@@ -258,6 +258,26 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // ── Invoices (e-Fatura / e-Arşiv — AccountingModule) ──────────
+    match /invoices/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Customer Risks (computed by app, read by RiskPanel) ───────
+    match /customerRisks/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Accounting']);
+      allow write: if hasRole(['Admin', 'Manager', 'Sales']);
+    }
+
+    // ── Payments (subscription billing history) ────────────────────
+    match /payments/{id} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
     // ── Categories (inventory master list) ────────────────────────
     match /categories/{id} {
       allow read: if isAuthenticated();

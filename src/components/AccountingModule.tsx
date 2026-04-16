@@ -468,6 +468,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   const [vknResult, setVknResult] = useState<any>(null);
   const [vknLoading, setVknLoading] = useState(false);
   const [lucaKontor, setLucaKontor] = useState<any>(null);
+  const [lucaNotConfigured, setLucaNotConfigured] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
 
   // Mikro Bank Movements
@@ -480,7 +481,12 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       fetch('/api/luca/kontor')
         .then(res => res.json())
         .then(data => {
-          if (data.success) setLucaKontor(data.data);
+          if (data.success) {
+            setLucaKontor(data.data);
+            setLucaNotConfigured(false);
+          } else if (data.notConfigured) {
+            setLucaNotConfigured(true);
+          }
         })
         .catch(console.error);
     }
@@ -503,6 +509,8 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       const data = await res.json();
       if (data.success) {
         setVknResult(data.data);
+      } else if (data.notConfigured) {
+        showToast('GİB API anahtarı yapılandırılmamış. Lütfen Ayarlar → Entegrasyonlar bölümünden LUCA_API_KEY ekleyin.', 'error');
       } else {
         showToast(data.error || 'Sorgulama başarısız', 'error');
       }
@@ -530,15 +538,18 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
           const res = await fetch('/api/luca/fatura-gonder', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ invoiceId: invId })
+            body: JSON.stringify({ invoiceId: invId, invoiceData: inv })
           });
           const data = await res.json();
-          if (data.success) {
+          if (data.success && data.ettn) {
             showToast(data.message, 'success');
             await updateDoc(doc(db, 'invoices', invId), {
               status: 'e-Fatura Gönderildi',
-              ettn: data.ettn
+              ettn: data.ettn,
+              eFaturaGonderimTarihi: new Date().toISOString(),
             });
+          } else if (data.notConfigured) {
+            showToast('LUCA_API_KEY yapılandırılmamış. e-Fatura gönderilemedi.', 'error');
           } else {
             showToast(data.error || 'Gönderim başarısız', 'error');
           }
@@ -3581,6 +3592,11 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                     <p className="text-[10px] text-gray-400 flex items-center gap-1 justify-end">
                       <RefreshCw className="w-3 h-3" /> Son güncelleme: {format(new Date(), 'HH:mm')}
                     </p>
+                  </div>
+                ) : lucaNotConfigured ? (
+                  <div className="flex flex-col items-center justify-center h-24 gap-2 text-center">
+                    <p className="text-xs font-bold text-amber-600">e-Fatura entegrasyonu aktif değil</p>
+                    <p className="text-[11px] text-gray-400">LUCA_API_KEY ortam değişkenini ayarlayın</p>
                   </div>
                 ) : (
                   <div className="flex items-center justify-center h-24 text-sm text-gray-400">Yükleniyor...</div>

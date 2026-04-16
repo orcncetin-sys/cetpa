@@ -2340,10 +2340,11 @@ function AppContent() {
   const [showPricingPage, setShowPricingPage] = useState(false);
   const [upgradeModal, setUpgradeModal] = useState<{ isOpen: boolean; blockedModule: string }>({ isOpen: false, blockedModule: '' });
   const [subscriptionLoaded, setSubscriptionLoaded] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState<{ id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' }[]>([]);
 
   // Load subscription from Firestore
   useEffect(() => {
-    if (!user) { setUserSubscription(null); setSubscriptionLoaded(false); return; }
+    if (!user) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
     const unsub = onSnapshot(doc(db, 'subscriptions', user.uid), (snap) => {
       if (snap.exists()) {
         setUserSubscription(snap.data() as UserSubscription);
@@ -2352,7 +2353,20 @@ function AppContent() {
       }
       setSubscriptionLoaded(true);
     }, () => setSubscriptionLoaded(true));
-    return () => unsub();
+
+    // Load real payment history from Firestore
+    const unsubPayments = onSnapshot(
+      query(collection(db, 'payments'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(24)),
+      (snap) => {
+        setPaymentHistory(snap.docs.map(d => {
+          const data = d.data();
+          return { id: d.id, ...data, status: (['paid','pending','failed'].includes(data.status) ? data.status : 'paid') } as { id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' };
+        }));
+      },
+      () => { /* payments collection may not exist yet */ }
+    );
+
+    return () => { unsub(); unsubPayments(); };
   }, [user]);
 
   // Check if module is accessible by subscription
@@ -2380,18 +2394,32 @@ function AppContent() {
     const endDate = new Date(now);
     if (cycle === 'monthly') endDate.setMonth(endDate.getMonth() + 1);
     else endDate.setFullYear(endDate.getFullYear() + 1);
+    const planConfig = getPlanConfig(planId);
+    const amount = cycle === 'monthly' ? planConfig.monthlyPrice : planConfig.yearlyPrice;
     const sub: UserSubscription = {
       plan: planId,
       cycle,
       status: 'active',
       startDate: now.toISOString(),
       endDate: endDate.toISOString(),
-      maxUsers: getPlanConfig(planId).maxUsers,
+      maxUsers: planConfig.maxUsers,
       currentUsers: 1,
       lastPayment: now.toISOString(),
     };
     try {
       await setDoc(doc(db, 'subscriptions', user.uid), sub);
+      // Write payment record to payments collection
+      await addDoc(collection(db, 'payments'), {
+        userId: user.uid,
+        plan: planId,
+        planName: planConfig.name,
+        cycle,
+        amount,
+        currency: 'TRY',
+        status: 'paid',
+        date: now.toISOString(),
+        createdAt: serverTimestamp(),
+      });
       setShowPricingPage(false);
     } catch (e) { console.error(e); }
   };
@@ -2945,6 +2973,67 @@ function AppContent() {
       unsubAuditLogs();
     };
   }, [user, userRole, isAuthReady]);
+
+  // ── Customer Risk Scoring — writes to customerRisks collection ──────────
+  useEffect(() => {
+    if (!user || leads.length === 0) return;
+    // Debounce: only run 3 s after last lead/order change to avoid write storms
+    const timer = setTimeout(async () => {
+      const now = new Date();
+      for (const lead of leads) {
+        try {
+          const customerOrders = orders.filter(
+            o => o.leadId === lead.id || o.customerName === lead.name
+          );
+          const totalBalance = customerOrders
+            .filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled')
+            .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0);
+
+          // Overdue: orders past their payment term date
+          let daysAllowed = 30;
+          if (lead.paymentTerms) {
+            const match = lead.paymentTerms.match(/\d+/);
+            if (match) daysAllowed = parseInt(match[0], 10);
+          }
+          const overdueCount = customerOrders.filter(o => {
+            if (o.status === 'Delivered' || o.status === 'Cancelled') return false;
+            const oAny = o as unknown as Record<string, unknown>;
+            const createdAt = oAny.createdAt;
+            const orderDate = createdAt && typeof createdAt === 'object' && 'toDate' in createdAt
+              ? (createdAt as { toDate: () => Date }).toDate()
+              : new Date((oAny.syncedAt as string) || now);
+            const due = new Date(orderDate);
+            due.setDate(due.getDate() + daysAllowed);
+            return now > due;
+          }).length;
+
+          const creditLimit = Number(lead.creditLimit) || 0;
+          const utilisation = creditLimit > 0 ? Math.min(totalBalance / creditLimit, 1) : 0;
+
+          // Risk score 0–100: weighted sum of utilisation, overdue, and order count
+          const riskScore = Math.min(
+            Math.round(utilisation * 50 + overdueCount * 20 + (customerOrders.length > 10 ? 10 : 0)),
+            100
+          );
+
+          await setDoc(doc(db, 'customerRisks', lead.id), {
+            customerId: lead.id,
+            customerName: lead.name,
+            company: lead.company || '',
+            currentBalance: totalBalance,
+            creditLimit,
+            riskScore,
+            overdueOrders: overdueCount,
+            totalOrders: customerOrders.length,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        } catch {
+          // Non-critical — risk panel will show stale data
+        }
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [leads, orders, user]);
 
   // --- Reports Filters ---
   // Nearest-neighbor TSP heuristic starting from Antalya (Eski Sanayi) depot
@@ -5075,6 +5164,7 @@ function AppContent() {
               <SubscriptionPanel
                 currentLanguage={currentLanguage}
                 subscription={userSubscription}
+                paymentHistory={paymentHistory}
                 onChangePlan={handleSelectPlan}
                 onCancelSubscription={handleCancelSubscription}
                 onViewPricing={() => setShowPricingPage(true)}

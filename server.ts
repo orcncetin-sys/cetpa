@@ -4,8 +4,30 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
+import admin from "firebase-admin";
 
 dotenv.config();
+
+// ── Firebase Admin SDK ──────────────────────────────────────────────────────
+// Initialise once; used by server-side routes (webhook, etc.)
+// Locally: run `gcloud auth application-default login` OR set GOOGLE_APPLICATION_CREDENTIALS
+// In production (Firebase Hosting / Cloud Run) ADC is automatic.
+let adminDb: admin.firestore.Firestore | null = null;
+const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
+const PROJECT_ID = "gen-lang-client-0628151245";
+
+try {
+  const adminApp = admin.initializeApp({ projectId: PROJECT_ID });
+  adminDb = adminApp.firestore();
+  adminDb.settings({ databaseId: FIRESTORE_DB_ID });
+  console.log("Firebase Admin SDK initialised ✓");
+} catch (e) {
+  console.warn("Firebase Admin SDK not initialised — webhook writes disabled:", (e as Error).message);
+}
+
+// ── Luca API helpers ────────────────────────────────────────────────────────
+const LUCA_API_URL = process.env.LUCA_API_URL || "https://api.luca.com.tr/v1";
+const LUCA_API_KEY = process.env.LUCA_API_KEY || "";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -255,13 +277,99 @@ async function startServer() {
     }
   });
 
-  // Webhook Handler
-  app.post("/api/shopify/webhook", (req: Request, res: Response) => {
-    const topic = req.headers['x-shopify-topic'];
-    console.log(`Received Shopify Webhook: ${topic}`);
-    
-    // Process webhook data (e.g., update Firestore)
-    res.status(200).send("Webhook received");
+  // ── Shopify Webhook Handler ──────────────────────────────────────────────
+  app.post("/api/shopify/webhook", async (req: Request, res: Response) => {
+    const topic = req.headers['x-shopify-topic'] as string;
+    const body = req.body;
+    console.log(`Shopify Webhook: ${topic}`);
+
+    // Acknowledge immediately so Shopify doesn't retry
+    res.status(200).send("ok");
+
+    if (!adminDb) {
+      console.warn("Webhook: Firebase Admin not available, skipping Firestore update");
+      return;
+    }
+
+    try {
+      if (topic === 'orders/create' || topic === 'orders/updated') {
+        const shopifyOrderId = `#${body.order_number || body.id}`;
+        // Try to find existing Cetpa order by shopifyOrderId
+        const snap = await adminDb
+          .collection('orders')
+          .where('shopifyOrderId', '==', shopifyOrderId)
+          .limit(1)
+          .get();
+
+        const orderData = {
+          shopifyOrderId,
+          customerName: body.billing_address?.name || body.customer?.first_name + ' ' + body.customer?.last_name || 'Unknown',
+          totalPrice: parseFloat(body.total_price || '0'),
+          status: body.financial_status === 'paid' ? 'Processing' : 'Pending',
+          shippingAddress: body.shipping_address?.address1 || '',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          shopifyRaw: {
+            fulfillmentStatus: body.fulfillment_status,
+            financialStatus: body.financial_status,
+            cancelReason: body.cancel_reason || null,
+          },
+        };
+
+        if (!snap.empty) {
+          await snap.docs[0].ref.update(orderData);
+          console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
+        } else if (topic === 'orders/create') {
+          await adminDb.collection('orders').add({
+            ...orderData,
+            lineItems: (body.line_items || []).map((li: Record<string, unknown>) => ({
+              title: li.title,
+              quantity: li.quantity,
+              price: parseFloat(String(li.price || '0')),
+              sku: li.sku || '',
+            })),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            source: 'shopify_webhook',
+          });
+          console.log(`Created Cetpa order from Shopify webhook ${shopifyOrderId}`);
+        }
+      }
+
+      if (topic === 'orders/cancelled') {
+        const shopifyOrderId = `#${body.order_number || body.id}`;
+        const snap = await adminDb
+          .collection('orders')
+          .where('shopifyOrderId', '==', shopifyOrderId)
+          .limit(1)
+          .get();
+        if (!snap.empty) {
+          await snap.docs[0].ref.update({
+            status: 'Cancelled',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`Cancelled Cetpa order for Shopify ${shopifyOrderId}`);
+        }
+      }
+
+      if (topic === 'orders/fulfillments_create' || topic === 'fulfillments/create') {
+        const shopifyOrderId = `#${body.order_number || body.order_id}`;
+        const trackingNumber = body.tracking_number || body.tracking_numbers?.[0] || null;
+        const snap = await adminDb
+          .collection('orders')
+          .where('shopifyOrderId', '==', shopifyOrderId)
+          .limit(1)
+          .get();
+        if (!snap.empty) {
+          await snap.docs[0].ref.update({
+            status: 'Shipped',
+            ...(trackingNumber && { trackingNumber }),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`Fulfilled Cetpa order ${shopifyOrderId}, tracking: ${trackingNumber}`);
+        }
+      }
+    } catch (err) {
+      console.error('Webhook Firestore write error:', err);
+    }
   });
 
   // Get Exchange Rates
@@ -283,18 +391,12 @@ async function startServer() {
     const apiKey = req.headers["x-gib-api-key"] as string;
     const integratorVkn = req.headers["x-gib-integrator-vkn"] as string;
 
-    // If no credentials configured, return a mock result for UI testing
+    // If no credentials configured, return a clear error — never fake data
     if (!apiKey || apiKey.trim() === '') {
-      console.warn('GİB API Key not configured, returning mock response.');
-      return res.json({
-        success: true,
-        data: {
-          vknTckn: vkt,
-          unvan: 'ÖRNEK TİCARET LİMİTED ŞİRKETİ',
-          vergiDairesi: 'Marmara Kurumlar',
-          il: 'İstanbul',
-          durum: 'Aktif'
-        }
+      return res.status(503).json({
+        success: false,
+        notConfigured: true,
+        error: 'GİB API anahtarı yapılandırılmamış. Lütfen LUCA_API_KEY ortam değişkenini ayarlayın.'
       });
     }
 
@@ -357,32 +459,55 @@ async function startServer() {
     }
   });
 
-  // Luca Kontör Bakiyesi (Mock)
-  app.get("/api/luca/kontor", async (req: Request, res: Response) => {
-    setTimeout(() => {
-      res.json({
-        success: true,
-        data: {
-          limit: 10000,
-          used: 4500,
-          remaining: 5500,
-          lastPurchase: "2024-01-15T10:00:00Z"
-        }
+  // ── Luca Kontör Bakiyesi ─────────────────────────────────────────────────
+  app.get("/api/luca/kontor", async (_req: Request, res: Response) => {
+    if (!LUCA_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        notConfigured: true,
+        error: 'LUCA_API_KEY ortam değişkeni ayarlanmamış. e-Fatura entegrasyonu devre dışı.'
       });
-    }, 500);
+    }
+    try {
+      const r = await fetch(`${LUCA_API_URL}/einvoice/kontor`, {
+        headers: { 'Authorization': `Bearer ${LUCA_API_KEY}`, 'Content-Type': 'application/json' }
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json({ success: false, error: data.message || 'Luca API hatası' });
+      res.json({ success: true, data });
+    } catch (err) {
+      console.error('Luca kontor error:', err);
+      res.status(500).json({ success: false, error: 'Luca API bağlantı hatası' });
+    }
   });
 
-  // Luca e-Fatura Gönderimi (Mock)
+  // ── Luca e-Fatura Gönderimi ──────────────────────────────────────────────
   app.post("/api/luca/fatura-gonder", async (req: Request, res: Response) => {
-    const { invoiceId, data } = req.body;
-    console.log(`Sending invoice to Luca: ${invoiceId}`);
-    setTimeout(() => {
-      res.json({
-        success: true,
-        message: "Fatura başarıyla e-Fatura sistemine (Luca) iletildi.",
-        ettn: `ETTN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
+    const { invoiceId, invoiceData } = req.body;
+    console.log(`e-Fatura gönderimi başlatıldı: ${invoiceId}`);
+
+    if (!LUCA_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        notConfigured: true,
+        error: 'LUCA_API_KEY ortam değişkeni ayarlanmamış. Fatura gönderilemedi.'
       });
-    }, 1500);
+    }
+
+    try {
+      const r = await fetch(`${LUCA_API_URL}/einvoice/send`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${LUCA_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId, ...invoiceData })
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json({ success: false, error: data.message || 'Luca fatura gönderim hatası' });
+      // Real Luca response should include ettn field
+      res.json({ success: true, message: 'Fatura Luca e-Fatura sistemine iletildi.', ettn: data.ettn || data.uuid || data.id });
+    } catch (err) {
+      console.error('Luca fatura-gonder error:', err);
+      res.status(500).json({ success: false, error: 'Luca API bağlantı hatası' });
+    }
   });
 
   // ── Cargo Tracking Proxy Routes ──────────────────────────────────────────

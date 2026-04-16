@@ -19,6 +19,7 @@ import {
 interface SubscriptionPanelProps {
   currentLanguage: 'tr' | 'en';
   subscription: UserSubscription | null;
+  paymentHistory?: PaymentRecord[];
   onChangePlan: (planId: SubscriptionPlan, cycle: BillingCycle) => void;
   onCancelSubscription: () => void;
   onViewPricing: () => void;
@@ -29,6 +30,8 @@ interface PaymentRecord {
   date: string;
   amount: number;
   plan: string;
+  planName?: Record<string, string>;
+  cycle?: string;
   status: 'paid' | 'pending' | 'failed';
   invoiceUrl?: string;
 }
@@ -36,6 +39,7 @@ interface PaymentRecord {
 export default function SubscriptionPanel({
   currentLanguage,
   subscription,
+  paymentHistory: paymentHistoryProp,
   onChangePlan,
   onCancelSubscription,
   onViewPricing,
@@ -49,10 +53,14 @@ export default function SubscriptionPanel({
   const remaining = daysRemaining(subscription);
   const isTrial = isTrialActive(subscription);
 
-  // Demo payment history
-  const paymentHistory: PaymentRecord[] = subscription && !isTrial ? [
-    { id: '1', date: new Date().toISOString().split('T')[0], amount: subscription.cycle === 'monthly' ? (plan?.monthlyPrice || 0) : (plan?.yearlyPrice || 0), plan: plan?.name[lang] || '', status: 'paid' },
-  ] : [];
+  // Real payment history from Firestore (passed as prop); empty array until data loads
+  const paymentHistory: PaymentRecord[] = (paymentHistoryProp ?? []).map(p => ({
+    id: p.id,
+    date: p.date?.split('T')[0] ?? '',
+    amount: Number(p.amount) || 0,
+    plan: typeof p.planName === 'object' ? (p.planName[lang] ?? p.plan) : (p.plan ?? ''),
+    status: (p.status as 'paid' | 'pending' | 'failed') ?? 'paid',
+  }));
 
   const t = {
     title: lang === 'tr' ? 'Abonelik Yönetimi' : 'Subscription Management',
