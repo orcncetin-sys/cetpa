@@ -425,7 +425,7 @@ async function startServer() {
   app.get('/api/tracking/ups/:trackingNumber', async (req: Request, res: Response) => {
     const clientId = process.env.UPS_CLIENT_ID;
     const clientSecret = process.env.UPS_CLIENT_SECRET;
-    const { trackingNumber } = req.params;
+    const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
 
     if (!clientId || !clientSecret) {
       return res.json({
