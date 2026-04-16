@@ -3799,20 +3799,21 @@ function AppContent() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
 
-
+            {/* Language toggle — icon only on mobile, icon+text on sm+ */}
             <button
               onClick={() => setCurrentLanguage(currentLanguage === 'tr' ? 'en' : 'tr')}
-              className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all outline-none", darkMode ? "bg-white/10 border-white/15 text-white/70 hover:text-white hover:bg-white/20" : "bg-black/[0.05] border-black/10 text-gray-600 hover:text-gray-900 hover:bg-black/[0.09]")}
+              className={cn("flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 rounded-xl border text-xs font-bold transition-all outline-none", darkMode ? "bg-white/10 border-white/15 text-white/70 hover:text-white hover:bg-white/20" : "bg-black/[0.05] border-black/10 text-gray-600 hover:text-gray-900 hover:bg-black/[0.09]")}
             >
-              <Globe className="w-3.5 h-3.5" />
-              {currentLanguage === 'tr' ? 'EN' : 'TR'}
+              <Globe className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="hidden sm:inline">{currentLanguage === 'tr' ? 'EN' : 'TR'}</span>
             </button>
 
+            {/* Dark mode toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
-              className={cn("flex items-center justify-center w-[38px] h-[38px] rounded-xl border transition-all outline-none", darkMode ? "bg-white/10 border-white/15 text-white/70 hover:text-white hover:bg-white/20" : "bg-black/[0.05] border-black/10 text-gray-500 hover:text-gray-900 hover:bg-black/[0.09]")}
+              className={cn("flex items-center justify-center w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] rounded-xl border transition-all outline-none flex-shrink-0", darkMode ? "bg-white/10 border-white/15 text-white/70 hover:text-white hover:bg-white/20" : "bg-black/[0.05] border-black/10 text-gray-500 hover:text-gray-900 hover:bg-black/[0.09]")}
               title={darkMode ? 'Açık Mod' : 'Karanlık Mod'}
             >
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
