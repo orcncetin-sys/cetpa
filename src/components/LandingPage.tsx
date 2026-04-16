@@ -141,20 +141,20 @@ export default function LandingPage({
             ? "border-white/5 bg-[#0a0a0a]/80"
             : "border-black/5 bg-white/60"
         )}>
-          <div className="flex items-center gap-10">
-            <img src="/cetpalogo.avif" alt="CETPA" className="h-8 w-auto object-contain" />
+          <div className="flex items-center gap-10 flex-shrink-0 min-w-0">
+            <img src="/cetpalogo.avif" alt="CETPA" className="h-7 sm:h-8 w-auto object-contain flex-shrink-0" />
             <div className="hidden md:flex items-center gap-8">
               <a href="#features" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.features}</a>
               <a href="#pricing" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.pricing}</a>
               <a href="#solutions" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.solutions}</a>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             {/* Language toggle */}
             <button
               onClick={onLanguageToggle}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-xs font-bold outline-none whitespace-nowrap",
+                "flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 rounded-xl border transition-all text-xs font-bold outline-none whitespace-nowrap flex-shrink-0",
                 d("bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10", "bg-black/5 border-black/8 text-black/50 hover:text-black hover:bg-black/10")
               )}
             >
@@ -167,7 +167,7 @@ export default function LandingPage({
               onClick={onDarkModeToggle}
               title={darkMode ? (isTR ? 'Açık Mod' : 'Light Mode') : (isTR ? 'Karanlık Mod' : 'Dark Mode')}
               className={cn(
-                "flex items-center justify-center w-[38px] h-[38px] rounded-xl border transition-all outline-none flex-shrink-0",
+                "flex items-center justify-center w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] rounded-xl border transition-all outline-none flex-shrink-0",
                 d("bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10", "bg-black/5 border-black/8 text-black/50 hover:text-black hover:bg-black/10")
               )}
             >
@@ -176,13 +176,13 @@ export default function LandingPage({
 
             {!isLoggedIn ? (
               <>
-                <button onClick={onLoginClick} className={cn("text-sm font-bold transition-colors px-3 py-2 whitespace-nowrap flex-shrink-0", d("text-white/80 hover:text-white", "text-black/80 hover:text-black"))}>{t.nav.login}</button>
-                <button onClick={onTryClick} className="bg-brand text-white px-4 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all whitespace-nowrap flex-shrink-0">{t.nav.cta}</button>
+                <button onClick={onLoginClick} className={cn("text-sm font-bold transition-colors px-2 sm:px-3 py-2 whitespace-nowrap flex-shrink-0", d("text-white/80 hover:text-white", "text-black/80 hover:text-black"))}>{t.nav.login}</button>
+                <button onClick={onTryClick} className="bg-brand text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all whitespace-nowrap flex-shrink-0">{t.nav.cta}</button>
               </>
             ) : (
-              <button onClick={onDashboardClick} className="bg-brand text-white px-5 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap">
+              <button onClick={onDashboardClick} className="bg-brand text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap flex-shrink-0">
                 <LayoutDashboard className="w-4 h-4" />
-                {isTR ? 'Panele Git' : 'Go to Dashboard'}
+                <span className="hidden sm:inline">{isTR ? 'Panele Git' : 'Go to Dashboard'}</span>
               </button>
             )}
           </div>
