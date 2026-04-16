@@ -258,6 +258,83 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // ── Shipments ──────────────────────────────────────────────────
+    match /shipments/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Inventory Movements ────────────────────────────────────────
+    match /inventoryMovements/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Purchasing', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Warehouses ─────────────────────────────────────────────────
+    match /warehouses/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Subscriptions (per-user billing) ──────────────────────────
+    match /subscriptions/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Companies (onboarding) ─────────────────────────────────────
+    match /companies/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Price Lists (B2B Portal) ───────────────────────────────────
+    match /priceLists/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'B2B']);
+      allow delete: if hasRole(['Admin', 'Manager']);
+    }
+
+    // ── Quotations (B2B Portal) ────────────────────────────────────
+    match /quotations/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'B2B', 'Dealer']);
+      allow delete: if hasRole(['Admin', 'Manager']);
+    }
+
+    // ── Leave Requests (HR) ────────────────────────────────────────
+    match /leaveRequests/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR', 'Accounting']);
+      allow create: if isAuthenticated();
+      allow update: if hasRole(['Admin', 'HR', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Payrolls (HR/Accounting) ───────────────────────────────────
+    match /payrolls/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'HR', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Demo Requests (Landing page form — public write) ──────────
+    match /demoRequests/{id} {
+      allow read: if isAdmin();
+      allow create: if true;
+    }
+
+    // ── Cargo Tracking (Logistics tab) ────────────────────────────
+    match /cargoTracking/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
     match /notifications/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update: if isAuthenticated();

@@ -2616,6 +2616,7 @@ function AppContent() {
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [newShipment, setNewShipment] = useState<Partial<Shipment>>({ status: 'Pending' });
+  const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
   const [shipmentCustomerSearch, setShipmentCustomerSearch] = useState('');
   const [shipmentCustomerOpen, setShipmentCustomerOpen] = useState(false);
   const [newOrder, setNewOrder] = useState<Partial<Order>>({
@@ -2919,9 +2920,9 @@ function AppContent() {
       setShipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Shipment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'shipments', auth.currentUser?.uid));
 
-    const unsubAuditLogs = onSnapshot(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
+    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
       setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'audit_logs', auth.currentUser?.uid));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid));
 
     return () => {
       unsubLeads();
@@ -3035,17 +3036,34 @@ function AppContent() {
     e.preventDefault();
     if (!user) return;
     try {
-      await addDoc(collection(db, 'shipments'), {
-        ...newShipment,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+      if (editingShipmentId) {
+        // Update existing shipment
+        await updateDoc(doc(db, 'shipments', editingShipmentId), {
+          ...newShipment,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        // Create new shipment
+        await addDoc(collection(db, 'shipments'), {
+          ...newShipment,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
       setNewShipment({ status: 'Pending' });
       setShipmentCustomerSearch('');
+      setEditingShipmentId(null);
       setIsAddingShipment(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'shipments');
+      handleFirestoreError(error, editingShipmentId ? OperationType.UPDATE : OperationType.CREATE, 'shipments');
     }
+  };
+
+  const handleEditShipment = (shipment: Shipment) => {
+    setEditingShipmentId(shipment.id);
+    setNewShipment({ ...shipment });
+    setShipmentCustomerSearch(shipment.customerName || '');
+    setIsAddingShipment(true);
   };
 
   const handleAddLead = async (e: React.FormEvent) => {
@@ -6270,7 +6288,7 @@ function AppContent() {
               <div className="apple-card overflow-hidden">
                 <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                   <h3 className="font-bold text-sm">Geçmiş Sevkiyatlar</h3>
-                  <button onClick={() => setIsAddingShipment(true)} className="apple-button-primary text-xs py-1.5 px-3">
+                  <button onClick={() => { setEditingShipmentId(null); setNewShipment({ status: 'Pending' }); setIsAddingShipment(true); }} className="apple-button-primary text-xs py-1.5 px-3">
                     <Plus className="w-3.5 h-3.5" /> Sevkiyat Ekle
                   </button>
                 </div>
@@ -6311,7 +6329,7 @@ function AppContent() {
                           </td>
                           <td className="font-mono text-xs">{shipment.trackingNo}</td>
                           <td className="flex gap-2">
-                            <button className="action-btn-edit"><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleEditShipment(shipment)} className="action-btn-edit"><Edit2 className="w-4 h-4" /></button>
                             <button onClick={() => handleDeleteShipment(shipment.id)} className="action-btn-delete"><Trash2 className="w-4 h-4" /></button>
                           </td>
                         </tr>
@@ -6912,11 +6930,11 @@ function AppContent() {
       <AnimatePresence>
         {isAddingShipment && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAddingShipment(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' }); }} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold">Sevkiyat Ekle</h3>
-                <button onClick={() => setIsAddingShipment(false)} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
+                <h3 className="text-xl font-bold">{editingShipmentId ? 'Sevkiyatı Düzenle' : 'Sevkiyat Ekle'}</h3>
+                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' }); }} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
               </div>
               <form onSubmit={handleAddShipment} className="p-6 space-y-4">
                 {/* Customer picker with address auto-fill */}
@@ -6999,7 +7017,7 @@ function AppContent() {
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
                 </div>
                 <button type="submit" className="apple-button-primary w-full mt-4">
-                  Sevkiyat Ekle
+                  {editingShipmentId ? 'Değişiklikleri Kaydet' : 'Sevkiyat Ekle'}
                 </button>
               </form>
             </motion.div>
