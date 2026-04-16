@@ -3194,7 +3194,9 @@ function AppContent() {
     const email = selectedLead ? selectedLead.email : undefined;
 
     setIsPushingToShopify(true);
-    let shopifyOrderId = `SHP-${Math.floor(Math.random() * 10000)}`;
+    // Pre-generate the Firestore doc ref so its ID can be reused as a stable order reference
+    const orderDocRef = doc(collection(db, 'orders'));
+    let shopifyOrderId = `SHP-${orderDocRef.id.slice(0, 8).toUpperCase()}`;
 
     try {
       // Push to Shopify as draft order if we have line items
@@ -3227,7 +3229,9 @@ function AppContent() {
       const kdvTutari = newOrder.faturali ? finalTotal - kdvHaricTutar : 0;
 
       try {
-        await addDoc(collection(db, 'orders'), {
+        // Use setDoc with the pre-generated ref so the doc ID is deterministic
+        // trackingNumber is derived from the Firestore doc ID — no random needed
+        await setDoc(orderDocRef, {
           ...newOrder,
           shopifyOrderId,
           customerName,
@@ -3239,9 +3243,10 @@ function AppContent() {
           kdvOran,
           kdvHaricTutar,
           kdvTutari,
-          trackingNumber: `TRK${Math.floor(Math.random() * 100000000)}`,
-          location: { lat: 36.9081 + (Math.random() * 0.5 - 0.25), lng: 30.6956 + (Math.random() * 0.5 - 0.25) },
+          trackingNumber: `TRK-${orderDocRef.id.slice(0, 12).toUpperCase()}`,
+          location: null,
           assignedTo: user?.uid ?? null,
+          createdAt: serverTimestamp(),
           syncedAt: serverTimestamp()
         });
         

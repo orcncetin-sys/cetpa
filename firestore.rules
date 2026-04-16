@@ -258,6 +258,13 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // ── Purchase Orders ────────────────────────────────────────────
+    match /purchaseOrders/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Purchasing', 'Accounting', 'Logistics']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
     // ── Shipments ──────────────────────────────────────────────────
     match /shipments/{id} {
       allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Accounting']);

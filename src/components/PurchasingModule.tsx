@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp } from 'lucide-react';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -119,8 +119,10 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     }
 
     try {
-      const orderNumber = `PO-${Math.floor(1000 + Math.random() * 9000)}`;
-      await addDoc(collection(db, 'purchaseOrders'), {
+      // Pre-generate doc ref so its ID drives the PO number — no random needed
+      const poDocRef = doc(collection(db, 'purchaseOrders'));
+      const orderNumber = `PO-${poDocRef.id.slice(0, 8).toUpperCase()}`;
+      await setDoc(poDocRef, {
         orderNumber,
         supplier: newOrder.supplier,
         items: newOrder.items,
