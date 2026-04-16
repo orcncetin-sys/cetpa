@@ -136,7 +136,7 @@ export default function LandingPage({
       {/* ── Navigation ── */}
       <nav className="fixed top-0 left-0 right-0 z-50 transition-all duration-300">
         <div className={cn(
-          "max-w-7xl mx-auto px-6 h-20 flex items-center justify-between border-b backdrop-blur-xl",
+          "max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between border-b backdrop-blur-xl",
           darkMode
             ? "border-white/5 bg-[#0a0a0a]/80"
             : "border-black/5 bg-white/60"
@@ -149,12 +149,12 @@ export default function LandingPage({
               <a href="#solutions" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.solutions}</a>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {/* Language toggle */}
             <button
               onClick={onLanguageToggle}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-xs font-bold outline-none",
+                "flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-xs font-bold outline-none whitespace-nowrap",
                 d("bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10", "bg-black/5 border-black/8 text-black/50 hover:text-black hover:bg-black/10")
               )}
             >
@@ -167,7 +167,7 @@ export default function LandingPage({
               onClick={onDarkModeToggle}
               title={darkMode ? (isTR ? 'Açık Mod' : 'Light Mode') : (isTR ? 'Karanlık Mod' : 'Dark Mode')}
               className={cn(
-                "flex items-center justify-center w-[38px] h-[38px] rounded-xl border transition-all outline-none",
+                "flex items-center justify-center w-[38px] h-[38px] rounded-xl border transition-all outline-none flex-shrink-0",
                 d("bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10", "bg-black/5 border-black/8 text-black/50 hover:text-black hover:bg-black/10")
               )}
             >
@@ -176,11 +176,11 @@ export default function LandingPage({
 
             {!isLoggedIn ? (
               <>
-                <button onClick={onLoginClick} className={cn("text-sm font-bold transition-colors px-4 py-2", d("text-white/80 hover:text-white", "text-black/80 hover:text-black"))}>{t.nav.login}</button>
-                <button onClick={onTryClick} className="bg-brand text-white px-5 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all">{t.nav.cta}</button>
+                <button onClick={onLoginClick} className={cn("text-sm font-bold transition-colors px-3 py-2 whitespace-nowrap flex-shrink-0", d("text-white/80 hover:text-white", "text-black/80 hover:text-black"))}>{t.nav.login}</button>
+                <button onClick={onTryClick} className="bg-brand text-white px-4 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all whitespace-nowrap flex-shrink-0">{t.nav.cta}</button>
               </>
             ) : (
-              <button onClick={onDashboardClick} className="bg-brand text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2">
+              <button onClick={onDashboardClick} className="bg-brand text-white px-5 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap">
                 <LayoutDashboard className="w-4 h-4" />
                 {isTR ? 'Panele Git' : 'Go to Dashboard'}
               </button>
