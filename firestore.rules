@@ -258,6 +258,13 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // ── Categories (inventory master list) ────────────────────────
+    match /categories/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
     // ── Purchase Orders ────────────────────────────────────────────
     match /purchaseOrders/{id} {
       allow read: if hasRole(['Admin', 'Manager', 'Purchasing', 'Accounting', 'Logistics']);

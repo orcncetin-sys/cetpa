@@ -2318,6 +2318,7 @@ function AppContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [firestoreCategories, setFirestoreCategories] = useState<string[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -2643,7 +2644,11 @@ function AppContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
-  const inventoryCategories = [...new Set(inventory.map(i => i.category).filter((c): c is string => !!c))].sort();
+  // Merge Firestore category master list with any category strings on existing inventory items
+  const inventoryCategories = [...new Set([
+    ...firestoreCategories,
+    ...inventory.map(i => i.category).filter((c): c is string => !!c)
+  ])].sort();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // ── Confirmation Modal state (replaces PIN + window.confirm) ──────────────
@@ -2904,6 +2909,10 @@ function AppContent() {
       setInventory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventory', auth.currentUser?.uid));
 
+    const unsubCategories = onSnapshot(query(collection(db, 'categories'), orderBy('name')), (snapshot) => {
+      setFirestoreCategories(snapshot.docs.map(d => d.data().name as string).filter(Boolean));
+    }, () => { /* silently ignore — categories may not exist yet */ });
+
     const unsubWarehouses = onSnapshot(collection(db, 'warehouses'), (snapshot) => {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
@@ -2928,6 +2937,7 @@ function AppContent() {
       unsubLeads();
       unsubOrders();
       unsubInventory();
+      unsubCategories();
       unsubWarehouses();
       unsubMovements();
       unsubEmployees();

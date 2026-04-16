@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
@@ -77,6 +77,20 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
           createdAt: serverTimestamp(),
         });
       }
+
+      // Persist new category to the categories master collection if it's new
+      const categoryName = formData.category?.trim();
+      if (categoryName && !existingCategories.includes(categoryName)) {
+        try {
+          const existing = await getDocs(query(collection(db, 'categories'), where('name', '==', categoryName)));
+          if (existing.empty) {
+            await addDoc(collection(db, 'categories'), { name: categoryName, createdAt: serverTimestamp() });
+          }
+        } catch {
+          // Non-critical — category master list may not be writable for this role
+        }
+      }
+
       onSave?.();
       onClose();
     } catch (error) {
