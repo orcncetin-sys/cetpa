@@ -1,0 +1,281 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          (request.auth.token.email == "orcncetin@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin')
+        );
+    }
+
+    function hasRole(roles) {
+      return isAuthenticated() && 
+        (
+          (request.auth.token.email == "orcncetin@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles)
+        );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'email', 'role']) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate'] &&
+             (!('suspended' in data) || data.suspended is bool);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['name', 'client', 'manager', 'status', 'priority']) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+             data.client is string && data.client.size() >= 1 && data.client.size() <= 100 &&
+             data.manager is string && data.manager.size() >= 1 && data.manager.size() <= 100 &&
+             data.status in ['Active', 'Completed', 'On-Hold', 'Planning'] &&
+             data.priority in ['High', 'Medium', 'Low'];
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['projectId', 'title', 'assignee', 'status', 'priority']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.assignee is string && data.assignee.size() >= 1 && data.assignee.size() <= 100 &&
+             data.status in ['Todo', 'In-Progress', 'Review', 'Done'] &&
+             data.priority in ['High', 'Medium', 'Low'];
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data)));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role));
+      allow delete: if isAdmin();
+    }
+
+    match /projects/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Corporate']) && isValidProject(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /tasks/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Purchasing', 'Corporate']) && isValidTask(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /resources/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'HR', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /qcRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /complaints/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    match /auditItems/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /fmeaRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /pfmeaRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /ctpatRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /kaizenRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /fiveSRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /eightDRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /leads/{leadId} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Accounting', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing', 'B2B', 'Dealer']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'B2B', 'Dealer']);
+      allow delete: if isAdmin();
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /journalEntries/{id} {
+      allow read: if hasRole(['Admin', 'Accounting', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    match /bankAccounts/{id} {
+      allow read: if hasRole(['Admin', 'Accounting', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    match /suppliers/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Purchasing', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
+    match /services/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /warehouseItems/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse']);
+      allow delete: if isAdmin();
+    }
+
+    match /transfers/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse']);
+      allow delete: if isAdmin();
+    }
+
+    match /checks/{id} {
+      allow read: if hasRole(['Admin', 'Accounting', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    match /budgets/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    match /waybills/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Warehouse']);
+      allow delete: if isAdmin();
+    }
+
+    match /employees/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'HR']);
+      allow delete: if isAdmin();
+    }
+
+    match /legalDocuments/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Legal', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Legal', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /contracts/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Legal', 'Corporate', 'Sales', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Legal', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /legalCases/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Legal', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Legal', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /complianceItems/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Legal', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Legal', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /auditLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    match /notifications/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAuthenticated();
+    }
+
+    match /notifications/{userId}/items/{id} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAuthenticated();
+    }
+
+    match /settings/{id} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole(['Admin', 'Manager']);
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

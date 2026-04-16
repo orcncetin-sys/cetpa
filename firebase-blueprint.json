@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "Lead": {
+      "title": "Lead",
+      "description": "A potential customer lead for the sales team.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["New", "Contacted", "Qualified", "Closed"] },
+        "score": { "type": "number", "description": "Gemini-powered lead score (0-100)" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "assignedTo": { "type": "string", "description": "UID of the sales rep" },
+        "customerType": { "type": "string", "enum": ["B2B", "Retail"] },
+        "taxId": { "type": "string" },
+        "authorizedContact": { "type": "string" },
+        "creditLimit": { "type": "number" },
+        "paymentTerms": { "type": "string" }
+      },
+      "required": ["name", "company", "status", "assignedTo"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A Shopify order synced to Firestore.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shopifyOrderId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "totalPrice": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"] },
+        "trackingNumber": { "type": "string" },
+        "shippingAddress": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "syncedAt": { "type": "string", "format": "date-time" },
+        "customerType": { "type": "string", "enum": ["B2B", "Retail"] },
+        "cargoCompany": { "type": "string" },
+        "estimatedDelivery": { "type": "string", "format": "date-time" },
+        "deliveryZone": { "type": "string" },
+        "assignedDriver": { "type": "string" }
+      },
+      "required": ["shopifyOrderId", "customerName", "status"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "A spare part inventory item from Shopify.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "stockLevel": { "type": "number" },
+        "lowStockThreshold": { "type": "number" },
+        "prices": { "type": "object", "description": "Prices for different tiers" },
+        "syncedAt": { "type": "string", "format": "date-time" },
+        "location": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date" }
+      },
+      "required": ["sku", "name", "stockLevel"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and metadata.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["Admin", "Sales Manager", "Sales Rep", "Logistics", "Warehouse", "Viewer"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "lastLogin": { "type": "string", "format": "date-time" },
+        "loginLocation": { "type": "string" },
+        "loginDevice": { "type": "string" }
+      }
+    },
+    "Quotation": {
+      "title": "Quotation",
+      "description": "A sales quotation for a customer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "lineItems": { "type": "array" },
+        "totalPrice": { "type": "number" },
+        "status": { "type": "string", "enum": ["Draft", "Sent", "Accepted", "Rejected", "Expired"] },
+        "validityDate": { "type": "string", "format": "date" }
+      }
+    },
+    "Visit": {
+      "title": "Visit",
+      "description": "A field sales visit report.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "repId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "outcome": { "type": "string" },
+        "location": { "type": "object", "description": "GPS check-in coordinates" }
+      }
+    },
+    "Target": {
+      "title": "Target",
+      "description": "Sales target for a rep.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "repId": { "type": "string" },
+        "period": { "type": "string" },
+        "amount": { "type": "number" }
+      }
+    },
+    "CustomerRisk": {
+      "title": "Customer Risk",
+      "description": "Risk profile and credit limit for a customer",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string", "description": "Name of the customer" },
+        "creditLimit": { "type": "number", "description": "Credit limit in TRY" },
+        "currentBalance": { "type": "number", "description": "Current outstanding balance" },
+        "riskScore": { "type": "number", "description": "Risk score (0-100)" }
+      },
+      "required": ["customerName", "riskScore"]
+    }
+  },
+  "firestore": {
+    "/leads/{leadId}": { "schema": "Lead", "description": "Collection of sales leads." },
+    "/orders/{orderId}": { "schema": "Order", "description": "Collection of synced Shopify orders." },
+    "/inventory/{itemId}": { "schema": "InventoryItem", "description": "Collection of spare part inventory items." },
+    "/inventory/{itemId}/movements/{moveId}": { "schema": "object", "description": "Stock movement logs." },
+    "/users/{userId}": { "schema": "User", "description": "User profiles." },
+    "/auditLog/{logId}": { "schema": "object", "description": "Login audit logs." },
+    "/invites/{inviteId}": { "schema": "object", "description": "Pending user invites." },
+    "/quotations/{quoteId}": { "schema": "Quotation", "description": "Sales quotations." },
+    "/purchaseOrders/{poId}": { "schema": "object", "description": "Supplier purchase orders." },
+    "/payments/{payId}": { "schema": "object", "description": "Customer payments." },
+    "/priceLists/{listId}": { "schema": "object", "description": "Tiered price lists." },
+    "/notifications/{userId}/items/{notifId}": { "schema": "object", "description": "User notifications." },
+    "/settings/app": { "schema": "object", "description": "Global app settings like logo." },
+    "/visits/{visitId}": { "schema": "Visit", "description": "Field sales visit reports." },
+    "/targets/{targetId}": { "schema": "Target", "description": "Sales targets." },
+    "/customerRisks/{riskId}": { "schema": "CustomerRisk", "description": "Customer risk profiles" },
+    "/commissions/{commId}": { "schema": "object", "description": "Sales commissions." },
+    "/aiInsights/{insightId}": { "schema": "object", "description": "AI-generated insights." },
+    "/communications/{customerId}/messages/{msgId}": { "schema": "object", "description": "Communication logs." },
+    "/messageTemplates/{templateId}": { "schema": "object", "description": "Message templates." },
+    "/{collection}/{recordId}/documents/{docId}": { "schema": "object", "description": "Attached documents." }
+  }
+}

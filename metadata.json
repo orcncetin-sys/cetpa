@@ -1,0 +1,8 @@
+{
+  "name": "Cetpa Sales & Logistics",
+  "description": "A production-ready sales and logistics management app for Cetpa. Features Shopify integration, real-time logistics tracking with Google Maps, and a Gemini-powered lead scoring CRM.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}

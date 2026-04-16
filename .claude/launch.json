@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cetpa-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "server.ts"],
+      "port": 5173,
+      "autoPort": false,
+      "env": {
+        "PORT": "5173"
+      },
+      "cwd": "/Users/orcun/Desktop/Cetpa B2B SaaS/cetpa-sales-&-logistics"
+    }
+  ]
+}

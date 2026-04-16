@@ -1,0 +1,313 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #ff4000;
+  --color-brand-hover: #cc3200;
+  --font-sans: "Avenir Next", "Avenir", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* ── Light mode tokens ────────────────────────────── */
+:root {
+  --bg-base:        #F5F5F7;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #ffffff;
+  --bg-overlay:     rgba(255,255,255,0.85);
+  --border-subtle:  #e5e5ea;
+  --border-card:    #f0f0f2;
+  --text-primary:   #1D1D1F;
+  --text-secondary: #6e6e73;
+  --text-muted:     #86868B;
+  --nav-bg:         rgba(255,255,255,0.80);
+  --nav-border:     rgba(0,0,0,0.08);
+}
+
+/* ── Dark mode tokens ─────────────────────────────── */
+.dark {
+  --bg-base:        #0a0a0a;
+  --bg-surface:     #1c1c1e;
+  --bg-elevated:    #2c2c2e;
+  --bg-overlay:     rgba(28,28,30,0.90);
+  --border-subtle:  #3a3a3c;
+  --border-card:    #2c2c2e;
+  --text-primary:   #f5f5f7;
+  --text-secondary: #aeaeb2;
+  --text-muted:     #636366;
+  --nav-bg:         rgba(0,0,0,0.92);
+  --nav-border:     rgba(255,255,255,0.08);
+}
+
+/* ── Global overrides ─────────────────────────────── */
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* In dark mode, map typical utility backgrounds to semantic tokens */
+.dark .bg-surface { background-color: var(--bg-surface) !important; }
+.dark .bg-elevated { background-color: var(--bg-elevated) !important; }
+
+/* Refined white background override: 
+   Avoid forcing it on everything (like knobs) while catching common UI panels */
+.dark .bg-white:not(.keep-white) {
+  background-color: var(--bg-surface) !important;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700,
+.dark .text-\[\#1D1D1F\],
+.dark .text-\[\#1D2226\],
+.dark .text-[#1D1D1F],
+.dark .text-[#1D2226] {
+  color: var(--text-primary) !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-600,
+.dark .text-\[\#86868B\],
+.dark .text-[#86868B],
+.dark .text-[#6e6e73] {
+  color: var(--text-secondary) !important;
+}
+
+.dark .text-gray-400 {
+  color: var(--text-muted) !important;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--border-subtle) !important;
+}
+
+.dark .bg-gray-50,
+.dark .bg-gray-100 {
+  background-color: var(--bg-elevated) !important;
+}
+
+.dark .divide-gray-50 > * + * {
+  border-color: var(--border-subtle) !important;
+}
+
+/* ── Dark mode component overrides ───────────────── */
+
+/* apple-button-secondary: @apply inlines bg-white, so class selector can't override it easily without !important */
+.dark .apple-button-secondary {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;
+}
+.dark .apple-button-secondary:hover {
+  background-color: #313133 !important;
+  border-color: #48484a !important;
+}
+
+/* apple-input: same issue as button */
+.dark .apple-input {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+.dark .apple-input::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* All native inputs, selects, textareas */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.dark textarea,
+.dark select {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* apple-table dark overrides */
+.dark .apple-table thead tr {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-subtle) !important;
+}
+.dark .apple-table thead th {
+  color: var(--text-muted) !important;
+}
+.dark .apple-table tbody tr {
+  border-color: var(--border-subtle) !important;
+}
+.dark .apple-table tbody tr:hover {
+  background-color: var(--bg-elevated) !important;
+}
+.dark .apple-table tbody td {
+  color: var(--text-primary) !important;
+}
+
+/* Generic table headers (inline tables, not .apple-table) */
+.dark table thead tr {
+  background-color: var(--bg-elevated) !important;
+}
+.dark table thead th {
+  border-color: var(--border-subtle) !important;
+}
+.dark table tbody tr {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Status badges — pastel bg + dark text → dark bg + bright text */
+.dark .bg-green-100  { background-color: rgba(34,  197, 94,  0.15) !important; }
+.dark .bg-blue-100   { background-color: rgba(59,  130, 246, 0.15) !important; }
+.dark .bg-yellow-100 { background-color: rgba(234, 179, 8,   0.15) !important; }
+.dark .bg-red-100    { background-color: rgba(239, 68,  68,  0.15) !important; }
+.dark .bg-orange-100 { background-color: rgba(249, 115, 22,  0.15) !important; }
+.dark .bg-purple-100 { background-color: rgba(168, 85,  247, 0.15) !important; }
+.dark .bg-pink-100   { background-color: rgba(236, 72,  153, 0.15) !important; }
+.dark .bg-gray-100   { background-color: var(--bg-elevated)        !important; }
+.dark .bg-gray-200   { background-color: #3a3a3c                   !important; }
+
+.dark .bg-green-50   { background-color: rgba(34,  197, 94,  0.10) !important; }
+.dark .bg-blue-50    { background-color: rgba(59,  130, 246, 0.10) !important; }
+.dark .bg-yellow-50  { background-color: rgba(234, 179, 8,   0.10) !important; }
+.dark .bg-red-50     { background-color: rgba(239, 68,  68,  0.10) !important; }
+.dark .bg-orange-50  { background-color: rgba(249, 115, 22,  0.10) !important; }
+.dark .bg-purple-50  { background-color: rgba(168, 85,  247, 0.10) !important; }
+
+/* Status text — darken-700 colors → bright equivalents */
+.dark .text-green-700  { color: #4ade80  !important; }
+.dark .text-green-600  { color: #22c55e  !important; }
+.dark .text-blue-700   { color: #60a5fa  !important; }
+.dark .text-blue-600   { color: #3b82f6  !important; }
+.dark .text-yellow-700 { color: #fbbf24  !important; }
+.dark .text-yellow-600 { color: #eab308  !important; }
+.dark .text-red-700    { color: #f87171  !important; }
+.dark .text-red-600    { color: #ef4444  !important; }
+.dark .text-orange-700 { color: #fb923c  !important; }
+.dark .text-orange-600 { color: #f97316  !important; }
+.dark .text-orange-500 { color: #fb923c  !important; }
+.dark .text-purple-700 { color: #c084fc  !important; }
+.dark .text-purple-600 { color: #a855f7  !important; }
+.dark .text-pink-700   { color: #f472b6  !important; }
+.dark .text-gray-700   { color: var(--text-secondary) !important; }
+.dark .text-gray-400   { color: var(--text-muted)     !important; }
+
+/* Hover backgrounds for action buttons */
+.dark .hover\:bg-gray-100:hover   { background-color: var(--bg-elevated) !important; }
+.dark .hover\:bg-blue-50:hover    { background-color: rgba(59,  130, 246, 0.15) !important; }
+.dark .hover\:bg-red-50:hover     { background-color: rgba(239, 68,  68,  0.15) !important; }
+.dark .hover\:bg-green-50:hover   { background-color: rgba(34,  197, 94,  0.15) !important; }
+.dark .hover\:bg-gray-50:hover    { background-color: var(--bg-elevated) !important; }
+.dark .hover\:bg-gray-50\/50:hover { background-color: var(--bg-elevated) !important; }
+
+/* Dividers */
+.dark .divide-gray-100 > * + * { border-color: var(--border-subtle) !important; }
+
+/* apple-card dark shadow and borders */
+.dark .apple-card {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+  border-color: var(--border-card) !important;
+}
+.dark .apple-card:hover {
+  box-shadow: 0 12px 24px rgba(0,0,0,0.5) !important;
+  border-color: #48484a !important;
+}
+
+/* bg-gray-50 opacity variants used in table rows */
+.dark .bg-gray-50\/60 { background-color: var(--bg-elevated) !important; }
+.dark .bg-gray-50\/50 { background-color: var(--bg-elevated) !important; }
+.dark .hover\:bg-gray-50\/60:hover { background-color: var(--bg-elevated) !important; }
+
+/* Inline border colors */
+.dark .border-gray-100 { border-color: var(--border-subtle) !important; }
+.dark .border-gray-200 { border-color: var(--border-subtle) !important; }
+
+/* ConfirmModal & modals with literal bg-white class — already handled by global rule,
+   but add shadow override for dark */
+.dark .shadow-2xl { box-shadow: 0 25px 50px rgba(0,0,0,0.7) !important; }
+
+/* ── Scrollbar ────────────────────────────────────── */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@layer components {
+  .apple-button-primary {
+    @apply bg-brand hover:bg-brand-hover text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm shrink-0 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .apple-button-secondary {
+    @apply bg-white border border-gray-200 hover:bg-gray-50 text-[#1D1D1F] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm shrink-0 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .apple-input {
+    @apply bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all placeholder:text-gray-400;
+  }
+
+  .apple-card {
+    @apply rounded-[2rem] border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden;
+    background-color: var(--bg-surface);
+    border-color: var(--border-card);
+  }
+
+  .apple-badge {
+    @apply px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider;
+  }
+
+  /* Consistent Action Buttons */
+  .action-btn-view {
+    @apply p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all;
+  }
+
+  .action-btn-edit {
+    @apply p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all;
+  }
+
+  .action-btn-delete {
+    @apply p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all;
+  }
+
+  .action-btn-add {
+    @apply p-2 text-green-500 hover:text-green-700 hover:bg-green-50 rounded-xl transition-all;
+  }
+
+  /* Generic data table used throughout the app */
+  .apple-table {
+    @apply w-full border-collapse text-left;
+    font-size: 0.875rem; /* text-sm default, but explicitly manageable */
+  }
+  .apple-table thead tr {
+    @apply border-b border-gray-100 bg-gray-50/60 sticky top-0 z-10;
+  }
+  .apple-table thead th {
+    @apply text-left text-[11px] font-bold text-[#86868B] uppercase tracking-widest px-4 py-4 whitespace-nowrap;
+  }
+  .apple-table tbody tr {
+    @apply border-b border-gray-50 hover:bg-gray-50/60 transition-colors;
+  }
+  .apple-table tbody td {
+    @apply px-4 py-4 text-sm leading-relaxed;
+    color: var(--text-primary);
+  }
+}
+
+/* ── Recharts Dark Mode ──────────────────────────── */
+.dark .recharts-cartesian-axis-tick-value {
+  fill: var(--text-secondary) !important;
+}
+.dark .recharts-legend-item-text {
+  color: var(--text-primary) !important;
+}
+.dark .recharts-default-tooltip {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-subtle) !important;
+}
+.dark .recharts-tooltip-label {
+  color: var(--text-primary) !important;
+}
+.dark .recharts-responsive-container text {
+  fill: var(--text-muted) !important;
+}
