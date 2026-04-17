@@ -19,6 +19,12 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface PullState {
+  running: boolean;
+  result: string | null;
+  error: string | null;
+}
+
 interface SyncLogEntry {
   id: string;
   operation: string;
@@ -84,6 +90,13 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const [stokImport, setStokImport] = useState<ImportState>({ running: false, result: null, error: null });
   const [cariImport, setCariImport] = useState<ImportState>({ running: false, result: null, error: null });
 
+  // Pull-flow states
+  const defaultPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const [pullPeriod, setPullPeriod] = useState(defaultPeriod);
+  const [bakiyePull, setBakiyePull] = useState<PullState>({ running: false, result: null, error: null });
+  const [mizanPull,  setMizanPull]  = useState<PullState>({ running: false, result: null, error: null });
+  const [kdvPull,    setKdvPull]    = useState<PullState>({ running: false, result: null, error: null });
+
   // Sync log
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
   const [showLog, setShowLog] = useState(false);
@@ -134,6 +147,46 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       setCariImport({ running: false, result, error: result.success ? null : (result.error || 'Bilinmeyen hata') });
     } catch (e) {
       setCariImport({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // ── Pull-flow handlers ─────────────────────────────────────────────────────
+  async function handlePullBakiye() {
+    setBakiyePull({ running: true, result: null, error: null });
+    try {
+      const r = await fetch('/api/mikro/pull/bakiye', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await r.json() as { success: boolean; updated?: number; skipped?: number; error?: string; notConfigured?: boolean };
+      if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
+      if (!d.success) throw new Error(d.error || 'Hata');
+      setBakiyePull({ running: false, result: `${t ? 'Güncellendi' : 'Updated'}: ${d.updated ?? 0} / ${t ? 'Atlandı' : 'Skipped'}: ${d.skipped ?? 0}`, error: null });
+    } catch (e) {
+      setBakiyePull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  async function handlePullMizan() {
+    setMizanPull({ running: true, result: null, error: null });
+    try {
+      const r = await fetch('/api/mikro/pull/mizan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period: pullPeriod }) });
+      const d = await r.json() as { success: boolean; period?: string; rows?: number; error?: string; notConfigured?: boolean };
+      if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
+      if (!d.success) throw new Error(d.error || 'Hata');
+      setMizanPull({ running: false, result: `${t ? 'Dönem' : 'Period'}: ${d.period ?? pullPeriod} · ${d.rows ?? 0} ${t ? 'satır' : 'rows'}`, error: null });
+    } catch (e) {
+      setMizanPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  async function handlePullKdv() {
+    setKdvPull({ running: true, result: null, error: null });
+    try {
+      const r = await fetch('/api/mikro/pull/kdv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period: pullPeriod }) });
+      const d = await r.json() as { success: boolean; period?: string; kdvMatrahi?: number; hesaplananKdv?: number; error?: string; notConfigured?: boolean };
+      if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
+      if (!d.success) throw new Error(d.error || 'Hata');
+      setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ₺${(d.kdvMatrahi ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} · KDV: ₺${(d.hesaplananKdv ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, error: null });
+    } catch (e) {
+      setKdvPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -228,6 +281,64 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
           onImport={handleImportCari}
           lang={currentLanguage}
         />
+      </div>
+
+      {/* ── Pull Flows ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-[#1a3a5c]" />
+            {t ? 'Mikro\'dan Veri Çek' : 'Pull Data from Mikro'}
+          </h4>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase">{t ? 'Dönem' : 'Period'}</label>
+            <input
+              type="month"
+              value={pullPeriod}
+              onChange={e => setPullPeriod(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-[#1a3a5c] bg-gray-50"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Cari Bakiye */}
+          <PullCard
+            icon={<Users className="w-4 h-4 text-[#1a3a5c]" />}
+            title={t ? 'Cari Bakiye' : 'Account Balances'}
+            description={t ? 'Tüm cari hesapların bakiyelerini Mikro\'dan çek.' : 'Pull AR/AP balances from Mikro for all accounts.'}
+            state={bakiyePull}
+            disabled={!status?.connected}
+            onPull={handlePullBakiye}
+            lang={t}
+          />
+          {/* Mizan */}
+          <PullCard
+            icon={<ShoppingCart className="w-4 h-4 text-indigo-600" />}
+            title={t ? 'Mizan' : 'Trial Balance'}
+            description={t ? `${pullPeriod} dönemine ait mizanı çek.` : `Pull trial balance for ${pullPeriod}.`}
+            state={mizanPull}
+            disabled={!status?.connected}
+            onPull={handlePullMizan}
+            lang={t}
+          />
+          {/* KDV Özet */}
+          <PullCard
+            icon={<Download className="w-4 h-4 text-amber-600" />}
+            title={t ? 'KDV Özeti' : 'VAT Summary'}
+            description={t ? `${pullPeriod} KDV matrahı ve hesaplanan KDV'yi çek.` : `Pull VAT base and calculated tax for ${pullPeriod}.`}
+            state={kdvPull}
+            disabled={!status?.connected}
+            onPull={handlePullKdv}
+            lang={t}
+          />
+        </div>
+
+        {!status?.connected && (
+          <p className="text-[10px] text-center text-gray-400">
+            {t ? 'Pull işlemleri için Mikro bağlantısı gerekli.' : 'Mikro connection required for pull operations.'}
+          </p>
+        )}
       </div>
 
       {/* ── Sync Log ── */}
@@ -416,6 +527,53 @@ function ImportCard({
           {t ? 'Mikro bağlantısı gerekli' : 'Mikro connection required'}
         </p>
       )}
+    </div>
+  );
+}
+
+// ── PullCard sub-component ────────────────────────────────────────────────────
+
+interface PullCardProps {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  state: PullState;
+  disabled: boolean;
+  onPull: () => void;
+  lang: boolean;
+}
+
+function PullCard({ icon, title, description, state, disabled, onPull, lang: t }: PullCardProps) {
+  return (
+    <div className="border border-gray-100 rounded-xl p-4 space-y-3 flex flex-col">
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 bg-gray-50 rounded-lg flex items-center justify-center">
+          {icon}
+        </div>
+        <h5 className="font-bold text-xs text-gray-800">{title}</h5>
+      </div>
+      <p className="text-[11px] text-gray-400 flex-1">{description}</p>
+
+      {state.result && !state.running && (
+        <div className="rounded-lg p-2 bg-green-50 text-green-700 text-[11px] flex items-center gap-1.5">
+          <CheckCircle2 className="w-3 h-3 flex-shrink-0" /> {state.result}
+        </div>
+      )}
+      {state.error && !state.running && (
+        <div className="rounded-lg p-2 bg-red-50 text-red-600 text-[11px] flex items-center gap-1.5">
+          <XCircle className="w-3 h-3 flex-shrink-0" /> {state.error}
+        </div>
+      )}
+
+      <button
+        onClick={onPull}
+        disabled={state.running || disabled}
+        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-[#1a3a5c] hover:bg-[#1a3a5c]/90 text-white text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {state.running
+          ? <><RefreshCw className="w-3.5 h-3.5 animate-spin"/>{t ? 'Çekiliyor…' : 'Pulling…'}</>
+          : <><Download className="w-3.5 h-3.5"/>{t ? 'Çek' : 'Pull'}</>}
+      </button>
     </div>
   );
 }

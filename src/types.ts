@@ -120,6 +120,12 @@ export interface Order {
   kdvTutari?: number;
   kdvHaricTutar?: number;
   hasInvoice?: boolean;
+  mikroFaturaNo?: string;
+  mikroFaturaDate?: string;
+  ettn?: string;
+  irsaliyeNo?: string;
+  irsaliyeEttn?: string;
+  mikroSynced?: boolean;
 }
 
 export interface InventoryMovement {
@@ -167,6 +173,7 @@ export interface Lead {
   priceTier?: string;
   voiceNotes?: VoiceNote[];
   nextFollowUpDate?: unknown;
+  cariKod?: string;
 }
 
 export interface Employee {

@@ -1370,6 +1370,312 @@ async function startServer() {
     }
   });
 
+  // ── Mikro e-Fatura / e-Arşiv ─────────────────────────────────────────────────
+  // POST /api/mikro/fatura/kaydet  — push order/invoice to Mikro as e-Fatura or e-Arşiv
+  // Body: { order: Record<string, unknown>, firebaseId: string }
+  //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
+  // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
+  app.post('/api/mikro/fatura/kaydet', async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
+    const t0 = Date.now();
+    try {
+      const lineItems = (order.lineItems || []) as Record<string, unknown>[];
+      if (lineItems.length === 0) return res.status(400).json({ success: false, error: 'Fatura satırı bulunamadı.' });
+
+      const rawDate    = order.createdAt ? new Date(order.createdAt as string) : new Date();
+      const faturaDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
+      // faturaTipi: 1=e-Fatura, 2=e-Arşiv, 3=İhracat
+      const faturaType = order.faturaTipi === 'e-arsiv' ? 2 : order.faturaTipi === 'ihracat' ? 3 : 1;
+      const kdvOran    = Number(order.kdvOran ?? 20);
+
+      const satirlar = lineItems.map((item: Record<string, unknown>) => ({
+        fat_tarih:        faturaDate,
+        fat_tip:          faturaType,
+        fat_cins:         1,   // Satış faturası
+        fat_evrakno_seri: 'F',
+        fat_musteri_kod:  (order.mikroCariKod as string) || '',
+        fat_stok_kod:     (item.sku  as string) || '',
+        fat_isim:         (item.name as string) || '',
+        fat_birim_fiyat:  Number(item.price    ?? 0),
+        fat_miktar:       Number(item.quantity ?? 1),
+        fat_tutar:        Number(item.price ?? 0) * Number(item.quantity ?? 1),
+        fat_vergi_pntr:   kdvOran >= 20 ? 4 : kdvOran >= 10 ? 3 : 1,
+        fat_vergisiz_fl:  false,
+      }));
+
+      const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [{ satirlar }] });
+      const duration   = Date.now() - t0;
+      const d          = data as Record<string, unknown>;
+      const success    = ok && d?.success !== false;
+      const mikroFaturaNo = (d?.faturaNo || d?.evrakNo || d?.id || null) as string | null;
+      const ettn          = (d?.ettn || d?.uuid || null) as string | null;
+      const errorMsg   = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+
+      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration);
+      if (adminDb && firebaseId && success) {
+        await adminDb.collection('orders').doc(firebaseId).set({
+          mikroFaturaNo,
+          ettn,
+          hasInvoice:      true,
+          mikroFaturaDate: faturaDate,
+          mikroSynced:     true,
+          mikroSyncedAt:   admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      res.json({ success, mikroFaturaNo, ettn, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration);
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  // ── Mikro e-İrsaliye ─────────────────────────────────────────────────────────
+  // POST /api/mikro/irsaliye/kaydet  — push shipment as e-İrsaliye to Mikro
+  // Body: { shipment: Record<string, unknown>, firebaseId: string }
+  //   shipment must have: mikroCariKod, customerName, destination, trackingNo, items[]
+  // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
+  app.post('/api/mikro/irsaliye/kaydet', async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { shipment, firebaseId } = req.body as { shipment: Record<string, unknown>; firebaseId: string };
+    const t0 = Date.now();
+    try {
+      const rawDate   = shipment.date ? new Date(shipment.date as string) : new Date();
+      const irsDate   = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
+      const items = (shipment.items || []) as Record<string, unknown>[];
+
+      // If no line items, create a placeholder row for the delivery note
+      const satirlar = items.length > 0 ? items.map((item: Record<string, unknown>) => ({
+        irs_tarih:        irsDate,
+        irs_tip:          7,   // Satış irsaliyesi
+        irs_cins:         1,
+        irs_evrakno_seri: 'I',
+        irs_musteri_kod:  (shipment.mikroCariKod as string) || '',
+        irs_stok_kod:     (item.sku  as string) || '',
+        irs_isim:         (item.name as string) || (shipment.customerName as string) || '',
+        irs_miktar:       Number(item.quantity ?? 1),
+        irs_birim_fiyat:  Number(item.price    ?? 0),
+        irs_tutar:        Number(item.price ?? 0) * Number(item.quantity ?? 1),
+        irs_kargo_firma:  (shipment.cargoFirm as string) || '',
+        irs_plaka:        (shipment.trackingNo as string) || '',
+      })) : [{
+        irs_tarih:        irsDate,
+        irs_tip:          7,
+        irs_cins:         1,
+        irs_evrakno_seri: 'I',
+        irs_musteri_kod:  (shipment.mikroCariKod as string) || '',
+        irs_isim:         (shipment.customerName as string) || '',
+        irs_miktar:       1,
+        irs_birim_fiyat:  0,
+        irs_tutar:        0,
+        irs_kargo_firma:  (shipment.cargoFirm as string) || '',
+        irs_plaka:        (shipment.trackingNo as string) || '',
+      }];
+
+      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [{ satirlar }] });
+      const duration      = Date.now() - t0;
+      const d             = data as Record<string, unknown>;
+      const success       = ok && d?.success !== false;
+      const irsaliyeNo    = (d?.irsaliyeNo || d?.evrakNo || d?.id || null) as string | null;
+      const irsaliyeEttn  = (d?.ettn || d?.uuid || null) as string | null;
+      const errorMsg      = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+
+      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration);
+      if (adminDb && firebaseId && success) {
+        await adminDb.collection('shipments').doc(firebaseId).set({
+          irsaliyeNo,
+          irsaliyeEttn,
+          mikroSynced:     true,
+          mikroSyncedAt:   admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      res.json({ success, irsaliyeNo, irsaliyeEttn, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', false, null, errorMsg, duration);
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  // ── Mikro Pull: Cari Bakiye ──────────────────────────────────────────────────
+  // POST /api/mikro/pull/bakiye — pull AR/AP balances from Mikro → Firebase cariBalances
+  // Runs full CariHareketListesiV2 per lead that has mikroCariKod; updates their bakiye
+  app.post('/api/mikro/pull/bakiye', async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      // 1. Fetch all leads that have a mikroCariKod
+      const leadsSnap = await adminDb.collection('leads')
+        .where('mikroCariKod', '!=', '')
+        .limit(Number(req.body?.limit ?? 100))
+        .get();
+
+      let updated = 0, errors = 0;
+      for (const leadDoc of leadsSnap.docs) {
+        const cariKod = (leadDoc.data() as Record<string, unknown>).mikroCariKod as string;
+        try {
+          const { ok, data } = await mikroPost('CariHareketListesiV2', {
+            CariKod: cariKod,
+            Size: '1',    // We only need the running balance; some versions return it in the header
+            Index: 0,
+          });
+          if (!ok) { errors++; continue; }
+          const d = data as Record<string, unknown>;
+          // Mikro returns bakiye in various field names depending on version
+          const bakiye      = Number(d?.bakiye ?? d?.Bakiye ?? d?.cariBakiye ?? 0);
+          const vadeliBorc  = Number(d?.vadeliBorc ?? d?.VadeliBorc ?? 0);
+          // Mirror to cariBalances collection AND update lead doc
+          await adminDb.collection('cariBalances').doc(cariKod).set({
+            cariKod, bakiye, vadeliBorc,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          await leadDoc.ref.set({ bakiye, vadeliBorc }, { merge: true });
+          updated++;
+        } catch { errors++; }
+      }
+      res.json({ success: true, total: leadsSnap.size, updated, errors, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Mikro Pull: Mizan (Trial Balance) ───────────────────────────────────────
+  // POST /api/mikro/pull/mizan  — pull monthly trial balance → Firebase accountingPeriods
+  // Body: { period?: 'YYYY-MM', yil?: number, ay?: number }
+  app.post('/api/mikro/pull/mizan', async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const now    = new Date();
+      const period = (req.body?.period as string) || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      const [yil, ay] = period.split('-').map(Number);
+      const ilkTarih  = `${yil}-${String(ay).padStart(2,'0')}-01`;
+      const lastDay   = new Date(yil, ay, 0).getDate();
+      const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
+
+      const { ok, data, status } = await mikroPost('MizanV2', {
+        IlkTarih: ilkTarih,
+        SonTarih: sonTarih,
+        Tip: 1,   // 1=Yardımcı hesap düzeyi
+        Size: '500',
+        Index: 0,
+      });
+
+      if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
+      const d      = data as Record<string, unknown>;
+      const rows   = (d?.hesaplar ?? d?.mizan ?? []) as Record<string, unknown>[];
+      const docId  = period;
+
+      await adminDb.collection('accountingPeriods').doc(docId).set({
+        period, yil, ay, rows,
+        toplam: { borc: rows.reduce((s, r) => s + Number(r.borc ?? 0), 0), alacak: rows.reduce((s, r) => s + Number(r.alacak ?? 0), 0) },
+        syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      res.json({ success: true, period, rowCount: rows.length, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Mutabakat PDF Generation ─────────────────────────────────────────────────
+  // GET /api/mutabakat/:leadId  — returns JSON data for client-side PDF generation
+  // The client (MutabakatPanel) renders the PDF using jsPDF
+  app.get('/api/mutabakat/:leadId', async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin başlatılamadı.' });
+    try {
+      const leadId = req.params.leadId as string;
+      const period     = (req.query.period as string) || new Date().getFullYear().toString();
+
+      // Fetch lead
+      const leadSnap = await adminDb.collection('leads').doc(leadId).get();
+      if (!leadSnap.exists) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+      const lead = leadSnap.data() as Record<string, unknown>;
+
+      // Fetch open orders
+      const ordersSnap = await adminDb.collection('orders')
+        .where('leadId', '==', leadId)
+        .where('status', 'in', ['Pending', 'Processing', 'Shipped'])
+        .orderBy('createdAt', 'desc')
+        .limit(100)
+        .get();
+
+      const orders = ordersSnap.docs.map(d => {
+        const o = d.data() as Record<string, unknown>;
+        const ts = (o.createdAt as admin.firestore.Timestamp);
+        return {
+          id:           d.id,
+          orderNo:      (o.shopifyOrderId || o.trendyolOrderNo || o.mikroEvrakNo || d.id.substring(0,8)) as string,
+          date:         ts?.toDate?.()?.toISOString().split('T')[0] ?? '',
+          amount:       Number(o.totalPrice ?? o.totalAmount ?? 0),
+          status:       o.status as string,
+          faturaNo:     (o.mikroFaturaNo ?? '') as string,
+        };
+      });
+
+      const totalAmount = orders.reduce((s, o) => s + o.amount, 0);
+      const bakiye      = Number((lead.bakiye as number) ?? 0);
+
+      res.json({
+        success: true,
+        lead: {
+          id:       leadId,
+          name:     lead.name as string,
+          company:  lead.company as string,
+          email:    lead.email as string,
+          phone:    lead.phone as string,
+          taxId:    lead.taxId as string,
+          cariKod:  lead.mikroCariKod as string,
+          bakiye,
+        },
+        orders,
+        totalAmount,
+        period,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── KDV Özet Pull ─────────────────────────────────────────────────────────────
+  // POST /api/mikro/pull/kdv  — pull monthly KDV summary → Firebase taxSummary
+  app.post('/api/mikro/pull/kdv', async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const now    = new Date();
+      const period = (req.body?.period as string) || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      const [yil, ay] = period.split('-').map(Number);
+      const ilkTarih  = `${yil}-${String(ay).padStart(2,'0')}-01`;
+      const lastDay   = new Date(yil, ay, 0).getDate();
+      const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
+
+      const { ok, data, status } = await mikroPost('KdvOzetV2', {
+        IlkTarih: ilkTarih, SonTarih: sonTarih,
+      });
+      if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
+      const d = data as Record<string, unknown>;
+      await adminDb.collection('taxSummary').doc(period).set({
+        period, yil, ay,
+        kdvHesaplanan: Number(d?.kdvHesaplanan ?? d?.hesaplananKdv ?? 0),
+        kdvIndirilecek: Number(d?.kdvIndirilecek ?? d?.indirilecekKdv ?? 0),
+        kdvOdenmesi: Number(d?.odenmesiGerekenKdv ?? d?.kdvFarki ?? 0),
+        rawData: d,
+        syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      res.json({ success: true, period, data: d, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ── Trendyol Seller API ─────────────────────────────────────────────────────
   // Credentials: TRENDYOL_SUPPLIER_ID, TRENDYOL_API_KEY, TRENDYOL_API_SECRET
   // Or stored in Firestore settings/trendyol: { supplierId, apiKey, apiSecret }

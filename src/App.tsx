@@ -159,6 +159,7 @@ import { exportOrderPDF } from './utils/pdf';
 import MikroSyncPanel from './components/MikroSyncPanel';
 import MarketplacePanel from './components/MarketplacePanel';
 import CariEkstrePanel from './components/CariEkstrePanel';
+import MutabakatPanel from './components/MutabakatPanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -2643,6 +2644,7 @@ function AppContent() {
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [faturaLoading, setFaturaLoading] = useState<Record<string, boolean>>({});
   const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
   const [isAddingOrder, setIsAddingOrder] = useState(false);
@@ -3421,8 +3423,82 @@ function AppContent() {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status });
       logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
+      // Auto-trigger e-İrsaliye when an order is marked as Shipped (fire-and-forget)
+      if (status === 'Shipped') {
+        const order = orders.find(o => o.id === orderId);
+        if (order) {
+          const lead = leads.find(l => l.id === order.leadId);
+          fetch('/api/mikro/irsaliye/kaydet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              shipment: {
+                mikroCariKod: lead?.cariKod || lead?.taxId || order.customerName,
+                customerName: order.customerName,
+                destination: order.shippingAddress || '',
+                trackingNo: order.trackingNumber || orderId.slice(0, 8),
+                cargoFirm: order.cargoCompany || '',
+                items: (order.lineItems || []).map(l => ({
+                  name: l.title || l.name || l.sku,
+                  qty: l.quantity,
+                  unitPrice: l.price,
+                })),
+                date: new Date().toISOString(),
+              },
+              firebaseId: orderId,
+            }),
+          }).then(r => r.json()).then((d: { success: boolean; irsaliyeNo?: string; notConfigured?: boolean }) => {
+            if (d.success && d.irsaliyeNo) {
+              toast(`${currentLanguage === 'tr' ? 'İrsaliye oluşturuldu' : 'Waybill created'}: ${d.irsaliyeNo}`, 'success');
+            }
+            // notConfigured → silently skip; error → silently skip (fire-and-forget)
+          }).catch(() => { /* Mikro not available — silent */ });
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+    }
+  };
+
+  // ── e-Fatura: push order to Mikro ────────────────────────────────────────────
+  const handleMikroFatura = async (order: Order) => {
+    setFaturaLoading(prev => ({ ...prev, [order.id]: true }));
+    try {
+      const lead = leads.find(l => l.id === order.leadId);
+      const r = await fetch('/api/mikro/fatura/kaydet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order: {
+            mikroCariKod: lead?.cariKod || lead?.taxId || order.customerName,
+            customerName: order.customerName,
+            lineItems: (order.lineItems || []).map(l => ({
+              name: l.title || l.name || l.sku,
+              qty: l.quantity,
+              unitPrice: l.price,
+              vatRate: l.vatRate ?? order.kdvOran ?? 20,
+            })),
+            totalPrice: order.totalPrice,
+            faturaTipi: order.faturaTipi || 'e-arsiv',
+            kdvOran: order.kdvOran ?? 20,
+          },
+          firebaseId: order.id,
+        }),
+      });
+      const d = await r.json() as { success: boolean; mikroFaturaNo?: string; notConfigured?: boolean; error?: string };
+      if (d.success) {
+        toast(`${currentLanguage === 'tr' ? 'Fatura kaydedildi' : 'Invoice recorded'}: ${d.mikroFaturaNo ?? ''}`, 'success');
+        // Optimistic update — Firestore onSnapshot will sync the real value shortly
+        if (selectedOrder?.id === order.id) setSelectedOrder({ ...selectedOrder, mikroFaturaNo: d.mikroFaturaNo, hasInvoice: true });
+      } else if (d.notConfigured) {
+        toast(currentLanguage === 'tr' ? 'Mikro bağlantısı yapılandırılmamış. Ayarlar\'dan girin.' : 'Mikro not configured. Go to Settings.', 'error');
+      } else {
+        toast(d.error || (currentLanguage === 'tr' ? 'Fatura gönderilemedi.' : 'Invoice push failed.'), 'error');
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error');
+    } finally {
+      setFaturaLoading(prev => ({ ...prev, [order.id]: false }));
     }
   };
 
@@ -6081,6 +6157,11 @@ function AppContent() {
                     />
                   </div>
 
+                  {/* ── Mutabakat Mektubu ── */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <MutabakatPanel leadId={selectedLead.id} currentLanguage={currentLanguage} />
+                  </div>
+
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="font-bold flex items-center gap-2">
@@ -6285,6 +6366,25 @@ function AppContent() {
                                     <CheckCircle2 className="w-3 h-3"/>{currentLanguage==='tr'?'Faturalı':'Invoiced'}
                                   </span>
                                 )}
+                                {/* Mikro e-Fatura push */}
+                                {!order.mikroFaturaNo && order.faturali !== false && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); void handleMikroFatura(order); }}
+                                    disabled={!!faturaLoading[order.id]}
+                                    className="text-xs font-bold px-2 py-1 bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c] hover:text-white rounded-lg transition-all flex items-center gap-1 disabled:opacity-40"
+                                    title={currentLanguage==='tr'?'Mikro\'ya e-Fatura gönder':'Push e-Invoice to Mikro'}
+                                  >
+                                    {faturaLoading[order.id]
+                                      ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/>
+                                      : <FileUp className="w-3.5 h-3.5"/>}
+                                    Mikro
+                                  </button>
+                                )}
+                                {order.mikroFaturaNo && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 bg-[#1a3a5c]/10 text-[#1a3a5c] rounded-full flex items-center gap-0.5" title={order.mikroFaturaNo}>
+                                    <CheckCircle2 className="w-3 h-3"/>Mikro
+                                  </span>
+                                )}
                                 <button onClick={() => openConfirm({
                                   title: currentT.confirm_delete_title,
                                   message: currentT.confirm_delete,
@@ -6350,7 +6450,7 @@ function AppContent() {
                   subtitle={`Customer: ${selectedOrder.customerName}`}
                   className="mb-0 w-full"
                   actionButton={
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {selectedOrder.status === 'Pending' && (
                         <button onClick={() => openConfirm({
                           title: currentT.confirm_approve_title,
@@ -6361,6 +6461,22 @@ function AppContent() {
                           className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-emerald-200 transition-colors">
                           Approve
                         </button>
+                      )}
+                      {/* Mikro e-Fatura button in order detail */}
+                      {!selectedOrder.mikroFaturaNo && selectedOrder.faturali !== false && (
+                        <button
+                          onClick={() => void handleMikroFatura(selectedOrder)}
+                          disabled={!!faturaLoading[selectedOrder.id]}
+                          className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40"
+                        >
+                          {faturaLoading[selectedOrder.id] ? <RefreshCw className="w-4 h-4 animate-spin"/> : <FileUp className="w-4 h-4"/>}
+                          {currentLanguage === 'tr' ? 'Mikro\'ya Fatura' : 'Push Invoice'}
+                        </button>
+                      )}
+                      {selectedOrder.mikroFaturaNo && (
+                        <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
+                          <CheckCircle2 className="w-4 h-4"/> Mikro: {selectedOrder.mikroFaturaNo}
+                        </span>
                       )}
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
