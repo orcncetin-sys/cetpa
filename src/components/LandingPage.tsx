@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowRight, LayoutDashboard, Zap,
@@ -8,6 +8,8 @@ import {
   Briefcase, Activity, Scale, Building2,
   Code, Database, Moon, Sun
 } from 'lucide-react';
+import PrivacyPage from './PrivacyPage';
+import TermsPage from './TermsPage';
 
 interface LandingPageProps {
   currentLanguage: 'tr' | 'en';
@@ -37,9 +39,14 @@ export default function LandingPage({
   onDarkModeToggle
 }: LandingPageProps) {
   const isTR = currentLanguage === 'tr';
+  const [activePage, setActivePage] = useState<null | 'privacy' | 'terms'>(null);
 
   // Shorthand helpers for dark/light conditional classes
   const d = (dark: string, light: string) => darkMode ? dark : light;
+
+  // Page routing — show sub-pages before the main landing render
+  if (activePage === 'privacy') return <PrivacyPage currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
+  if (activePage === 'terms')   return <TermsPage   currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
 
   const t = {
     nav: {
@@ -144,9 +151,19 @@ export default function LandingPage({
           <div className="flex items-center gap-10 flex-shrink-0 min-w-0">
             <img src="/cetpalogo.avif" alt="CETPA" className="h-7 sm:h-8 w-auto object-contain flex-shrink-0" />
             <div className="hidden md:flex items-center gap-8">
-              <a href="#features" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.features}</a>
-              <a href="#pricing" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.pricing}</a>
-              <a href="#solutions" className={cn("text-sm font-medium transition-colors", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}>{t.nav.solutions}</a>
+              {[
+                { id: 'features',  label: t.nav.features  },
+                { id: 'pricing',   label: t.nav.pricing   },
+                { id: 'solutions', label: t.nav.solutions },
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
+                  className={cn("text-sm font-medium transition-colors outline-none focus:outline-none", d("text-white/60 hover:text-white", "text-black/60 hover:text-black"))}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
@@ -311,6 +328,76 @@ export default function LandingPage({
         </div>
       </section>
 
+      {/* ── Solutions ── */}
+      <section id="solutions" className="py-32">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <p className={cn("text-xs font-bold uppercase tracking-widest mb-4", d("text-white/30", "text-black/30"))}>
+              {isTR ? 'Sektörel Çözümler' : 'Industry Solutions'}
+            </p>
+            <h2 className="text-4xl font-bold mb-4">
+              {isTR ? 'Her Sektöre Özel' : 'Tailored for Every Industry'}
+            </h2>
+            <p className={cn("max-w-xl mx-auto", d("text-white/40", "text-black/40"))}>
+              {isTR
+                ? 'CETPA ERP farklı sektörlerin operasyonel ihtiyaçlarına göre yapılandırılabilir.'
+                : 'CETPA ERP adapts to the operational needs of different industries.'}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[
+              {
+                icon: Truck,
+                label: isTR ? 'Otomotiv & Yan Sanayi' : 'Automotive & OEM',
+                desc: isTR ? 'Tedarik zinciri yönetimi, FMEA ve üretim izleme' : 'Supply chain management, FMEA & production tracking',
+              },
+              {
+                icon: Building2,
+                label: isTR ? 'İnşaat & Gayrimenkul' : 'Construction & Real Estate',
+                desc: isTR ? 'Proje maliyet kontrolü ve alt yüklenici takibi' : 'Project cost control & subcontractor tracking',
+              },
+              {
+                icon: Package,
+                label: isTR ? 'Tekstil & Hazır Giyim' : 'Textile & Apparel',
+                desc: isTR ? 'Varyant yönetimi, beden-renk stok takibi' : 'Variant management, size-colour inventory tracking',
+              },
+              {
+                icon: ShieldCheck,
+                label: isTR ? 'Gıda & İçecek' : 'Food & Beverage',
+                desc: isTR ? 'Lot takibi, son kullanma tarihi ve kalite kontrol' : 'Lot tracking, expiry management & quality control',
+              },
+              {
+                icon: Globe,
+                label: isTR ? 'İhracat & Dış Ticaret' : 'Export & Trade',
+                desc: isTR ? 'Döviz yönetimi, gümrük ve lojistik entegrasyonu' : 'FX management, customs & logistics integration',
+              },
+              {
+                icon: BarChart3,
+                label: isTR ? 'Teknoloji & Yazılım' : 'Technology & Software',
+                desc: isTR ? 'Proje bazlı faturalama, kaynak planlama' : 'Project-based billing & resource planning',
+              },
+            ].map(({ icon: Icon, label, desc }, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "p-6 rounded-3xl border transition-all group hover:scale-[1.02] cursor-default",
+                  d("bg-white/5 border-white/8 hover:bg-white/10", "bg-gray-50 border-gray-100 hover:bg-gray-100/80")
+                )}
+              >
+                <div
+                  className="w-11 h-11 rounded-2xl flex items-center justify-center mb-4"
+                  style={{ backgroundColor: 'rgba(255,64,0,0.1)' }}
+                >
+                  <Icon className="w-5 h-5" style={{ color: '#ff4000' }} />
+                </div>
+                <h3 className="font-bold mb-1.5">{label}</h3>
+                <p className={cn("text-sm leading-relaxed", d("text-white/40", "text-black/40"))}>{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── Final CTA ── */}
       <section className="py-32">
         <div className="max-w-7xl mx-auto px-6 text-center">
@@ -337,9 +424,15 @@ export default function LandingPage({
             <span>© 2026 CETPA TECHNOLOGY</span>
           </div>
           <div className="flex items-center gap-8 text-[10px] font-bold uppercase tracking-widest">
-            <a href="#" className="hover:text-brand transition-colors">Privacy</a>
-            <a href="#" className="hover:text-brand transition-colors">Terms</a>
-            <a href="#" className="hover:text-brand transition-colors">Contact</a>
+            <button onClick={() => setActivePage('privacy')} className="hover:text-brand transition-colors outline-none focus:outline-none">
+              {isTR ? 'Gizlilik' : 'Privacy'}
+            </button>
+            <button onClick={() => setActivePage('terms')} className="hover:text-brand transition-colors outline-none focus:outline-none">
+              {isTR ? 'Koşullar' : 'Terms'}
+            </button>
+            <a href="mailto:info@cetpa.io" className="hover:text-brand transition-colors outline-none focus:outline-none">
+              {isTR ? 'İletişim' : 'Contact'}
+            </a>
           </div>
         </div>
       </footer>
