@@ -1370,6 +1370,295 @@ async function startServer() {
     }
   });
 
+  // ── Trendyol Seller API ─────────────────────────────────────────────────────
+  // Credentials: TRENDYOL_SUPPLIER_ID, TRENDYOL_API_KEY, TRENDYOL_API_SECRET
+  // Or stored in Firestore settings/trendyol: { supplierId, apiKey, apiSecret }
+
+  async function getTrendyolCreds(): Promise<{ supplierId: string; apiKey: string; apiSecret: string } | null> {
+    if (process.env.TRENDYOL_SUPPLIER_ID && process.env.TRENDYOL_API_KEY && process.env.TRENDYOL_API_SECRET) {
+      return { supplierId: process.env.TRENDYOL_SUPPLIER_ID, apiKey: process.env.TRENDYOL_API_KEY, apiSecret: process.env.TRENDYOL_API_SECRET };
+    }
+    if (!adminDb) return null;
+    try {
+      const snap = await adminDb.collection('settings').doc('trendyol').get();
+      if (!snap.exists) return null;
+      const d = snap.data() as Record<string, unknown>;
+      const supplierId = d.supplierId as string | undefined;
+      const apiKey     = d.apiKey     as string | undefined;
+      const apiSecret  = d.apiSecret  as string | undefined;
+      if (!supplierId || !apiKey || !apiSecret) return null;
+      return { supplierId, apiKey, apiSecret };
+    } catch { return null; }
+  }
+
+  /** GET /api/trendyol/status */
+  app.get('/api/trendyol/status', async (_req: Request, res: Response) => {
+    const creds = await getTrendyolCreds();
+    if (!creds) return res.json({ configured: false, connected: false, message: 'Trendyol kimlik bilgileri eksik.' });
+    try {
+      const token = Buffer.from(`${creds.apiKey}:${creds.apiSecret}`).toString('base64');
+      const r = await fetch(
+        `https://api.trendyol.com/sapigw/suppliers/${creds.supplierId}/orders?status=Created&size=1`,
+        { headers: { Authorization: `Basic ${token}`, 'User-Agent': `${creds.supplierId} - SelfIntegration` } }
+      );
+      if (r.ok) return res.json({ configured: true, connected: true });
+      const txt = await r.text();
+      return res.json({ configured: true, connected: false, error: `HTTP ${r.status}: ${txt.substring(0, 200)}` });
+    } catch (e) {
+      return res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** POST /api/trendyol/sync — pull recent orders → Firebase */
+  app.post('/api/trendyol/sync', async (req: Request, res: Response) => {
+    const creds = await getTrendyolCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    const t0 = Date.now();
+    try {
+      const token = Buffer.from(`${creds.apiKey}:${creds.apiSecret}`).toString('base64');
+      const daysBack = Number(req.body?.daysBack ?? 7);
+      const startMs  = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+      const url = `https://api.trendyol.com/sapigw/suppliers/${creds.supplierId}/orders?startDate=${startMs}&size=200&page=0`;
+      const r   = await fetch(url, {
+        headers: { Authorization: `Basic ${token}`, 'User-Agent': `${creds.supplierId} - SelfIntegration` }
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        return res.status(r.status).json({ success: false, error: `Trendyol API ${r.status}: ${txt.substring(0, 200)}` });
+      }
+      const data = await r.json() as { content?: Record<string, unknown>[] };
+      const orders = data.content ?? [];
+      let created = 0, updated = 0;
+      if (adminDb) {
+        for (const o of orders) {
+          const tyOrderNo = String(o.orderNumber ?? o.id ?? '');
+          if (!tyOrderNo) continue;
+          const existing = await adminDb.collection('orders').where('trendyolOrderNo', '==', tyOrderNo).limit(1).get();
+          const payload = {
+            trendyolOrderNo: tyOrderNo,
+            customerName:    (o.shipmentAddress as Record<string, unknown>)?.fullName as string ?? 'Trendyol',
+            totalPrice:      Number(o.totalPrice ?? 0),
+            status:          'Pending' as const,
+            customerType:    'Retail' as const,
+            source:          'Trendyol',
+            rawData:         o,
+            updatedAt:       admin.firestore.FieldValue.serverTimestamp(),
+          };
+          if (existing.empty) {
+            await adminDb.collection('orders').add({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            created++;
+          } else {
+            await existing.docs[0].ref.set(payload, { merge: true });
+            updated++;
+          }
+        }
+      }
+      res.json({ success: true, total: orders.length, created, updated, duration: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── Hepsiburada Merchant API ────────────────────────────────────────────────
+  // Credentials: HEPSIBURADA_MERCHANT_ID, HEPSIBURADA_USERNAME, HEPSIBURADA_PASSWORD
+
+  async function getHepsiburadaCreds(): Promise<{ merchantId: string; username: string; password: string } | null> {
+    if (process.env.HEPSIBURADA_MERCHANT_ID && process.env.HEPSIBURADA_USERNAME && process.env.HEPSIBURADA_PASSWORD) {
+      return { merchantId: process.env.HEPSIBURADA_MERCHANT_ID, username: process.env.HEPSIBURADA_USERNAME, password: process.env.HEPSIBURADA_PASSWORD };
+    }
+    if (!adminDb) return null;
+    try {
+      const snap = await adminDb.collection('settings').doc('hepsiburada').get();
+      if (!snap.exists) return null;
+      const d = snap.data() as Record<string, unknown>;
+      const merchantId = d.merchantId as string | undefined;
+      const username   = d.username   as string | undefined;
+      const password   = d.password   as string | undefined;
+      if (!merchantId || !username || !password) return null;
+      return { merchantId, username, password };
+    } catch { return null; }
+  }
+
+  /** GET /api/hepsiburada/status */
+  app.get('/api/hepsiburada/status', async (_req: Request, res: Response) => {
+    const creds = await getHepsiburadaCreds();
+    if (!creds) return res.json({ configured: false, connected: false, message: 'Hepsiburada kimlik bilgileri eksik.' });
+    try {
+      const token = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
+      const r = await fetch(
+        `https://mpop.hepsiburada.com/product-service/api/products/merchants/${creds.merchantId}/products?limit=1&offset=0`,
+        { headers: { Authorization: `Basic ${token}`, Accept: 'application/json' } }
+      );
+      if (r.ok) return res.json({ configured: true, connected: true });
+      return res.json({ configured: true, connected: false, error: `HTTP ${r.status}` });
+    } catch (e) {
+      return res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** POST /api/hepsiburada/sync — pull recent orders → Firebase */
+  app.post('/api/hepsiburada/sync', async (req: Request, res: Response) => {
+    const creds = await getHepsiburadaCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    const t0 = Date.now();
+    try {
+      const token = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
+      const daysBack  = Number(req.body?.daysBack ?? 7);
+      const beginDate = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0];
+      const url = `https://mpop.hepsiburada.com/order-service-module/api/orders/merchantid/${creds.merchantId}?beginDate=${beginDate}&pageSize=100&pageNumber=0`;
+      const r   = await fetch(url, { headers: { Authorization: `Basic ${token}`, Accept: 'application/json' } });
+      if (!r.ok) {
+        const txt = await r.text();
+        return res.status(r.status).json({ success: false, error: `Hepsiburada API ${r.status}: ${txt.substring(0, 200)}` });
+      }
+      const data = await r.json() as { data?: Record<string, unknown>[] };
+      const orders = data.data ?? [];
+      let created = 0, updated = 0;
+      if (adminDb) {
+        for (const o of orders) {
+          const hbOrderId = String(o.id ?? o.orderNumber ?? '');
+          if (!hbOrderId) continue;
+          const existing = await adminDb.collection('orders').where('hepsiburadaOrderId', '==', hbOrderId).limit(1).get();
+          const payload = {
+            hepsiburadaOrderId: hbOrderId,
+            customerName:       String(o.customerFirstName ?? '') + ' ' + String(o.customerLastName ?? ''),
+            totalPrice:         Number(o.totalPrice ?? o.orderAmount ?? 0),
+            status:             'Pending' as const,
+            customerType:       'Retail' as const,
+            source:             'Hepsiburada',
+            rawData:            o,
+            updatedAt:          admin.firestore.FieldValue.serverTimestamp(),
+          };
+          if (existing.empty) {
+            await adminDb.collection('orders').add({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            created++;
+          } else {
+            await existing.docs[0].ref.set(payload, { merge: true });
+            updated++;
+          }
+        }
+      }
+      res.json({ success: true, total: orders.length, created, updated, duration: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── WhatsApp Business API ───────────────────────────────────────────────────
+  // Supports 360dialog (primary) and Twilio (fallback)
+  // Credentials: WHATSAPP_API_KEY (360dialog) or TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWATSAPP_FROM
+
+  /** POST /api/whatsapp/send — send a text or template message */
+  app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+    const { to, message, templateName, templateParams } = req.body as {
+      to: string; message?: string; templateName?: string; templateParams?: string[];
+    };
+    if (!to) return res.status(400).json({ success: false, error: 'to phone number required' });
+
+    // Normalise phone: ensure + prefix, digits only
+    const phone = to.startsWith('+') ? to.replace(/[^+\d]/g, '') : `+${to.replace(/\D/g, '')}`;
+
+    // --- 360dialog ---
+    const dialogApiKey = process.env.WHATSAPP_360DIALOG_API_KEY;
+    if (dialogApiKey) {
+      try {
+        const body: Record<string, unknown> = { messaging_product: 'whatsapp', to: phone };
+        if (templateName) {
+          body.type = 'template';
+          body.template = {
+            name: templateName, language: { code: 'tr' },
+            components: templateParams ? [{ type: 'body', parameters: templateParams.map(p => ({ type: 'text', text: p })) }] : [],
+          };
+        } else {
+          body.type = 'text';
+          body.text = { body: message ?? '' };
+        }
+        const r = await fetch('https://waba.360dialog.io/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'D360-API-KEY': dialogApiKey },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) return res.status(r.status).json({ success: false, error: JSON.stringify(data).substring(0, 200) });
+        // Log to Firebase
+        if (adminDb) {
+          await adminDb.collection('whatsappMessages').add({
+            to: phone, message: message ?? templateName ?? '', status: 'sent',
+            provider: '360dialog', messageId: (data as Record<string, unknown>).messages,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        return res.json({ success: true, provider: '360dialog', data });
+      } catch (e) {
+        return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // --- Twilio WhatsApp fallback ---
+    const twilioSid    = process.env.TWILIO_ACCOUNT_SID;
+    const twilioToken  = process.env.TWILIO_AUTH_TOKEN;
+    const twilioFrom   = process.env.TWILIO_WHATSAPP_FROM ?? 'whatsapp:+14155238886';
+    if (twilioSid && twilioToken) {
+      try {
+        const token = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+        const form  = new URLSearchParams({ From: twilioFrom, To: `whatsapp:${phone}`, Body: message ?? templateName ?? '' });
+        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+          method: 'POST', headers: { Authorization: `Basic ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(),
+        });
+        const data = await r.json();
+        if (!r.ok) return res.status(r.status).json({ success: false, error: (data as Record<string,unknown>).message });
+        if (adminDb) {
+          await adminDb.collection('whatsappMessages').add({
+            to: phone, message: message ?? '', status: 'sent',
+            provider: 'twilio', messageId: (data as Record<string, unknown>).sid,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        return res.json({ success: true, provider: 'twilio', data });
+      } catch (e) {
+        return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // No provider configured
+    return res.status(503).json({ success: false, notConfigured: true,
+      error: 'WhatsApp sağlayıcısı yapılandırılmamış. WHATSAPP_360DIALOG_API_KEY veya TWILIO_* env değişkenlerini ayarlayın.' });
+  });
+
+  // ── AR Aging API ─────────────────────────────────────────────────────────────
+  // Pure Firebase aggregation — no Mikro needed
+
+  /** GET /api/aging — AR aging buckets for all customers (or ?customerId=X for one) */
+  app.get('/api/aging', async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin not initialised' });
+    try {
+      const customerId = req.query.customerId as string | undefined;
+      let q = adminDb.collection('orders')
+        .where('status', 'in', ['Pending', 'Processing', 'Shipped'])
+        .orderBy('createdAt', 'desc');
+      if (customerId) q = q.where('leadId', '==', customerId) as typeof q;
+      const snap = await q.limit(500).get();
+      const now = Date.now();
+      const buckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
+      const rows: Record<string, unknown>[] = [];
+      for (const doc of snap.docs) {
+        const o = doc.data() as Record<string, unknown>;
+        const createdMs = (o.createdAt as admin.firestore.Timestamp)?.toMillis?.() ?? now;
+        const ageD = Math.floor((now - createdMs) / 86400000);
+        const amount = Number(o.totalPrice ?? o.totalAmount ?? 0);
+        if (ageD <= 30)      buckets.current += amount;
+        else if (ageD <= 60) buckets.d30     += amount;
+        else if (ageD <= 90) buckets.d60     += amount;
+        else if (ageD <= 120) buckets.d90    += amount;
+        else                  buckets.over90 += amount;
+        rows.push({ id: doc.id, customerName: o.customerName, amount, ageD, status: o.status, createdAt: (o.createdAt as admin.firestore.Timestamp)?.toDate?.()?.toISOString() });
+      }
+      res.json({ success: true, buckets, rows });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

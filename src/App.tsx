@@ -157,6 +157,8 @@ import ProductForm from './components/ProductForm';
 import ProductDetail from './components/ProductDetail';
 import { exportOrderPDF } from './utils/pdf';
 import MikroSyncPanel from './components/MikroSyncPanel';
+import MarketplacePanel from './components/MarketplacePanel';
+import CariEkstrePanel from './components/CariEkstrePanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -4387,6 +4389,14 @@ function AppContent() {
                     icon={Calculator}
                   />
                   <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('muhasebe')} userRole={userRole} exchangeRates={exchangeRates} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+
+                  {/* ── Vade Analizi (AR Aging) ── */}
+                  <div className="mt-6">
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
+                      <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
+                    </h4>
+                    <CariEkstrePanel currentLanguage={currentLanguage} />
+                  </div>
                 </>
               )}
             </motion.div>
@@ -4734,6 +4744,14 @@ function AppContent() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* ── Turkish Marketplaces ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
+                  {currentLanguage === 'tr' ? 'Türk Pazaryerleri' : 'Turkish Marketplaces'}
+                </h4>
+                <MarketplacePanel currentLanguage={currentLanguage} />
               </div>
               </>}
             </motion.div>
@@ -5928,13 +5946,32 @@ function AppContent() {
                   subtitle={selectedLead.company}
                   className="mb-0 w-full"
                   actionButton={
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <button onClick={() => { setEditingLeadData(selectedLead); setIsEditingLead(true); }} className="apple-button-secondary">
                         <Edit2 className="w-4 h-4" /> {currentT.edit}
                       </button>
                       <button onClick={() => handleDeleteLead(selectedLead.id)} className="apple-button-secondary text-red-600 hover:bg-red-50">
                         <Trash2 className="w-4 h-4" /> {currentT.delete}
                       </button>
+                      {selectedLead.phone && (
+                        <button
+                          onClick={async () => {
+                            const msg = currentLanguage === 'tr'
+                              ? `Merhaba ${selectedLead.name}, Cetpa'dan yazıyoruz. Size nasıl yardımcı olabiliriz?`
+                              : `Hello ${selectedLead.name}, reaching out from Cetpa. How can we help you?`;
+                            try {
+                              const r = await fetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: selectedLead.phone, message: msg }) });
+                              const d = await r.json();
+                              if (d.success) toast(currentLanguage === 'tr' ? 'WhatsApp mesajı gönderildi ✓' : 'WhatsApp message sent ✓', 'success');
+                              else if (d.notConfigured) toast(currentLanguage === 'tr' ? 'WhatsApp sağlayıcısı yapılandırılmamış. Ayarlar\'dan WHATSAPP_360DIALOG_API_KEY ekleyin.' : 'WhatsApp provider not configured. Add WHATSAPP_360DIALOG_API_KEY in Settings.', 'error');
+                              else toast(d.error || 'WhatsApp hatası', 'error');
+                            } catch(e) { toast(e instanceof Error ? e.message : 'Hata', 'error'); }
+                          }}
+                          className="apple-button-secondary text-green-700 hover:bg-green-50"
+                        >
+                          <MessageSquare className="w-4 h-4" /> WhatsApp
+                        </button>
+                      )}
                       <button onClick={() => setIsAddingOrder(true)} className="apple-button-primary">
                         <Plus className="w-4 h-4" /> {currentT.add_order}
                       </button>
@@ -6033,6 +6070,15 @@ function AppContent() {
                         ))
                       )}
                     </div>
+                  </div>
+
+                  {/* ── Cari Ekstre (AR aging for this customer) ── */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <CariEkstrePanel
+                      currentLanguage={currentLanguage}
+                      leadId={selectedLead.id}
+                      customerName={selectedLead.name}
+                    />
                   </div>
 
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
