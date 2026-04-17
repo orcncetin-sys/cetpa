@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Plus, Trash2, Save, Search, Package, User, DollarSign, Calendar, FileText } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, setDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatInCurrency } from '../utils/currency';
 import { type Lead, type InventoryItem, type Quotation, type QuotationItem } from '../types';
@@ -101,7 +101,7 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
       };
 
       if (initialData) {
-        await updateDoc(doc(db, 'quotations', initialData.id), quotationData);
+        await setDoc(doc(db, 'quotations', initialData.id), quotationData, { merge: true });
       } else {
         await addDoc(collection(db, 'quotations'), {
           ...quotationData,

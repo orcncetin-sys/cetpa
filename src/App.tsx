@@ -5331,9 +5331,9 @@ function AppContent() {
                   <button
                     onClick={async () => {
                       const newVal = !lucaSettings.enabled;
-                      await updateDoc(doc(db, 'settings', 'luca'), { enabled: newVal });
+                      await setDoc(doc(db, 'settings', 'luca'), { enabled: newVal }, { merge: true });
                       if (newVal) {
-                        await updateDoc(doc(db, 'settings', 'mikro'), { enabled: false }).catch(() => {});
+                        await setDoc(doc(db, 'settings', 'mikro'), { enabled: false }, { merge: true }).catch(() => {});
                       }
                     }}
                     className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${lucaSettings.enabled ? 'bg-purple-500' : 'bg-gray-200'}`}
@@ -5341,21 +5341,21 @@ function AppContent() {
                     <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${lucaSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
-                {[
-                  { key: 'luca_api_key', label: 'API Key', placeholder: 'Luca API Key' },
-                  { key: 'luca_company_id', label: currentLanguage === 'tr' ? 'Şirket ID' : 'Company ID', placeholder: 'Company ID' },
-                  { key: 'luca_base_url', label: 'Base URL', placeholder: 'https://api.luca.com.tr' },
-                ].map(field => (
-                  <div key={field.key} className="space-y-1">
+                {([
+                  { firestoreKey: 'apiKey',     label: 'API Key',                                                    placeholder: 'Luca API Key',         isSecret: true  },
+                  { firestoreKey: 'companyId',  label: currentLanguage === 'tr' ? 'Şirket ID' : 'Company ID',       placeholder: 'Company ID',           isSecret: false },
+                  { firestoreKey: 'baseUrl',    label: 'Base URL',                                                   placeholder: 'https://api.luca.com.tr', isSecret: false },
+                ] as { firestoreKey: keyof typeof lucaSettings; label: string; placeholder: string; isSecret: boolean }[]).map(field => (
+                  <div key={field.firestoreKey} className="space-y-1">
                     <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
                     <input
-                      type={field.key.includes('key') ? 'password' : 'text'}
-                      defaultValue={(companySettings?.[field.key] as string) || (field.key === 'luca_base_url' ? 'https://api.luca.com.tr' : '')}
+                      key={`luca-${field.firestoreKey}-${String(lucaSettings[field.firestoreKey] ?? '')}`}
+                      type={field.isSecret ? 'password' : 'text'}
+                      defaultValue={(lucaSettings[field.firestoreKey] as string) || (field.firestoreKey === 'baseUrl' ? 'https://api.luca.com.tr' : '')}
                       placeholder={field.placeholder}
                       onChange={e => {
-                        const val = e.target.value;
-                        const key = field.key === 'luca_api_key' ? 'apiKey' : field.key === 'luca_company_id' ? 'companyId' : 'baseUrl';
-                        setDoc(doc(db, 'settings', 'luca'), { [key]: val }, { merge: true });
+                        const val = e.target.value.trim();
+                        setDoc(doc(db, 'settings', 'luca'), { [field.firestoreKey]: val }, { merge: true });
                       }}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
                     />
