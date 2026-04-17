@@ -4494,16 +4494,16 @@ function AppContent() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Shopify */}
-                <div className="apple-card p-5">
-                  <div className="flex items-center gap-3 mb-4">
+                <div className="apple-card p-5 flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center">
                       <ShoppingBag className="w-5 h-5 text-green-600" />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <h3 className="font-bold text-sm text-[#1D1D1F]">Shopify</h3>
                       <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'E-ticaret entegrasyonu' : 'E-commerce integration'}</p>
                     </div>
-                    <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                       {companySettings?.shopify_access_token ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Not Connected')}
                     </span>
                   </div>
@@ -4511,19 +4511,36 @@ function AppContent() {
                     <div className="flex justify-between"><span>Store URL</span><span className="font-mono text-gray-700 truncate max-w-[160px]">{(companySettings?.shopify_store_url as string) || '—'}</span></div>
                     <div className="flex justify-between"><span>Access Token</span><span className="font-mono text-gray-400">{companySettings?.shopify_access_token ? '••••••••' : '—'}</span></div>
                   </div>
+                  <button
+                    onClick={async () => {
+                      const token = (companySettings?.shopify_access_token as string) || '';
+                      if (!token) { toast(currentLanguage==='tr'?'Önce Ayarlar\'dan Access Token girin.':'Enter Access Token in Settings first.','error'); return; }
+                      toast(currentLanguage==='tr'?'Shopify senkronizasyonu başlatıldı…':'Starting Shopify sync…','info');
+                      try {
+                        const r = await fetch('/api/shopify/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
+                        const d = await r.json();
+                        if (d.error) throw new Error(d.error);
+                        toast(`${currentLanguage==='tr'?'Senkronize edildi':'Synced'} — ${d.products?.length ?? 0} ${currentLanguage==='tr'?'ürün':'products'}, ${d.orders?.length ?? 0} ${currentLanguage==='tr'?'sipariş':'orders'}`, 'success');
+                      } catch(e) { toast(e instanceof Error ? e.message : 'Sync hatası', 'error'); }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {currentLanguage === 'tr' ? 'Senkronize Et' : 'Sync Now'}
+                  </button>
                 </div>
 
                 {/* TCMB */}
-                <div className="apple-card p-5">
-                  <div className="flex items-center gap-3 mb-4">
+                <div className="apple-card p-5 flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
                       <Globe className="w-5 h-5 text-blue-600" />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <h3 className="font-bold text-sm text-[#1D1D1F]">TCMB Döviz</h3>
                       <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Canlı kur bilgisi' : 'Live exchange rates'}</p>
                     </div>
-                    <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${exchangeRates ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${exchangeRates ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
                       {exchangeRates ? (currentLanguage === 'tr' ? 'Canlı' : 'Live') : (currentLanguage === 'tr' ? 'Bekleniyor' : 'Loading')}
                     </span>
                   </div>
@@ -4532,11 +4549,28 @@ function AppContent() {
                     <div className="flex justify-between"><span>EUR / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.EUR ? `₺${(exchangeRates.EUR).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
                     <div className="flex justify-between"><span>GBP / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.GBP ? `₺${(exchangeRates.GBP).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
                   </div>
+                  <button
+                    onClick={async () => {
+                      toast(currentLanguage==='tr'?'Kurlar güncelleniyor…':'Refreshing rates…', 'info');
+                      try {
+                        const r = await fetch('/api/settings/exchange-rates');
+                        const d = await r.json();
+                        if (d.rates) {
+                          setExchangeRates(d.rates);
+                          toast(currentLanguage==='tr'?'Döviz kurları güncellendi.':'Exchange rates updated.', 'success');
+                        } else throw new Error('Kur verisi alınamadı');
+                      } catch(e) { toast(e instanceof Error ? e.message : 'Hata', 'error'); }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {currentLanguage === 'tr' ? 'Kurları Yenile' : 'Refresh Rates'}
+                  </button>
                 </div>
 
                 {/* Luca */}
-                <div className="apple-card p-5">
-                  <div className="flex items-center gap-3 mb-4">
+                <div className="apple-card p-5 flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center">
                       <BookOpen className="w-5 h-5 text-purple-600" />
                     </div>
@@ -4547,25 +4581,44 @@ function AppContent() {
                     <button
                       onClick={async () => {
                         const newVal = !lucaSettings.enabled;
-                        await updateDoc(doc(db, 'settings', 'luca'), { enabled: newVal });
+                        await setDoc(doc(db, 'settings', 'luca'), { enabled: newVal }, { merge: true });
                         if (newVal) {
-                          await updateDoc(doc(db, 'settings', 'mikro'), { enabled: false }).catch(() => {});
+                          await setDoc(doc(db, 'settings', 'mikro'), { enabled: false }, { merge: true }).catch(() => {});
                         }
+                        toast(newVal ? (currentLanguage==='tr'?'Luca aktif edildi':'Luca enabled') : (currentLanguage==='tr'?'Luca devre dışı':'Luca disabled'), 'success');
                       }}
                       className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${lucaSettings.enabled ? 'bg-purple-500' : 'bg-gray-200'}`}
                     >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white keep-white rounded-full shadow transition-transform ${lucaSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${lucaSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
                   <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Yevmiye senkronizasyonu' : 'Journal sync'}</span><span className="text-gray-700">{currentLanguage === 'tr' ? 'Muhasebe → Luca sekmesi' : 'Accounting → Luca tab'}</span></div>
-                    <div className="flex justify-between"><span>API</span><span className="font-mono text-gray-400">https://api.luca.com.tr</span></div>
+                    <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Kontör bakiyesi' : 'e-Invoice credit'}</span>
+                      <span className={`font-semibold ${lucaSettings.enabled ? 'text-purple-600' : 'text-gray-400'}`}>{lucaSettings.enabled ? (currentLanguage==='tr'?'Aktif':'Active') : (currentLanguage==='tr'?'Pasif':'Inactive')}</span>
+                    </div>
+                    <div className="flex justify-between"><span>API</span><span className="font-mono text-gray-400">api.luca.com.tr</span></div>
                   </div>
+                  <button
+                    onClick={async () => {
+                      toast(currentLanguage==='tr'?'Luca bağlantısı test ediliyor…':'Testing Luca connection…','info');
+                      try {
+                        const r = await fetch('/api/luca/kontor');
+                        const d = await r.json();
+                        if (d.notConfigured) { toast(currentLanguage==='tr'?'LUCA_API_KEY sunucuda ayarlanmamış.':'LUCA_API_KEY not set on server.','error'); return; }
+                        if (d.success) toast(currentLanguage==='tr'?'Luca bağlantısı başarılı.':'Luca connection successful.','success');
+                        else toast(d.error || 'Luca hatası', 'error');
+                      } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {currentLanguage === 'tr' ? 'Bağlantıyı Test Et' : 'Test Connection'}
+                  </button>
                 </div>
 
                 {/* Mikro */}
-                <div className="apple-card p-5">
-                  <div className="flex items-center gap-3 mb-4">
+                <div className="apple-card p-5 flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#e8f0f7' }}>
                       <BookOpen className="w-5 h-5" style={{ color: '#1a3a5c' }} />
                     </div>
@@ -4576,33 +4629,59 @@ function AppContent() {
                     <button
                       onClick={async () => {
                         const newVal = !mikroSettings.enabled;
-                        await updateDoc(doc(db, 'settings', 'mikro'), { enabled: newVal });
+                        await setDoc(doc(db, 'settings', 'mikro'), { enabled: newVal }, { merge: true });
                         if (newVal) {
-                          await updateDoc(doc(db, 'settings', 'luca'), { enabled: false }).catch(() => {});
+                          await setDoc(doc(db, 'settings', 'luca'), { enabled: false }, { merge: true }).catch(() => {});
                         }
+                        toast(newVal ? (currentLanguage==='tr'?'Mikro aktif edildi':'Mikro enabled') : (currentLanguage==='tr'?'Mikro devre dışı':'Mikro disabled'), 'success');
                       }}
                       className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${mikroSettings.enabled ? 'bg-[#1a3a5c]' : 'bg-gray-200'}`}
                     >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white keep-white rounded-full shadow transition-transform ${mikroSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${mikroSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
                   <div className="space-y-2 text-xs text-gray-500">
                     <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Veri akışı' : 'Data flow'}</span><span className="text-gray-700">Cetpa ↔ Mikro</span></div>
                     <div className="flex justify-between"><span>API</span><span className="font-mono text-gray-400 truncate max-w-[140px]">jumpbulutapigw.mikro.com.tr</span></div>
                   </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={async () => {
+                        toast(currentLanguage==='tr'?'Mikro bağlantısı kontrol ediliyor…':'Checking Mikro connection…','info');
+                        try {
+                          const r = await fetch('/api/mikro/status');
+                          const d = await r.json();
+                          if (!d.configured) { toast(currentLanguage==='tr'?'Mikro env vars sunucuda ayarlanmamış.':'Mikro env vars not set on server.','error'); return; }
+                          if (d.connected) toast(currentLanguage==='tr'?'Mikro bağlantısı başarılı ✓':'Mikro connection successful ✓','success');
+                          else toast(d.error || (currentLanguage==='tr'?'Token alınamadı':'Could not get token'),'error');
+                        } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-[#1a3a5c] text-[#1a3a5c] hover:bg-[#1a3a5c]/5 text-xs font-bold transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      {currentLanguage === 'tr' ? 'Test Et' : 'Test'}
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('settings')}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[#1a3a5c] hover:bg-[#1a3a5c]/90 text-white text-xs font-bold transition-colors"
+                    >
+                      <Download className="w-3 h-3" />
+                      {currentLanguage === 'tr' ? 'Veri Aktar' : 'Import Data'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Firebase */}
-                <div className="apple-card p-5">
-                  <div className="flex items-center gap-3 mb-4">
+                <div className="apple-card p-5 flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center">
                       <Flame className="w-5 h-5 text-orange-500" />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <h3 className="font-bold text-sm text-[#1D1D1F]">Firebase</h3>
                       <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Veritabanı & Kimlik Doğrulama' : 'Database & Authentication'}</p>
                     </div>
-                    <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                       {user ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Anonim' : 'Anonymous')}
                     </span>
                   </div>
@@ -4610,6 +4689,7 @@ function AppContent() {
                     <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Kullanıcı' : 'User'}</span><span className="font-mono text-gray-700 truncate max-w-[160px]">{user?.email || user?.uid?.slice(0, 8) || '—'}</span></div>
                     <div className="flex justify-between"><span>Firestore</span><span className="text-green-600 font-semibold">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</span></div>
                     <div className="flex justify-between"><span>Auth</span><span className={`font-semibold ${user ? 'text-green-600' : 'text-gray-400'}`}>{user ? (currentLanguage === 'tr' ? 'Oturum Açık' : 'Signed In') : (currentLanguage === 'tr' ? 'Oturum Yok' : 'Not Signed In')}</span></div>
+                    <div className="flex justify-between"><span>Project ID</span><span className="font-mono text-gray-400 text-[10px]">gen-lang-client-0628151245</span></div>
                   </div>
                 </div>
               </div>
@@ -5263,7 +5343,7 @@ function AppContent() {
                       onChange={e => {
                         const val = e.target.value;
                         const key = field.key === 'luca_api_key' ? 'apiKey' : field.key === 'luca_company_id' ? 'companyId' : 'baseUrl';
-                        updateDoc(doc(db, 'settings', 'luca'), { [key]: val });
+                        setDoc(doc(db, 'settings', 'luca'), { [key]: val }, { merge: true });
                       }}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
                     />
@@ -5306,7 +5386,7 @@ function AppContent() {
                       placeholder={field.placeholder}
                       onChange={e => {
                         const val = e.target.value;
-                        updateDoc(doc(db, 'settings', 'mikro'), { [field.key.replace('mikro_', '')]: val });
+                        setDoc(doc(db, 'settings', 'mikro'), { [field.key.replace('mikro_', '')]: val }, { merge: true });
                       }}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
                     />
