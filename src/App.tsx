@@ -2945,7 +2945,7 @@ function AppContent() {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
 
-    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), orderBy('timestamp', 'desc'), limit(20)), (snapshot) => {
+    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), orderBy('timestamp', 'desc'), limit(200)), (snapshot) => {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
 

@@ -9,7 +9,19 @@ import { db } from '../firebase';
 import { format } from 'date-fns';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 
-import { InventoryItem, Transfer } from '../types';
+import { InventoryItem } from '../types';
+
+interface InventoryMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  type: 'in' | 'out';
+  quantity: number;
+  reason: string;
+  notes?: string;
+  timestamp?: { toDate: () => Date };
+  date?: string;
+}
 
 interface ProductDetailProps {
   product: InventoryItem;
@@ -18,34 +30,39 @@ interface ProductDetailProps {
 
 export default function ProductDetail({ product, onClose }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [movements, setMovements] = useState<Transfer[]>([]);
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!product) return;
-    
-    // Fetch transfers involving this product
+
+    // Fetch inventory movements for this product
     const q = query(
-      collection(db, 'transfers'),
-      where('productName', '==', product.name),
-      orderBy('createdAt', 'desc'),
-      limit(5)
+      collection(db, 'inventoryMovements'),
+      where('productId', '==', product.id),
+      orderBy('timestamp', 'desc'),
+      limit(20)
     );
 
     const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(doc => {
-        const docData = doc.data() as Transfer;
+      const data = snap.docs.map(docSnap => {
+        const d = docSnap.data();
         return {
-          id: doc.id,
-          ...docData,
-          type: 'Transfer',
-          date: docData.createdAt && typeof (docData.createdAt as { toDate?: () => Date }).toDate === 'function' ? format((docData.createdAt as { toDate: () => Date }).toDate(), 'dd.MM.yyyy HH:mm') : docData.date
-        };
+          id: docSnap.id,
+          productId: d.productId ?? '',
+          productName: d.productName ?? '',
+          type: d.type as 'in' | 'out',
+          quantity: d.quantity ?? 0,
+          reason: d.reason ?? '',
+          notes: d.notes,
+          timestamp: d.timestamp,
+          date: d.timestamp?.toDate ? format(d.timestamp.toDate(), 'dd.MM.yyyy HH:mm') : '—',
+        } as InventoryMovement;
       });
       setMovements(data);
       setLoading(false);
     }, (error) => {
-      logFirestoreError(error, OperationType.LIST, 'transfers');
+      logFirestoreError(error, OperationType.LIST, 'inventoryMovements');
       setLoading(false);
     });
 
@@ -173,9 +190,18 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
                     movements.map((m) => (
                       <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-4 py-3 text-xs text-gray-600">{m.date}</td>
-                        <td className="px-4 py-3 text-xs font-medium text-gray-800">{(m as unknown as Record<string, unknown>).type as string || 'Transfer'}</td>
-                        <td className="px-4 py-3 text-xs text-right font-bold text-brand">{m.quantity}</td>
-                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[150px]">{m.notes || m.fromWarehouse + ' -> ' + m.toWarehouse}</td>
+                        <td className="px-4 py-3 text-xs font-medium">
+                          <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>
+                            {m.type === 'in' ? '▲ Giriş' : '▼ Çıkış'}
+                          </span>
+                        </td>
+                        <td className={`px-4 py-3 text-xs text-right font-bold ${m.type === 'in' ? 'text-green-600' : 'text-red-500'}`}>
+                          {m.type === 'in' ? '+' : '-'}{m.quantity}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[200px]" title={m.notes || m.reason}>
+                          <span className="font-medium text-gray-700">{m.reason}</span>
+                          {m.notes && <span className="ml-1 text-gray-400">— {m.notes}</span>}
+                        </td>
                       </tr>
                     ))
                   )}

@@ -66,6 +66,9 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [kpiCurrency, setKpiCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
+  const [validationError, setValidationError] = useState('');
+  const showValidationError = (msg: string) => { setValidationError(msg); setTimeout(() => setValidationError(''), 3500); };
+
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
     isOpen: false,
     title: '',
@@ -114,7 +117,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
   const handleSubmitOrder = async () => {
     if (!newOrder.supplier || newOrder.items.length === 0) {
-      alert(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
       return;
     }
 
@@ -142,7 +145,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   const handleUpdateOrder = async () => {
     if (!editingOrder) return;
     if (!newOrder.supplier || newOrder.items.length === 0) {
-      alert(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
       return;
     }
 
@@ -179,13 +182,14 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               await updateDoc(doc(db, 'inventory', invItem.id), {
                 stockLevel: (invItem.stockLevel || 0) + Number(item.quantity)
               });
-              // Log movement
-              await addDoc(collection(db, 'stockMovements'), {
+              // Log to inventoryMovements (same collection App.tsx reads)
+              await addDoc(collection(db, 'inventoryMovements'), {
                 productId: invItem.id,
                 productName: invItem.name,
                 type: 'in',
                 quantity: Number(item.quantity),
-                reason: `Purchase Order #${order.orderNumber}`,
+                reason: `Satın Alma Siparişi #${order.orderNumber}`,
+                notes: `Tedarikçi: ${order.supplier}`,
                 timestamp: serverTimestamp()
               });
             }
@@ -722,12 +726,15 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 >
                   {viewingOrder ? (currentLanguage === 'tr' ? 'Kapat' : 'Close') : (currentLanguage === 'tr' ? 'İptal' : 'Cancel')}
                 </button>
+                {validationError && (
+                  <span className="text-xs text-red-500 font-medium flex-1">{validationError}</span>
+                )}
                 {!viewingOrder && (
                   <button
                     onClick={editingOrder ? handleUpdateOrder : handleSubmitOrder}
                     className="apple-button-primary px-12"
                   >
-                    {editingOrder 
+                    {editingOrder
                       ? (currentLanguage === 'tr' ? 'Güncelle' : 'Update')
                       : (currentLanguage === 'tr' ? 'Siparişi Oluştur' : 'Create Order')}
                   </button>

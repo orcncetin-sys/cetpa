@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
@@ -71,11 +71,44 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
 
       if (initialData?.id) {
         await updateDoc(doc(db, 'inventory', initialData.id), data);
+
+        // Log stock adjustment if quantity changed
+        const oldStock = Number(initialData.stockLevel) || 0;
+        const newStock = Number(formData.stockLevel) || 0;
+        const diff = newStock - oldStock;
+        if (diff !== 0) {
+          try {
+            await addDoc(collection(db, 'inventoryMovements'), {
+              productId: initialData.id,
+              productName: formData.name,
+              type: diff > 0 ? 'in' : 'out',
+              quantity: Math.abs(diff),
+              reason: 'Manuel Stok Düzeltmesi',
+              notes: `${oldStock} → ${newStock}`,
+              timestamp: serverTimestamp(),
+            });
+          } catch { /* non-critical */ }
+        }
       } else {
-        await addDoc(collection(db, 'inventory'), {
+        const newRef = await addDoc(collection(db, 'inventory'), {
           ...data,
           createdAt: serverTimestamp(),
         });
+
+        // Log opening stock movement
+        if (formData.stockLevel > 0) {
+          try {
+            await addDoc(collection(db, 'inventoryMovements'), {
+              productId: newRef.id,
+              productName: formData.name,
+              type: 'in',
+              quantity: Number(formData.stockLevel),
+              reason: 'Açılış Stoğu',
+              notes: 'Ürün oluşturulurken belirlenen başlangıç stok miktarı',
+              timestamp: serverTimestamp(),
+            });
+          } catch { /* non-critical */ }
+        }
       }
 
       // Persist new category to the categories master collection if it's new
