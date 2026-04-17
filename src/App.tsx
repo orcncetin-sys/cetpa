@@ -156,6 +156,7 @@ import BarcodeScanner from './components/BarcodeScanner';
 import ProductForm from './components/ProductForm';
 import ProductDetail from './components/ProductDetail';
 import { exportOrderPDF } from './utils/pdf';
+import MikroSyncPanel from './components/MikroSyncPanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -5316,6 +5317,14 @@ function AppContent() {
                     ? 'Access Token\'ı "Online İşlem Merkezi"nden oluşturun. Erişim için izin verilen IP adresinden bağlanın.'
                     : 'Generate the Access Token from "Online İşlem Merkezi". Connect from the whitelisted IP address.'}
                 </div>
+              </div>
+
+              {/* ── Mikro Data Import Panel ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
+                  {currentLanguage === 'tr' ? 'Mikro\'dan Veri Aktar' : 'Import Data from Mikro'}
+                </h4>
+                <MikroSyncPanel currentLanguage={currentLanguage} />
               </div>
 
               <button

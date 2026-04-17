@@ -1106,6 +1106,201 @@ async function startServer() {
     }
   });
 
+  // ── Mikro Full Import Routes ─────────────────────────────────────────────────
+  // These UPSERT — create new Firebase docs for items that don't exist yet,
+  // update existing ones. Paginates automatically until all records are fetched.
+
+  /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
+  app.post('/api/mikro/import/stok', async (_req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+
+    const t0 = Date.now();
+    let created = 0, updated = 0, errors = 0;
+    const PAGE_SIZE = 100;
+    let index = 0;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const { ok, data } = await mikroPost('StokListesiV2', {
+          StokKod: '', TarihTipi: 2,
+          IlkTarih: '2000-01-01',
+          SonTarih: `${new Date().getFullYear() + 1}-12-31`,
+          Sort: 'sto_kod', Size: String(PAGE_SIZE), Index: index,
+        });
+
+        if (!ok) break;
+
+        const stoklar = ((data as Record<string, unknown>)?.stoklar ?? []) as Record<string, unknown>[];
+        if (!Array.isArray(stoklar) || stoklar.length === 0) break;
+
+        for (const s of stoklar) {
+          const sku = (s.sto_kod as string)?.trim();
+          if (!sku) continue;
+
+          try {
+            // Map Mikro fields → Cetpa InventoryItem shape
+            const prices: Record<string, number> = {};
+            const fiyatlar = (s.satis_fiyatlari as Record<string, unknown>[]) || [];
+            if (fiyatlar[0]) prices['Retail']       = Number(fiyatlar[0].sfiyat_fiyati) || 0;
+            if (fiyatlar[1]) prices['B2B Standard'] = Number(fiyatlar[1].sfiyat_fiyati) || 0;
+            if (fiyatlar[2]) prices['B2B Premium']  = Number(fiyatlar[2].sfiyat_fiyati) || 0;
+            if (fiyatlar[3]) prices['Dealer']        = Number(fiyatlar[3].sfiyat_fiyati) || 0;
+            // Fallback: some responses use flat price fields
+            if (!prices['Retail'] && s.sto_satis_fiyat1)       prices['Retail']       = Number(s.sto_satis_fiyat1);
+            if (!prices['B2B Standard'] && s.sto_satis_fiyat2)  prices['B2B Standard'] = Number(s.sto_satis_fiyat2);
+            if (!prices['B2B Premium'] && s.sto_satis_fiyat3)   prices['B2B Premium']  = Number(s.sto_satis_fiyat3);
+            if (!prices['Dealer'] && s.sto_satis_fiyat4)        prices['Dealer']       = Number(s.sto_satis_fiyat4);
+
+            const item = {
+              sku,
+              name:             (s.sto_isim as string)     || sku,
+              category:         (s.sto_grup_isim as string) || (s.sto_grup_kodu as string) || 'Genel',
+              unit:             (s.sto_birim1_ad as string) || 'ADET',
+              vatRate:          Number(s.sto_perakende_vergi) || 20,
+              stockLevel:       Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
+              lowStockThreshold: 5,
+              prices,
+              price:            prices['Retail'] || 0,
+              mikroStoKod:      sku,
+              mikroSynced:      true,
+              mikroData:        s,
+              source:           'mikro_import',
+            };
+
+            // Upsert: update if exists, create if not
+            const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
+            if (!snap.empty) {
+              await snap.docs[0].ref.update({
+                ...item,
+                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              updated++;
+            } else {
+              await adminDb.collection('inventory').add({
+                ...item,
+                createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              created++;
+            }
+          } catch (itemErr) {
+            console.warn(`Stok import hatası (${sku}):`, itemErr);
+            errors++;
+          }
+        }
+
+        hasMore = stoklar.length === PAGE_SIZE;
+        index += PAGE_SIZE;
+        console.log(`Stok import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
+      }
+
+      const duration = Date.now() - t0;
+      await writeSyncLog('ImportStok', 'inventory', 'bulk', true, null, null, duration);
+      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
+      res.json({ success: true, created, updated, errors, duration });
+
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('ImportStok', 'inventory', 'bulk', false, null, errorMsg, duration);
+      console.error('Stok import genel hatası:', err);
+      res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
+    }
+  });
+
+  /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
+  app.post('/api/mikro/import/cari', async (_req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+
+    const t0 = Date.now();
+    let created = 0, updated = 0, errors = 0;
+    const PAGE_SIZE = 100;
+    let index = 0;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const { ok, data } = await mikroPost('CariListesiV2', {
+          FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi,cari_muh_kod',
+          WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'",
+          Sort: 'cari_kod', Size: String(PAGE_SIZE), Index: index,
+        });
+
+        if (!ok) break;
+
+        const cariler = ((data as Record<string, unknown>)?.cariler ?? []) as Record<string, unknown>[];
+        if (!Array.isArray(cariler) || cariler.length === 0) break;
+
+        for (const c of cariler) {
+          const cariKod = (c.cari_kod as string)?.trim();
+          if (!cariKod) continue;
+
+          try {
+            const unvan = (c.cari_unvan1 as string) || cariKod;
+            // Determine if customer (0) or supplier (1) from hareket_tipi
+            const hareketTipi = Number(c.cari_hareket_tipi ?? 0);
+            const leadType = hareketTipi === 1 ? 'Supplier' : 'Customer';
+
+            const lead = {
+              mikroCariKod:   cariKod,
+              company:        unvan,
+              name:           unvan,
+              email:          (c.cari_EMail   as string) || '',
+              phone:          (c.cari_CepTel  as string) || '',
+              taxId:          (c.cari_vdaire_no  as string) || '',
+              taxOffice:      (c.cari_vdaire_adi as string) || '',
+              eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
+              type:           leadType,
+              status:         'Active',
+              mikroSynced:    true,
+              mikroData:      c,
+              source:         'mikro_import',
+            };
+
+            // Upsert by mikroCariKod
+            const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
+            if (!snap.empty) {
+              await snap.docs[0].ref.update({
+                ...lead,
+                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              updated++;
+            } else {
+              await adminDb.collection('leads').add({
+                ...lead,
+                createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              created++;
+            }
+          } catch (itemErr) {
+            console.warn(`Cari import hatası (${cariKod}):`, itemErr);
+            errors++;
+          }
+        }
+
+        hasMore = cariler.length === PAGE_SIZE;
+        index += PAGE_SIZE;
+        console.log(`Cari import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
+      }
+
+      const duration = Date.now() - t0;
+      await writeSyncLog('ImportCari', 'lead', 'bulk', true, null, null, duration);
+      console.log(`Cari import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
+      res.json({ success: true, created, updated, errors, duration });
+
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('ImportCari', 'lead', 'bulk', false, null, errorMsg, duration);
+      console.error('Cari import genel hatası:', err);
+      res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
+    }
+  });
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

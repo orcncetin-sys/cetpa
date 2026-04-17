@@ -210,6 +210,33 @@ export async function fullCariSync(): Promise<MikroListResult<MikroCariItem>> {
   });
 }
 
+// ── Full import (Mikro → Firebase, paginated upsert) ─────────────────────────
+
+export interface MikroImportResult extends MikroSyncResult {
+  created: number;
+  updated: number;
+  errors:  number;
+  duration?: number;
+}
+
+/**
+ * Import ALL stock from Mikro into Firebase inventory.
+ * Server paginates automatically and upserts each item.
+ * New items are created; existing ones (matched by SKU) are updated.
+ */
+export async function importStokFromMikro(): Promise<MikroImportResult> {
+  return apiPost<MikroImportResult>('/api/mikro/import/stok');
+}
+
+/**
+ * Import ALL customers/suppliers from Mikro into Firebase leads.
+ * Server paginates automatically and upserts each cari account.
+ * New accounts are created; existing ones (matched by mikroCariKod) are updated.
+ */
+export async function importCariFromMikro(): Promise<MikroImportResult> {
+  return apiPost<MikroImportResult>('/api/mikro/import/cari');
+}
+
 // ── Legacy / compatibility exports ────────────────────────────────────────────
 // These match the old stub signatures so existing callers compile.
 // Bank movements endpoint is not yet in the Mikro Jump Postman collection —
