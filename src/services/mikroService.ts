@@ -1,112 +1,226 @@
-export const MIKRO_DEFAULT_ENDPOINT = 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods';
+/**
+ * mikroService.ts — Cetpa ↔ Mikro Jump API integration (client-side)
+ *
+ * All real Mikro API calls are made SERVER-SIDE (server.ts /api/mikro/*)
+ * because Mikro requires a whitelisted IP and OAuth credentials that must
+ * never be exposed to the browser.
+ *
+ * This service is a thin client that calls our own Express endpoints.
+ * Every result is also written back to Firebase by the server — so
+ * Firebase is always the source of truth regardless of which ERP is used.
+ *
+ * Swapping ERPs later = only server.ts routes change. This file stays.
+ */
 
-export interface MikroConfig {
-  endpoint: string;
-  accessToken: string;
-  enabled: boolean;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface MikroSyncResult {
+  success: boolean;
+  notConfigured?: boolean;
+  error?: string;
+  duration?: number;
 }
 
-interface MikroRequestBody {
-  MethodName: string;
-  Parameters?: Record<string, unknown>;
+export interface MikroStokSyncResult extends MikroSyncResult {
+  mikroStoKod?: string;
 }
 
-async function mikroRequest(body: MikroRequestBody, config: MikroConfig): Promise<unknown> {
-  const res = await fetch(config.endpoint || MIKRO_DEFAULT_ENDPOINT, {
+export interface MikroCariSyncResult extends MikroSyncResult {
+  cariKod?: string;
+}
+
+export interface MikroSiparisSyncResult extends MikroSyncResult {
+  mikroEvrakNo?: string | null;
+}
+
+export interface MikroListResult<T> extends MikroSyncResult {
+  count: number;
+  data: T[];
+  duration?: number;
+}
+
+export interface MikroStatus {
+  configured: boolean;
+  connected: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface MikroStokItem {
+  sto_kod: string;
+  sto_isim: string;
+  sto_birim1_ad?: string;
+  sto_perakende_vergi?: number;
+  [key: string]: unknown;
+}
+
+export interface MikroCariItem {
+  cari_kod: string;
+  cari_unvan1: string;
+  cari_unvan2?: string;
+  cari_vdaire_no?: string;
+  cari_EMail?: string;
+  cari_CepTel?: string;
+  cari_efatura_fl?: number;
+  [key: string]: unknown;
+}
+
+// ── Internal fetch helper ─────────────────────────────────────────────────────
+
+async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.accessToken}`,
-      'access_token': config.accessToken,
-    },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`Mikro API hatası: ${res.status} ${res.statusText}`);
-  return res.json();
+  const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
+  return data as T;
 }
 
-/** Bağlantı testi — firma listesini çeker */
-export async function testMikroConnection(config: MikroConfig): Promise<boolean> {
-  try {
-    await mikroRequest({ MethodName: 'GetFirmaList' }, config);
-    return true;
-  } catch {
-    return false;
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  const data = await res.json().catch(() => ({ configured: false, connected: false }));
+  return data as T;
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+
+/** Check if Mikro is configured and the token endpoint is reachable */
+export async function getMikroStatus(): Promise<MikroStatus> {
+  return apiGet<MikroStatus>('/api/mikro/status');
+}
+
+// ── Stok (Inventory) ──────────────────────────────────────────────────────────
+
+/**
+ * Push one inventory item to Mikro (StokKaydetV2).
+ * Server writes mikroStoKod + mikroSynced back to Firebase inventory/{firebaseId}.
+ */
+export async function syncInventoryItemToMikro(
+  item: Record<string, unknown>,
+  firebaseId: string
+): Promise<MikroStokSyncResult> {
+  return apiPost<MikroStokSyncResult>('/api/mikro/stok/kaydet', { item, firebaseId });
+}
+
+/**
+ * Pull stock list from Mikro (StokListesiV2) and mirror to Firebase.
+ * @param options Optional filters: stokKod prefix, date range, pagination
+ */
+export async function pullStokFromMikro(options?: {
+  stokKod?: string;
+  ilkTarih?: string;
+  size?: number;
+  index?: number;
+}): Promise<MikroListResult<MikroStokItem>> {
+  return apiPost<MikroListResult<MikroStokItem>>('/api/mikro/stok/listesi', options ?? {});
+}
+
+// ── Cari (Customer / Supplier) ────────────────────────────────────────────────
+
+/**
+ * Push a lead/customer to Mikro (CariKaydetV2).
+ * Server writes mikroCariKod + mikroSynced back to Firebase leads/{firebaseId}.
+ */
+export async function syncLeadToMikro(
+  lead: Record<string, unknown>,
+  firebaseId: string
+): Promise<MikroCariSyncResult> {
+  return apiPost<MikroCariSyncResult>('/api/mikro/cari/kaydet', { lead, firebaseId });
+}
+
+/**
+ * Pull cari list from Mikro (CariListesiV2) and mirror to Firebase.
+ */
+export async function pullCariFromMikro(options?: {
+  whereStr?: string;
+  size?: number;
+  index?: number;
+}): Promise<MikroListResult<MikroCariItem>> {
+  return apiPost<MikroListResult<MikroCariItem>>('/api/mikro/cari/listesi', options ?? {});
+}
+
+// ── Sipariş (Order) ───────────────────────────────────────────────────────────
+
+/**
+ * Push an order to Mikro (SiparisKaydetV2).
+ * Requires order.mikroCariKod to be set (sync lead first if missing).
+ * Server writes mikroEvrakNo + mikroSynced back to Firebase orders/{firebaseId}.
+ */
+export async function syncOrderToMikro(
+  order: Record<string, unknown>,
+  firebaseId: string
+): Promise<MikroSiparisSyncResult> {
+  return apiPost<MikroSiparisSyncResult>('/api/mikro/siparis/kaydet', { order, firebaseId });
+}
+
+// ── Convenience: sync lead then order (handles missing cariKod) ───────────────
+
+/**
+ * Ensure a lead has a Mikro cari code, then push the order.
+ * Use this when creating an order for a customer who may not be in Mikro yet.
+ */
+export async function syncOrderWithCari(
+  lead: Record<string, unknown>,
+  leadFirebaseId: string,
+  order: Record<string, unknown>,
+  orderFirebaseId: string
+): Promise<{ cariResult: MikroCariSyncResult; orderResult: MikroSiparisSyncResult }> {
+  // Step 1: ensure cari exists in Mikro
+  let cariResult: MikroCariSyncResult;
+  if (lead.mikroCariKod) {
+    cariResult = { success: true, cariKod: lead.mikroCariKod as string };
+  } else {
+    cariResult = await syncLeadToMikro(lead, leadFirebaseId);
   }
+
+  // Step 2: push order (inject cariKod if we just got one)
+  const orderWithCari = cariResult.cariKod
+    ? { ...order, mikroCariKod: cariResult.cariKod }
+    : order;
+
+  const orderResult = await syncOrderToMikro(orderWithCari, orderFirebaseId);
+
+  return { cariResult, orderResult };
 }
 
-// ─── Cetpa → Mikro (PUSH) ────────────────────────────────────────────────────
+// ── Bulk / Manual sync triggers ───────────────────────────────────────────────
 
-/** Fatura gönder (Cetpa → Mikro) */
-export async function pushInvoiceToMikro(
-  invoice: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'FaturaKaydet', Parameters: invoice }, config);
+/**
+ * Trigger a full pull of all Mikro stok into Firebase.
+ * Intended for admin "Mikro'dan İçeri Al" button.
+ */
+export async function fullStokSync(): Promise<MikroListResult<MikroStokItem>> {
+  return apiPost<MikroListResult<MikroStokItem>>('/api/mikro/stok/listesi', {
+    size: 500,
+    index: 0,
+    ilkTarih: '2020-01-01',
+  });
 }
 
-/** Cari (müşteri/bayi) gönder (Cetpa → Mikro) */
-export async function pushCustomerToMikro(
-  customer: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'CariKaydet', Parameters: customer }, config);
+/**
+ * Trigger a full pull of all Mikro cari into Firebase.
+ * Intended for admin "Müşterileri Çek" button.
+ */
+export async function fullCariSync(): Promise<MikroListResult<MikroCariItem>> {
+  return apiPost<MikroListResult<MikroCariItem>>('/api/mikro/cari/listesi', {
+    whereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'",
+    size: 500,
+    index: 0,
+  });
 }
 
-/** Yevmiye gönder (Cetpa → Mikro) */
-export async function pushJournalToMikro(
-  entries: Record<string, unknown>[],
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'YevmiyeKaydet', Parameters: { entries } }, config);
-}
+// ── Legacy / compatibility exports ────────────────────────────────────────────
+// These match the old stub signatures so existing callers compile.
+// Bank movements endpoint is not yet in the Mikro Jump Postman collection —
+// it will be wired up when Mikro provides the endpoint name.
 
-/** Stok güncelle (Cetpa → Mikro) */
-export async function pushStockToMikro(
-  items: Record<string, unknown>[],
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'StokGuncelle', Parameters: { items } }, config);
-}
-
-// ─── Mikro → Cetpa (PULL) ────────────────────────────────────────────────────
-
-/** Faturaları çek (Mikro → Cetpa) */
-export async function pullInvoicesFromMikro(
-  params: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'FaturaListesi', Parameters: params }, config);
-}
-
-/** Carileri çek (Mikro → Cetpa) */
-export async function pullCustomersFromMikro(
-  params: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'CariListesi', Parameters: params }, config);
-}
-
-/** Stok listesini çek (Mikro → Cetpa) */
-export async function pullStockFromMikro(
-  params: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'StokListesi', Parameters: params }, config);
-}
-
-/** Yevmiye kayıtlarını çek (Mikro → Cetpa) */
-export async function pullJournalFromMikro(
-  params: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'YevmiyeListesi', Parameters: params }, config);
-}
-
-/** Banka hareketlerini çek (Mikro → Cetpa) */
+/** @deprecated Pass no config — credentials live in server env vars. */
 export async function pullBankMovementsFromMikro(
-  params: Record<string, unknown>,
-  config: MikroConfig
-): Promise<unknown> {
-  return mikroRequest({ MethodName: 'BankaHareketListesi', Parameters: params }, config);
+  _params: Record<string, unknown>,
+  _config?: unknown
+): Promise<{ success: boolean; data: unknown[]; notImplemented?: boolean }> {
+  // Mikro Jump API endpoint for bank movements not yet available.
+  // Returns empty array so AccountingModule renders gracefully.
+  return { success: false, data: [], notImplemented: true };
 }

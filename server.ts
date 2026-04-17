@@ -129,6 +129,177 @@ async function fetchAndCacheExchangeRates() {
 cron.schedule('*/30 * * * *', fetchAndCacheExchangeRates);
 fetchAndCacheExchangeRates(); // Initial fetch
 
+// ── Mikro Jump API — Config & Helpers ───────────────────────────────────────
+// All Mikro calls MUST originate from this server (whitelisted IP requirement).
+// Token: OpenID Connect via onlinekullanici.mikro.com.tr (~6h validity)
+// API:   jumpbulutapigw.mikro.com.tr — bearer token + Mikro context in body
+
+const MIKRO_AUTH_URL = 'https://onlinekullanici.mikro.com.tr/auth/realms/Mikro/protocol/openid-connect/token';
+const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods';
+
+function isMikroConfigured(): boolean {
+  return !!(
+    process.env.MIKRO_IDM_EMAIL &&
+    process.env.MIKRO_IDM_PASSWORD &&
+    process.env.MIKRO_API_KEY &&
+    process.env.MIKRO_ALIAS
+  );
+}
+
+/** Build the Mikro context object included in every request body */
+function getMikroContext(): Record<string, unknown> {
+  return {
+    Alias:          process.env.MIKRO_ALIAS          || '',
+    FirmaKodu:      process.env.MIKRO_FIRMA_KODU      || '01',
+    CalismaYili:    process.env.MIKRO_CALISMA_YILI    || String(new Date().getFullYear()),
+    ApiKey:         process.env.MIKRO_API_KEY         || '',
+    KullaniciKodu:  process.env.MIKRO_KULLANICI_KODU  || 'SRV',
+    Sifre:          process.env.MIKRO_SIFRE           || '',
+    FirmaNo:        parseInt(process.env.MIKRO_FIRMA_NO  || '0', 10),
+    SubeNo:         parseInt(process.env.MIKRO_SUBE_NO   || '0', 10),
+  };
+}
+
+// In-memory token cache (refreshed 5 min before expiry)
+let mikroTokenCache: { access_token: string; expiresAt: number } | null = null;
+
+async function getMikroToken(): Promise<string> {
+  const now = Date.now();
+  if (mikroTokenCache && now < mikroTokenCache.expiresAt - 5 * 60 * 1000) {
+    return mikroTokenCache.access_token;
+  }
+
+  const res = await fetch(MIKRO_AUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:  'mikro-rjf',
+      username:   process.env.MIKRO_IDM_EMAIL    || '',
+      password:   process.env.MIKRO_IDM_PASSWORD || '',
+      grant_type: 'password',
+    }).toString(),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Mikro token alınamadı (${res.status}): ${errText.substring(0, 200)}`);
+  }
+
+  const data = await res.json() as { access_token: string; expires_in: number };
+  mikroTokenCache = {
+    access_token: data.access_token,
+    expiresAt:    now + (data.expires_in || 21600) * 1000,
+  };
+  console.log(`Mikro token alındı ✓ (${Math.round((data.expires_in || 21600) / 60)} dk geçerli)`);
+  return mikroTokenCache.access_token;
+}
+
+/** Call a Mikro Jump API endpoint.  Injects auth token + Mikro context automatically. */
+async function mikroPost(
+  endpoint: string,
+  extraBody: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  const token = await getMikroToken();
+  const url   = `${MIKRO_API_BASE}/${endpoint}`;
+
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ Mikro: getMikroContext(), ...extraBody }),
+  });
+
+  const text = await res.text();
+  let data: unknown;
+  try { data = JSON.parse(text); } catch { data = text; }
+
+  if (!res.ok) {
+    console.warn(`Mikro ${endpoint} HTTP ${res.status}:`, text.substring(0, 300));
+  }
+
+  return { ok: res.ok, status: res.status, data };
+}
+
+/** Write a sync event to the syncLog Firestore collection */
+async function writeSyncLog(
+  operation: string,
+  entityType: string,
+  entityId:   string,
+  success:    boolean,
+  mikroRef:   string | null,
+  error:      string | null,
+  duration:   number
+): Promise<void> {
+  if (!adminDb) return;
+  try {
+    await adminDb.collection('syncLog').add({
+      timestamp:  admin.firestore.FieldValue.serverTimestamp(),
+      operation,
+      entityType,
+      entityId,
+      success,
+      mikroRef,
+      error,
+      duration,
+    });
+  } catch (e) {
+    console.warn('syncLog write failed:', e);
+  }
+}
+
+// ── Mikro periodic sync (cron) ───────────────────────────────────────────────
+// Every hour: pull updated cari + stok from Mikro → Firebase
+if (process.env.MIKRO_CRON_SYNC === 'true') {
+  cron.schedule('0 * * * *', async () => {
+    if (!isMikroConfigured() || !adminDb) return;
+    console.log('Mikro cron: stok + cari sync başlatıldı');
+    try {
+      // Pull stok
+      const stokRes = await mikroPost('StokListesiV2', {
+        StokKod: '', TarihTipi: 2,
+        IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
+        Sort: 'sto_kod', Size: '500', Index: 0,
+      });
+      const stoklar = ((stokRes.data as Record<string, unknown>)?.stoklar ?? []) as Record<string, unknown>[];
+      let stokUpdated = 0;
+      for (const s of stoklar) {
+        const sku = s.sto_kod as string;
+        if (!sku) continue;
+        const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
+        if (!snap.empty) {
+          await snap.docs[0].ref.update({ mikroData: s, mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp() });
+          stokUpdated++;
+        }
+      }
+
+      // Pull cari
+      const cariRes = await mikroPost('CariListesiV2', {
+        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl',
+        WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'",
+        Sort: 'cari_kod', Size: '500', Index: 0,
+      });
+      const cariler = ((cariRes.data as Record<string, unknown>)?.cariler ?? []) as Record<string, unknown>[];
+      let cariUpdated = 0;
+      for (const c of cariler) {
+        const cariKod = c.cari_kod as string;
+        if (!cariKod) continue;
+        const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
+        if (!snap.empty) {
+          await snap.docs[0].ref.update({ mikroData: c, mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp() });
+          cariUpdated++;
+        }
+      }
+
+      console.log(`Mikro cron tamamlandı — stok: ${stokUpdated}, cari: ${cariUpdated} güncellendi`);
+    } catch (err) {
+      console.error('Mikro cron sync hatası:', err);
+    }
+  });
+  console.log('Mikro cron sync aktif (saatte bir çalışır) ✓');
+}
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
@@ -642,6 +813,296 @@ async function startServer() {
       res.json(data);
     } catch (err: unknown) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'FedEx fetch failed' });
+    }
+  });
+
+  // ── Mikro Jump API Routes ────────────────────────────────────────────────────
+
+  /** GET /api/mikro/status — is Mikro configured and token reachable? */
+  app.get('/api/mikro/status', async (_req: Request, res: Response) => {
+    if (!isMikroConfigured()) {
+      return res.json({ configured: false, connected: false, message: 'Mikro env vars ayarlanmamış.' });
+    }
+    try {
+      await getMikroToken();
+      res.json({ configured: true, connected: true });
+    } catch (err) {
+      res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** POST /api/mikro/stok/kaydet — push inventory item → Mikro StokKaydetV2 */
+  app.post('/api/mikro/stok/kaydet', async (req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
+    const t0 = Date.now();
+
+    try {
+      const prices = (item.prices as Record<string, number>) || {};
+      const stok = {
+        sto_kod:              (item.sku  as string) || `STK${Date.now()}`,
+        sto_isim:             (item.name as string) || '',
+        sto_kisa_ismi:        ((item.name as string) || '').substring(0, 24),
+        sto_cins:             0,
+        sto_doviz_cinsi:      0,
+        sto_birim1_ad:        'ADET',
+        sto_perakende_vergi:  20,
+        sto_toptan_vergi:     20,
+        satis_fiyatlari: [
+          { sfiyat_listesirano: 1, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['Retail']       || 0, sfiyat_doviz: 0 },
+          { sfiyat_listesirano: 2, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['B2B Standard'] || 0, sfiyat_doviz: 0 },
+          { sfiyat_listesirano: 3, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['B2B Premium']  || 0, sfiyat_doviz: 0 },
+          { sfiyat_listesirano: 4, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['Dealer']       || 0, sfiyat_doviz: 0 },
+        ].filter(p => p.sfiyat_fiyati > 0),
+      };
+
+      const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] });
+      const duration = Date.now() - t0;
+      const d = data as Record<string, unknown>;
+      const success = ok && d?.success !== false;
+      const mikroStoKod = stok.sto_kod;
+      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+
+      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId, success, mikroStoKod, errorMsg, duration);
+
+      if (adminDb && firebaseId && success) {
+        await adminDb.collection('inventory').doc(firebaseId).update({
+          mikroStoKod,
+          mikroSynced:   true,
+          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      res.json({ success, mikroStoKod, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId || 'unknown', false, null, errorMsg, duration);
+      console.error('Mikro StokKaydetV2 hatası:', err);
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  /** POST /api/mikro/stok/listesi — pull Mikro StokListesiV2 → Firebase */
+  app.post('/api/mikro/stok/listesi', async (req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { stokKod = '', ilkTarih = '2020-01-01', size = 100, index = 0 } = req.body || {};
+    const t0 = Date.now();
+
+    try {
+      const { ok, data, status } = await mikroPost('StokListesiV2', {
+        StokKod:   stokKod,
+        TarihTipi: 2,
+        IlkTarih:  ilkTarih,
+        SonTarih:  `${new Date().getFullYear() + 1}-12-31`,
+        Sort:      'sto_kod',
+        Size:      String(size),
+        Index:     index,
+      });
+
+      if (!ok) return res.status(status).json({ success: false, error: data });
+
+      const stoklar = ((data as Record<string, unknown>)?.stoklar ?? data) as Record<string, unknown>[];
+
+      // Mirror matched items back to Firebase
+      if (adminDb && Array.isArray(stoklar)) {
+        for (const s of stoklar) {
+          const sku = s.sto_kod as string;
+          if (!sku) continue;
+          const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
+          if (!snap.empty) {
+            await snap.docs[0].ref.update({
+              mikroStoKod:   sku,
+              mikroSynced:   true,
+              mikroData:     s,
+              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      res.json({ success: true, count: Array.isArray(stoklar) ? stoklar.length : 0, data: stoklar, duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('Mikro StokListesiV2 hatası:', err);
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** POST /api/mikro/cari/kaydet — push lead/customer → Mikro CariKaydetV2 */
+  app.post('/api/mikro/cari/kaydet', async (req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
+    const t0 = Date.now();
+
+    try {
+      const cariKod = (lead.mikroCariKod as string) || `CAR${(firebaseId || Date.now().toString()).substring(0, 6).toUpperCase()}`;
+      const contactName = (lead.contactName as string) || '';
+      const nameParts   = contactName.split(' ');
+
+      const cari = {
+        cari_kod:                    cariKod,
+        cari_unvan1:                 (lead.company  as string) || (lead.name as string) || '',
+        cari_unvan2:                 '',
+        cari_vdaire_no:              (lead.taxId     as string) || (lead.vkn as string) || '',
+        cari_vdaire_adi:             (lead.taxOffice as string) || '',
+        cari_EMail:                  (lead.email     as string) || '',
+        cari_CepTel:                 (lead.phone     as string) || '',
+        cari_efatura_fl:             (lead.eFaturaKayitli as boolean) ? 1 : 0,
+        cari_def_efatura_cinsi:      0,
+        cari_doviz_cinsi1:           0,
+        cari_doviz_cinsi2:           255,
+        cari_doviz_cinsi3:           255,
+        cari_KurHesapSekli:          1,
+        cari_sevk_adres_no:          0,
+        cari_fatura_adres_no:        0,
+        adres: [{
+          adr_cadde:          (lead.address  as string) || '',
+          adr_ilce:           (lead.district as string) || '',
+          adr_il:             (lead.city     as string) || '',
+          adr_ulke:           'TÜRKİYE',
+          adr_tel_ulke_kodu:  '090',
+          adr_tel_bolge_kodu: '',
+          adr_tel_no1:        (lead.phone    as string) || '',
+          adr_posta_kodu:     0,
+          yetkili: contactName ? [{
+            mye_isim:         nameParts[0]  || '',
+            mye_soyisim:      nameParts.slice(1).join(' ') || '',
+            mye_email_adres:  (lead.email as string) || '',
+            mye_cep_telno:    (lead.phone as string) || '',
+            mye_dahili_telno: '',
+          }] : [],
+        }],
+      };
+
+      const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] });
+      const duration = Date.now() - t0;
+      const d = data as Record<string, unknown>;
+      const success = ok && d?.success !== false;
+      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+
+      await writeSyncLog('CariKaydetV2', 'lead', firebaseId, success, cariKod, errorMsg, duration);
+
+      if (adminDb && firebaseId && success) {
+        await adminDb.collection('leads').doc(firebaseId).update({
+          mikroCariKod:  cariKod,
+          mikroSynced:   true,
+          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      res.json({ success, cariKod, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('CariKaydetV2', 'lead', firebaseId || 'unknown', false, null, errorMsg, duration);
+      console.error('Mikro CariKaydetV2 hatası:', err);
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  /** POST /api/mikro/cari/listesi — pull Mikro CariListesiV2 → Firebase */
+  app.post('/api/mikro/cari/listesi', async (req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { whereStr = "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'", size = 200, index = 0 } = req.body || {};
+    const t0 = Date.now();
+
+    try {
+      const { ok, data, status } = await mikroPost('CariListesiV2', {
+        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl',
+        WhereStr:  whereStr,
+        Sort:      'cari_kod',
+        Size:      String(size),
+        Index:     index,
+      });
+
+      if (!ok) return res.status(status).json({ success: false, error: data });
+
+      const cariler = ((data as Record<string, unknown>)?.cariler ?? data) as Record<string, unknown>[];
+
+      if (adminDb && Array.isArray(cariler)) {
+        for (const c of cariler) {
+          const cariKod = c.cari_kod as string;
+          if (!cariKod) continue;
+          const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
+          if (!snap.empty) {
+            await snap.docs[0].ref.update({
+              mikroData:     c,
+              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      res.json({ success: true, count: Array.isArray(cariler) ? cariler.length : 0, data: cariler, duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('Mikro CariListesiV2 hatası:', err);
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
+  app.post('/api/mikro/siparis/kaydet', async (req: Request, res: Response) => {
+    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
+    const t0 = Date.now();
+
+    try {
+      const lineItems = (order.lineItems || []) as Record<string, unknown>[];
+      if (lineItems.length === 0) {
+        return res.status(400).json({ success: false, error: 'Sipariş satırı bulunamadı.' });
+      }
+
+      // Format date as dd.MM.yyyy for Mikro
+      const rawDate   = order.createdAt ? new Date(order.createdAt as string) : new Date();
+      const orderDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
+
+      const satirlar = lineItems.map((item: Record<string, unknown>) => ({
+        sip_tarih:        orderDate,
+        sip_tip:          '1',
+        sip_cins:         '0',
+        sip_evrakno_seri: 'T',
+        sip_musteri_kod:  (order.mikroCariKod as string) || '',
+        sip_stok_kod:     (item.sku as string) || (item.productId as string) || '',
+        sip_b_fiyat:      Number((item.unitPrice as number) || (item.price as number) || 0),
+        sip_miktar:       Number((item.quantity as number)  || 1),
+        sip_tutar:        Number((item.total    as number)  || ((item.unitPrice as number || 0) * (item.quantity as number || 1))),
+        sip_vergi_pntr:   4,     // 20% KDV (adjust per product if needed)
+        sip_depono:       1,
+        sip_vergisiz_fl:  false,
+      }));
+
+      const { ok, data, status } = await mikroPost('SiparisKaydetV2', {
+        evraklar: [{ satirlar }],
+      });
+
+      const duration = Date.now() - t0;
+      const d = data as Record<string, unknown>;
+      const success = ok && d?.success !== false;
+      const mikroEvrakNo = (d?.evrakNo || d?.id || null) as string | null;
+      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+
+      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration);
+
+      if (adminDb && firebaseId && success) {
+        await adminDb.collection('orders').doc(firebaseId).update({
+          mikroEvrakNo,
+          mikroSynced:   true,
+          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      res.json({ success, mikroEvrakNo, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration);
+      console.error('Mikro SiparisKaydetV2 hatası:', err);
+      res.status(500).json({ success: false, error: errorMsg });
     }
   });
 
