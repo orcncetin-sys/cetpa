@@ -384,6 +384,112 @@ service cloud.firestore {
       allow write: if hasRole(['Admin', 'Manager']);
     }
 
+    // ── Bank Transactions (AccountingModule) ──────────────────────
+    match /bankTransactions/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Document Templates (DocumentDesigner) ─────────────────────
+    match /documentTemplates/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Corporate Governance ───────────────────────────────────────
+    match /boardMeetings/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Corporate', 'Legal']);
+      allow create, update: if hasRole(['Admin', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /shareholders/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Corporate', 'Legal', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    match /assemblyMeetings/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Corporate', 'Legal']);
+      allow create, update: if hasRole(['Admin', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Fixed Assets / Sabit Kıymetler ────────────────────────────
+    match /sabitKiymetler/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Cost Centers / Maliyet Merkezleri & Kalemleri ─────────────
+    match /maliyetMerkezleri/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Accounting', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /maliyetKalemleri/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Accounting', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Collections & Payments / Tahsilat ─────────────────────────
+    match /tahsilatKayitlari/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Accounting', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    match /tahsilatOdemeleri/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Accounting', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Commission Rules (DealerCommissionPanel) ───────────────────
+    match /commissionRules/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Dealer', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Production ─────────────────────────────────────────────────
+    match /productionOrders/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    match /machines/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    // ── HR Extended ────────────────────────────────────────────────
+    match /performanceReviews/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR']);
+      allow create, update: if hasRole(['Admin', 'HR', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /trainings/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'HR', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    match /travelRequests/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR', 'Accounting']);
+      allow create: if isAuthenticated();
+      allow update: if hasRole(['Admin', 'HR', 'Manager', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
