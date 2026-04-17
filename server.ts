@@ -137,69 +137,136 @@ fetchAndCacheExchangeRates(); // Initial fetch
 const MIKRO_AUTH_URL = 'https://onlinekullanici.mikro.com.tr/auth/realms/Mikro/protocol/openid-connect/token';
 const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods';
 
-function isMikroConfigured(): boolean {
-  return !!(
+interface MikroCreds {
+  idmEmail: string;
+  idmPassword: string;
+  alias: string;
+  firmaKodu: string;
+  calismaYili: string;
+  apiKey: string;
+  kullaniciKodu: string;
+  sifre: string;
+  firmaNo: number;
+  subeNo: number;
+}
+
+/**
+ * Get Mikro credentials — env vars take priority, Firestore settings/mikro as fallback.
+ * This allows the admin to configure Mikro from the Settings UI without needing env vars.
+ */
+async function getMikroCreds(): Promise<MikroCreds | null> {
+  // 1. Try env vars first (server deployment)
+  if (
     process.env.MIKRO_IDM_EMAIL &&
     process.env.MIKRO_IDM_PASSWORD &&
     process.env.MIKRO_API_KEY &&
     process.env.MIKRO_ALIAS
-  );
+  ) {
+    return {
+      idmEmail:      process.env.MIKRO_IDM_EMAIL,
+      idmPassword:   process.env.MIKRO_IDM_PASSWORD,
+      alias:         process.env.MIKRO_ALIAS,
+      firmaKodu:     process.env.MIKRO_FIRMA_KODU     || '01',
+      calismaYili:   process.env.MIKRO_CALISMA_YILI   || String(new Date().getFullYear()),
+      apiKey:        process.env.MIKRO_API_KEY,
+      kullaniciKodu: process.env.MIKRO_KULLANICI_KODU || 'SRV',
+      sifre:         process.env.MIKRO_SIFRE          || '',
+      firmaNo:       parseInt(process.env.MIKRO_FIRMA_NO || '0', 10),
+      subeNo:        parseInt(process.env.MIKRO_SUBE_NO  || '0', 10),
+    };
+  }
+
+  // 2. Fallback: read from Firestore settings/mikro (entered from Settings UI)
+  if (!adminDb) return null;
+  try {
+    const snap = await adminDb.collection('settings').doc('mikro').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, unknown>;
+    // Support both new field names and legacy "accessToken" → idmPassword mapping
+    const idmEmail    = (d.idmEmail    || d.email)         as string | undefined;
+    const idmPassword = (d.idmPassword || d.accessToken || d.access_token) as string | undefined;
+    const alias       = d.alias        as string | undefined;
+    const apiKey      = d.apiKey       as string | undefined;
+
+    if (!idmPassword || !alias) return null; // minimum required
+
+    return {
+      idmEmail:      idmEmail      || '',
+      idmPassword,
+      alias,
+      firmaKodu:     (d.firmaKodu     as string) || '01',
+      calismaYili:   (d.calismaYili   as string) || String(new Date().getFullYear()),
+      apiKey:        apiKey  || '',
+      kullaniciKodu: (d.kullaniciKodu as string) || 'SRV',
+      sifre:         (d.sifre         as string) || '',
+      firmaNo:       Number(d.firmaNo  ?? 0),
+      subeNo:        Number(d.subeNo   ?? 0),
+    };
+  } catch (e) {
+    console.warn('getMikroCreds: Firestore read failed:', e);
+    return null;
+  }
 }
 
-/** Build the Mikro context object included in every request body */
-function getMikroContext(): Record<string, unknown> {
-  return {
-    Alias:          process.env.MIKRO_ALIAS          || '',
-    FirmaKodu:      process.env.MIKRO_FIRMA_KODU      || '01',
-    CalismaYili:    process.env.MIKRO_CALISMA_YILI    || String(new Date().getFullYear()),
-    ApiKey:         process.env.MIKRO_API_KEY         || '',
-    KullaniciKodu:  process.env.MIKRO_KULLANICI_KODU  || 'SRV',
-    Sifre:          process.env.MIKRO_SIFRE           || '',
-    FirmaNo:        parseInt(process.env.MIKRO_FIRMA_NO  || '0', 10),
-    SubeNo:         parseInt(process.env.MIKRO_SUBE_NO   || '0', 10),
-  };
-}
+// In-memory token cache keyed by IDM email (invalidates if user changes creds)
+const mikroTokenCacheMap = new Map<string, { access_token: string; expiresAt: number }>();
 
-// In-memory token cache (refreshed 5 min before expiry)
-let mikroTokenCache: { access_token: string; expiresAt: number } | null = null;
+async function getMikroToken(creds: MikroCreds): Promise<string> {
+  const cacheKey = `${creds.idmEmail}|${creds.alias}`;
+  const now      = Date.now();
+  const cached   = mikroTokenCacheMap.get(cacheKey);
 
-async function getMikroToken(): Promise<string> {
-  const now = Date.now();
-  if (mikroTokenCache && now < mikroTokenCache.expiresAt - 5 * 60 * 1000) {
-    return mikroTokenCache.access_token;
+  if (cached && now < cached.expiresAt - 5 * 60 * 1000) {
+    return cached.access_token;
   }
 
   const res = await fetch(MIKRO_AUTH_URL, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id:  'mikro-rjf',
-      username:   process.env.MIKRO_IDM_EMAIL    || '',
-      password:   process.env.MIKRO_IDM_PASSWORD || '',
+      username:   creds.idmEmail,
+      password:   creds.idmPassword,
       grant_type: 'password',
     }).toString(),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Mikro token alınamadı (${res.status}): ${errText.substring(0, 200)}`);
+    throw new Error(`Mikro token alınamadı (${res.status}): ${errText.substring(0, 300)}`);
   }
 
   const data = await res.json() as { access_token: string; expires_in: number };
-  mikroTokenCache = {
+  mikroTokenCacheMap.set(cacheKey, {
     access_token: data.access_token,
     expiresAt:    now + (data.expires_in || 21600) * 1000,
-  };
-  console.log(`Mikro token alındı ✓ (${Math.round((data.expires_in || 21600) / 60)} dk geçerli)`);
-  return mikroTokenCache.access_token;
+  });
+  console.log(`Mikro token alındı ✓ alias=${creds.alias} (${Math.round((data.expires_in || 21600) / 60)} dk geçerli)`);
+  return data.access_token;
 }
 
-/** Call a Mikro Jump API endpoint.  Injects auth token + Mikro context automatically. */
+function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
+  return {
+    Alias:         creds.alias,
+    FirmaKodu:     creds.firmaKodu,
+    CalismaYili:   creds.calismaYili,
+    ApiKey:        creds.apiKey,
+    KullaniciKodu: creds.kullaniciKodu,
+    Sifre:         creds.sifre,
+    FirmaNo:       creds.firmaNo,
+    SubeNo:        creds.subeNo,
+  };
+}
+
+/** Call a Mikro Jump API endpoint — resolves creds, injects token + context. */
 async function mikroPost(
   endpoint: string,
   extraBody: Record<string, unknown>
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const token = await getMikroToken();
+  const creds = await getMikroCreds();
+  if (!creds) throw new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.');
+
+  const token = await getMikroToken(creds);
   const url   = `${MIKRO_API_BASE}/${endpoint}`;
 
   const res = await fetch(url, {
@@ -208,7 +275,7 @@ async function mikroPost(
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify({ Mikro: getMikroContext(), ...extraBody }),
+    body: JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }),
   });
 
   const text = await res.text();
@@ -253,7 +320,8 @@ async function writeSyncLog(
 // Every hour: pull updated cari + stok from Mikro → Firebase
 if (process.env.MIKRO_CRON_SYNC === 'true') {
   cron.schedule('0 * * * *', async () => {
-    if (!isMikroConfigured() || !adminDb) return;
+    const cronCreds = await getMikroCreds();
+    if (!cronCreds || !adminDb) return;
     console.log('Mikro cron: stok + cari sync başlatıldı');
     try {
       // Pull stok
@@ -820,11 +888,12 @@ async function startServer() {
 
   /** GET /api/mikro/status — is Mikro configured and token reachable? */
   app.get('/api/mikro/status', async (_req: Request, res: Response) => {
-    if (!isMikroConfigured()) {
-      return res.json({ configured: false, connected: false, message: 'Mikro env vars ayarlanmamış.' });
+    const statusCreds = await getMikroCreds();
+    if (!statusCreds) {
+      return res.json({ configured: false, connected: false, message: 'Mikro kimlik bilgileri yapılandırılmamış. Ayarlar > Mikro ERP bölümünden girin.' });
     }
     try {
-      await getMikroToken();
+      await getMikroToken(statusCreds);
       res.json({ configured: true, connected: true });
     } catch (err) {
       res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
@@ -833,7 +902,7 @@ async function startServer() {
 
   /** POST /api/mikro/stok/kaydet — push inventory item → Mikro StokKaydetV2 */
   app.post('/api/mikro/stok/kaydet', async (req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
     const t0 = Date.now();
@@ -886,7 +955,7 @@ async function startServer() {
 
   /** POST /api/mikro/stok/listesi — pull Mikro StokListesiV2 → Firebase */
   app.post('/api/mikro/stok/listesi', async (req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { stokKod = '', ilkTarih = '2020-01-01', size = 100, index = 0 } = req.body || {};
     const t0 = Date.now();
@@ -932,7 +1001,7 @@ async function startServer() {
 
   /** POST /api/mikro/cari/kaydet — push lead/customer → Mikro CariKaydetV2 */
   app.post('/api/mikro/cari/kaydet', async (req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
     const t0 = Date.now();
@@ -1005,7 +1074,7 @@ async function startServer() {
 
   /** POST /api/mikro/cari/listesi — pull Mikro CariListesiV2 → Firebase */
   app.post('/api/mikro/cari/listesi', async (req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { whereStr = "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'", size = 200, index = 0 } = req.body || {};
     const t0 = Date.now();
@@ -1046,7 +1115,7 @@ async function startServer() {
 
   /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
   app.post('/api/mikro/siparis/kaydet', async (req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
     const t0 = Date.now();
@@ -1112,7 +1181,7 @@ async function startServer() {
 
   /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
   app.post('/api/mikro/import/stok', async (_req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
     const t0 = Date.now();
@@ -1212,7 +1281,7 @@ async function startServer() {
 
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
   app.post('/api/mikro/import/cari', async (_req: Request, res: Response) => {
-    if (!isMikroConfigured()) return res.status(503).json({ success: false, notConfigured: true });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
     const t0 = Date.now();

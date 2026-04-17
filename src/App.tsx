@@ -2781,6 +2781,18 @@ function AppContent() {
     return () => unsubSettings();
   }, [user]);
 
+  // --- Real-time Mikro & Luca Settings ---
+  useEffect(() => {
+    if (!user) return;
+    const unsubMikro = onSnapshot(doc(db, 'settings', 'mikro'), (docSnap) => {
+      if (docSnap.exists()) setMikroSettings(docSnap.data() as Partial<MikroConfig>);
+    });
+    const unsubLuca = onSnapshot(doc(db, 'settings', 'luca'), (docSnap) => {
+      if (docSnap.exists()) setLucaSettings(docSnap.data() as Partial<LucaConfig>);
+    });
+    return () => { unsubMikro(); unsubLuca(); };
+  }, [user]);
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
@@ -5364,9 +5376,9 @@ function AppContent() {
                   <button
                     onClick={async () => {
                       const newVal = !mikroSettings.enabled;
-                      await updateDoc(doc(db, 'settings', 'mikro'), { enabled: newVal });
+                      await setDoc(doc(db, 'settings', 'mikro'), { enabled: newVal }, { merge: true });
                       if (newVal) {
-                        await updateDoc(doc(db, 'settings', 'luca'), { enabled: false }).catch(() => {});
+                        await setDoc(doc(db, 'settings', 'luca'), { enabled: false }, { merge: true }).catch(() => {});
                       }
                     }}
                     className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${mikroSettings.enabled ? 'bg-[#1a3a5c]' : 'bg-gray-200'}`}
@@ -5374,29 +5386,70 @@ function AppContent() {
                     <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${mikroSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
-                {[
-                  { key: 'mikro_access_token', label: 'Access Token', placeholder: '1234...', isSecret: true },
-                  { key: 'mikro_endpoint', label: 'API Endpoint', placeholder: 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods', isSecret: false },
-                ].map(field => (
-                  <div key={field.key} className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
-                    <input
-                      type={field.isSecret ? 'password' : 'text'}
-                      defaultValue={(companySettings?.[field.key] as string) || (field.key === 'mikro_endpoint' ? 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods' : '')}
-                      placeholder={field.placeholder}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setDoc(doc(db, 'settings', 'mikro'), { [field.key.replace('mikro_', '')]: val }, { merge: true });
-                      }}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
-                    />
-                  </div>
-                ))}
-                <div className="p-3 bg-blue-50 rounded-xl text-xs text-blue-700">
-                  💡 {currentLanguage === 'tr'
-                    ? 'Access Token\'ı "Online İşlem Merkezi"nden oluşturun. Erişim için izin verilen IP adresinden bağlanın.'
-                    : 'Generate the Access Token from "Online İşlem Merkezi". Connect from the whitelisted IP address.'}
+
+                {/* ── Credential fields ── */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {([
+                    { firestoreKey: 'idmEmail',    label: currentLanguage === 'tr' ? 'IDM E-posta' : 'IDM Email',       placeholder: 'ornek@firma.com',  isSecret: false,  hint: currentLanguage === 'tr' ? 'Online İşlem Merkezi kullanıcı adı' : 'Online İşlem Merkezi username' },
+                    { firestoreKey: 'idmPassword', label: currentLanguage === 'tr' ? 'IDM Şifre (Access Token)' : 'IDM Password (Access Token)', placeholder: '1234…',             isSecret: true,   hint: currentLanguage === 'tr' ? 'Online İşlem Merkezi şifresi veya API token' : 'Online İşlem Merkezi password or API token' },
+                    { firestoreKey: 'alias',       label: 'Alias',                          placeholder: 'XCXY-8332',        isSecret: false,  hint: currentLanguage === 'tr' ? 'Mikro firma alias kodu (zorunlu)' : 'Mikro company alias code (required)' },
+                    { firestoreKey: 'apiKey',      label: 'API Key',                        placeholder: 'mikro-api-key…',   isSecret: true,   hint: currentLanguage === 'tr' ? 'Mikro yönetici portalından alınan API anahtarı' : 'API key from Mikro admin portal' },
+                    { firestoreKey: 'firmaKodu',   label: currentLanguage === 'tr' ? 'Firma Kodu' : 'Company Code', placeholder: '01',               isSecret: false,  hint: '' },
+                    { firestoreKey: 'calismaYili', label: currentLanguage === 'tr' ? 'Çalışma Yılı' : 'Work Year',   placeholder: String(new Date().getFullYear()), isSecret: false, hint: '' },
+                    { firestoreKey: 'kullaniciKodu', label: currentLanguage === 'tr' ? 'Kullanıcı Kodu' : 'User Code', placeholder: 'SRV',           isSecret: false,  hint: '' },
+                    { firestoreKey: 'sifre',       label: currentLanguage === 'tr' ? 'Sunucu Şifresi (MD5)' : 'Server Password (MD5)', placeholder: 'MD5 hash…', isSecret: true, hint: '' },
+                  ] as { firestoreKey: keyof MikroConfig; label: string; placeholder: string; isSecret: boolean; hint: string }[]).map(field => (
+                    <div key={field.firestoreKey} className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
+                        {field.label}
+                        {(field.firestoreKey === 'idmPassword' || field.firestoreKey === 'alias') && (
+                          <span className="text-red-400">*</span>
+                        )}
+                      </label>
+                      <input
+                        key={`mikro-${field.firestoreKey}-${String(mikroSettings[field.firestoreKey] ?? '')}`}
+                        type={field.isSecret ? 'password' : 'text'}
+                        defaultValue={(mikroSettings[field.firestoreKey] as string) || ''}
+                        placeholder={field.placeholder}
+                        onChange={e => {
+                          const val = e.target.value.trim();
+                          setDoc(doc(db, 'settings', 'mikro'), { [field.firestoreKey]: val }, { merge: true });
+                        }}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#1a3a5c] focus:ring-2 focus:ring-[#1a3a5c]/10 transition-all font-mono"
+                      />
+                      {field.hint && (
+                        <p className="text-[10px] text-gray-400">{field.hint}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
+
+                <div className="p-3 bg-blue-50 rounded-xl text-xs text-blue-700 space-y-1">
+                  <p>💡 {currentLanguage === 'tr'
+                    ? 'IDM Şifre ve Alias alanları zorunludur. Diğer alanlar boş bırakılırsa sunucu varsayılan değerlerini kullanır.'
+                    : 'IDM Password and Alias fields are required. Other fields fall back to server defaults if empty.'}</p>
+                  <p className="text-blue-500">{currentLanguage === 'tr'
+                    ? '* Sunucuda MIKRO_* ortam değişkenleri tanımlıysa bunlar Firestore ayarlarını geçersiz kılar.'
+                    : '* Server MIKRO_* env vars override Firestore settings if defined.'}</p>
+                </div>
+
+                {/* Test connection */}
+                <button
+                  onClick={async () => {
+                    toast(currentLanguage==='tr'?'Mikro bağlantısı kontrol ediliyor…':'Checking Mikro connection…','info');
+                    try {
+                      const r = await fetch('/api/mikro/status');
+                      const d = await r.json();
+                      if (!d.configured) { toast(currentLanguage==='tr'?'Mikro yapılandırılmamış. IDM Şifre ve Alias alanlarını doldurun.':'Mikro not configured. Fill in IDM Password and Alias.','error'); return; }
+                      if (d.connected) toast(currentLanguage==='tr'?'Mikro bağlantısı başarılı ✓':'Mikro connection successful ✓','success');
+                      else toast(d.error || (currentLanguage==='tr'?'Token alınamadı':'Could not get token'),'error');
+                    } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-[#1a3a5c] text-[#1a3a5c] hover:bg-[#1a3a5c]/5 text-sm font-bold transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Bağlantıyı Test Et' : 'Test Connection'}
+                </button>
               </div>
 
               {/* ── Mikro Data Import Panel ── */}

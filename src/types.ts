@@ -397,10 +397,25 @@ export interface LucaConfig {
 }
 
 export interface MikroConfig {
-  accessToken: string;
-  endpoint: string;
-  lastSync?: string | null;
-  connected?: boolean;
   enabled: boolean;
-  updatedAt?: any;
+  // IDM credentials (Online İşlem Merkezi login → Bearer token)
+  idmEmail?: string;
+  idmPassword?: string;      // "1234..." from Online İşlem Merkezi
+  // Mikro Jump API context (body of every request)
+  alias?: string;            // e.g. "XCXY-8332"
+  firmaKodu?: string;        // e.g. "01"
+  calismaYili?: string;      // e.g. "2026"
+  apiKey?: string;           // from Mikro admin portal
+  kullaniciKodu?: string;    // e.g. "SRV"
+  sifre?: string;            // MD5-hashed server user password
+  firmaNo?: number;
+  subeNo?: number;
+  // Status & metadata
+  lastSync?: string | null;
+  syncedCount?: number;
+  connected?: boolean;
+  updatedAt?: unknown;
+  // Legacy compat
+  accessToken?: string;      // maps to idmPassword
+  endpoint?: string;
 }
