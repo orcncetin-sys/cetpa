@@ -526,6 +526,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── User Invites ───────────────────────────────────────────────────────────
+    // Written server-side via Admin SDK; read by anyone with the token (auth not required).
+    match /invites/{token} {
+      allow read: if true;  // public read by token — safe (random 36-char token)
+      allow write: if false; // server-side only
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

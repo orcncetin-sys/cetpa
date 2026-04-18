@@ -2347,6 +2347,81 @@ async function startServer() {
     res.json({ success: true, id: result.id });
   });
 
+  // ── Admin: User Invite ────────────────────────────────────────────────────
+  // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
+  // Body: { email, role }
+  app.post('/api/admin/invite', async (req: Request, res: Response) => {
+    const { email, role = 'Sales' } = req.body as { email: string; role?: string };
+    if (!email) return res.status(400).json({ success: false, error: 'email gerekli.' });
+
+    // Generate a random token
+    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+    // Store invite in Firestore (if admin available)
+    if (adminDb) {
+      try {
+        await adminDb.collection('invites').doc(token).set({
+          email, role, token, expiresAt,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          used: false,
+        });
+      } catch (e) {
+        console.warn('Could not write invite to Firestore:', (e as Error).message);
+      }
+    }
+
+    // Determine app URL for invite link
+    const appUrl = process.env.APP_URL || `https://gen-lang-client-0628151245.web.app`;
+    const inviteUrl = `${appUrl}/?invite=${token}`;
+
+    // Send via Resend
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey && !adminDb) return res.status(503).json({ success: false, notConfigured: true });
+    if (!resendKey) {
+      // No email config — still return success with the invite URL so admin can share manually
+      return res.json({ success: true, inviteUrl, emailSent: false, note: 'Resend not configured — share the invite URL manually.' });
+    }
+
+    const fromAddress = process.env.RESEND_FROM || 'davet@cetpa.com.tr';
+    const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:system-ui,sans-serif;background:#f5f5f7;margin:0;padding:24px;">
+  <div style="max-width:480px;margin:auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="background:#ff4000;padding:28px 32px;">
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;letter-spacing:-.5px;">CETPA'ya Davet Edildiniz</h1>
+    </div>
+    <div style="padding:28px 32px;">
+      <p style="font-size:14px;color:#1d1d1f;margin:0 0 16px;">Merhaba,</p>
+      <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">
+        CETPA B2B platformuna <strong>${role}</strong> rolüyle davet edildiniz.
+        Aşağıdaki butona tıklayarak kaydınızı tamamlayabilirsiniz.
+      </p>
+      <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;letter-spacing:-.2px;">
+        Hesap Oluştur
+      </a>
+      <p style="font-size:11px;color:#86868b;margin:20px 0 0;">Bu bağlantı 7 gün geçerlidir. Eğer bu daveti beklemiyor idiyseniz görmezden gelebilirsiniz.</p>
+    </div>
+    <div style="background:#f5f5f7;padding:16px 32px;text-align:center;">
+      <p style="font-size:11px;color:#86868b;margin:0;">CETPA B2B SaaS Platform</p>
+    </div>
+  </div>
+</body></html>`;
+
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromAddress, to: [email], subject: `CETPA'ya Davet Edildiniz — ${role} Rolü`, html }),
+      });
+      const d = await r.json() as Record<string, unknown>;
+      if (!r.ok) return res.status(500).json({ success: false, error: (d.message as string) || 'Resend API hatası' });
+      return res.json({ success: true, inviteUrl, emailSent: true, id: d.id });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // ── Reports Summary API ────────────────────────────────────────────────────
   // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
   app.get('/api/reports/summary', async (_req: Request, res: Response) => {

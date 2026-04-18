@@ -2756,6 +2756,10 @@ function AppContent() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  // ── User invite state ─────────────────────────────────────────────
+  const [inviteEmail, setInviteEmail]   = useState('');
+  const [inviteRole,  setInviteRole]    = useState('Sales');
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   // Merge Firestore category master list with any category strings on existing inventory items
@@ -3031,8 +3035,33 @@ function AppContent() {
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'orders', auth.currentUser?.uid));
 
+    // Track previously-known low-stock IDs so we only fire once per drop
+    const prevLowStockIds = new Set<string>();
+
     const unsubInventory = onSnapshot(collection(db, 'inventory'), (snapshot) => {
-      setInventory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
+      setInventory(items);
+
+      // Detect newly-low-stock items and create bell notifications
+      const uid = auth.currentUser?.uid;
+      if (uid) {
+        for (const item of items) {
+          const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
+          if (isLow && !prevLowStockIds.has(item.id)) {
+            prevLowStockIds.add(item.id);
+            // Fire-and-forget: write to notifications subcollection
+            addDoc(collection(db, 'notifications', uid, 'items'), {
+              title: currentLanguage === 'tr' ? 'Düşük Stok Uyarısı' : 'Low Stock Alert',
+              message: `${item.name} — ${currentLanguage === 'tr' ? 'stok kritik seviyede' : 'stock is critically low'}: ${item.stockLevel ?? 0} ${currentLanguage === 'tr' ? 'adet' : 'units'}`,
+              type: 'warning',
+              read: false,
+              createdAt: serverTimestamp(),
+            }).catch(() => { /* non-critical */ });
+          } else if (!isLow) {
+            prevLowStockIds.delete(item.id);
+          }
+        }
+      }
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventory', auth.currentUser?.uid));
 
     const unsubCategories = onSnapshot(query(collection(db, 'categories'), orderBy('name')), (snapshot) => {
@@ -3274,6 +3303,11 @@ function AppContent() {
         notes: `${newLead.notes}\n\nAI Insights: ${scoreResult.reasoning}`,
         assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
+      createNotification(
+        currentLanguage === 'tr' ? 'Yeni Müşteri Adayı' : 'New Lead',
+        `${newLead.name}${newLead.company ? ` — ${newLead.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'} (AI Skor: ${scoreResult.score}/100)`,
+        'info'
+      ).catch(() => {});
       setNewLead({ name: '', company: '', email: '', phone: '', notes: '' });
       setIsAddingLead(false);
     } catch (error) {
@@ -3504,6 +3538,33 @@ function AppContent() {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status });
       logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
+
+      // ── Notification trigger on key status changes ─────────────────────────
+      {
+        const ord = orders.find(o => o.id === orderId);
+        if (ord) {
+          if (status === 'Delivered') {
+            createNotification(
+              currentLanguage === 'tr' ? 'Sipariş Teslim Edildi' : 'Order Delivered',
+              `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)} ${currentLanguage === 'tr' ? 'teslim edildi' : 'delivered'} ₺${ord.totalPrice.toLocaleString('tr-TR')}`,
+              'success'
+            ).catch(() => {});
+          } else if (status === 'Shipped') {
+            createNotification(
+              currentLanguage === 'tr' ? 'Sipariş Kargoya Verildi' : 'Order Shipped',
+              `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)} ${currentLanguage === 'tr' ? 'kargoya verildi' : 'shipped'}`,
+              'info'
+            ).catch(() => {});
+          } else if (status === 'Cancelled') {
+            createNotification(
+              currentLanguage === 'tr' ? 'Sipariş İptal Edildi' : 'Order Cancelled',
+              `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)}`,
+              'warning'
+            ).catch(() => {});
+          }
+        }
+      }
+
       // Auto-trigger e-İrsaliye when an order is marked as Shipped (fire-and-forget)
       if (status === 'Shipped') {
         const order = orders.find(o => o.id === orderId);
@@ -4708,6 +4769,128 @@ function AppContent() {
                 </div>
               </div>
 
+              {/* ── 6-Month Revenue Trend + Top Products ── */}
+              {(() => {
+                // Build last-6-month buckets
+                const now6 = new Date();
+                const months: { key: string; label: string; revenue: number; orders: number }[] = [];
+                for (let i = 5; i >= 0; i--) {
+                  const d = new Date(now6.getFullYear(), now6.getMonth() - i, 1);
+                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  const short = d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+                  months.push({ key, label: short, revenue: 0, orders: 0 });
+                }
+                for (const o of orders) {
+                  const raw = o.createdAt;
+                  const d = raw
+                    ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
+                    : new Date();
+                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  const bucket = months.find(m => m.key === key);
+                  if (bucket) { bucket.revenue += o.totalPrice; bucket.orders++; }
+                }
+
+                // Top-5 products by order line count
+                const productCount: Record<string, { name: string; count: number; revenue: number }> = {};
+                for (const o of orders) {
+                  for (const li of (o.lineItems || [])) {
+                    const k = (li as { sku?: string; name?: string; title?: string }).sku || (li as { name?: string }).name || 'Unknown';
+                    productCount[k] = productCount[k] || { name: (li as { name?: string; title?: string }).name || (li as { title?: string }).title || k, count: 0, revenue: 0 };
+                    productCount[k].count += (li as { quantity?: number }).quantity || 1;
+                    productCount[k].revenue += ((li as { price?: number }).price || 0) * ((li as { quantity?: number }).quantity || 1);
+                  }
+                }
+                const top5 = Object.values(productCount).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+                const maxRevTop = Math.max(...top5.map(p => p.revenue), 1);
+
+                const totalRevAll = months.reduce((s, m) => s + m.revenue, 0);
+                const totalOrdAll = months.reduce((s, m) => s + m.orders, 0);
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {/* Trend chart — takes 2 cols */}
+                    <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                          {currentLanguage === 'tr' ? '6 Aylık Ciro Trendi' : '6-Month Revenue Trend'}
+                        </h3>
+                        <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-brand inline-block" />{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-300 inline-block" />{currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 mb-3">
+                        <div>
+                          <p className="text-xl font-bold text-gray-900">₺{totalRevAll.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                          <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '6 ay toplam ciro' : '6-month total revenue'}</p>
+                        </div>
+                        <div className="w-px h-8 bg-gray-100" />
+                        <div>
+                          <p className="text-xl font-bold text-blue-600">{totalOrdAll}</p>
+                          <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'toplam sipariş' : 'total orders'}</p>
+                        </div>
+                      </div>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <AreaChart data={months} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="gradRev" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%"  stopColor="#ff4000" stopOpacity={0.18} />
+                              <stop offset="95%" stopColor="#ff4000" stopOpacity={0} />
+                            </linearGradient>
+                            <linearGradient id="gradOrd" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.15} />
+                              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#86868b' }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="rev" tick={{ fontSize: 9, fill: '#86868b' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                          <YAxis yAxisId="ord" orientation="right" tick={{ fontSize: 9, fill: '#86868b' }} axisLine={false} tickLine={false} />
+                          <Tooltip
+                            formatter={(value: number, name: string) =>
+                              name === 'revenue'
+                                ? [`₺${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Ciro' : 'Revenue']
+                                : [value, currentLanguage === 'tr' ? 'Sipariş' : 'Orders']
+                            }
+                            contentStyle={{ fontSize: 11, borderRadius: 10, border: '1px solid #f0f0f0' }}
+                          />
+                          <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#ff4000" strokeWidth={2} fill="url(#gradRev)" dot={{ r: 3, fill: '#ff4000' }} />
+                          <Area yAxisId="ord" type="monotone" dataKey="orders"  stroke="#3b82f6" strokeWidth={2} fill="url(#gradOrd)" dot={{ r: 3, fill: '#3b82f6' }} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Top products — 1 col */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">
+                        {currentLanguage === 'tr' ? 'En Çok Satan Ürünler' : 'Top Products'}
+                      </h3>
+                      {top5.length === 0 ? (
+                        <p className="text-xs text-gray-400 text-center py-6">{currentLanguage === 'tr' ? 'Sipariş verisi yok' : 'No order data'}</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {top5.map((p, i) => (
+                            <div key={i} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-gray-700 truncate max-w-[140px]">{p.name}</span>
+                                <span className="text-[10px] font-bold text-gray-500">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-1.5">
+                                <div
+                                  className="bg-brand h-1.5 rounded-full transition-all"
+                                  style={{ width: `${Math.round((p.revenue / maxRevTop) * 100)}%` }}
+                                />
+                              </div>
+                              <p className="text-[10px] text-gray-400">{p.count} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Lead Pipeline Summary */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">{dashT.lead_summary}</h3>
@@ -5612,6 +5795,78 @@ function AppContent() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* ── Invite User ── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-8 h-8 bg-blue-50 rounded-xl flex items-center justify-center">
+              <Mail size={16} className="text-blue-500" />
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-800 text-sm">{currentLanguage==='tr'?'Kullanıcı Davet Et':'Invite User'}</h3>
+              <p className="text-xs text-gray-400">{currentLanguage==='tr'?'E-posta ile davet linki gönder':'Send an invite link via email'}</p>
+            </div>
+          </div>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!inviteEmail.trim()) return;
+              setInviteLoading(true);
+              try {
+                const r = await fetch('/api/admin/invite', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+                });
+                const d = await r.json() as { success: boolean; notConfigured?: boolean; error?: string };
+                if (d.success) {
+                  toast(currentLanguage === 'tr' ? `Davet gönderildi: ${inviteEmail}` : `Invite sent to ${inviteEmail}`, 'success');
+                  setInviteEmail('');
+                } else if (d.notConfigured) {
+                  toast(currentLanguage === 'tr' ? 'E-posta servisi yapılandırılmamış. Ayarlar > Resend API anahtarını girin.' : 'Email not configured. Add Resend API key in Settings.', 'error');
+                } else {
+                  toast(d.error || 'Davet gönderilemedi', 'error');
+                }
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'Hata', 'error');
+              } finally {
+                setInviteLoading(false);
+              }
+            }}
+            className="flex flex-col sm:flex-row gap-2"
+          >
+            <input
+              type="email"
+              required
+              value={inviteEmail}
+              onChange={e => setInviteEmail(e.target.value)}
+              placeholder="ornek@sirket.com"
+              className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand transition-colors"
+            />
+            <select
+              value={inviteRole}
+              onChange={e => setInviteRole(e.target.value)}
+              className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand transition-colors"
+            >
+              {(['Admin','Manager','Sales','Logistics','Accounting','HR','Purchasing','B2B','Dealer'] as string[]).map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={inviteLoading || !inviteEmail}
+              className="apple-button-primary flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+            >
+              {inviteLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+              {currentLanguage === 'tr' ? 'Davet Gönder' : 'Send Invite'}
+            </button>
+          </form>
+          <p className="text-[10px] text-gray-400 mt-2">
+            {currentLanguage === 'tr'
+              ? 'Davet edilen kullanıcı, e-posta üzerinden kayıt olabilir. Rol ataması önceden yapılır.'
+              : 'The invited user can register via email. The role is pre-assigned.'}
+          </p>
         </div>
 
         {/* Role Simulator */}
