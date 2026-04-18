@@ -1119,6 +1119,28 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
       return 0;
     });
 
+  const [autoReorderLoading, setAutoReorderLoading] = useState(false);
+  const [autoReorderResult, setAutoReorderResult]   = useState<string | null>(null);
+
+  const handleAutoReorder = async () => {
+    setAutoReorderLoading(true);
+    setAutoReorderResult(null);
+    try {
+      const r = await fetch('/api/inventory/auto-reorder', { method: 'POST' });
+      const d = await r.json() as { success: boolean; created: number; lowStockCount: number; message?: string; error?: string; items?: string[] };
+      if (d.success) {
+        const msg = d.created === 0
+          ? (currentLanguage === 'tr' ? 'Tüm stoklar limitin üzerinde.' : 'All stock levels are above threshold.')
+          : `${d.created} ${currentLanguage === 'tr' ? 'taslak SAS oluşturuldu' : 'draft POs created'} (${d.items?.slice(0,3).join(', ')}${(d.items?.length ?? 0) > 3 ? '…' : ''})`;
+        setAutoReorderResult(msg);
+      }
+    } catch (e) {
+      setAutoReorderResult(e instanceof Error ? e.message : 'Hata');
+    } finally {
+      setAutoReorderLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Row 1: Title + Add button */}
@@ -1127,9 +1149,22 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
         subtitle={currentT.inventory_desc}
         icon={Package}
         actionButton={
-          <button onClick={() => setIsAddingProduct(true)} className="apple-button-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> {currentT.add_product}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void handleAutoReorder()}
+              disabled={autoReorderLoading}
+              className="apple-button-secondary flex items-center gap-2 text-sm"
+              title={currentLanguage === 'tr' ? 'Düşük stoklar için taslak SAS oluştur' : 'Create draft POs for low-stock items'}
+            >
+              {autoReorderLoading
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <ShoppingCart className="w-4 h-4" />}
+              {currentLanguage === 'tr' ? 'Otomatik SAS' : 'Auto-Reorder'}
+            </button>
+            <button onClick={() => setIsAddingProduct(true)} className="apple-button-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" /> {currentT.add_product}
+            </button>
+          </div>
         }
       />
       {/* Row 2: Search + Scan + Export */}
@@ -1194,6 +1229,17 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
           )}
         </div>
       </div>
+
+      {/* Auto-reorder result banner */}
+      {autoReorderResult && (
+        <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span>{autoReorderResult}</span>
+          <button onClick={() => setAutoReorderResult(null)} className="ml-auto text-emerald-400 hover:text-emerald-600">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Category Filters */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none -mx-1 px-1">
@@ -2702,6 +2748,8 @@ function AppContent() {
   const [crmSearch, setCrmSearch] = useState('');
   const [crmSort, setCrmSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
   const [orderSearch, setOrderSearch] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   // Merge Firestore category master list with any category strings on existing inventory items
@@ -6533,12 +6581,96 @@ function AppContent() {
                 }
               />
 
+              {/* ── Bulk action bar (appears when orders are selected) ── */}
+              {selectedOrderIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a3a5c] text-white px-5 py-3 rounded-2xl shadow-2xl border border-white/10">
+                  <span className="text-sm font-bold">{selectedOrderIds.size} {currentLanguage === 'tr' ? 'sipariş seçildi' : 'orders selected'}</span>
+                  <div className="w-px h-5 bg-white/20" />
+                  {(['Processing', 'Shipped', 'Delivered'] as Order['status'][]).map(s => (
+                    <button
+                      key={s}
+                      disabled={bulkActionLoading}
+                      onClick={() => openConfirm({
+                        title: currentLanguage === 'tr' ? 'Toplu Güncelleme' : 'Bulk Update',
+                        message: `${selectedOrderIds.size} ${currentLanguage === 'tr' ? 'siparişin durumunu' : "orders'"} "${s}" ${currentLanguage === 'tr' ? 'olarak güncellensin mi?' : 'status update?'}`,
+                        onConfirm: async () => {
+                          setBulkActionLoading(true);
+                          for (const id of selectedOrderIds) {
+                            await handleUpdateOrderStatus(id, s);
+                          }
+                          setSelectedOrderIds(new Set());
+                          setBulkActionLoading(false);
+                        },
+                      })}
+                      className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition-colors disabled:opacity-50"
+                    >
+                      → {s}
+                    </button>
+                  ))}
+                  <div className="w-px h-5 bg-white/20" />
+                  <button
+                    onClick={() => {
+                      // Bulk PDF export: generate one PDF with all selected orders
+                      const sel = orders.filter(o => selectedOrderIds.has(o.id));
+                      import('jspdf').then(({ jsPDF }) => {
+                        import('jspdf-autotable').then(({ default: autoTable }) => {
+                          const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                          pdf.setFontSize(14);
+                          pdf.text(currentLanguage === 'tr' ? 'Sipariş Listesi' : 'Order List', 14, 20);
+                          autoTable(pdf, {
+                            startY: 28,
+                            head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
+                            body: sel.map(o => [o.shopifyOrderId ?? o.id.slice(0,8), o.customerName, o.status, `₺${o.totalPrice.toLocaleString('tr-TR')}`]),
+                            styles: { fontSize: 9 },
+                          });
+                          pdf.save(`siparisler_${new Date().toISOString().split('T')[0]}.pdf`);
+                        });
+                      });
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition-colors flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" /> PDF
+                  </button>
+                  <button
+                    onClick={() => setSelectedOrderIds(new Set())}
+                    className="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {/* Desktop Table View */}
               <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
+                        {/* Select-all checkbox */}
+                        <th className="pl-4 py-4 w-8">
+                          <input
+                            type="checkbox"
+                            className="rounded accent-brand cursor-pointer"
+                            checked={selectedOrderIds.size > 0 && (() => {
+                              const filtered = orders.filter(o =>
+                                o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                                o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
+                              );
+                              return filtered.every(o => selectedOrderIds.has(o.id));
+                            })()}
+                            onChange={e => {
+                              const filtered = orders.filter(o =>
+                                o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                                o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
+                              );
+                              if (e.target.checked) {
+                                setSelectedOrderIds(new Set(filtered.map(o => o.id)));
+                              } else {
+                                setSelectedOrderIds(new Set());
+                              }
+                            }}
+                          />
+                        </th>
                         <th className="px-6 py-4 font-bold text-gray-500 uppercase text-[10px] tracking-wider">{currentT.order_id}</th>
                         {[
                           { key: 'customerName', label: currentT.customer },
@@ -6567,9 +6699,26 @@ function AppContent() {
                         );
                         const sorted = sortData(filtered, orderSort.key, orderSort.dir);
                         return sorted.length === 0 ? (
-                          <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
+                          <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
                         ) : sorted.map(order => (
-                          <tr key={order.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedOrder(order)}>
+                          <tr
+                            key={order.id}
+                            className={cn("hover:bg-gray-50 transition-colors cursor-pointer", selectedOrderIds.has(order.id) && "bg-brand/5")}
+                            onClick={() => setSelectedOrder(order)}
+                          >
+                            <td className="pl-4 py-4 w-8" onClick={e => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className="rounded accent-brand cursor-pointer"
+                                checked={selectedOrderIds.has(order.id)}
+                                onChange={e => {
+                                  const next = new Set(selectedOrderIds);
+                                  if (e.target.checked) next.add(order.id);
+                                  else next.delete(order.id);
+                                  setSelectedOrderIds(next);
+                                }}
+                              />
+                            </td>
                             <td className="px-6 py-4 font-medium text-[#1D2226]">{order.shopifyOrderId}</td>
                             <td className="px-6 py-4 text-gray-600">{order.customerName}</td>
                             <td className="px-6 py-4 text-gray-500">

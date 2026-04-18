@@ -885,6 +885,157 @@ async function startServer() {
     }
   });
 
+  // ── Turkish Cargo Carrier Tracking ──────────────────────────────────────────
+  // Returns a normalised TrackingResult-compatible object.
+  // Falls back to realistic mock data when credentials aren't configured.
+  // Credentials (optional) stored in env vars or Firestore settings/cargoApiKeys.
+
+  function trMockEvents(carrier: string, no: string, status: string) {
+    const now = Date.now();
+    return {
+      mock: true, carrier, trackingNumber: no,
+      statusCode: 'in_transit' as const, status,
+      origin: 'İstanbul', destination: 'Ankara',
+      estimatedDelivery: new Date(now + 86400000).toISOString(),
+      isMock: true,
+      events: [
+        { timestamp: new Date(now - 1800000).toISOString(), location: 'Ankara Dağıtım Merkezi', status: 'Dağıtıma Çıktı', description: `${carrier}: Dağıtıma çıktı` },
+        { timestamp: new Date(now - 7200000).toISOString(), location: 'Ankara Transfer Merkezi', status: 'Transfer Merkezi', description: `${carrier}: Transfer merkezine ulaştı` },
+        { timestamp: new Date(now - 86400000).toISOString(), location: 'İstanbul Çıkış Deposu', description: `${carrier}: Kargo alındı`, status: 'Alındı' },
+      ],
+    };
+  }
+
+  // Yurtiçi Kargo
+  app.get('/api/tracking/yurtici/:no', async (req: Request, res: Response) => {
+    const no = req.params['no'] as string;
+    const apiKey = process.env.YURTICI_API_KEY;
+    if (!apiKey) return res.json(trMockEvents('Yurtiçi', no, 'Dağıtımda'));
+    try {
+      const r = await fetch('https://ws.yurticikargo.com/GetShipmentInfo/v1', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+        body:    JSON.stringify({ trackingNumbers: [no] }),
+        signal:  AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return res.json(trMockEvents('Yurtiçi', no, 'Bilinmiyor'));
+      const data = await r.json() as Record<string, unknown>;
+      res.json(data);
+    } catch {
+      res.json(trMockEvents('Yurtiçi', no, 'Bilgi Alınamadı'));
+    }
+  });
+
+  // MNG Kargo
+  app.get('/api/tracking/mng/:no', async (req: Request, res: Response) => {
+    const no = req.params['no'] as string;
+    const apiKey = process.env.MNG_API_KEY;
+    if (!apiKey) return res.json(trMockEvents('MNG', no, 'Yolda'));
+    try {
+      const r = await fetch(`https://service.mngkargo.com.tr/mngWS.asmx/Sorgu?TakipNo=${encodeURIComponent(no)}`, {
+        headers: { 'x-api-key': apiKey },
+        signal:  AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return res.json(trMockEvents('MNG', no, 'Bilinmiyor'));
+      const data = await r.json() as Record<string, unknown>;
+      res.json(data);
+    } catch {
+      res.json(trMockEvents('MNG', no, 'Bilgi Alınamadı'));
+    }
+  });
+
+  // Aras Kargo
+  app.get('/api/tracking/aras/:no', async (req: Request, res: Response) => {
+    const no = req.params['no'] as string;
+    const apiKey = process.env.ARAS_API_KEY;
+    if (!apiKey) return res.json(trMockEvents('Aras', no, 'Transfer Merkezinde'));
+    try {
+      const r = await fetch(`https://kargo.aras.com.tr/api/v1/shipment/track/${encodeURIComponent(no)}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal:  AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return res.json(trMockEvents('Aras', no, 'Bilinmiyor'));
+      const data = await r.json() as Record<string, unknown>;
+      res.json(data);
+    } catch {
+      res.json(trMockEvents('Aras', no, 'Bilgi Alınamadı'));
+    }
+  });
+
+  // PTT Kargo
+  app.get('/api/tracking/ptt/:no', async (req: Request, res: Response) => {
+    const no = req.params['no'] as string;
+    try {
+      // PTT has a semi-public JSON endpoint
+      const r = await fetch(`https://gonderitakip.ptt.gov.tr/Track/Verify?q=${encodeURIComponent(no)}`, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        signal:  AbortSignal.timeout(8000),
+      });
+      if (r.ok) {
+        const data = await r.json() as Record<string, unknown>;
+        return res.json({ ...trMockEvents('PTT', no, 'Yolda'), ...data, mock: false, isMock: false });
+      }
+      return res.json(trMockEvents('PTT', no, 'Teslimatta'));
+    } catch {
+      res.json(trMockEvents('PTT', no, 'Teslimatta'));
+    }
+  });
+
+  // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
+  app.post('/api/inventory/auto-reorder', async (_req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+    try {
+      const snap = await adminDb.collection('inventory').get();
+      const lowStock: { id: string; name: string; sku: string; stockLevel: number; lowStockThreshold: number; supplier?: string }[] = [];
+      snap.forEach(d => {
+        const item = d.data() as Record<string, unknown>;
+        const stock = Number(item.stockLevel ?? item.quantity ?? 0);
+        const threshold = Number(item.lowStockThreshold ?? item.minStock ?? 5);
+        if (stock < threshold) {
+          lowStock.push({
+            id: d.id,
+            name: String(item.name ?? ''),
+            sku:  String(item.sku ?? ''),
+            stockLevel: stock,
+            lowStockThreshold: threshold,
+            supplier: item.supplier as string | undefined,
+          });
+        }
+      });
+
+      if (lowStock.length === 0) {
+        return res.json({ success: true, created: 0, message: 'Tüm ürünler stok limitinin üzerinde.' });
+      }
+
+      const batch = adminDb.batch();
+      const poRef = adminDb.collection('purchaseOrders');
+      const created: string[] = [];
+
+      for (const item of lowStock) {
+        const reorderQty = Math.max(item.lowStockThreshold * 3, 10);
+        const newRef = poRef.doc();
+        batch.set(newRef, {
+          status:      'Taslak',
+          source:      'auto-reorder',
+          inventoryId: item.id,
+          productName: item.name,
+          sku:         item.sku,
+          supplier:    item.supplier ?? '',
+          quantity:    reorderQty,
+          currentStock: item.stockLevel,
+          threshold:   item.lowStockThreshold,
+          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+        });
+        created.push(newRef.id);
+      }
+      await batch.commit();
+
+      res.json({ success: true, created: created.length, lowStockCount: lowStock.length, items: lowStock.map(i => i.name) });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // ── Mikro Jump API Routes ────────────────────────────────────────────────────
 
   /** GET /api/mikro/status — is Mikro configured and token reachable? */

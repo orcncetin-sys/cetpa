@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, limit, addDoc, serverTimestamp 
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 
-type Carrier = 'DHL' | 'UPS' | 'FedEx';
+type Carrier = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
 interface Props {
   darkMode: boolean;
@@ -12,10 +12,17 @@ interface Props {
 }
 
 const carrierAccents: Record<Carrier, string> = {
-  DHL: '#CC0000',
-  UPS: '#FF6600',
-  FedEx: '#FF6600',
+  DHL:     '#CC0000',
+  UPS:     '#FF6600',
+  FedEx:   '#4D148C',
+  'Yurtiçi': '#E30714',
+  MNG:     '#FF6B00',
+  Aras:    '#003DA6',
+  PTT:     '#FFB800',
 };
+
+const INTERNATIONAL_CARRIERS: Carrier[] = ['DHL', 'UPS', 'FedEx'];
+const TR_CARRIERS: Carrier[]             = ['Yurtiçi', 'MNG', 'Aras', 'PTT'];
 
 const statusColors: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -91,12 +98,10 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
         <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <span>
           {currentLanguage === 'tr'
-            ? 'Demo modunda çalışıyor. Gerçek takip için '
-            : 'Running in demo mode. For live tracking set '}
-          <strong>DHL_API_KEY</strong>{', '}
-          <strong>UPS_CLIENT_ID / UPS_CLIENT_SECRET</strong>{', '}
-          <strong>FEDEX_CLIENT_ID / FEDEX_CLIENT_SECRET</strong>
-          {currentLanguage === 'tr' ? ' ortam değişkenlerini ayarlayın.' : ' in environment variables.'}
+            ? 'Türk kargo firmaları demo modunda çalışır. Gerçek veriler için Entegrasyonlar\'dan API anahtarlarını girin. Uluslararası taşıyıcılar için '
+            : 'Turkish carriers run in demo mode. Add API keys in Integrations for live data. International carriers require '}
+          <strong>DHL_API_KEY</strong>{', '}<strong>UPS_CLIENT_ID</strong>{', '}<strong>FEDEX_CLIENT_ID</strong>
+          {currentLanguage === 'tr' ? ' ortam değişkenlerini ayarlayın.' : ' env vars.'}
         </span>
       </div>
 
@@ -109,14 +114,37 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
           {currentLanguage === 'tr' ? 'Kargo Takip' : 'Track Shipment'}
         </h3>
         <div className="flex gap-3 flex-wrap">
-          {/* Carrier selector */}
-          <div className="flex gap-2">
-            {(['DHL', 'UPS', 'FedEx'] as Carrier[]).map(c => (
+          {/* Carrier selector — split into international + TR */}
+          <div className="flex flex-wrap gap-2">
+            <span className={cn("text-[10px] font-bold uppercase self-center mr-1", darkMode ? "text-white/30" : "text-gray-400")}>
+              🌍
+            </span>
+            {INTERNATIONAL_CARRIERS.map(c => (
               <button
                 key={c}
                 onClick={() => setTrackCarrier(c)}
                 className={cn(
-                  "px-4 py-2.5 rounded-xl text-xs font-black transition-all border outline-none",
+                  "px-3 py-2 rounded-xl text-xs font-black transition-all border outline-none",
+                  trackCarrier === c
+                    ? "text-white shadow-md scale-[1.02]"
+                    : darkMode
+                      ? "bg-white/5 border-white/10 text-white/50 hover:bg-white/10"
+                      : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"
+                )}
+                style={trackCarrier === c ? { backgroundColor: carrierAccents[c], borderColor: carrierAccents[c] } : {}}
+              >
+                {c}
+              </button>
+            ))}
+            <span className={cn("text-[10px] font-bold uppercase self-center mx-1", darkMode ? "text-white/30" : "text-gray-400")}>
+              🇹🇷
+            </span>
+            {TR_CARRIERS.map(c => (
+              <button
+                key={c}
+                onClick={() => setTrackCarrier(c)}
+                className={cn(
+                  "px-3 py-2 rounded-xl text-xs font-black transition-all border outline-none",
                   trackCarrier === c
                     ? "text-white shadow-md scale-[1.02]"
                     : darkMode
@@ -294,7 +322,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                 <div className="flex items-center gap-3">
                   <span
                     className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
-                    style={{ backgroundColor: carrierAccents[t.carrier as Carrier] || '#666' }}
+                    style={{ backgroundColor: carrierAccents[t.carrier as Carrier] ?? '#555' }}
                   >
                     {t.carrier}
                   </span>

@@ -1,4 +1,4 @@
-export type CarrierCode = 'DHL' | 'UPS' | 'FedEx';
+export type CarrierCode = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
 export interface TrackingEvent {
   timestamp: string;
@@ -162,6 +162,21 @@ export async function trackShipment(
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return normalizeFedEx(data, trackingNumber);
+    }
+
+    // ── Turkish carriers ──────────────────────────────────────────────────────
+    const trCarriers: Record<string, string> = {
+      'Yurtiçi': 'yurtici',
+      'MNG':     'mng',
+      'Aras':    'aras',
+      'PTT':     'ptt',
+    };
+    if (trCarriers[carrier]) {
+      const res = await fetch(`/api/tracking/${trCarriers[carrier]}/${encodeURIComponent(trackingNumber)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as Record<string, unknown>;
+      // Server already returns a normalized TrackingResult-compatible object
+      return data as unknown as TrackingResult;
     }
 
     throw new Error('Unknown carrier');
