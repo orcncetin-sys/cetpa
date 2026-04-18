@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
+import { createHmac } from "crypto";
 
 dotenv.config();
 
@@ -1962,6 +1963,189 @@ async function startServer() {
       res.json({ success: true, buckets, rows });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── iyzico Payment Gateway ───────────────────────────────────────────────────
+  // Reads credentials from env (IYZICO_API_KEY, IYZICO_SECRET_KEY, IYZICO_BASE_URL)
+  // or Firestore settings/iyzico (apiKey, secretKey, baseUrl).
+
+  type IyzicoCreds = { apiKey: string; secretKey: string; baseUrl: string };
+
+  async function getIyzicoCreds(): Promise<IyzicoCreds | null> {
+    const apiKey    = process.env.IYZICO_API_KEY;
+    const secretKey = process.env.IYZICO_SECRET_KEY;
+    const baseUrl   = process.env.IYZICO_BASE_URL || 'https://sandbox-api.iyzipay.com';
+    if (apiKey && secretKey) return { apiKey, secretKey, baseUrl };
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('iyzico').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.apiKey || !d.secretKey) return null;
+    return { apiKey: d.apiKey, secretKey: d.secretKey, baseUrl: d.baseUrl || 'https://sandbox-api.iyzipay.com' };
+  }
+
+  // HMAC-SHA256 Authorization header for iyzico v2
+  function iyzicoAuth(creds: IyzicoCreds, randomStr: string, pkiStr: string): string {
+    const msgToHash = creds.apiKey + randomStr + creds.secretKey + pkiStr;
+    const hash = createHmac('sha256', creds.secretKey).update(msgToHash).digest('base64');
+    return `IYZWS apiKey:${creds.apiKey}&hash:${hash}`;
+  }
+
+  // Serialize a JS object into iyzico's PKI string format
+  function toPkiString(obj: Record<string, unknown>): string {
+    return Object.entries(obj)
+      .filter(([, v]) => v !== null && v !== undefined && v !== '')
+      .map(([k, v]) => {
+        if (Array.isArray(v)) {
+          const inner = v.map(item =>
+            typeof item === 'object' && item !== null
+              ? `[${toPkiString(item as Record<string, unknown>)}]`
+              : String(item)
+          ).join(',');
+          return `${k}=[${inner}]`;
+        }
+        if (typeof v === 'object') return `${k}=[${toPkiString(v as Record<string, unknown>)}]`;
+        return `${k}=${v}`;
+      })
+      .join(',');
+  }
+
+  function randStr(len = 12): string {
+    return Math.random().toString(36).slice(2, 2 + len).padEnd(len, '0');
+  }
+
+  // GET /api/iyzico/status
+  app.get('/api/iyzico/status', async (_req: Request, res: Response) => {
+    const creds = await getIyzicoCreds();
+    if (!creds) return res.json({ configured: false, connected: false });
+    try {
+      // Lightweight check: retrieve installment info for 1 TRY
+      const body   = { locale: 'tr', conversationId: 'status-check', binNumber: '554960' };
+      const rndStr = randStr();
+      const auth   = iyzicoAuth(creds, rndStr, toPkiString(body));
+      const r = await fetch(`${creds.baseUrl}/payment/iyzipos/installment/detail`, {
+        method: 'POST',
+        headers: { Authorization: auth, 'x-iyzi-rnd': rndStr, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000),
+      });
+      const d = await r.json() as { status?: string };
+      res.json({ configured: true, connected: d.status === 'success' || r.ok, sandbox: creds.baseUrl.includes('sandbox') });
+    } catch (e) {
+      res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // POST /api/iyzico/payment-link
+  // Body: { orderId, amount, currency?, customerName, customerEmail, customerPhone?,
+  //         shippingAddress?, taxId?, lineItems?, callbackUrl? }
+  // On success: stores paymentPageUrl + iyzicoToken on orders/{orderId}
+  app.post('/api/iyzico/payment-link', async (req: Request, res: Response) => {
+    const creds = await getIyzicoCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+
+    const {
+      orderId, amount, currency = 'TRY',
+      customerName, customerEmail, customerPhone = '+905000000000',
+      shippingAddress = 'Türkiye', taxId = '11111111111',
+      lineItems = [], callbackUrl = `${req.protocol}://${req.get('host')}/payment/result`,
+    } = req.body as {
+      orderId: string; amount: number; currency?: string;
+      customerName: string; customerEmail: string; customerPhone?: string;
+      shippingAddress?: string; taxId?: string;
+      lineItems?: { name: string; price: number; qty?: number }[];
+      callbackUrl?: string;
+    };
+
+    if (!orderId || !amount || !customerName || !customerEmail) {
+      return res.status(400).json({ success: false, error: 'orderId, amount, customerName, customerEmail gerekli.' });
+    }
+
+    const amountStr = amount.toFixed(2);
+    const nameParts = customerName.trim().split(' ');
+    const firstName = nameParts[0];
+    const lastName  = nameParts.slice(1).join(' ') || 'Müşteri';
+
+    // Build basket items
+    const basket = lineItems.length > 0
+      ? lineItems.map((l, i) => ({
+          id: `item-${i}`,
+          name: l.name,
+          category1: 'B2B',
+          itemType: 'PHYSICAL',
+          price: (l.price * (l.qty ?? 1)).toFixed(2),
+        }))
+      : [{ id: orderId, name: 'Sipariş', category1: 'B2B', itemType: 'PHYSICAL', price: amountStr }];
+
+    const body = {
+      locale: 'tr',
+      conversationId: orderId,
+      price: amountStr,
+      paidPrice: amountStr,
+      currency,
+      basketId: orderId,
+      paymentGroup: 'PRODUCT',
+      callbackUrl,
+      buyer: {
+        id: orderId,
+        name: firstName,
+        surname: lastName,
+        email: customerEmail,
+        identityNumber: taxId,
+        registrationAddress: shippingAddress,
+        city: 'İstanbul',
+        country: 'Turkey',
+        ip: req.ip || '127.0.0.1',
+        gsmNumber: customerPhone,
+      },
+      shippingAddress: {
+        contactName: customerName,
+        city: 'İstanbul',
+        country: 'Turkey',
+        address: shippingAddress,
+        zipCode: '34000',
+      },
+      billingAddress: {
+        contactName: customerName,
+        city: 'İstanbul',
+        country: 'Turkey',
+        address: shippingAddress,
+        zipCode: '34000',
+      },
+      basketItems: basket,
+    };
+
+    const rndStr = randStr();
+    const pkiStr = toPkiString(body);
+    const auth   = iyzicoAuth(creds, rndStr, pkiStr);
+
+    try {
+      const r = await fetch(`${creds.baseUrl}/payment/initialize/checkout`, {
+        method: 'POST',
+        headers: {
+          Authorization: auth,
+          'x-iyzi-rnd': rndStr,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+      const d = await r.json() as { status?: string; paymentPageUrl?: string; token?: string; errorMessage?: string };
+
+      const success = d.status === 'success' && !!d.paymentPageUrl;
+      if (success && adminDb) {
+        await adminDb.collection('orders').doc(orderId).set({
+          iyzicoPaymentUrl:   d.paymentPageUrl,
+          iyzicoToken:        d.token,
+          iyzicoCreatedAt:    admin.firestore.FieldValue.serverTimestamp(),
+          iyzicoSandbox:      creds.baseUrl.includes('sandbox'),
+        }, { merge: true });
+      }
+      res.json({ success, paymentPageUrl: d.paymentPageUrl, token: d.token, error: d.errorMessage });
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ success: false, error: errorMsg });
     }
   });
 

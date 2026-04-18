@@ -126,6 +126,9 @@ export interface Order {
   irsaliyeNo?: string;
   irsaliyeEttn?: string;
   mikroSynced?: boolean;
+  iyzicoPaymentUrl?: string;
+  iyzicoToken?: string;
+  iyzicoSandbox?: boolean;
 }
 
 export interface InventoryMovement {

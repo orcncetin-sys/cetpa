@@ -160,6 +160,7 @@ import MikroSyncPanel from './components/MikroSyncPanel';
 import MarketplacePanel from './components/MarketplacePanel';
 import CariEkstrePanel from './components/CariEkstrePanel';
 import MutabakatPanel from './components/MutabakatPanel';
+import DemandForecastPanel from './components/DemandForecastPanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -2644,7 +2645,8 @@ function AppContent() {
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [faturaLoading, setFaturaLoading] = useState<Record<string, boolean>>({});
+  const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
+  const [iyzicoLinkLoading,  setIyzicoLinkLoading]  = useState<Record<string, boolean>>({});
   const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
   const [isAddingOrder, setIsAddingOrder] = useState(false);
@@ -3499,6 +3501,49 @@ function AppContent() {
       toast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
       setFaturaLoading(prev => ({ ...prev, [order.id]: false }));
+    }
+  };
+
+  // ── iyzico: generate payment link ─────────────────────────────────────────
+  const handleIyzicoPaymentLink = async (order: Order) => {
+    setIyzicoLinkLoading(prev => ({ ...prev, [order.id]: true }));
+    try {
+      const lead = leads.find(l => l.id === order.leadId);
+      const r = await fetch('/api/iyzico/payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId:        order.id,
+          amount:         order.totalPrice,
+          currency:       'TRY',
+          customerName:   order.customerName,
+          customerEmail:  lead?.email || order.customerEmail || '',
+          customerPhone:  lead?.phone || '',
+          shippingAddress: order.shippingAddress || 'Türkiye',
+          taxId:          lead?.taxId || '11111111111',
+          lineItems:      (order.lineItems || []).map(l => ({
+            name:  l.title || l.name || l.sku,
+            price: l.price,
+            qty:   l.quantity,
+          })),
+        }),
+      });
+      const d = await r.json() as { success: boolean; paymentPageUrl?: string; notConfigured?: boolean; error?: string };
+      if (d.success && d.paymentPageUrl) {
+        // Open in new tab + copy to clipboard
+        window.open(d.paymentPageUrl, '_blank');
+        navigator.clipboard?.writeText(d.paymentPageUrl).catch(() => {});
+        toast(currentLanguage === 'tr' ? 'Ödeme linki oluşturuldu ve açıldı ✓' : 'Payment link created and opened ✓', 'success');
+        if (selectedOrder?.id === order.id) setSelectedOrder({ ...selectedOrder, iyzicoPaymentUrl: d.paymentPageUrl });
+      } else if (d.notConfigured) {
+        toast(currentLanguage === 'tr' ? 'iyzico yapılandırılmamış. Entegrasyonlar\'dan API anahtarını girin.' : 'iyzico not configured. Add API key in Integrations.', 'error');
+      } else {
+        toast(d.error || (currentLanguage === 'tr' ? 'Ödeme linki oluşturulamadı.' : 'Payment link failed.'), 'error');
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error');
+    } finally {
+      setIyzicoLinkLoading(prev => ({ ...prev, [order.id]: false }));
     }
   };
 
@@ -4443,11 +4488,15 @@ function AppContent() {
 
           {/* ── Reports Dashboard ── */}
           {activeTab === 'reports' && (
-            <motion.div key="reports" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div key="reports" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
               {!canAccess('reports') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Raporlar':'Reports'} /> : (
                 <>
                   {!hasFullAccess('reports') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} />
+                  {/* ── AI Demand Forecast ── */}
+                  <div className="bg-white rounded-2xl border border-gray-100 p-6">
+                    <DemandForecastPanel currentLanguage={currentLanguage} />
+                  </div>
                 </>
               )}
             </motion.div>
@@ -4819,6 +4868,47 @@ function AppContent() {
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wh.color}`}>{wh.status}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* ── iyzico Payment Gateway ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                  <CreditCard className="w-3.5 h-3.5" />
+                  {currentLanguage === 'tr' ? 'iyzico Ödeme Geçidi' : 'iyzico Payment Gateway'}
+                </h4>
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center">
+                      <CreditCard className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-sm text-gray-900">iyzico</h4>
+                      <p className="text-[11px] text-gray-400">
+                        {currentLanguage === 'tr' ? 'B2B müşterilere ödeme linki oluştur ve gönder.' : 'Generate and send payment links to B2B customers.'}
+                      </p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'apiKey',    label: 'API Key',    placeholder: 'sandbox-...', isSecret: false },
+                    { key: 'secretKey', label: 'Secret Key', placeholder: 'sandbox-...', isSecret: true  },
+                    { key: 'baseUrl',   label: 'Base URL',   placeholder: 'https://sandbox-api.iyzipay.com', isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                      <input
+                        type={f.isSecret ? 'password' : 'text'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'iyzico'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/10 transition-all font-mono"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-400">
+                    {currentLanguage === 'tr'
+                      ? '* Değerler otomatik kaydedilir. Test için sandbox URL kullanın. Canlıya geçmek için https://api.iyzipay.com girin.'
+                      : '* Values auto-saved. Use sandbox URL for testing. Enter https://api.iyzipay.com for production.'}
+                  </p>
                 </div>
               </div>
 
@@ -6477,6 +6567,29 @@ function AppContent() {
                         <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
                           <CheckCircle2 className="w-4 h-4"/> Mikro: {selectedOrder.mikroFaturaNo}
                         </span>
+                      )}
+                      {/* iyzico payment link */}
+                      {!selectedOrder.iyzicoPaymentUrl ? (
+                        <button
+                          onClick={() => void handleIyzicoPaymentLink(selectedOrder)}
+                          disabled={!!iyzicoLinkLoading[selectedOrder.id]}
+                          className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-emerald-200 transition-colors disabled:opacity-40"
+                        >
+                          {iyzicoLinkLoading[selectedOrder.id]
+                            ? <RefreshCw className="w-4 h-4 animate-spin"/>
+                            : <CreditCard className="w-4 h-4"/>}
+                          {currentLanguage === 'tr' ? 'Ödeme Linki' : 'Payment Link'}
+                        </button>
+                      ) : (
+                        <a
+                          href={selectedOrder.iyzicoPaymentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-emerald-200"
+                          title={selectedOrder.iyzicoPaymentUrl}
+                        >
+                          <CheckCircle2 className="w-4 h-4"/> iyzico {selectedOrder.iyzicoSandbox ? '(sandbox)' : ''}
+                        </a>
                       )}
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
