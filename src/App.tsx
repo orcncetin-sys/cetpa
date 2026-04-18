@@ -162,6 +162,8 @@ import CariEkstrePanel from './components/CariEkstrePanel';
 import MutabakatPanel from './components/MutabakatPanel';
 import DemandForecastPanel from './components/DemandForecastPanel';
 import BOMPanel from './components/BOMPanel';
+import OrderTrackingView from './components/OrderTrackingView';
+import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -1068,7 +1070,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
   );
 };
 
-const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[] }) => {
+const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses, onPrintLabels }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[], onPrintLabels?: (items: LabelItem[]) => void }) => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<InventoryItem | null>(null);
   const [editingProduct, setEditingProduct] = useState<InventoryItem | null>(null);
@@ -1171,6 +1173,24 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
           >
             <Download className="w-4 h-4" />
           </button>
+          {onPrintLabels && (
+            <button
+              onClick={() => {
+                const labelData: LabelItem[] = filteredInventory.map(i => ({
+                  id:    i.id,
+                  name:  i.name,
+                  sku:   i.sku,
+                  price: i.prices?.['Retail'] ?? i.price ?? 0,
+                  unit:  (i as InventoryItem & { unit?: string }).unit,
+                }));
+                onPrintLabels(labelData);
+              }}
+              className="apple-button-secondary p-2.5 flex items-center justify-center"
+              title={currentLanguage === 'tr' ? 'Etiket Yazdır' : 'Print Labels'}
+            >
+              <FileText className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -2648,6 +2668,9 @@ function AppContent() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
   const [iyzicoLinkLoading,  setIyzicoLinkLoading]  = useState<Record<string, boolean>>({});
+  const [labelItems,         setLabelItems]         = useState<LabelItem[] | null>(null);
+  // Public order tracking — read from URL on mount
+  const trackOrderId = new URLSearchParams(window.location.search).get('track') ?? null;
   const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
   const [isAddingOrder, setIsAddingOrder] = useState(false);
@@ -3458,6 +3481,28 @@ function AppContent() {
           }).catch(() => { /* Mikro not available — silent */ });
         }
       }
+      // Auto-send email on Shipped / Delivered (fire-and-forget)
+      if (status === 'Shipped' || status === 'Delivered') {
+        const ord  = orders.find(o => o.id === orderId);
+        const lead = ord ? leads.find(l => l.id === ord.leadId) : null;
+        const toEmail = lead?.email || (ord as (Order & { customerEmail?: string }) | undefined)?.customerEmail;
+        if (toEmail && ord) {
+          fetch('/api/email/order-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId, status,
+              customerEmail: toEmail,
+              customerName:  ord.customerName,
+              orderNo:       ord.shopifyOrderId,
+              lang:          currentLanguage,
+            }),
+          }).then(r => r.json())
+            .then((d: { success: boolean; notConfigured?: boolean }) => {
+              if (d.success) toast(currentLanguage === 'tr' ? 'Bildirim e-postası gönderildi ✓' : 'Notification email sent ✓', 'success');
+            }).catch(() => {});
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
     }
@@ -3613,6 +3658,18 @@ function AppContent() {
   };
 
   // --- Render ---
+
+  // Public order tracking — no auth required
+  if (trackOrderId) {
+    return (
+      <OrderTrackingView
+        orderId={trackOrderId}
+        currentLanguage={currentLanguage}
+        onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }}
+      />
+    );
+  }
+
   if (!isAuthReady) return (
     <div className={cn("h-screen flex items-center justify-center transition-colors duration-500", darkMode ? "bg-[#0a0a0a]" : "bg-[#F5F5F7]")}>
       <Clock className="animate-spin text-brand" />
@@ -4917,6 +4974,48 @@ function AppContent() {
                 </div>
               </div>
 
+              {/* ── Email Notifications (Resend) ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5" />
+                  {currentLanguage === 'tr' ? 'E-posta Bildirimleri (Resend)' : 'Email Notifications (Resend)'}
+                </h4>
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
+                      <Mail className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-sm text-gray-900">Resend</h4>
+                      <p className="text-[11px] text-gray-400">
+                        {currentLanguage === 'tr'
+                          ? 'Sipariş durumu değişimlerinde müşterilere otomatik bildirim gönder.'
+                          : 'Automatically notify customers when order status changes.'}
+                      </p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'apiKey',      label: currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key',       placeholder: 're_...',                   isSecret: true  },
+                    { key: 'fromAddress', label: currentLanguage === 'tr' ? 'Gönderen Adres' : 'From Address', placeholder: 'siparis@cetpa.com.tr',      isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                      <input
+                        type={f.isSecret ? 'password' : 'email'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'email'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/10 transition-all font-mono"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-400">
+                    {currentLanguage === 'tr'
+                      ? '* Değerler anında kaydedilir. Resend\'den ücretsiz API anahtarı alın: resend.com'
+                      : '* Values auto-saved. Get a free API key at resend.com'}
+                  </p>
+                </div>
+              </div>
+
               {/* ── Turkish Marketplaces ── */}
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
@@ -5758,6 +5857,7 @@ function AppContent() {
                 userRole={userRole}
                 inventoryMovements={inventoryMovements}
                 warehouses={warehouses}
+                onPrintLabels={setLabelItems}
               />
             </motion.div>
           )}
@@ -6596,6 +6696,20 @@ function AppContent() {
                           <CheckCircle2 className="w-4 h-4"/> iyzico {selectedOrder.iyzicoSandbox ? '(sandbox)' : ''}
                         </a>
                       )}
+                      {/* Copy public tracking link */}
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}/?track=${selectedOrder.id}`;
+                          navigator.clipboard.writeText(url).then(() =>
+                            toast(currentLanguage === 'tr' ? 'Takip linki kopyalandı ✓' : 'Tracking link copied ✓', 'success')
+                          ).catch(() => {});
+                        }}
+                        className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
+                        title={currentLanguage === 'tr' ? 'Müşteri takip linkini kopyala' : 'Copy customer tracking link'}
+                      >
+                        <Link className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Takip Linki' : 'Track Link'}
+                      </button>
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
                         message: currentT.confirm_delete,
@@ -7660,6 +7774,15 @@ function AppContent() {
           </div>
         )}
       </AnimatePresence>
+      {/* Inventory label sheet modal */}
+      {labelItems && (
+        <LabelSheetModal
+          items={labelItems}
+          currentLanguage={currentLanguage}
+          onClose={() => setLabelItems(null)}
+        />
+      )}
+
       <AIChat />
     </div>
   );

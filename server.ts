@@ -1966,6 +1966,160 @@ async function startServer() {
     }
   });
 
+  // ── Email (Resend) ────────────────────────────────────────────────────────────
+  // Credentials: RESEND_API_KEY env var or Firestore settings/email.resendApiKey
+  // From address: RESEND_FROM env var or settings/email.fromAddress
+
+  async function getResendKey(): Promise<{ apiKey: string; from: string } | null> {
+    const apiKey = process.env.RESEND_API_KEY;
+    const from   = process.env.RESEND_FROM || 'Cetpa <onboarding@resend.dev>';
+    if (apiKey) return { apiKey, from };
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('email').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.resendApiKey) return null;
+    return { apiKey: d.resendApiKey, from: d.fromAddress || from };
+  }
+
+  async function sendEmail(to: string, subject: string, html: string): Promise<{ id?: string; error?: string }> {
+    const creds = await getResendKey();
+    if (!creds) return { error: 'notConfigured' };
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${creds.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: creds.from, to: [to], subject, html }),
+      signal: AbortSignal.timeout(12000),
+    });
+    const d = await r.json() as { id?: string; name?: string; message?: string };
+    if (!r.ok) return { error: d.message ?? d.name ?? `HTTP ${r.status}` };
+    return { id: d.id };
+  }
+
+  // GET /api/email/status
+  app.get('/api/email/status', async (_req: Request, res: Response) => {
+    const creds = await getResendKey();
+    res.json({ configured: !!creds });
+  });
+
+  // POST /api/email/send — generic send (used by UI)
+  // Body: { to, subject, html }
+  app.post('/api/email/send', async (req: Request, res: Response) => {
+    const { to, subject, html } = req.body as { to: string; subject: string; html: string };
+    if (!to || !subject || !html) return res.status(400).json({ success: false, error: 'to, subject, html gerekli.' });
+    const result = await sendEmail(to, subject, html);
+    if (result.error === 'notConfigured') return res.status(503).json({ success: false, notConfigured: true });
+    if (result.error) return res.status(500).json({ success: false, error: result.error });
+    res.json({ success: true, id: result.id });
+  });
+
+  // POST /api/email/order-notification
+  // Body: { orderId, status, customerEmail } — sends branded status email
+  app.post('/api/email/order-notification', async (req: Request, res: Response) => {
+    const { orderId, status, customerEmail, customerName, orderNo, lang = 'tr' } =
+      req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
+    if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });
+
+    const trackUrl = `${req.protocol}://${req.get('host')}/?track=${orderId}`;
+    const tr = lang === 'tr';
+
+    const statusLabel: Record<string, { tr: string; en: string; color: string }> = {
+      Pending:    { tr: 'Sipariş Alındı',   en: 'Order Received',  color: '#f59e0b' },
+      Processing: { tr: 'Hazırlanıyor',     en: 'Processing',      color: '#8b5cf6' },
+      Shipped:    { tr: 'Kargoya Verildi',  en: 'Shipped',         color: '#3b82f6' },
+      Delivered:  { tr: 'Teslim Edildi',    en: 'Delivered',       color: '#10b981' },
+      Cancelled:  { tr: 'İptal Edildi',     en: 'Cancelled',       color: '#ef4444' },
+    };
+    const lbl = statusLabel[status] ?? { tr: status, en: status, color: '#6b7280' };
+    const subjectText = tr
+      ? `Siparişiniz güncellendi: ${lbl.tr} — #${orderNo ?? orderId.slice(0, 8)}`
+      : `Order update: ${lbl.en} — #${orderNo ?? orderId.slice(0, 8)}`;
+
+    const html = `
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+<div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+  <!-- Header -->
+  <div style="background:#1a3a5c;padding:24px 32px;">
+    <p style="margin:0;color:#fff;font-size:22px;font-weight:800;">CETPA</p>
+    <p style="margin:4px 0 0;color:rgba(255,255,255,.7);font-size:12px;">${tr ? 'Sipariş Bilgilendirme' : 'Order Notification'}</p>
+  </div>
+  <!-- Body -->
+  <div style="padding:32px;">
+    <p style="margin:0 0 8px;font-size:14px;color:#374151;">${tr ? `Sayın ${customerName},` : `Dear ${customerName},`}</p>
+    <p style="margin:0 0 24px;font-size:14px;color:#6b7280;">${tr ? 'Siparişinizin durumu güncellendi.' : 'Your order status has been updated.'}</p>
+    <!-- Status badge -->
+    <div style="text-align:center;margin:0 0 24px;">
+      <span style="display:inline-block;background:${lbl.color}1a;color:${lbl.color};font-size:15px;font-weight:700;padding:10px 28px;border-radius:999px;border:2px solid ${lbl.color}44;">
+        ${tr ? lbl.tr : lbl.en}
+      </span>
+    </div>
+    <!-- Order no -->
+    <div style="background:#f9fafb;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#9ca3af;font-weight:700;letter-spacing:.08em;">${tr ? 'SİPARİŞ NO' : 'ORDER NO'}</p>
+      <p style="margin:4px 0 0;font-size:20px;font-weight:800;color:#1a3a5c;font-family:monospace;">#${orderNo ?? orderId.slice(0, 8).toUpperCase()}</p>
+    </div>
+    <!-- CTA -->
+    <div style="text-align:center;margin-bottom:24px;">
+      <a href="${trackUrl}" style="display:inline-block;background:#1a3a5c;color:#fff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:999px;text-decoration:none;">
+        ${tr ? '📦 Siparişimi Takip Et' : '📦 Track My Order'}
+      </a>
+    </div>
+    <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">${tr ? 'Sorularınız için bize ulaşabilirsiniz.' : 'Feel free to contact us with any questions.'}</p>
+  </div>
+  <div style="background:#f9fafb;padding:16px 32px;text-align:center;">
+    <p style="margin:0;font-size:11px;color:#d1d5db;">© ${new Date().getFullYear()} Cetpa Yazılım A.Ş.</p>
+  </div>
+</div></body></html>`;
+
+    const result = await sendEmail(customerEmail, subjectText, html);
+    if (result.error === 'notConfigured') return res.status(503).json({ success: false, notConfigured: true });
+    if (result.error) return res.status(500).json({ success: false, error: result.error });
+
+    // Log to Firestore
+    if (adminDb) {
+      await adminDb.collection('emailLog').add({
+        orderId, to: customerEmail, subject: subjectText, status, sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    res.json({ success: true, id: result.id });
+  });
+
+  // ── Public Order Tracking ──────────────────────────────────────────────────
+  // GET /api/track/:orderId — no auth required
+  // Returns sanitised order data safe to expose to customers
+
+  app.get('/api/track/:orderId', async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+    const orderId = req.params['orderId'] as string;
+    try {
+      const snap = await adminDb.collection('orders').doc(orderId).get();
+      if (!snap.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      const o = snap.data() as Record<string, unknown>;
+      // Return only safe fields — no email, payment info, or internal refs
+      res.json({
+        success: true,
+        order: {
+          id:                orderId,
+          orderNo:           (o.shopifyOrderId as string | undefined) ?? orderId.slice(0, 8).toUpperCase(),
+          customerName:      o.customerName,
+          status:            o.status,
+          trackingNumber:    o.trackingNumber ?? null,
+          shippingAddress:   o.shippingAddress ?? null,
+          estimatedDelivery: o.estimatedDelivery ?? null,
+          lineItems:         (o.lineItems as unknown[] | undefined)?.map((l: unknown) => {
+            const li = l as Record<string, unknown>;
+            return { name: li.name ?? li.title ?? li.sku, quantity: li.quantity ?? 1, price: li.price ?? 0 };
+          }) ?? [],
+          updatedAt: (o.syncedAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
+          createdAt: (o.createdAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
+        },
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // ── Luca Muhasebe API ────────────────────────────────────────────────────────
   // Credentials from env (LUCA_API_KEY, LUCA_COMPANY_ID, LUCA_BASE_URL)
   // or Firestore settings/luca.
