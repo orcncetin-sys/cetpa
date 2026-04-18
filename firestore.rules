@@ -498,6 +498,34 @@ service cloud.firestore {
       allow write: if false; // server-side only via Admin SDK
     }
 
+    // ── Luca ERP Sync Log ──────────────────────────────────────────────────────
+    // Server writes via Admin SDK; Managers/Admins read in LucaSyncPanel.
+    match /lucaSyncLog/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow write: if false; // server-side only via Admin SDK
+    }
+
+    // ── WhatsApp Message Log ───────────────────────────────────────────────────
+    // Server writes via Admin SDK; Logistics/Sales/Admin read in order detail.
+    match /waMessageLog/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics']);
+      allow write: if false; // server-side only via Admin SDK
+    }
+
+    // ── Email Log ──────────────────────────────────────────────────────────────
+    // Server writes via Admin SDK; Admins read for audit.
+    match /emailLog/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow write: if false; // server-side only via Admin SDK
+    }
+
+    // ── Bill of Materials ──────────────────────────────────────────────────────
+    match /bom/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow delete: if isAdmin();
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
