@@ -1966,6 +1966,160 @@ async function startServer() {
     }
   });
 
+  // ── Luca Muhasebe API ────────────────────────────────────────────────────────
+  // Credentials from env (LUCA_API_KEY, LUCA_COMPANY_ID, LUCA_BASE_URL)
+  // or Firestore settings/luca.
+
+  type LucaCreds = { apiKey: string; companyId: string; baseUrl: string };
+
+  async function getLucaCreds(): Promise<LucaCreds | null> {
+    const apiKey    = process.env.LUCA_API_KEY;
+    const companyId = process.env.LUCA_COMPANY_ID;
+    const baseUrl   = process.env.LUCA_BASE_URL || 'https://api.luca.com.tr';
+    if (apiKey && companyId) return { apiKey, companyId, baseUrl };
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('luca').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.apiKey || !d.companyId) return null;
+    return { apiKey: d.apiKey, companyId: d.companyId, baseUrl: d.baseUrl || 'https://api.luca.com.tr' };
+  }
+
+  function lucaHeaders(creds: LucaCreds): Record<string, string> {
+    return {
+      Authorization: `Bearer ${creds.apiKey}`,
+      'X-Company-Id': creds.companyId,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+  }
+
+  // GET /api/luca/status — test connection
+  app.get('/api/luca/status', async (_req: Request, res: Response) => {
+    const creds = await getLucaCreds();
+    if (!creds) return res.json({ configured: false, connected: false });
+    try {
+      const r = await fetch(`${creds.baseUrl}/v1/company`, {
+        headers: lucaHeaders(creds),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) {
+        const d = await r.json() as Record<string, unknown>;
+        res.json({ configured: true, connected: true, companyName: d.name ?? d.companyName ?? d.unvan ?? 'OK' });
+      } else {
+        res.json({ configured: true, connected: false, error: `HTTP ${r.status}` });
+      }
+    } catch (e) {
+      res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // POST /api/luca/sync/fatura
+  // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
+  app.post('/api/luca/sync/fatura', async (req: Request, res: Response) => {
+    const creds = await getLucaCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+
+    const { orderId } = req.body as { orderId: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId gerekli.' });
+
+    const orderDoc = await adminDb.collection('orders').doc(orderId).get();
+    if (!orderDoc.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+    const order = orderDoc.data() as Record<string, unknown>;
+
+    const lines = ((order.lineItems as Record<string, unknown>[] | undefined) ?? []).map((l, i) => ({
+      siraNo:       i + 1,
+      malHizmetAdi: l.title ?? l.name ?? l.sku ?? 'Ürün',
+      miktar:       l.quantity ?? 1,
+      birim:        'Adet',
+      birimFiyat:   l.price ?? 0,
+      kdvOrani:     order.kdvOran ?? 20,
+    }));
+
+    const payload = {
+      faturaTipi:   order.faturaTipi ?? 'SATIS',
+      seriNo:       order.shopifyOrderId ?? orderId.slice(0, 8),
+      faturaTarihi: new Date().toISOString().split('T')[0],
+      vadeGunu:     30,
+      musteri: {
+        ad:         order.customerName,
+        vergiNo:    (order.taxId as string | undefined) ?? '11111111111',
+        adres:      order.shippingAddress ?? '',
+      },
+      satirlar: lines,
+      kdvDahil: true,
+    };
+
+    try {
+      const t0 = Date.now();
+      const r = await fetch(`${creds.baseUrl}/v1/faturalar`, {
+        method: 'POST',
+        headers: lucaHeaders(creds),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await r.json() as Record<string, unknown>;
+      const success = r.ok && data.success !== false;
+      const lucaFaturaNo = (data.faturaNo ?? data.id ?? null) as string | null;
+      const duration = Date.now() - t0;
+
+      if (success) {
+        await adminDb.collection('orders').doc(orderId).set({
+          lucaFaturaNo,
+          lucaSynced:   true,
+          lucaSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          hasInvoice:   true,
+        }, { merge: true });
+      }
+      res.json({ success, lucaFaturaNo, data, duration });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
+  app.post('/api/luca/sync/stok', async (_req: Request, res: Response) => {
+    const creds = await getLucaCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+
+    try {
+      const t0 = Date.now();
+      const r = await fetch(`${creds.baseUrl}/v1/stoklar?limit=500`, {
+        headers: lucaHeaders(creds),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!r.ok) return res.json({ success: false, error: `Luca HTTP ${r.status}` });
+
+      const data = await r.json() as { items?: Record<string, unknown>[] };
+      const items = data.items ?? (Array.isArray(data) ? data as Record<string, unknown>[] : []);
+
+      let created = 0; let updated = 0;
+      const batch = adminDb.batch();
+      for (const item of items) {
+        const sku  = (item.stokKodu ?? item.kod ?? item.code) as string | undefined;
+        if (!sku) continue;
+        const ref = adminDb.collection('inventory').doc(`luca-${sku}`);
+        const snap = await ref.get();
+        const data2 = {
+          name:       item.stokAdi ?? item.ad ?? item.name ?? sku,
+          sku,
+          quantity:   Number(item.miktar ?? item.stock ?? 0),
+          source:     'luca',
+          lucaSynced: true,
+          updatedAt:  admin.firestore.FieldValue.serverTimestamp(),
+        };
+        if (snap.exists) { batch.update(ref, data2); updated++; }
+        else             { batch.set(ref, { ...data2, createdAt: admin.firestore.FieldValue.serverTimestamp() }); created++; }
+      }
+      await batch.commit();
+      res.json({ success: true, total: items.length, created, updated, duration: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // ── iyzico Payment Gateway ───────────────────────────────────────────────────
   // Reads credentials from env (IYZICO_API_KEY, IYZICO_SECRET_KEY, IYZICO_BASE_URL)
   // or Firestore settings/iyzico (apiKey, secretKey, baseUrl).

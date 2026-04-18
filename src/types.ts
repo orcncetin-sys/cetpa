@@ -129,6 +129,8 @@ export interface Order {
   iyzicoPaymentUrl?: string;
   iyzicoToken?: string;
   iyzicoSandbox?: boolean;
+  lucaFaturaNo?: string;
+  lucaSynced?: boolean;
 }
 
 export interface InventoryMovement {

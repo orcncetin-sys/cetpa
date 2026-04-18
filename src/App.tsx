@@ -161,6 +161,7 @@ import MarketplacePanel from './components/MarketplacePanel';
 import CariEkstrePanel from './components/CariEkstrePanel';
 import MutabakatPanel from './components/MutabakatPanel';
 import DemandForecastPanel from './components/DemandForecastPanel';
+import BOMPanel from './components/BOMPanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -4605,11 +4606,15 @@ function AppContent() {
           )}
 
           {activeTab === 'production' && (
-            <motion.div key="production" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <motion.div key="production" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
               {!canAccess('production') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Üretim Yönetimi':'Production Management'} /> : (
                 <>
                   {!hasFullAccess('production') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <ProductionModule currentLanguage={currentLanguage} isAuthenticated={!!user} />
+                  {/* ── BOM / MRP ── */}
+                  <div className="bg-white rounded-2xl border border-gray-100 p-6">
+                    <BOMPanel currentLanguage={currentLanguage} />
+                  </div>
                 </>
               )}
             </motion.div>
@@ -4749,11 +4754,11 @@ function AppContent() {
                     onClick={async () => {
                       toast(currentLanguage==='tr'?'Luca bağlantısı test ediliyor…':'Testing Luca connection…','info');
                       try {
-                        const r = await fetch('/api/luca/kontor');
-                        const d = await r.json();
-                        if (d.notConfigured) { toast(currentLanguage==='tr'?'LUCA_API_KEY sunucuda ayarlanmamış.':'LUCA_API_KEY not set on server.','error'); return; }
-                        if (d.success) toast(currentLanguage==='tr'?'Luca bağlantısı başarılı.':'Luca connection successful.','success');
-                        else toast(d.error || 'Luca hatası', 'error');
+                        const r = await fetch('/api/luca/status');
+                        const d = await r.json() as { configured: boolean; connected: boolean; companyName?: string; error?: string };
+                        if (!d.configured) { toast(currentLanguage==='tr'?'Luca API Key yapılandırılmamış. Ayarlar\'dan girin.':'Luca API Key not configured.','error'); return; }
+                        if (d.connected) toast(`${currentLanguage==='tr'?'Luca bağlantısı başarılı':'Luca connected'}${d.companyName ? ` — ${d.companyName}` : ''}`, 'success');
+                        else toast(d.error || 'Luca bağlantı hatası', 'error');
                       } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
                     }}
                     className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-colors"
