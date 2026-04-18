@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
-import { Order } from '../types';
+import { Order, Lead } from '../types';
 
 // jsPDF's built-in fonts don't support Turkish chars
 const normTR = (s: string) => s
@@ -155,4 +155,175 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
 
   doc.save(`CETPA_Siparis_${orderNo}_${dateStr.replace(/\./g, '-')}.pdf`);
+};
+
+// ── Customer Account Statement ────────────────────────────────────────────────
+
+export const exportCustomerStatement = (
+  lead: Lead,
+  orders: Order[],
+  lang: 'tr' | 'en' = 'tr',
+) => {
+  const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W    = doc.internal.pageSize.getWidth();
+  const H    = doc.internal.pageSize.getHeight();
+  const BRAND: [number, number, number] = [26, 58, 92];   // #1a3a5c navy
+  const LIGHT: [number, number, number] = [245, 245, 247];
+  const DARK:  [number, number, number] = [29,  29,  31];
+  const GREY:  [number, number, number] = [134, 134, 139];
+
+  const today = new Date().toLocaleDateString('tr-TR');
+
+  // ── Header band ──────────────────────────────────────────────────────────
+  doc.setFillColor(...BRAND);
+  doc.rect(0, 0, W, 32, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(22);
+  doc.setTextColor(255, 255, 255);
+  doc.text('CETPA', 14, 15);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(200, 220, 255);
+  doc.text('SATIS & LOJISTIK', 14, 22);
+
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text(
+    lang === 'tr' ? 'HESAP EKSTRESI' : 'ACCOUNT STATEMENT',
+    W - 14, 15, { align: 'right' },
+  );
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(200, 220, 255);
+  doc.text(`${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, W - 14, 22, { align: 'right' });
+
+  // ── Customer info box ────────────────────────────────────────────────────
+  const boxY = 38;
+  doc.setFillColor(...LIGHT);
+  doc.roundedRect(14, boxY, W - 28, 28, 2, 2, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...DARK);
+  doc.text(lang === 'tr' ? 'MUSTERI' : 'CUSTOMER', 20, boxY + 7);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(normTR(lead.name), 20, boxY + 14);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...GREY);
+  const infoLine = [lead.company, lead.email, lead.phone].filter(Boolean).join('  •  ');
+  doc.text(normTR(infoLine), 20, boxY + 20);
+
+  if (lead.creditLimit) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...BRAND);
+    doc.text(
+      `${lang === 'tr' ? 'Kredi Limiti' : 'Credit Limit'}: ${lead.creditLimit.toLocaleString('tr-TR')} TRY`,
+      W - 20, boxY + 14, { align: 'right' },
+    );
+  }
+
+  // ── Orders table ─────────────────────────────────────────────────────────
+  const tableY = boxY + 34;
+
+  // Sort orders by date descending
+  const sorted = [...orders].sort((a, b) => {
+    const aTs = (a.syncedAt as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
+    const bTs = (b.syncedAt as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
+    return bTs - aTs;
+  });
+
+  const statusLabel: Record<string, { tr: string; en: string }> = {
+    Pending:    { tr: 'Bekliyor',       en: 'Pending'    },
+    Processing: { tr: 'Hazirlanıyor',   en: 'Processing' },
+    Shipped:    { tr: 'Kargoda',        en: 'Shipped'    },
+    Delivered:  { tr: 'Teslim Edildi',  en: 'Delivered'  },
+    Cancelled:  { tr: 'Iptal',          en: 'Cancelled'  },
+  };
+
+  const head = lang === 'tr'
+    ? [['Siparis No', 'Tarih', 'Durum', 'Urunler', 'Tutar (TRY)']]
+    : [['Order No',   'Date',  'Status', 'Items',  'Amount (TRY)']];
+
+  const body = sorted.map(o => {
+    const dateObj = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(o.syncedAt as string | number);
+    const dateStr2 = isNaN(dateObj.getTime()) ? '—' : dateObj.toLocaleDateString('tr-TR');
+    const itemNames = (o.lineItems ?? []).map(l => normTR(String(l.name ?? l.title ?? l.sku ?? ''))).slice(0, 2).join(', ');
+    const status   = statusLabel[o.status]?.[lang] ?? o.status;
+    return [
+      normTR(o.shopifyOrderId ?? o.id.slice(0, 8)),
+      dateStr2,
+      status,
+      normTR(itemNames || '—'),
+      o.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 }),
+    ];
+  });
+
+  autoTable(doc, {
+    startY:     tableY,
+    head,
+    body,
+    styles:       { fontSize: 8, cellPadding: 3, overflow: 'ellipsize' },
+    headStyles:   { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+    alternateRowStyles: { fillColor: [250, 250, 252] },
+    columnStyles: {
+      0: { cellWidth: 28, fontStyle: 'bold' },
+      1: { cellWidth: 22 },
+      2: { cellWidth: 24 },
+      3: { cellWidth: 'auto' },
+      4: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+    },
+    margin: { left: 14, right: 14 },
+  });
+
+  // ── Summary box ──────────────────────────────────────────────────────────
+  const finalY: number = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? 200;
+
+  const delivered    = sorted.filter(o => o.status === 'Delivered');
+  const outstanding  = sorted.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
+  const totalDelivered   = delivered.reduce((s, o)   => s + o.totalPrice, 0);
+  const totalOutstanding = outstanding.reduce((s, o) => s + o.totalPrice, 0);
+  const grandTotal       = sorted.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + o.totalPrice, 0);
+
+  const sumY = finalY + 6;
+  doc.setFillColor(...LIGHT);
+  doc.roundedRect(W - 80, sumY, 66, 36, 2, 2, 'F');
+
+  const rows = [
+    [lang === 'tr' ? 'Teslim Edildi' : 'Delivered',   `${totalDelivered.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+    [lang === 'tr' ? 'Bekleyen'     : 'Outstanding',  `${totalOutstanding.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+    [lang === 'tr' ? 'TOPLAM'       : 'TOTAL',        `${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+  ];
+  rows.forEach(([label, value], i) => {
+    const y = sumY + 8 + i * 9;
+    doc.setFont('helvetica', i === 2 ? 'bold' : 'normal');
+    doc.setFontSize(i === 2 ? 9 : 8);
+    const color = i === 2 ? BRAND : GREY;
+    doc.setTextColor(...color);
+    doc.text(label, W - 76, y);
+    doc.text(value, W - 18, y, { align: 'right' });
+  });
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  doc.setFillColor(...BRAND);
+  doc.rect(0, H - 14, W, 14, 'F');
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(255, 255, 255);
+  doc.text(
+    lang === 'tr'
+      ? `Bu ekstre ${today} tarihinde CETPA tarafindan uretilmistir.`
+      : `This statement was generated by CETPA on ${today}.`,
+    14, H - 6,
+  );
+  doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
+
+  doc.save(`CETPA_Ekstre_${normTR(lead.name).replace(/\s+/g, '_')}_${today.replace(/\./g, '-')}.pdf`);
 };

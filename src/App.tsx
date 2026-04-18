@@ -165,6 +165,8 @@ import BOMPanel from './components/BOMPanel';
 import OrderTrackingView from './components/OrderTrackingView';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import LucaSyncPanel from './components/LucaSyncPanel';
+import GlobalSearch from './components/GlobalSearch';
+import { exportCustomerStatement } from './utils/pdf';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -2537,6 +2539,18 @@ function AppContent() {
     return () => { document.body.style.overflow = ''; };
   }, [isMobileMenuOpen]);
 
+  // Global search keyboard shortcut — Cmd+K / Ctrl+K
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setGlobalSearchOpen(v => !v);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   const filteredOrders = orders.filter(o => {
     if (!o.createdAt) return true;
     const orderDate = (o.createdAt as { toDate?: () => Date })?.toDate ? (o.createdAt as { toDate: () => Date }).toDate() : new Date(o.createdAt as string | number | Date);
@@ -2750,6 +2764,7 @@ function AppContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   // Merge Firestore category master list with any category strings on existing inventory items
@@ -4195,6 +4210,22 @@ function AppContent() {
               <span className="hidden sm:inline">{currentLanguage === 'tr' ? 'EN' : 'TR'}</span>
             </button>
 
+            {/* Global search trigger */}
+            <button
+              onClick={() => setGlobalSearchOpen(true)}
+              className={cn(
+                "hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all outline-none flex-shrink-0",
+                darkMode
+                  ? "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/70"
+                  : "bg-black/[0.04] border-black/10 text-gray-400 hover:bg-black/[0.07]"
+              )}
+              title={currentLanguage === 'tr' ? 'Ara (⌘K)' : 'Search (⌘K)'}
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">{currentLanguage === 'tr' ? 'Ara…' : 'Search…'}</span>
+              <kbd className="hidden lg:inline text-[9px] bg-black/[0.06] px-1 py-0.5 rounded font-mono">⌘K</kbd>
+            </button>
+
             {/* Dark mode toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
@@ -4519,6 +4550,98 @@ function AppContent() {
                   );
                 })()}
               </div>
+
+              {/* ── Insight strip: revenue trend + alerts + search CTA ── */}
+              {(() => {
+                const pendingCount   = orders.filter(o => o.status === 'Pending').length;
+                const lowStockCount  = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length;
+                const shippedToday   = orders.filter(o => {
+                  const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
+                  return o.status === 'Shipped' && d.toDateString() === new Date().toDateString();
+                }).length;
+                const weekRevenue = filteredOrders
+                  .filter(o => {
+                    const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
+                    return (Date.now() - d.getTime()) < 7 * 86400000;
+                  })
+                  .reduce((s, o) => s + o.totalPrice, 0);
+
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      {
+                        icon: TrendingUp,
+                        label: currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue',
+                        value: `₺${weekRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
+                        color: 'text-emerald-600',
+                        bg:   'bg-emerald-50',
+                        sub:  currentLanguage === 'tr' ? 'Bu hafta' : 'This week',
+                        onClick: () => setActiveTab('reports'),
+                      },
+                      {
+                        icon: Clock,
+                        label: currentLanguage === 'tr' ? 'Bekleyen Sipariş' : 'Pending Orders',
+                        value: pendingCount,
+                        color: pendingCount > 5 ? 'text-amber-600' : 'text-gray-600',
+                        bg:   pendingCount > 5 ? 'bg-amber-50' : 'bg-gray-50',
+                        sub:  pendingCount > 5 ? (currentLanguage === 'tr' ? '⚠ Acil' : '⚠ Urgent') : (currentLanguage === 'tr' ? 'Normal' : 'Normal'),
+                        onClick: () => setActiveTab('orders'),
+                      },
+                      {
+                        icon: AlertTriangle,
+                        label: currentLanguage === 'tr' ? 'Düşük Stok' : 'Low Stock',
+                        value: lowStockCount,
+                        color: lowStockCount > 0 ? 'text-red-600' : 'text-gray-400',
+                        bg:   lowStockCount > 0 ? 'bg-red-50' : 'bg-gray-50',
+                        sub:  lowStockCount > 0 ? (currentLanguage === 'tr' ? 'Sipariş verilmeli' : 'Reorder needed') : (currentLanguage === 'tr' ? 'Stok yeterli' : 'Stock OK'),
+                        onClick: () => setActiveTab('inventory'),
+                      },
+                      {
+                        icon: Truck,
+                        label: currentLanguage === 'tr' ? 'Bugün Kargolandı' : 'Shipped Today',
+                        value: shippedToday,
+                        color: 'text-blue-600',
+                        bg:   'bg-blue-50',
+                        sub:  currentLanguage === 'tr' ? 'Kargoya verilen' : 'Dispatched',
+                        onClick: () => setActiveTab('lojistik'),
+                      },
+                    ].map((stat, i) => {
+                      const Icon = stat.icon;
+                      return (
+                        <button
+                          key={i}
+                          onClick={stat.onClick}
+                          className="apple-card p-4 flex items-center gap-3 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
+                        >
+                          <div className={`w-9 h-9 rounded-xl ${stat.bg} flex items-center justify-center flex-shrink-0`}>
+                            <Icon className={`w-4 h-4 ${stat.color}`} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
+                            <p className="text-[10px] font-semibold text-gray-500 truncate">{stat.label}</p>
+                            <p className="text-[10px] text-gray-400 truncate">{stat.sub}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ⌘K search shortcut banner */}
+              <button
+                onClick={() => setGlobalSearchOpen(true)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all hover:shadow-sm group",
+                  darkMode ? "bg-white/5 border-white/10 hover:bg-white/8" : "bg-gray-50 border-gray-100 hover:bg-gray-100/80"
+                )}
+              >
+                <Search className="w-4 h-4 text-gray-400" />
+                <span className={cn("flex-1 text-sm", darkMode ? "text-white/40" : "text-gray-400")}>
+                  {currentLanguage === 'tr' ? 'Sipariş, müşteri veya ürün ara…' : 'Search orders, leads or products…'}
+                </span>
+                <kbd className="hidden sm:inline text-[10px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono shadow-sm">⌘K</kbd>
+              </button>
 
               {/* Quick Actions */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -6365,6 +6488,23 @@ function AppContent() {
                           <MessageSquare className="w-4 h-4" /> WhatsApp
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          const leadOrders = orders.filter(o =>
+                            o.leadId === selectedLead.id || o.customerName === selectedLead.name
+                          );
+                          exportCustomerStatement(
+                            selectedLead,
+                            leadOrders,
+                            currentLanguage as 'tr' | 'en',
+                          );
+                        }}
+                        className="apple-button-secondary flex items-center gap-2"
+                        title={currentLanguage === 'tr' ? 'Hesap ekstresi PDF olarak indir' : 'Download account statement PDF'}
+                      >
+                        <FileDown className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Ekstre PDF' : 'Statement PDF'}
+                      </button>
                       <button onClick={() => setIsAddingOrder(true)} className="apple-button-primary">
                         <Plus className="w-4 h-4" /> {currentT.add_order}
                       </button>
@@ -7997,6 +8137,31 @@ function AppContent() {
           </div>
         )}
       </AnimatePresence>
+      {/* Global search palette (⌘K) */}
+      {globalSearchOpen && (
+        <GlobalSearch
+          orders={orders}
+          leads={leads}
+          inventory={inventory}
+          currentLanguage={currentLanguage}
+          onSelectOrder={order => {
+            setSelectedOrder(order);
+            setActiveTab('orders');
+            setGlobalSearchOpen(false);
+          }}
+          onSelectLead={lead => {
+            setSelectedLead(lead);
+            setActiveTab('crm');
+            setGlobalSearchOpen(false);
+          }}
+          onSelectProduct={() => {
+            setActiveTab('inventory');
+            setGlobalSearchOpen(false);
+          }}
+          onClose={() => setGlobalSearchOpen(false)}
+        />
+      )}
+
       {/* Inventory label sheet modal */}
       {labelItems && (
         <LabelSheetModal
