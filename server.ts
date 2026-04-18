@@ -369,6 +369,117 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
   console.log('Mikro cron sync aktif (saatte bir çalışır) ✓');
 }
 
+// ── Weekly email report cron ────────────────────────────────────────────────
+// Every Monday at 08:00 — send summary report to REPORT_RECIPIENT_EMAIL
+if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
+  cron.schedule('0 8 * * 1', async () => {
+    if (!adminDb) return;
+    const recipient = process.env.REPORT_RECIPIENT_EMAIL;
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!recipient || !resendKey) {
+      console.warn('Weekly report: REPORT_RECIPIENT_EMAIL or RESEND_API_KEY not set, skipping.');
+      return;
+    }
+
+    try {
+      const now  = new Date();
+      const d7   = new Date(now); d7.setDate(d7.getDate() - 7);
+      const d14  = new Date(now); d14.setDate(d14.getDate() - 14);
+
+      const [ordersSnap, leadsSnap, inventorySnap] = await Promise.all([
+        adminDb.collection('orders').get(),
+        adminDb.collection('leads').get(),
+        adminDb.collection('inventory').get(),
+      ]);
+
+      const orders    = ordersSnap.docs.map(d => d.data() as Record<string, unknown>);
+      const inventory = inventorySnap.docs.map(d => d.data() as Record<string, unknown>);
+      const leads     = leadsSnap.docs.map(d => d.data() as Record<string, unknown>);
+
+      function dateOf(o: Record<string, unknown>): Date {
+        const raw = o.createdAt as { toDate?: () => Date } | string | null;
+        if (!raw) return new Date(0);
+        if (typeof raw === 'string') return new Date(raw);
+        return raw.toDate?.() ?? new Date(0);
+      }
+
+      const thisWeek = orders.filter(o => dateOf(o) >= d7);
+      const prevWeek = orders.filter(o => dateOf(o) >= d14 && dateOf(o) < d7);
+      const thisRev  = thisWeek.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
+      const prevRev  = prevWeek.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
+      const lowStock = inventory.filter(i => ((i.stockLevel as number) || 0) <= ((i.lowStockThreshold as number) || 5));
+      const newLeads = leads.filter(l => dateOf(l) >= d7).length;
+
+      const deltaRev = thisRev - prevRev;
+      const deltaPct = prevRev > 0 ? Math.round((deltaRev / prevRev) * 100) : 0;
+      const arrow    = deltaRev >= 0 ? '▲' : '▼';
+      const color    = deltaRev >= 0 ? '#10b981' : '#ef4444';
+
+      const weekStr = `${d7.toLocaleDateString('tr-TR')} – ${now.toLocaleDateString('tr-TR')}`;
+
+      const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:system-ui,sans-serif;background:#f5f5f7;margin:0;padding:24px;">
+  <div style="max-width:520px;margin:auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="background:#ff4000;padding:28px 32px;">
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;letter-spacing:-.5px;">CETPA Haftalık Rapor</h1>
+      <p style="color:rgba(255,255,255,.75);margin:4px 0 0;font-size:13px;">${weekStr}</p>
+    </div>
+    <div style="padding:28px 32px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #f0f0f0;">
+            <span style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.5px;">Sipariş Sayısı</span><br>
+            <span style="font-size:28px;font-weight:800;color:#1d1d1f;">${thisWeek.length}</span>
+            <span style="color:#86868b;font-size:12px;margin-left:8px;">(geçen hafta: ${prevWeek.length})</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #f0f0f0;">
+            <span style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.5px;">Ciro</span><br>
+            <span style="font-size:28px;font-weight:800;color:#1d1d1f;">₺${thisRev.toLocaleString('tr-TR')}</span>
+            <span style="color:${color};font-size:12px;font-weight:700;margin-left:8px;">${arrow} %${Math.abs(deltaPct)}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #f0f0f0;">
+            <span style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.5px;">Yeni Müşteri Adayı</span><br>
+            <span style="font-size:28px;font-weight:800;color:#1d1d1f;">${newLeads}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 0;">
+            <span style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.5px;">Düşük Stok Uyarısı</span><br>
+            <span style="font-size:28px;font-weight:800;color:${lowStock.length > 0 ? '#ef4444' : '#10b981'};">${lowStock.length} ürün</span>
+            ${lowStock.length > 0 ? `<p style="font-size:11px;color:#86868b;margin:4px 0 0;">${lowStock.slice(0, 5).map(i => i.name as string).join(', ')}${lowStock.length > 5 ? ' …' : ''}</p>` : ''}
+          </td>
+        </tr>
+      </table>
+    </div>
+    <div style="background:#f5f5f7;padding:16px 32px;text-align:center;">
+      <p style="font-size:11px;color:#86868b;margin:0;">Bu rapor otomatik olarak gönderilmiştir. CETPA B2B SaaS</p>
+    </div>
+  </div>
+</body></html>`;
+
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from:    process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+          to:      [recipient],
+          subject: `CETPA Haftalık Rapor — ${weekStr}`,
+          html,
+        }),
+      });
+      console.log(`Weekly report sent to ${recipient}`);
+    } catch (err) {
+      console.error('Weekly report cron hatası:', err);
+    }
+  });
+  console.log('Weekly email report cron aktif (Pazartesi 08:00) ✓');
+}
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
@@ -2234,6 +2345,54 @@ async function startServer() {
       });
     }
     res.json({ success: true, id: result.id });
+  });
+
+  // ── Reports Summary API ────────────────────────────────────────────────────
+  // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
+  app.get('/api/reports/summary', async (_req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    try {
+      const now       = new Date();
+      const d30       = new Date(now); d30.setDate(d30.getDate() - 30);
+      const d60       = new Date(now); d60.setDate(d60.getDate() - 60);
+
+      const [ordersSnap, leadsSnap, inventorySnap] = await Promise.all([
+        adminDb.collection('orders').get(),
+        adminDb.collection('leads').get(),
+        adminDb.collection('inventory').get(),
+      ]);
+
+      const orders    = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
+      const leads     = leadsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
+      const inventory = inventorySnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
+
+      function dateOf(o: Record<string, unknown>): Date {
+        const raw = o.createdAt as { toDate?: () => Date } | string | null;
+        if (!raw) return new Date(0);
+        if (typeof raw === 'string') return new Date(raw);
+        return raw.toDate?.() ?? new Date(0);
+      }
+
+      const thisOrders = orders.filter(o => dateOf(o) >= d30 && dateOf(o) <= now);
+      const prevOrders = orders.filter(o => dateOf(o) >= d60 && dateOf(o) < d30);
+
+      const revenue = (arr: typeof orders) => arr.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
+      const thisRevenue = revenue(thisOrders);
+      const prevRevenue = revenue(prevOrders);
+
+      const lowStock = inventory.filter(i => ((i.stockLevel as number) || 0) <= ((i.lowStockThreshold as number) || 5));
+
+      res.json({
+        period: { start: d30.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
+        orders:     { count: thisOrders.length, prevCount: prevOrders.length, delta: thisOrders.length - prevOrders.length },
+        revenue:    { total: thisRevenue, prev: prevRevenue, delta: thisRevenue - prevRevenue },
+        leads:      { total: leads.length, new30: leads.filter(l => dateOf(l) >= d30).length },
+        inventory:  { total: inventory.length, lowStock: lowStock.length },
+        delivered:  thisOrders.filter(o => o.status === 'Delivered').length,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   // ── Public Order Tracking ──────────────────────────────────────────────────

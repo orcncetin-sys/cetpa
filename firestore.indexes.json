@@ -161,6 +161,46 @@
       "fields": [
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "sabitKiymetler",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kategori", "order": "ASCENDING" },
+        { "fieldPath": "alisTarihi", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "maliyetMerkezleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "departman", "order": "ASCENDING" },
+        { "fieldPath": "aktif", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "maliyetKalemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "merkezId", "order": "ASCENDING" },
+        { "fieldPath": "tarih", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tahsilatKayitlari",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "durum", "order": "ASCENDING" },
+        { "fieldPath": "vadeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tahsilatOdemeleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kaydiId", "order": "ASCENDING" },
+        { "fieldPath": "tarih", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

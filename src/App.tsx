@@ -156,6 +156,7 @@ import BarcodeScanner from './components/BarcodeScanner';
 import ProductForm from './components/ProductForm';
 import ProductDetail from './components/ProductDetail';
 import { exportOrderPDF } from './utils/pdf';
+import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, type MonthlySummaryRow } from './utils/export';
 import MikroSyncPanel from './components/MikroSyncPanel';
 import MarketplacePanel from './components/MarketplacePanel';
 import CariEkstrePanel from './components/CariEkstrePanel';
@@ -173,6 +174,9 @@ import { ToastProvider, useToast } from './components/Toast';
 import DateRangePicker from './components/DateRangePicker';
 import ConfirmModal from './components/ConfirmModal';
 import DealerCommissionPanel from './components/DealerCommissionPanel';
+import SabitKiymetModule from './components/SabitKiymetModule';
+import MaliyetMerkeziModule from './components/MaliyetMerkeziModule';
+import TahsilatModule from './components/TahsilatModule';
 import { translations, type Language } from './translations';
 import PricingPage from './components/PricingPage';
 import OnboardingFlow from './components/OnboardingFlow';
@@ -1191,23 +1195,9 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
             <span>{currentLanguage === 'tr' ? 'Barkod Tara' : 'Scan Barcode'}</span>
           </button>
           <button
-            onClick={() => {
-              const csv = Papa.unparse(inventory.map(i => ({
-                'Ürün Adı': i.name,
-                'SKU': i.sku,
-                'Kategori': i.category,
-                'Stok': i.stockLevel,
-                'Maliyet': i.costPrice,
-                'Fiyat': i.prices?.['Retail'] || i.price
-              })));
-              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-              const link = document.createElement('a');
-              link.href = URL.createObjectURL(blob);
-              link.download = `envanter_${new Date().toISOString().split('T')[0]}.csv`;
-              link.click();
-            }}
+            onClick={() => exportInventoryCSV(inventory, currentLanguage)}
             className="apple-button-secondary p-2.5 flex items-center justify-center"
-            title={currentLanguage === 'tr' ? 'Dışa Aktar' : 'Export'}
+            title={currentLanguage === 'tr' ? 'CSV olarak dışa aktar' : 'Export as CSV'}
           >
             <Download className="w-4 h-4" />
           </button>
@@ -2363,6 +2353,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'>('genel');
   const ACCESS_VALUES = ['✅','👁','📊','❌'] as const;
   type AccessVal = typeof ACCESS_VALUES[number];
   const defaultAccessMatrix: { section: string; access: AccessVal[] }[] = [
@@ -4742,6 +4733,55 @@ function AppContent() {
               {!canAccess('reports') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Raporlar':'Reports'} /> : (
                 <>
                   {!hasFullAccess('reports') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Export toolbar ── */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Dışa Aktar:' : 'Export:'}</span>
+                    <button onClick={() => exportOrdersCSV(orders, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
+                      <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Siparişler' : 'Orders'}
+                    </button>
+                    <button onClick={() => exportLeadsCSV(leads, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
+                      <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Müşteriler' : 'Leads'}
+                    </button>
+                    <button onClick={() => exportInventoryCSV(inventory, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
+                      <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Envanter' : 'Inventory'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Build monthly summary from orders
+                        const monthMap = new Map<string, MonthlySummaryRow>();
+                        for (const o of orders) {
+                          const raw = o.createdAt;
+                          const date = raw
+                            ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
+                            : new Date();
+                          const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                          const row = monthMap.get(month) ?? { month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 };
+                          row.orderCount++;
+                          row.revenue += o.totalPrice;
+                          if (o.status === 'Delivered') row.delivered++;
+                          monthMap.set(month, row);
+                        }
+                        for (const l of leads) {
+                          const raw = l.createdAt;
+                          const date = raw
+                            ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
+                            : new Date();
+                          const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                          const row = monthMap.get(month) ?? { month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 };
+                          row.newLeads++;
+                          monthMap.set(month, row);
+                        }
+                        exportMonthlySummaryCSV(
+                          [...monthMap.values()].sort((a, b) => a.month.localeCompare(b.month)),
+                          currentLanguage
+                        );
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-brand/30 bg-brand/5 hover:bg-brand/10 text-brand text-xs font-semibold transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Aylık Özet' : 'Monthly Summary'}
+                    </button>
+                  </div>
+
                   <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} />
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
@@ -4754,24 +4794,82 @@ function AppContent() {
 
           {/* ── Muhasebe & Finans ── */}
           {activeTab === 'muhasebe' && (
-            <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               {!canAccess('muhasebe') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Muhasebe & Finans':'Accounting & Finance'} /> : (
                 <>
                   {!hasFullAccess('muhasebe') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <ModuleHeader 
-                    title={currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'} 
-                    subtitle={currentLanguage === 'tr' ? 'Finansal kayıtları ve raporları yönetin.' : 'Manage financial records and reports.'}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
+                    subtitle={currentLanguage === 'tr' ? 'Finansal kayıtları, sabit kıymetler, maliyet merkezleri ve tahsilatları yönetin.' : 'Manage financial records, fixed assets, cost centers and collections.'}
                     icon={Calculator}
                   />
-                  <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('muhasebe')} userRole={userRole} exchangeRates={exchangeRates} createNotification={createNotification} warehouses={warehouses} employees={employees} />
 
-                  {/* ── Vade Analizi (AR Aging) ── */}
-                  <div className="mt-6">
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
-                      <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
-                    </h4>
-                    <CariEkstrePanel currentLanguage={currentLanguage} />
+                  {/* ── Sub-tab navigation ── */}
+                  <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
+                    {([
+                      { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
+                      { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
+                      { id: 'sabit-kiymet', label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
+                      { id: 'maliyet',      label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
+                    ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
+                      const Icon = tab.icon;
+                      const isActive = muhasebeTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setMuhasebeTab(tab.id)}
+                          className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {tab.label}
+                        </button>
+                      );
+                    })}
                   </div>
+
+                  {/* ── Genel Muhasebe ── */}
+                  {muhasebeTab === 'genel' && (
+                    <motion.div key="muhasebe-genel" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('muhasebe')} userRole={userRole} exchangeRates={exchangeRates} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                      {/* ── Vade Analizi (AR Aging) ── */}
+                      <div>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
+                          <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
+                        </h4>
+                        <CariEkstrePanel currentLanguage={currentLanguage} />
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* ── Tahsilat Takibi ── */}
+                  {muhasebeTab === 'tahsilat' && (
+                    <motion.div key="muhasebe-tahsilat" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <TahsilatModule
+                        currentLanguage={currentLanguage as 'tr' | 'en'}
+                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                      />
+                    </motion.div>
+                  )}
+
+                  {/* ── Sabit Kıymetler ── */}
+                  {muhasebeTab === 'sabit-kiymet' && (
+                    <motion.div key="muhasebe-sabit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <SabitKiymetModule
+                        currentLanguage={currentLanguage as 'tr' | 'en'}
+                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                      />
+                    </motion.div>
+                  )}
+
+                  {/* ── Maliyet Merkezleri ── */}
+                  {muhasebeTab === 'maliyet' && (
+                    <motion.div key="muhasebe-maliyet" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <MaliyetMerkeziModule
+                        currentLanguage={currentLanguage as 'tr' | 'en'}
+                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                      />
+                    </motion.div>
+                  )}
                 </>
               )}
             </motion.div>
@@ -6264,9 +6362,19 @@ function AppContent() {
                 subtitle={currentT.manage_leads}
                 icon={Users}
                 actionButton={
-                  <button onClick={() => setIsAddingLead(true)} className="apple-button-primary">
-                    <Plus className="w-4 h-4" /> {currentT.new_lead_btn}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => exportLeadsCSV(leads, currentLanguage)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors"
+                      title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download as CSV'}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      CSV
+                    </button>
+                    <button onClick={() => setIsAddingLead(true)} className="apple-button-primary">
+                      <Plus className="w-4 h-4" /> {currentT.new_lead_btn}
+                    </button>
+                  </div>
                 }
               />
               {/* Row 2: Search + secondary actions */}
@@ -6702,7 +6810,7 @@ function AppContent() {
                 subtitle={currentT.manage_orders}
                 icon={Package}
                 actionButton={
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     <div className="relative w-full sm:w-auto">
                       <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                       <input
@@ -6713,6 +6821,14 @@ function AppContent() {
                         className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-full text-sm outline-none focus:border-brand w-full sm:w-64 transition-all"
                       />
                     </div>
+                    <button
+                      onClick={() => exportOrdersCSV(orders, currentLanguage)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors"
+                      title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download as CSV'}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      CSV
+                    </button>
                     <button onClick={() => { setSelectedLead(null); setIsAddingOrder(true); }}
                       className="apple-button-primary">
                       <Plus className="w-4 h-4" /> {currentT.new_order}
