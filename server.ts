@@ -2457,6 +2457,187 @@ async function startServer() {
     }
   });
 
+  // ── WhatsApp Business Cloud API ─────────────────────────────────────────────
+  // Reads credentials from env vars or Firestore settings/whatsapp:
+  //   phoneNumberId  — from Meta Developer Console
+  //   accessToken    — System User Permanent Token
+  //   templateName   — pre-approved message template (default: "order_status_update")
+  //   templateLang   — BCP-47 code (default: "tr")
+
+  type WACreds = { phoneNumberId: string; accessToken: string; templateName: string; templateLang: string };
+
+  async function getWACreds(): Promise<WACreds | null> {
+    const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
+    const accessToken   = process.env.WA_ACCESS_TOKEN;
+    if (phoneNumberId && accessToken) {
+      return {
+        phoneNumberId,
+        accessToken,
+        templateName: process.env.WA_TEMPLATE_NAME || 'order_status_update',
+        templateLang: process.env.WA_TEMPLATE_LANG || 'tr',
+      };
+    }
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('whatsapp').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.phoneNumberId || !d.accessToken) return null;
+    return {
+      phoneNumberId: d.phoneNumberId,
+      accessToken:   d.accessToken,
+      templateName:  d.templateName || 'order_status_update',
+      templateLang:  d.templateLang || 'tr',
+    };
+  }
+
+  // Send a WhatsApp template message
+  async function sendWhatsApp(creds: WACreds, to: string, components: object[]): Promise<{ messageId?: string; error?: string }> {
+    // Normalize phone: strip non-digits, ensure leading country code
+    const phone = to.replace(/\D/g, '').replace(/^0/, '90');
+    if (phone.length < 10) return { error: 'Geçersiz telefon numarası.' };
+
+    const body = {
+      messaging_product: 'whatsapp',
+      to:                phone,
+      type:              'template',
+      template: {
+        name:     creds.templateName,
+        language: { code: creds.templateLang },
+        components,
+      },
+    };
+
+    const r = await fetch(`https://graph.facebook.com/v19.0/${creds.phoneNumberId}/messages`, {
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${creds.accessToken}`,
+        'Content-Type':  'application/json',
+      },
+      body:   JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await r.json() as Record<string, unknown>;
+    if (!r.ok) return { error: JSON.stringify(data) };
+    const msgs = data.messages as Array<{ id?: string }> | undefined;
+    return { messageId: msgs?.[0]?.id };
+  }
+
+  // GET /api/whatsapp/status
+  app.get('/api/whatsapp/status', async (_req: Request, res: Response) => {
+    const creds = await getWACreds();
+    if (!creds) return res.json({ configured: false });
+    // Verify the token by hitting the phone number endpoint
+    try {
+      const r = await fetch(`https://graph.facebook.com/v19.0/${creds.phoneNumberId}`, {
+        headers: { 'Authorization': `Bearer ${creds.accessToken}` },
+        signal:  AbortSignal.timeout(6000),
+      });
+      const d = await r.json() as Record<string, unknown>;
+      res.json({ configured: true, connected: r.ok, displayPhoneNumber: d.display_phone_number, error: r.ok ? undefined : d.error });
+    } catch (e) {
+      res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // POST /api/whatsapp/send
+  // Body: { to, orderNo, status, customerName, lang? }
+  app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+    const creds = await getWACreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+
+    const { to, orderNo, status, customerName, lang = 'tr' } = req.body as {
+      to: string; orderNo: string; status: string; customerName?: string; lang?: string;
+    };
+    if (!to || !orderNo || !status) {
+      return res.status(400).json({ success: false, error: 'to, orderNo ve status zorunludur.' });
+    }
+
+    // Status label in Turkish or English
+    const statusLabels: Record<string, { tr: string; en: string }> = {
+      Pending:    { tr: 'Sipariş Alındı',    en: 'Order Received'  },
+      Processing: { tr: 'Hazırlanıyor',       en: 'Processing'      },
+      Shipped:    { tr: 'Kargoya Verildi',    en: 'Shipped'         },
+      Delivered:  { tr: 'Teslim Edildi',      en: 'Delivered'       },
+      Cancelled:  { tr: 'İptal Edildi',       en: 'Cancelled'       },
+    };
+    const statusLabel = (statusLabels[status]?.[lang as 'tr' | 'en']) ?? status;
+
+    // Template body components: {{1}} = orderNo, {{2}} = statusLabel, {{3}} = customerName
+    const components = [{
+      type:       'body',
+      parameters: [
+        { type: 'text', text: orderNo },
+        { type: 'text', text: statusLabel },
+        { type: 'text', text: customerName ?? '' },
+      ],
+    }];
+
+    try {
+      const result = await sendWhatsApp(creds, to, components);
+      if (result.error) return res.json({ success: false, error: result.error });
+
+      // Log to Firestore
+      if (adminDb) {
+        await adminDb.collection('waMessageLog').add({
+          to, orderNo, status,
+          messageId:  result.messageId ?? null,
+          sentAt:     admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      res.json({ success: true, messageId: result.messageId });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // POST /api/whatsapp/order-notification
+  // Body: { orderId, status, phone, customerName, orderNo, lang }
+  // Fire-and-forget safe — always 200 even if WA not configured
+  app.post('/api/whatsapp/order-notification', async (req: Request, res: Response) => {
+    const creds = await getWACreds();
+    if (!creds) return res.json({ success: false, notConfigured: true });
+
+    const { orderId, status, phone, customerName, orderNo, lang = 'tr' } = req.body as {
+      orderId?: string; status: string; phone: string; customerName?: string; orderNo?: string; lang?: string;
+    };
+    if (!phone || !status) return res.json({ success: false, error: 'phone ve status zorunludur.' });
+
+    const statusLabels: Record<string, { tr: string; en: string }> = {
+      Pending:    { tr: 'Sipariş Alındı',    en: 'Order Received'  },
+      Processing: { tr: 'Hazırlanıyor',       en: 'Processing'      },
+      Shipped:    { tr: 'Kargoya Verildi',    en: 'Shipped'         },
+      Delivered:  { tr: 'Teslim Edildi',      en: 'Delivered'       },
+      Cancelled:  { tr: 'İptal Edildi',       en: 'Cancelled'       },
+    };
+    const statusLabel = (statusLabels[status]?.[lang as 'tr' | 'en']) ?? status;
+    const no = orderNo ?? orderId?.slice(0, 8).toUpperCase() ?? '—';
+
+    const components = [{
+      type:       'body',
+      parameters: [
+        { type: 'text', text: no },
+        { type: 'text', text: statusLabel },
+        { type: 'text', text: customerName ?? '' },
+      ],
+    }];
+
+    try {
+      const result = await sendWhatsApp(creds, phone, components);
+      if (adminDb) {
+        await adminDb.collection('waMessageLog').add({
+          to: phone, orderId: orderId ?? null, orderNo: no, status,
+          messageId:  result.messageId ?? null,
+          error:      result.error ?? null,
+          sentAt:     admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      res.json({ success: !result.error, messageId: result.messageId, error: result.error });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -164,6 +164,7 @@ import DemandForecastPanel from './components/DemandForecastPanel';
 import BOMPanel from './components/BOMPanel';
 import OrderTrackingView from './components/OrderTrackingView';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
+import LucaSyncPanel from './components/LucaSyncPanel';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 import { ToastProvider, useToast } from './components/Toast';
@@ -3481,11 +3482,13 @@ function AppContent() {
           }).catch(() => { /* Mikro not available — silent */ });
         }
       }
-      // Auto-send email on Shipped / Delivered (fire-and-forget)
+      // Auto-send email + WhatsApp on Shipped / Delivered (fire-and-forget)
       if (status === 'Shipped' || status === 'Delivered') {
         const ord  = orders.find(o => o.id === orderId);
         const lead = ord ? leads.find(l => l.id === ord.leadId) : null;
         const toEmail = lead?.email || (ord as (Order & { customerEmail?: string }) | undefined)?.customerEmail;
+        const toPhone = lead?.phone || (ord as (Order & { customerPhone?: string }) | undefined)?.customerPhone;
+
         if (toEmail && ord) {
           fetch('/api/email/order-notification', {
             method: 'POST',
@@ -3500,6 +3503,24 @@ function AppContent() {
           }).then(r => r.json())
             .then((d: { success: boolean; notConfigured?: boolean }) => {
               if (d.success) toast(currentLanguage === 'tr' ? 'Bildirim e-postası gönderildi ✓' : 'Notification email sent ✓', 'success');
+            }).catch(() => {});
+        }
+
+        // WhatsApp notification (fire-and-forget)
+        if (toPhone && ord) {
+          fetch('/api/whatsapp/order-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId, status,
+              phone:        toPhone,
+              customerName: ord.customerName,
+              orderNo:      ord.shopifyOrderId,
+              lang:         currentLanguage,
+            }),
+          }).then(r => r.json())
+            .then((d: { success: boolean; notConfigured?: boolean }) => {
+              if (d.success) toast(currentLanguage === 'tr' ? 'WhatsApp bildirimi gönderildi ✓' : 'WhatsApp notification sent ✓', 'success');
             }).catch(() => {});
         }
       }
@@ -4933,6 +4954,50 @@ function AppContent() {
                 </div>
               </div>
 
+              {/* ── WhatsApp Business ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  {currentLanguage === 'tr' ? 'WhatsApp Business (Meta Cloud API)' : 'WhatsApp Business (Meta Cloud API)'}
+                </h4>
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center">
+                      <MessageSquare className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-sm text-gray-900">WhatsApp Business API</h4>
+                      <p className="text-[11px] text-gray-400">
+                        {currentLanguage === 'tr'
+                          ? 'Müşterilere kargo ve teslimat bildirimleri gönder.'
+                          : 'Send order shipping & delivery notifications to customers.'}
+                      </p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'phoneNumberId', label: currentLanguage === 'tr' ? 'Phone Number ID'  : 'Phone Number ID',   placeholder: '1234567890',                isSecret: false },
+                    { key: 'accessToken',   label: currentLanguage === 'tr' ? 'Access Token'     : 'Access Token',      placeholder: 'EAA...',                    isSecret: true  },
+                    { key: 'templateName',  label: currentLanguage === 'tr' ? 'Şablon Adı'       : 'Template Name',     placeholder: 'order_status_update',       isSecret: false },
+                    { key: 'templateLang',  label: currentLanguage === 'tr' ? 'Şablon Dili'      : 'Template Language', placeholder: 'tr',                        isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                      <input
+                        type={f.isSecret ? 'password' : 'text'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'whatsapp'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-green-400 focus:ring-2 focus:ring-green-400/10 transition-all font-mono"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-400">
+                    {currentLanguage === 'tr'
+                      ? '* Meta Developer Console\'dan System User Permanent Token alın. Mesaj şablonu önceden Meta tarafından onaylanmış olmalıdır.'
+                      : '* Get a System User Permanent Token from Meta Developer Console. The message template must be pre-approved by Meta.'}
+                  </p>
+                </div>
+              </div>
+
               {/* ── iyzico Payment Gateway ── */}
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
@@ -5746,6 +5811,15 @@ function AppContent() {
                   {currentLanguage === 'tr' ? 'Mikro\'dan Veri Aktar' : 'Import Data from Mikro'}
                 </h4>
                 <MikroSyncPanel currentLanguage={currentLanguage} />
+              </div>
+
+              {/* ── Luca Sync Panel ── */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5" />
+                  {currentLanguage === 'tr' ? 'Luca Muhasebe Entegrasyonu' : 'Luca Accounting Sync'}
+                </h4>
+                <LucaSyncPanel currentLanguage={currentLanguage} />
               </div>
 
               <button
