@@ -65,7 +65,7 @@ export function exportLeadsCSV(leads: Lead[], lang: string = 'tr'): void {
     [tr ? 'Kredi Limiti (₺)'  : 'Credit Limit (₺)']:l.creditLimit ?? 0,
     [tr ? 'Ödeme Vadesi'       : 'Payment Terms']:   l.paymentTerms ?? '',
     [tr ? 'Atanan'             : 'Assigned To']:     l.assignedTo ?? '',
-    [tr ? 'AI Skoru'           : 'AI Score']:        l.aiScore ?? '',
+    [tr ? 'AI Skoru'           : 'AI Score']:        l.score ?? '',
     [tr ? 'Oluşturulma'        : 'Created']:
       l.createdAt
         ? (typeof l.createdAt === 'string'
@@ -98,6 +98,60 @@ export function exportInventoryCSV(inventory: InventoryItem[], lang: string = 't
 
   const csv = Papa.unparse(rows);
   downloadCSV(csv, `CETPA_Envanter_${ts()}.csv`);
+}
+
+// ── Stock Movements ───────────────────────────────────────────────────────────
+
+export interface StockMovementRow {
+  id: string;
+  productName: string;
+  productId: string;
+  type: 'in' | 'out' | 'adjustment';
+  quantity: number;
+  reason?: string;
+  notes?: string;
+  timestamp: string | { toDate?: () => Date };
+}
+
+export function exportStockMovementsCSV(movements: StockMovementRow[], lang: string = 'tr'): void {
+  const tr = lang === 'tr';
+  const rows = movements.map(m => {
+    let tsStr = '';
+    if (m.timestamp) {
+      if (typeof m.timestamp === 'string') {
+        tsStr = m.timestamp.slice(0, 10);
+      } else {
+        tsStr = (m.timestamp as { toDate?: () => Date }).toDate?.().toISOString().slice(0, 10) ?? '';
+      }
+    }
+    return {
+      [tr ? 'Ürün'         : 'Product']:    m.productName,
+      [tr ? 'Tür'          : 'Type']:       m.type === 'in' ? (tr ? 'Giriş' : 'In') : m.type === 'out' ? (tr ? 'Çıkış' : 'Out') : (tr ? 'Düzeltme' : 'Adjustment'),
+      [tr ? 'Miktar'       : 'Quantity']:   m.quantity,
+      [tr ? 'Sebep'        : 'Reason']:     m.reason ?? '',
+      [tr ? 'Notlar'       : 'Notes']:      m.notes ?? '',
+      [tr ? 'Tarih'        : 'Date']:       tsStr,
+    };
+  });
+  const csv = Papa.unparse(rows);
+  downloadCSV(csv, `CETPA_Stok_Hareketleri_${ts()}.csv`);
+}
+
+// ── Inventory CSV Import Template ─────────────────────────────────────────────
+
+export function downloadInventoryImportTemplate(): void {
+  const headers = [
+    'name', 'sku', 'category', 'stockLevel', 'lowStockThreshold',
+    'price_Retail', 'price_B2B Standard', 'price_B2B Premium', 'price_Dealer',
+    'supplier', 'warehouseId',
+  ];
+  const example = [
+    'Örnek Ürün', 'SKU-001', 'Elektronik', '100', '10',
+    '299.90', '249.90', '229.90', '199.90',
+    'Tedarikçi A', 'depo-1',
+  ];
+  const csv = Papa.unparse([headers, example], { header: false });
+  downloadCSV(csv, 'CETPA_Envanter_Sablon.csv');
 }
 
 // ── Monthly Summary ───────────────────────────────────────────────────────────

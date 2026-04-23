@@ -17,6 +17,8 @@ interface Order {
 interface FinancePanelProps {
   orders: Order[];
   currentLanguage: 'tr' | 'en';
+  exchangeRates?: Record<string, number> | null;
+  displayCurrency?: 'TRY' | 'USD' | 'EUR';
 }
 
 const toDate = (val: Order['syncedAt']): Date => {
@@ -25,9 +27,16 @@ const toDate = (val: Order['syncedAt']): Date => {
   return new Date(val as string | number);
 };
 
-const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage }) => {
+const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, exchangeRates, displayCurrency: externalCurrency }) => {
   const [sort, setSort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'date', dir: 'desc'});
+  const [localCurrency, setLocalCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   const toggleSort = (key: string) => setSort(s => ({key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc'}));
+
+  // Use external currency if provided, otherwise local toggle
+  const currency = externalCurrency ?? localCurrency;
+  const fxRate   = currency === 'USD' ? (exchangeRates?.USD || 1) : currency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+  const sym      = currency === 'TRY' ? '₺' : currency === 'USD' ? '$' : '€';
+  const cvt      = (v: number) => (currency === 'TRY' ? v : v / fxRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
 
   const totalRevenue = orders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
   const totalCost    = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
@@ -68,9 +77,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage }) 
   };
 
   const kpis = [
-    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: `₺${totalRevenue.toLocaleString('tr-TR')}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: `₺${totalCost.toLocaleString('tr-TR')}`,    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
-    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `₺${profit.toLocaleString('tr-TR')}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
+    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: `${sym}${cvt(totalRevenue)}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: `${sym}${cvt(totalCost)}`,    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
+    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `${sym}${cvt(profit)}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
   ];
 
   return (
@@ -80,7 +89,16 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage }) 
         {kpis.map((k, i) => {
           const Icon = k.icon;
           return (
-            <div key={i} className={`apple-card p-6 ${k.bg}`}>
+            <div key={i} className={`apple-card p-6 ${k.bg} relative`}>
+              {/* Currency toggle — only on first card */}
+              {i === 0 && !externalCurrency && (
+                <button
+                  onClick={() => setLocalCurrency(c => c === 'TRY' ? 'USD' : c === 'USD' ? 'EUR' : 'TRY')}
+                  className="absolute top-3 right-3 text-[9px] font-bold bg-white/70 px-1.5 py-0.5 rounded-full text-gray-500 hover:bg-white transition-colors border border-gray-200"
+                >
+                  {currency}
+                </button>
+              )}
               <div className="flex items-center gap-3 mb-2">
                 <Icon className={k.color} size={20} />
                 <h3 className="text-sm font-bold text-gray-500">{k.label}</h3>
@@ -152,7 +170,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage }) 
                     </td>
                     <td className="py-3.5 px-5 font-medium text-gray-800 hidden sm:table-cell">{o.customerName || '—'}</td>
                     <td className="py-3.5 px-5 text-right font-bold text-gray-900">
-                      ₺{(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      {sym}{cvt(o.totalPrice || 0)}
                     </td>
                     <td className="py-3.5 px-5 text-center">
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>

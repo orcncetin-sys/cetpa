@@ -2,7 +2,7 @@ import DashboardAnalysis from './components/DashboardAnalysis';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -102,7 +102,8 @@ import {
   Flame,
   Award,
   Moon,
-  Sun
+  Sun,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -125,7 +126,8 @@ import {
   type Warehouse,
   type RouteStop,
   type LucaConfig,
-  type MikroConfig
+  type MikroConfig,
+  type Supplier
 } from './types';
 import { scoreLead } from './services/geminiService';
 import { syncShopify, createShopifyDraftOrder } from './services/shopifyService';
@@ -156,7 +158,7 @@ import BarcodeScanner from './components/BarcodeScanner';
 import ProductForm from './components/ProductForm';
 import ProductDetail from './components/ProductDetail';
 import { exportOrderPDF } from './utils/pdf';
-import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, type MonthlySummaryRow } from './utils/export';
+import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, exportStockMovementsCSV, downloadInventoryImportTemplate, type MonthlySummaryRow, type StockMovementRow } from './utils/export';
 import MikroSyncPanel from './components/MikroSyncPanel';
 import MarketplacePanel from './components/MarketplacePanel';
 import CariEkstrePanel from './components/CariEkstrePanel';
@@ -231,6 +233,7 @@ interface B2BPortalProps {
   inventory: InventoryItem[];
   currentT: Record<string, string>;
   currentLanguage: string;
+  exchangeRates?: Record<string, number> | null;
 }
 
 // --- Error Handling ---
@@ -363,7 +366,7 @@ const SortHeader = ({
 // QuotationItem, Quotation, B2BPortalProps, PriceList are imported from ./types
 
 // --- B2B Portal Components ---
-const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage }: B2BPortalProps) => {
+const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage, exchangeRates }: B2BPortalProps) => {
   const [b2bTab, setB2bTab] = useState<'quotations'|'dealers'|'pricelists'|'komisyon'>('quotations');
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -375,6 +378,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
   const [isEditingQuotation, setIsEditingQuotation] = useState(false);
   const [isEditingPriceList, setIsEditingPriceList] = useState(false);
   const [isEditingCredit, setIsEditingCredit] = useState(false);
+  const [dealerCurrency, setDealerCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   const [creditInfo, setCreditInfo] = useState({ limit: 500000, used: 200000 });
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'createdAt', direction: 'desc' });
@@ -664,19 +668,36 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
       {b2bTab === 'dealers' && (
         <div className="space-y-4">
           {/* KPI row */}
+          {(() => {
+            const dcRate = dealerCurrency === 'USD' ? (exchangeRates?.USD || 1) : dealerCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+            const dcSym  = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
+            const totalCredit = dealers.reduce((s,d)=>s+(d.creditLimit as number||0),0);
+            const cvtCredit   = dealerCurrency === 'TRY' ? totalCredit : totalCredit / dcRate;
+            return (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: currentLanguage==='tr'?'Toplam Bayi':'Total Dealers', value: dealers.length, color: 'text-brand', bg: 'bg-brand/10' },
-              { label: currentLanguage==='tr'?'Aktif':'Active', value: dealers.filter(d=>d.status==='Active').length, color: 'text-green-600', bg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Toplam Kredi Limiti':'Total Credit', value: `₺${dealers.reduce((s,d)=>s+(d.creditLimit as number||0),0).toLocaleString('tr-TR',{maximumFractionDigits:0})}`, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: currentLanguage==='tr'?'Toplam Teklif':'Quotes', value: quotations.length, color: 'text-purple-600', bg: 'bg-purple-50' },
-            ].map((k,i) => (
-              <div key={i} className="apple-card p-4">
-                <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
-                <p className="text-xs text-gray-500 mt-1">{k.label}</p>
-              </div>
-            ))}
+            <div className="apple-card p-4">
+              <p className="text-xl font-bold text-brand">{dealers.length}</p>
+              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Bayi':'Total Dealers'}</p>
+            </div>
+            <div className="apple-card p-4">
+              <p className="text-xl font-bold text-green-600">{dealers.filter(d=>d.status==='Active').length}</p>
+              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Aktif':'Active'}</p>
+            </div>
+            <div className="apple-card p-4 relative">
+              <button
+                onClick={() => setDealerCurrency(c => c==='TRY'?'USD':c==='USD'?'EUR':'TRY')}
+                className="absolute top-2.5 right-2.5 text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full hover:bg-blue-200 transition-colors"
+              >{dealerCurrency}</button>
+              <p className="text-xl font-bold text-blue-600">{dcSym}{cvtCredit.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Kredi Limiti':'Total Credit'}</p>
+            </div>
+            <div className="apple-card p-4">
+              <p className="text-xl font-bold text-purple-600">{quotations.length}</p>
+              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Teklif':'Quotes'}</p>
+            </div>
           </div>
+            );
+          })()}
           {/* Dealers table */}
           <div className="apple-card p-0 overflow-hidden">
             <div className="overflow-x-auto">
@@ -705,7 +726,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
                       <td className="hidden sm:table-cell">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand">{d.priceTier as string || 'Dealer'}</span>
                       </td>
-                      <td className="hidden lg:table-cell font-semibold">₺{(d.creditLimit as number||0).toLocaleString('tr-TR')}</td>
+                      <td className="hidden lg:table-cell font-semibold">{dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€'}{(dealerCurrency === 'TRY' ? (d.creditLimit as number||0) : (d.creditLimit as number||0) / (dealerCurrency === 'USD' ? (exchangeRates?.USD||1) : (exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
                       <td className="hidden lg:table-cell text-gray-500">{d.paymentTerms as string || '30'} {currentLanguage==='tr'?'gün':'days'}</td>
                       <td>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.status==='Active'?'bg-green-100 text-green-600':'bg-gray-100 text-gray-500'}`}>
@@ -1128,6 +1149,72 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
   const [autoReorderLoading, setAutoReorderLoading] = useState(false);
   const [autoReorderResult, setAutoReorderResult]   = useState<string | null>(null);
 
+  // ── CSV Import state ────────────────────────────────────────────────────────
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importRows, setImportRows]           = useState<Record<string, string>[]>([]);
+  const [importLoading, setImportLoading]     = useState(false);
+  const [importResult, setImportResult]       = useState<string | null>(null);
+  const importFileRef                         = useRef<HTMLInputElement>(null);
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        setImportRows(results.data);
+        setImportModalOpen(true);
+      },
+    });
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = async () => {
+    setImportLoading(true);
+    let upserted = 0;
+    try {
+      for (const row of importRows) {
+        const sku = (row.sku ?? '').trim();
+        if (!sku) continue;
+        const existing = inventory.find(i => i.sku === sku);
+        const payload: Record<string, unknown> = {
+          name:              (row.name ?? '').trim(),
+          sku,
+          category:          (row.category ?? '').trim(),
+          stockLevel:        Number(row.stockLevel)        || 0,
+          lowStockThreshold: Number(row.lowStockThreshold) || 5,
+          prices: {
+            'Retail':       Number(row['price_Retail'])         || 0,
+            'B2B Standard': Number(row['price_B2B Standard'])   || 0,
+            'B2B Premium':  Number(row['price_B2B Premium'])    || 0,
+            'Dealer':       Number(row['price_Dealer'])         || 0,
+          },
+          supplier:    (row.supplier    ?? '').trim(),
+          warehouseId: (row.warehouseId ?? '').trim(),
+          updatedAt:   serverTimestamp(),
+        };
+        if (existing) {
+          await updateDoc(doc(db, 'inventory', existing.id), payload);
+        } else {
+          await addDoc(collection(db, 'inventory'), { ...payload, createdAt: serverTimestamp() });
+        }
+        upserted++;
+      }
+      setImportResult(
+        currentLanguage === 'tr'
+          ? `${upserted} ürün başarıyla içe aktarıldı.`
+          : `${upserted} products imported successfully.`
+      );
+      setImportModalOpen(false);
+      setImportRows([]);
+    } catch (err) {
+      setImportResult(err instanceof Error ? err.message : 'Hata / Error');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const handleAutoReorder = async () => {
     setAutoReorderLoading(true);
     setAutoReorderResult(null);
@@ -1194,6 +1281,21 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
             <Scan className="w-4 h-4" />
             <span>{currentLanguage === 'tr' ? 'Barkod Tara' : 'Scan Barcode'}</span>
           </button>
+          {/* hidden CSV file picker */}
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <button
+            onClick={() => importFileRef.current?.click()}
+            className="apple-button-secondary p-2.5 flex items-center justify-center"
+            title={currentLanguage === 'tr' ? 'CSV olarak içe aktar' : 'Import from CSV'}
+          >
+            <Upload className="w-4 h-4" />
+          </button>
           <button
             onClick={() => exportInventoryCSV(inventory, currentLanguage)}
             className="apple-button-secondary p-2.5 flex items-center justify-center"
@@ -1232,6 +1334,164 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
           </button>
         </div>
       )}
+
+      {/* CSV import result banner */}
+      {importResult && (
+        <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-blue-700">
+          <FileUp className="w-4 h-4 flex-shrink-0" />
+          <span>{importResult}</span>
+          <button onClick={() => setImportResult(null)} className="ml-auto text-blue-400 hover:text-blue-600">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* ── Phase 31: Low-Stock Watchlist Panel ── */}
+      {(() => {
+        const critical = inventory.filter(i => (i.stockLevel ?? 0) === 0);
+        const warning  = inventory.filter(i => (i.stockLevel ?? 0) > 0 && (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
+        if (critical.length === 0 && warning.length === 0) return null;
+        return (
+          <div className="rounded-2xl border overflow-hidden" style={{ borderColor: critical.length > 0 ? '#fca5a5' : '#fde68a' }}>
+            <div className={`px-4 py-3 flex items-center justify-between ${critical.length > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle className={`w-4 h-4 ${critical.length > 0 ? 'text-red-500' : 'text-amber-500'}`} />
+                <span className={`text-xs font-bold ${critical.length > 0 ? 'text-red-700' : 'text-amber-700'}`}>
+                  {currentLanguage === 'tr'
+                    ? `${critical.length > 0 ? `${critical.length} kritik (0 stok)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} uyarı (düşük stok)` : ''}`
+                    : `${critical.length > 0 ? `${critical.length} critical (out of stock)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} low stock warning` : ''}`}
+                </span>
+              </div>
+              <button onClick={() => void handleAutoReorder()} disabled={autoReorderLoading}
+                className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors ${critical.length > 0 ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
+                {autoReorderLoading ? '…' : (currentLanguage === 'tr' ? '⚡ Otomatik SAS' : '⚡ Auto-Reorder')}
+              </button>
+            </div>
+            <div className="bg-white divide-y divide-gray-50 max-h-48 overflow-y-auto">
+              {[...critical, ...warning].slice(0, 10).map(item => {
+                const pct = item.lowStockThreshold > 0 ? Math.min((item.stockLevel ?? 0) / item.lowStockThreshold, 1) : 0;
+                const isCrit = (item.stockLevel ?? 0) === 0;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
+                      <p className="text-[10px] text-gray-400">{item.sku}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${isCrit ? 'bg-red-500' : 'bg-amber-400'}`} style={{ width: `${pct * 100}%` }} />
+                      </div>
+                      <span className={`text-[10px] font-bold w-10 text-right ${isCrit ? 'text-red-600' : 'text-amber-600'}`}>
+                        {item.stockLevel ?? 0}/{item.lowStockThreshold ?? 5}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* CSV Import Preview Modal */}
+      <AnimatePresence>
+        {importModalOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden"
+            >
+              {/* header */}
+              <div className="px-8 py-5 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center text-white">
+                    <FileUp className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-[#1D1D1F]">
+                      {currentLanguage === 'tr' ? 'CSV İçe Aktarma Önizlemesi' : 'CSV Import Preview'}
+                    </h2>
+                    <p className="text-xs text-[#86868B]">
+                      {currentLanguage === 'tr'
+                        ? `${importRows.length} satır — SKU eşleşirse güncellenir, yoksa eklenir`
+                        : `${importRows.length} rows — existing SKUs will be updated, new ones added`}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setImportModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* table */}
+              <div className="flex-1 overflow-auto p-6">
+                <div className="text-xs text-gray-400 mb-3 flex items-center gap-2">
+                  <span>{currentLanguage === 'tr' ? 'Şablon indir:' : 'Download template:'}</span>
+                  <button
+                    onClick={() => downloadInventoryImportTemplate()}
+                    className="text-brand font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" /> CETPA_Envanter_Sablon.csv
+                  </button>
+                </div>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      {['sku', 'name', 'category', 'stockLevel', 'price_Retail', 'price_B2B Standard', 'supplier'].map(h => (
+                        <th key={h} className="px-3 py-2 font-bold text-gray-500 border border-gray-100 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.slice(0, 50).map((row, i) => {
+                      const exists = inventory.some(inv => inv.sku === (row.sku ?? '').trim());
+                      return (
+                        <tr key={i} className={exists ? 'bg-amber-50' : 'bg-white'}>
+                          {['sku', 'name', 'category', 'stockLevel', 'price_Retail', 'price_B2B Standard', 'supplier'].map(h => (
+                            <td key={h} className="px-3 py-1.5 border border-gray-100 text-gray-700 max-w-[140px] truncate">{row[h] ?? ''}</td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {importRows.length > 50 && (
+                  <p className="text-xs text-gray-400 mt-2 text-center">
+                    {currentLanguage === 'tr' ? `...ve ${importRows.length - 50} satır daha` : `...and ${importRows.length - 50} more rows`}
+                  </p>
+                )}
+                <div className="flex items-center gap-3 mt-4 text-xs text-gray-500">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-sm bg-amber-100 border border-amber-200 inline-block" />
+                    {currentLanguage === 'tr' ? 'Mevcut SKU — güncellenecek' : 'Existing SKU — will be updated'}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-sm bg-white border border-gray-200 inline-block" />
+                    {currentLanguage === 'tr' ? 'Yeni SKU — eklenecek' : 'New SKU — will be added'}
+                  </span>
+                </div>
+              </div>
+
+              {/* footer */}
+              <div className="px-8 py-5 bg-gray-50/50 border-t border-gray-100 flex items-center justify-end gap-3">
+                <button onClick={() => setImportModalOpen(false)} className="apple-button-secondary">
+                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  onClick={() => void handleConfirmImport()}
+                  disabled={importLoading}
+                  className="apple-button-primary px-10 flex items-center gap-2"
+                >
+                  {importLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  {currentLanguage === 'tr' ? 'İçe Aktar' : 'Import'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Category Filters */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none -mx-1 px-1">
@@ -1315,12 +1575,16 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                       currentSort={sortConfig} 
                       onSort={handleSort} 
                     />
-                    <SortHeader 
-                      label={currentT.price} 
-                      sortKey="price" 
-                      currentSort={sortConfig} 
-                      onSort={handleSort} 
+                    <SortHeader
+                      label={currentT.price}
+                      sortKey="price"
+                      currentSort={sortConfig}
+                      onSort={handleSort}
                     />
+                    {/* Phase 59: Cost Price + Margin column */}
+                    <th className="px-4 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest hidden xl:table-cell">
+                      {currentLanguage === 'tr' ? 'Maliyet / Marj' : 'Cost / Margin'}
+                    </th>
                     <th className="px-6 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest">{currentT.status}</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest text-right">{currentT.actions}</th>
                   </tr>
@@ -1331,7 +1595,15 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
                           <span className="text-sm font-bold text-gray-900">{item.name}</span>
-                          <span className="text-[10px] font-mono text-[#86868B] tracking-wider">{item.sku}</span>
+                          {/* Phase 52: SKU click-to-copy */}
+                          <button
+                            className="flex items-center gap-1 w-fit group/sku mt-0.5"
+                            onClick={e => { e.stopPropagation(); void navigator.clipboard.writeText(item.sku); }}
+                            title={currentT.copy_sku || 'Copy SKU'}
+                          >
+                            <span className="text-[10px] font-mono text-[#86868B] tracking-wider group-hover/sku:text-brand transition-colors">{item.sku}</span>
+                            <Copy className="w-2.5 h-2.5 text-gray-300 group-hover/sku:text-brand opacity-0 group-hover/sku:opacity-100 transition-all" />
+                          </button>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -1343,33 +1615,105 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                         {item.location || currentT.main_warehouse}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-sm font-bold",
-                            item.stockLevel <= item.lowStockThreshold ? "text-red-500" : "text-gray-900"
-                          )}>
-                            {item.stockLevel}
-                          </span>
-                          {item.stockLevel <= item.lowStockThreshold && (
-                            <AlertTriangle className="w-3 h-3 text-red-500" />
-                          )}
-                        </div>
+                        {/* Phase 33: Stock mini-gauge */}
+                        {(() => {
+                          const stock  = item.stockLevel ?? 0;
+                          const thresh = item.lowStockThreshold ?? 5;
+                          const refMax = Math.max(thresh * 4, stock, 20);
+                          const pct    = Math.min(stock / refMax, 1);
+                          const isCrit = stock === 0;
+                          const isLow  = stock > 0 && stock <= thresh;
+                          const barColor = isCrit ? 'bg-red-500' : isLow ? 'bg-amber-400' : 'bg-emerald-400';
+                          return (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className={cn("text-sm font-bold", isCrit ? "text-red-500" : isLow ? "text-amber-600" : "text-gray-900")}>
+                                  {stock}
+                                </span>
+                                {(isCrit || isLow) && <AlertTriangle className={`w-3 h-3 ${isCrit ? 'text-red-500' : 'text-amber-500'}`} />}
+                              </div>
+                              <div className="w-16 h-1 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${pct * 100}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-sm font-bold text-gray-900">
                           {(item.price ?? item.prices?.['Retail'] ?? 0).toLocaleString()} TL
                         </span>
                       </td>
+                      {/* Phase 59: Cost Price + Margin cell */}
+                      <td className="px-4 py-4 hidden xl:table-cell">
+                        {(() => {
+                          const retail = item.price ?? item.prices?.['Retail'] ?? 0;
+                          const cost   = item.costPrice ?? item.cost ?? 0;
+                          const margin = retail > 0 && cost > 0 ? Math.round(((retail - cost) / retail) * 100) : null;
+                          return (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-xs font-semibold text-gray-500">{cost > 0 ? `₺${cost.toLocaleString('tr-TR')}` : '—'}</span>
+                              {margin !== null && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full w-fit ${margin >= 30 ? 'bg-emerald-50 text-emerald-700' : margin >= 15 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>
+                                  %{margin}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-6 py-4">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider",
-                          item.stockLevel <= item.lowStockThreshold ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"
-                        )}>
-                          {item.stockLevel <= item.lowStockThreshold ? currentT.critical : currentT.normal}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={cn(
+                            "px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider w-fit",
+                            item.stockLevel <= item.lowStockThreshold ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"
+                          )}>
+                            {item.stockLevel <= item.lowStockThreshold ? currentT.critical : currentT.normal}
+                          </span>
+                          {/* Phase 66: Last movement date */}
+                          {(() => {
+                            const lastMov = movements
+                              .filter(m => (m as { productId?: string }).productId === item.id || m.productName === item.name)
+                              .sort((a, b) => {
+                                const getT = (x: unknown) => {
+                                  if (!x) return 0;
+                                  if (typeof (x as { toDate?: () => Date }).toDate === 'function') return (x as { toDate: () => Date }).toDate().getTime();
+                                  return new Date(x as string | number).getTime();
+                                };
+                                return getT(b.timestamp) - getT(a.timestamp);
+                              })[0];
+                            if (!lastMov) return null;
+                            const d = typeof (lastMov.timestamp as { toDate?: () => Date }).toDate === 'function'
+                              ? (lastMov.timestamp as { toDate: () => Date }).toDate()
+                              : new Date(lastMov.timestamp as string | number);
+                            const daysAgo = Math.round((Date.now() - d.getTime()) / 86400000);
+                            return (
+                              <span className="text-[9px] text-gray-400" title={d.toLocaleDateString()}>
+                                {daysAgo === 0
+                                  ? (currentLanguage === 'tr' ? 'Bugün hareket' : 'Moved today')
+                                  : (currentLanguage === 'tr' ? `${daysAgo}g önce` : `${daysAgo}d ago`)}
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* Phase 54: Quick Stock Adjustment */}
+                          <button
+                            onClick={async (e) => { e.stopPropagation(); const newStock = Math.max(0, (item.stockLevel ?? 0) - 1); await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-all font-bold text-xs"
+                            title={currentLanguage === 'tr' ? 'Stok azalt' : 'Decrease stock'}
+                          >
+                            −
+                          </button>
+                          <button
+                            onClick={async (e) => { e.stopPropagation(); const newStock = (item.stockLevel ?? 0) + 1; await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); }}
+                            className="p-1.5 rounded-lg hover:bg-emerald-50 text-gray-300 hover:text-emerald-600 transition-all font-bold text-xs"
+                            title={currentLanguage === 'tr' ? 'Stok artır' : 'Increase stock'}
+                          >
+                            +
+                          </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setSelectedProduct(item); }}
                             className="p-2 rounded-xl hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-all"
@@ -1433,7 +1777,12 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.stock}</p>
+                    {/* Phase 39: Mobile stock gauge */}
                     <p className="text-sm font-bold">{item.stockLevel}</p>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${(item.stockLevel ?? 0) === 0 ? 'bg-red-500' : (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5) ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                        style={{ width: `${Math.min(((item.stockLevel ?? 0) / Math.max((item.lowStockThreshold ?? 5) * 4, 1)) * 100, 100)}%` }} />
+                    </div>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.price}</p>
@@ -1493,6 +1842,15 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
               <h3 className="text-lg font-bold flex items-center gap-2">
                 <RefreshCw className="w-5 h-5 text-brand" /> {currentT.movements}
               </h3>
+              {movements.length > 0 && (
+                <button
+                  onClick={() => exportStockMovementsCSV(movements as unknown as StockMovementRow[], currentLanguage)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                  title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download CSV'}
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+              )}
             </div>
             <div className="space-y-4">
               {movements.length === 0 ? (
@@ -1912,7 +2270,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
                       <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
                     </div>
-                    <span className="text-sm font-bold text-brand">₺{c.total.toLocaleString('tr-TR',{minimumFractionDigits:0})}</span>
+                    <span className="text-sm font-bold text-brand">{revenueSymbol}{formatInCurrency(c.total, revenueCurrency, exchangeRates)}</span>
                   </div>
                 ))}
               </div>
@@ -1945,7 +2303,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             {[
               { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), color: 'text-blue-600', bg: 'bg-blue-50' },
               { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), color: 'text-orange-500', bg: 'bg-orange-50' },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: `₺${totalInventoryValueTRY.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0})}`, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: `${revenueSymbol}${formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates)}`, color: 'text-green-600', bg: 'bg-green-50' },
               { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), color: 'text-purple-600', bg: 'bg-purple-50' },
             ].map((k,i) => (
               <motion.div key={i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}}
@@ -2139,7 +2497,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count' },
-              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: '₺' + hrStats.totalPayroll.toLocaleString(), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll' },
+              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: revenueSymbol + formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll' },
               { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval' },
             ].map((k,i) => {
               const Icon = k.icon;
@@ -2272,6 +2630,66 @@ const LogisticsMap = ({ orders, routeStops, depot, currentT }: { orders: Order[]
   );
 };
 
+// ── Order Status Timeline ────────────────────────────────────────────────────
+
+const ORDER_STATUS_STEPS = [
+  { key: 'Pending',    labelTR: 'Sipariş Alındı',  labelEN: 'Received',   icon: Clock        },
+  { key: 'Processing', labelTR: 'Hazırlanıyor',     labelEN: 'Processing', icon: Package      },
+  { key: 'Shipped',    labelTR: 'Kargoya Verildi',  labelEN: 'Shipped',    icon: Truck        },
+  { key: 'Delivered',  labelTR: 'Teslim Edildi',    labelEN: 'Delivered',  icon: CheckCircle2 },
+] as const;
+
+function OrderStatusTimeline({ status, lang = 'tr' }: { status: string; lang?: string }) {
+  const isTR = lang === 'tr';
+  const isCancelled = status === 'Cancelled';
+  const activeIdx = Math.max(ORDER_STATUS_STEPS.findIndex(s => s.key === status), 0);
+
+  return (
+    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-4">
+        {isTR ? 'Sipariş Durumu' : 'Order Status'}
+      </p>
+      {isCancelled ? (
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+            <X className="w-5 h-5 text-red-500" />
+          </div>
+          <div>
+            <p className="font-bold text-red-600 text-sm">{isTR ? 'Sipariş İptal Edildi' : 'Order Cancelled'}</p>
+            <p className="text-[11px] text-red-400">{isTR ? 'Bu sipariş iptal edilmiştir.' : 'This order has been cancelled.'}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-end">
+          {ORDER_STATUS_STEPS.map((step, idx) => {
+            const done   = activeIdx >= idx;
+            const active = activeIdx === idx;
+            const Icon   = step.icon;
+            return (
+              <React.Fragment key={step.key}>
+                <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300
+                    ${done ? 'bg-brand text-white' : 'bg-gray-100 text-gray-300'}
+                    ${active ? 'ring-4 ring-brand/20 scale-110' : ''}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <span className={`text-[9px] text-center font-bold leading-tight max-w-[60px] ${done ? 'text-brand' : 'text-gray-300'}`}>
+                    {isTR ? step.labelTR : step.labelEN}
+                  </span>
+                </div>
+                {idx < ORDER_STATUS_STEPS.length - 1 && (
+                  <div className={`flex-1 h-[3px] mb-[22px] mx-1.5 rounded-full transition-all duration-500
+                    ${activeIdx > idx ? 'bg-brand' : 'bg-gray-100'}`} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -2295,6 +2713,19 @@ function AppContent() {
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem('cetpa-theme-mode') === 'dark';
   });
+
+  // ── Phase 25: Online / offline indicator ──────────────────────────────────
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const handleOnline  = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online',  handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online',  handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   React.useEffect(() => {
     const html = document.documentElement;
@@ -2354,6 +2785,51 @@ function AppContent() {
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
   const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'>('genel');
+
+  // ── Dashboard summary (30-day KPI deltas) ─────────────────────────────────
+  const [summaryData, setSummaryData] = useState<{
+    orders:    { count: number; prevCount: number; delta: number };
+    revenue:   { total: number; prev: number; delta: number };
+    leads:     { total: number; new30: number };
+    inventory: { total: number; lowStock: number };
+    delivered: number;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/reports/summary')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: typeof summaryData) => { if (d) setSummaryData(d); })
+      .catch(() => {});
+  }, []);
+
+  // ── System health state ────────────────────────────────────────────────────
+  const [healthData, setHealthData] = useState<{
+    status: string; uptime: number; env: string;
+    firebase: boolean; resend: boolean; whatsapp: boolean; iyzico: boolean;
+    timestamp: string;
+  } | null>(null);
+  const [statsData, setStatsData] = useState<Record<string, number> | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+
+  const fetchSystemHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const [hr, sr] = await Promise.all([
+        fetch('/api/health'),
+        fetch('/api/admin/stats'),
+      ]);
+      if (hr.ok) setHealthData(await hr.json() as typeof healthData);
+      if (sr.ok) {
+        const sd = await sr.json() as { counts: Record<string, number> };
+        setStatsData(sd.counts);
+      }
+    } catch { /* ignore — offline */ }
+    setHealthLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (adminTab === 'system') void fetchSystemHealth();
+  }, [adminTab, fetchSystemHealth]);
   const ACCESS_VALUES = ['✅','👁','📊','❌'] as const;
   type AccessVal = typeof ACCESS_VALUES[number];
   const defaultAccessMatrix: { section: string; access: AccessVal[] }[] = [
@@ -2393,6 +2869,62 @@ function AppContent() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+
+  // ── Phase 29: Supplier Directory ──────────────────────────────────────────
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers'>('pos');
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [newSupplier, setNewSupplier] = useState<Partial<Supplier>>({});
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
+      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)));
+    }, err => console.error('suppliers:', err));
+    return () => unsub();
+  }, [user]);
+
+  const handleSaveSupplier = async () => {
+    if (!newSupplier.name?.trim()) return;
+    try {
+      if (editingSupplier) {
+        await updateDoc(doc(db, 'suppliers', editingSupplier.id), { ...newSupplier });
+      } else {
+        await addDoc(collection(db, 'suppliers'), { ...newSupplier, createdAt: serverTimestamp() });
+      }
+      setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({});
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteSupplier = async (id: string) => {
+    if (!window.confirm(currentLanguage === 'tr' ? 'Tedarikçiyi silmek istiyor musunuz?' : 'Delete this supplier?')) return;
+    await deleteDoc(doc(db, 'suppliers', id));
+  };
+
+  // ── Phase 38: Recently Viewed trail ───────────────────────────────────────
+  const [recentlyViewed, setRecentlyViewed] = useState<{ type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('cetpa-recent') ?? '[]'); } catch { return []; }
+  });
+  const trackView = useCallback((item: { type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }) => {
+    setRecentlyViewed(prev => {
+      const next = [item, ...prev.filter(r => r.id !== item.id)].slice(0, 5);
+      localStorage.setItem('cetpa-recent', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // ── Phase 27: Dashboard Quick Note ────────────────────────────────────────
+  const [quickNote, setQuickNote] = useState<string>(() => localStorage.getItem('cetpa-quick-note') ?? '');
+  const quickNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleQuickNoteChange = (val: string) => {
+    setQuickNote(val);
+    if (quickNoteTimer.current) clearTimeout(quickNoteTimer.current);
+    quickNoteTimer.current = setTimeout(() => {
+      localStorage.setItem('cetpa-quick-note', val);
+    }, 600);
+  };
 
   // ─── Subscription State ─────────────────────────────────────────────────
   const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
@@ -2533,14 +3065,45 @@ function AppContent() {
   // Global search keyboard shortcut — Cmd+K / Ctrl+K
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setGlobalSearchOpen(v => !v);
+      }
+      // Phase 28: ? key → shortcut cheat-sheet
+      if (e.key === '?' && !inInput && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setShortcutModalOpen(v => !v);
+      }
+      // Single-key tab navigation (only when not in an input)
+      if (!inInput && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        switch (e.key) {
+          case 'd': setActiveTab('dashboard'); break;
+          case 'o': setActiveTab('orders');    break;
+          case 'c': setActiveTab('crm');       break;
+          case 'i': setActiveTab('inventory'); break;
+          case 'r': setActiveTab('reports');   break;
+        }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, []);
+
+  // Phase 68: N shortcut — open new-item form based on active tab
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName);
+      if (inInput || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.key !== 'n') return;
+      e.preventDefault();
+      if (activeTab === 'orders') { setSelectedLead(null); setIsAddingOrder(true); }
+      else if (activeTab === 'crm') { setIsAddingLead(true); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredOrders = orders.filter(o => {
     if (!o.createdAt) return true;
@@ -2743,6 +3306,7 @@ function AppContent() {
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
   const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
   const [orderCustomerOpen, setOrderCustomerOpen] = useState(false);
+  const leadFromOrderRef = useRef(false); // Phase 82: track lead-modal opened from order form
   const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
   const [isEditingLead, setIsEditingLead] = useState(false);
   const [editingLeadData, setEditingLeadData] = useState<Partial<Lead>>({});
@@ -2753,9 +3317,12 @@ function AppContent() {
   const [crmSearch, setCrmSearch] = useState('');
   const [crmSort, setCrmSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
   const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter,  setOrderStatusFilter]  = useState<string>('All'); // Phase 55
+  const [leadStatusFilter,   setLeadStatusFilter]   = useState<string>('All'); // Phase 72
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false); // Phase 28
   // ── User invite state ─────────────────────────────────────────────
   const [inviteEmail, setInviteEmail]   = useState('');
   const [inviteRole,  setInviteRole]    = useState('Sales');
@@ -3049,8 +3616,9 @@ function AppContent() {
           const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
           if (isLow && !prevLowStockIds.has(item.id)) {
             prevLowStockIds.add(item.id);
-            // Fire-and-forget: write to notifications subcollection
-            addDoc(collection(db, 'notifications', uid, 'items'), {
+            // Fire-and-forget: write to flat notifications collection (matches listener)
+            addDoc(collection(db, 'notifications'), {
+              userId: uid,
               title: currentLanguage === 'tr' ? 'Düşük Stok Uyarısı' : 'Low Stock Alert',
               message: `${item.name} — ${currentLanguage === 'tr' ? 'stok kritik seviyede' : 'stock is critically low'}: ${item.stockLevel ?? 0} ${currentLanguage === 'tr' ? 'adet' : 'units'}`,
               type: 'warning',
@@ -3298,16 +3866,25 @@ function AppContent() {
     setIsScoring(true);
     try {
       const scoreResult = await scoreLead(newLead);
-      await addDoc(collection(db, 'leads'), {
+      const docRef = await addDoc(collection(db, 'leads'), {
         ...newLead, status: 'New', score: scoreResult.score,
         notes: `${newLead.notes}\n\nAI Insights: ${scoreResult.reasoning}`,
-        assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        customerType: 'B2B' as const,
       });
       createNotification(
         currentLanguage === 'tr' ? 'Yeni Müşteri Adayı' : 'New Lead',
         `${newLead.name}${newLead.company ? ` — ${newLead.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'} (AI Skor: ${scoreResult.score}/100)`,
         'info'
       ).catch(() => {});
+      // Phase 82: if opened from within order form, auto-select the new lead as customer
+      if (leadFromOrderRef.current) {
+        const freshLead = { id: docRef.id, ...newLead, status: 'New' as const, score: scoreResult.score, assignedTo: user?.uid ?? 'guest', customerType: 'B2B' as const };
+        setNewOrder(prev => ({ ...prev, customerName: newLead.name, shippingAddress: newLead.company || '' }));
+        setOrderCustomerSearch(newLead.name);
+        setSelectedLead(freshLead as unknown as Lead);
+        leadFromOrderRef.current = false;
+      }
       setNewLead({ name: '', company: '', email: '', phone: '', notes: '' });
       setIsAddingLead(false);
     } catch (error) {
@@ -4278,6 +4855,15 @@ function AppContent() {
               <kbd className="hidden lg:inline text-[9px] bg-black/[0.06] px-1 py-0.5 rounded font-mono">⌘K</kbd>
             </button>
 
+            {/* Keyboard shortcut help — Phase 28 */}
+            <button
+              onClick={() => setShortcutModalOpen(true)}
+              className={cn("hidden md:flex items-center justify-center w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] rounded-xl border transition-all outline-none flex-shrink-0 font-bold", darkMode ? "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/70" : "bg-black/[0.04] border-black/10 text-gray-400 hover:bg-black/[0.07] hover:text-gray-600")}
+              title={currentLanguage === 'tr' ? 'Klavye kısayolları (?)' : 'Keyboard shortcuts (?)'}
+            >
+              <span className="text-xs">?</span>
+            </button>
+
             {/* Dark mode toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
@@ -4457,6 +5043,14 @@ function AppContent() {
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
                   const isActive = activeTab === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
+                  // Phase 30 — tab count badges
+                  const badgeCount = tab.id === 'orders'
+                    ? orders.filter(o => o.status === 'Pending').length
+                    : tab.id === 'crm'
+                      ? leads.filter(l => l.status === 'New').length
+                      : tab.id === 'inventory'
+                        ? inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length
+                        : 0;
                   return (
                     <button
                       key={tab.id}
@@ -4478,6 +5072,12 @@ function AppContent() {
                         <tab.icon className={cn("w-5 h-5 flex-shrink-0", isActive ? "text-brand" : isLocked ? "opacity-40" : "")} />
                         {isLocked && (
                           <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-amber-500" />
+                        )}
+                        {/* Count badge */}
+                        {!isLocked && badgeCount > 0 && (
+                          <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 bg-brand rounded-full text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
+                            {badgeCount > 99 ? '99+' : badgeCount}
+                          </span>
                         )}
                       </div>
                       <span className="text-center leading-tight line-clamp-2">{tab.label}</span>
@@ -4520,6 +5120,26 @@ function AppContent() {
         )}
       </AnimatePresence>
 
+      {/* ── Phase 25: Offline Banner ── */}
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-amber-500 text-white text-center text-xs font-bold py-2 px-4 flex items-center justify-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+              {currentLanguage === 'tr'
+                ? 'İnternet bağlantısı yok — veriler yüklenemiyor olabilir.'
+                : 'No internet connection — data may not load.'}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
         <AnimatePresence mode="wait">
 
@@ -4528,7 +5148,11 @@ function AppContent() {
             <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
               {/* Welcome */}
               <ModuleHeader
-                title={`${dashT.greeting}${user?.displayName ? `, ${user.displayName.split(' ')[0]}` : ''} 👋`}
+                title={`${(() => {
+                  const h = new Date().getHours();
+                  if (currentLanguage === 'tr') return h < 12 ? 'Günaydın' : h < 17 ? 'İyi öğlenler' : 'İyi akşamlar';
+                  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+                })()}${user?.displayName ? `, ${user.displayName.split(' ')[0]}` : ''} ${new Date().getHours() < 12 ? '☀️' : new Date().getHours() < 17 ? '👋' : '🌙'}`}
                 subtitle={dashT.subtitle}
                 icon={LayoutDashboard}
                 actionButton={
@@ -4552,16 +5176,30 @@ function AppContent() {
               />
 
               {/* KPI Cards */}
+              {(() => {
+                const DeltaBadge = ({ delta }: { delta: number | null | undefined }) => {
+                  if (delta == null || isNaN(delta)) return null;
+                  const up = delta >= 0;
+                  return (
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                      {up ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+                    </span>
+                  );
+                };
+                return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: dashT.total_orders, value: filteredOrders.length, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders' },
-                  { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm' },
-                  { label: dashT.inventory_label, value: inventory.length, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory' },
+                  { label: dashT.total_orders, value: filteredOrders.length, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta },
+                  { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
+                  { label: dashT.inventory_label, value: inventory.length, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
                 ].map((kpi, i) => (
                   <button key={i} onClick={() => setActiveTab(kpi.tab)}
                     className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 cursor-pointer group">
-                    <div className={`w-9 h-9 rounded-xl ${kpi.bg} flex items-center justify-center mb-3`}>
-                      <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                    <div className="flex items-start justify-between mb-3">
+                      <div className={`w-9 h-9 rounded-xl ${kpi.bg} flex items-center justify-center`}>
+                        <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                      </div>
+                      <DeltaBadge delta={kpi.delta} />
                     </div>
                     <p className="text-2xl font-bold" style={{color:'var(--text-primary)'}}>{kpi.value}</p>
                     <p className="text-xs font-semibold text-gray-500 mt-1">{kpi.label}</p>
@@ -4571,30 +5209,66 @@ function AppContent() {
                     </p>
                   </button>
                 ))}
-                {/* Revenue KPI with currency toggle */}
+                {/* Revenue KPI with currency toggle + delta */}
                 {(() => {
                   const totalTRY = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
                   const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
                   const converted = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                  const revDelta = summaryData?.revenue?.delta;
                   return (
                     <div className="apple-card p-4 text-left group">
                       <div className="flex items-center justify-between mb-3">
                         <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center">
                           <DollarSign className="w-4 h-4 text-green-500" />
                         </div>
-                        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                          {(['TRY','USD','EUR'] as const).map(c => (
-                            <button key={c} onClick={() => setKpiCurrency(c)}
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                              {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                            </button>
-                          ))}
+                        <div className="flex items-center gap-1.5">
+                          {revDelta != null && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${revDelta >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                              {revDelta >= 0 ? '▲' : '▼'} {Math.abs(revDelta).toFixed(1)}%
+                            </span>
+                          )}
+                          <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                            {(['TRY','USD','EUR'] as const).map(c => (
+                              <button key={c} onClick={() => setKpiCurrency(c)}
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                                {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                       <p className="text-2xl font-bold" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                       <p className="text-xs font-semibold text-gray-500 mt-1">{dashT.total_revenue}</p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{dashT.all_time}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {summaryData ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days') : dashT.all_time}
+                      </p>
+                      {/* Phase 35: 7-day revenue sparkline */}
+                      {(() => {
+                        const days = Array.from({ length: 7 }, (_, i) => {
+                          const d = new Date(); d.setDate(d.getDate() - (6 - i));
+                          const dayStr = d.toDateString();
+                          const rev = orders.filter(o => {
+                            const od = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? (o.createdAt ? new Date(o.createdAt as string | number) : null);
+                            return od?.toDateString() === dayStr;
+                          }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                          return { day: d.getDate(), rev };
+                        });
+                        const maxRev = Math.max(...days.map(d => d.rev), 1);
+                        return (
+                          <div className="flex items-end gap-0.5 mt-2 h-8">
+                            {days.map((d, i) => (
+                              <div key={i} className="flex-1 flex flex-col justify-end">
+                                <div
+                                  className="bg-green-400 rounded-sm opacity-60 group-hover:opacity-100 transition-opacity"
+                                  style={{ height: `${Math.max((d.rev / maxRev) * 100, 4)}%` }}
+                                  title={`${d.day}: ₺${d.rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <button onClick={() => setActiveTab('reports')} className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
                         <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
                       </button>
@@ -4602,6 +5276,8 @@ function AppContent() {
                   );
                 })()}
               </div>
+                );
+              })()}
 
               {/* ── Insight strip: revenue trend + alerts + search CTA ── */}
               {(() => {
@@ -4618,18 +5294,39 @@ function AppContent() {
                   })
                   .reduce((s, o) => s + o.totalPrice, 0);
 
+                const insightRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const insightSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvtWeek = kpiCurrency === 'TRY' ? weekRevenue : weekRevenue / insightRate;
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* ── 7-Day Revenue card — with currency toggle ── */}
+                    <button
+                      onClick={() => setActiveTab('reports')}
+                      className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                          <TrendingUp className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        {/* Currency toggle */}
+                        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
+                          {(['TRY','USD','EUR'] as const).map(c => (
+                            <button key={c} onClick={() => setKpiCurrency(c)}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                              {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-xl font-bold text-emerald-600">
+                        {insightSymbol}{cvtWeek.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                      </p>
+                      <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
+                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
+                    </button>
+
+                    {/* ── Remaining plain cards ── */}
                     {[
-                      {
-                        icon: TrendingUp,
-                        label: currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue',
-                        value: `₺${weekRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
-                        color: 'text-emerald-600',
-                        bg:   'bg-emerald-50',
-                        sub:  currentLanguage === 'tr' ? 'Bu hafta' : 'This week',
-                        onClick: () => setActiveTab('reports'),
-                      },
                       {
                         icon: Clock,
                         label: currentLanguage === 'tr' ? 'Bekleyen Sipariş' : 'Pending Orders',
@@ -4680,6 +5377,267 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 56: MTD Revenue vs. Last Month ── */}
+              {orders.length > 0 && (() => {
+                const now = new Date();
+                const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                const getOrderDate = (o: Order): Date => {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return new Date(0);
+                  return typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
+                };
+                const mtdRev  = orders.filter(o => getOrderDate(o) >= thisMonthStart).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const lastRev = orders.filter(o => { const d = getOrderDate(o); return d >= lastMonthStart && d <= lastMonthEnd; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const pct = lastRev > 0 ? Math.round(((mtdRev - lastRev) / lastRev) * 100) : null;
+                const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+                const dayProgress = Math.round((now.getDate() / daysInMonth) * 100);
+                // On-pace projection
+                const projectedRev   = dayProgress > 0 ? Math.round(mtdRev * (100 / dayProgress)) : mtdRev;
+                const mtdRate        = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const mtdSymbol      = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvtMtd         = kpiCurrency === 'TRY' ? mtdRev      : mtdRev / mtdRate;
+                const cvtProjected   = kpiCurrency === 'TRY' ? projectedRev : projectedRev / mtdRate;
+                const cvtLastRev     = kpiCurrency === 'TRY' ? lastRev     : lastRev / mtdRate;
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
+                          {currentLanguage === 'tr' ? 'Bu Ay Ciro (MTD)' : 'Revenue MTD'}
+                        </h3>
+                        <p className={cn("text-xl font-black mt-0.5", darkMode ? "text-white" : "text-gray-900")}>
+                          {mtdSymbol}{cvtMtd.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5">
+                        {/* Currency toggle — shared kpiCurrency */}
+                        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                          {(['TRY','USD','EUR'] as const).map(c => (
+                            <button key={c} onClick={() => setKpiCurrency(c)}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                              {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                            </button>
+                          ))}
+                        </div>
+                        {pct !== null && (
+                          <span className={cn("text-sm font-black px-2 py-1 rounded-xl", pct >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600")}>
+                            {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}%
+                          </span>
+                        )}
+                        <p className={cn("text-[10px]", darkMode ? "text-white/40" : "text-gray-400")}>
+                          {currentLanguage === 'tr' ? 'Geçen aya göre' : 'vs. last month'}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Month progress bar */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[10px] text-gray-400">
+                        <span>{currentLanguage === 'tr' ? 'Ay ilerlemesi' : 'Month progress'}: {dayProgress}%</span>
+                        <span>{currentLanguage === 'tr' ? 'Projeksiyon' : 'Projected'}: {mtdSymbol}{cvtProjected.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                      <div className={cn("h-2 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-brand to-orange-400 transition-all duration-700"
+                          style={{ width: `${dayProgress}%` }}
+                        />
+                      </div>
+                      {lastRev > 0 && (
+                        <div className="flex justify-between text-[10px] text-gray-400">
+                          <span>{currentLanguage === 'tr' ? 'Geçen ay' : 'Last month'}: {mtdSymbol}{cvtLastRev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 42: Financial KPI mini-strip ── */}
+              {(() => {
+                const aov = filteredOrders.length > 0
+                  ? filteredOrders.reduce((s, o) => s + (o.totalPrice || 0), 0) / filteredOrders.length
+                  : 0;
+                const deliveryRate = orders.length > 0
+                  ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100)
+                  : 0;
+                const leadConvRate = leads.length > 0
+                  ? Math.round((leads.filter(l => l.status === 'Closed' || (l.status as string) === 'Closed Won').length / leads.length) * 100)
+                  : 0;
+                const repeatBuyers = (() => {
+                  const custMap: Record<string, number> = {};
+                  for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + 1; }
+                  return Object.values(custMap).filter(c => c > 1).length;
+                })();
+                const kpiRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const kpiSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvtAov    = kpiCurrency === 'TRY' ? aov : aov / kpiRate;
+                return (
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* ── AOV card — with currency toggle ── */}
+                    <button onClick={() => setActiveTab('reports')}
+                      className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                          <DollarSign className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
+                          {(['TRY','USD','EUR'] as const).map(c => (
+                            <button key={c} onClick={() => setKpiCurrency(c)}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                              {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-xl font-bold text-emerald-600">
+                        {kpiSymbol}{cvtAov.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                      </p>
+                      <p className="text-[10px] font-semibold text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Ort. Sipariş Değeri' : 'Avg. Order Value'}</p>
+                      <p className="text-[10px] text-gray-400">AOV</p>
+                    </button>
+
+                    {/* ── Remaining plain KPI cards ── */}
+                    {[
+                      {
+                        label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Delivery Rate',
+                        value: `${deliveryRate}%`,
+                        sub: `${orders.filter(o => o.status === 'Delivered').length} / ${orders.length}`,
+                        icon: CheckCircle2, color: deliveryRate > 80 ? 'text-emerald-600' : 'text-amber-600', bg: deliveryRate > 80 ? 'bg-emerald-50' : 'bg-amber-50',
+                        onClick: () => setActiveTab('orders'),
+                      },
+                      {
+                        label: currentLanguage === 'tr' ? 'Müşteri Dönüşümü' : 'Lead Conversion',
+                        value: `${leadConvRate}%`,
+                        sub: `${leads.filter(l => l.status === 'Closed' || (l.status as string) === 'Closed Won').length} ${currentLanguage === 'tr' ? 'kazanıldı' : 'won'}`,
+                        icon: TrendingUp, color: leadConvRate > 20 ? 'text-blue-600' : 'text-gray-400', bg: leadConvRate > 20 ? 'bg-blue-50' : 'bg-gray-50',
+                        onClick: () => setActiveTab('crm'),
+                      },
+                      {
+                        label: currentLanguage === 'tr' ? 'Tekrar Eden Alıcı' : 'Repeat Buyers',
+                        value: repeatBuyers,
+                        sub: currentLanguage === 'tr' ? 'birden fazla sipariş' : 'multiple orders',
+                        icon: Users, color: 'text-purple-600', bg: 'bg-purple-50',
+                        onClick: () => setActiveTab('crm'),
+                      },
+                    ].map((stat, i) => {
+                      const Icon = stat.icon;
+                      return (
+                        <button key={i} onClick={stat.onClick}
+                          className="apple-card p-4 flex items-center gap-3 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group">
+                          <div className={`w-9 h-9 rounded-xl ${stat.bg} flex items-center justify-center flex-shrink-0`}>
+                            <Icon className={`w-4 h-4 ${stat.color}`} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
+                            <p className="text-[10px] font-semibold text-gray-500 truncate">{stat.label}</p>
+                            <p className="text-[10px] text-gray-400 truncate">{stat.sub}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 43: Order Status Segmented Bar ── */}
+              {orders.length > 0 && (() => {
+                const statusConfig = [
+                  { key: 'Pending',    labelTR: 'Bekliyor',   labelEN: 'Pending',    color: 'bg-amber-400',  textColor: 'text-amber-700',  bg: 'bg-amber-50'  },
+                  { key: 'Processing', labelTR: 'Hazırlanıyor', labelEN: 'Processing', color: 'bg-purple-400', textColor: 'text-purple-700', bg: 'bg-purple-50' },
+                  { key: 'Shipped',    labelTR: 'Kargoda',    labelEN: 'Shipped',    color: 'bg-blue-400',   textColor: 'text-blue-700',   bg: 'bg-blue-50'   },
+                  { key: 'Delivered',  labelTR: 'Teslim',     labelEN: 'Delivered',  color: 'bg-emerald-400',textColor: 'text-emerald-700', bg: 'bg-emerald-50'},
+                  { key: 'Cancelled',  labelTR: 'İptal',      labelEN: 'Cancelled',  color: 'bg-gray-300',   textColor: 'text-gray-500',   bg: 'bg-gray-50'   },
+                ];
+                const total = orders.length;
+                const counts = statusConfig.map(s => ({ ...s, count: orders.filter(o => o.status === s.key).length }));
+                return (
+                  <div className={cn("rounded-2xl border p-5 space-y-3", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
+                        {currentLanguage === 'tr' ? 'Sipariş Durumu' : 'Order Status'}
+                      </h3>
+                      <button onClick={() => setActiveTab('orders')} className="text-[10px] font-semibold text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'Tümünü gör' : 'View all'}
+                      </button>
+                    </div>
+                    {/* Segmented bar */}
+                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
+                      {counts.filter(s => s.count > 0).map(s => (
+                        <div
+                          key={s.key}
+                          className={`${s.color} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
+                          style={{ width: `${(s.count / total) * 100}%` }}
+                          title={`${s.key}: ${s.count}`}
+                        />
+                      ))}
+                    </div>
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {counts.filter(s => s.count > 0).map(s => (
+                        <button key={s.key} onClick={() => setActiveTab('orders')} className="flex items-center gap-1.5 group">
+                          <span className={`w-2 h-2 rounded-full ${s.color} flex-shrink-0`} />
+                          <span className={cn("text-[11px]", darkMode ? "text-white/60" : "text-gray-500")}>
+                            {currentLanguage === 'tr' ? s.labelTR : s.labelEN}
+                          </span>
+                          <span className={cn("text-[11px] font-bold", darkMode ? "text-white/80" : "text-gray-800")}>{s.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 79: B2B vs Retail Revenue Split ── */}
+              {orders.length > 0 && (() => {
+                const b2bRev    = orders.filter(o => o.customerType === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const retailRev = orders.filter(o => o.customerType !== 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const totalRev  = b2bRev + retailRev;
+                if (totalRev === 0) return null;
+                const b2bPct    = Math.round((b2bRev    / totalRev) * 100);
+                const retailPct = 100 - b2bPct;
+                const p79Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const p79Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvtB2B    = kpiCurrency === 'TRY' ? b2bRev    : b2bRev    / p79Rate;
+                const cvtRetail = kpiCurrency === 'TRY' ? retailRev : retailRev / p79Rate;
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
+                        {currentLanguage === 'tr' ? 'B2B vs Perakende Ciro' : 'B2B vs Retail Revenue'}
+                      </h3>
+                    </div>
+                    {/* Split bar */}
+                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-3">
+                      {b2bPct > 0 && (
+                        <div className="bg-blue-500 transition-all duration-700 rounded-l-full" style={{ width: `${b2bPct}%` }} title={`B2B: ${b2bPct}%`} />
+                      )}
+                      {retailPct > 0 && (
+                        <div className="bg-gray-300 transition-all duration-700 rounded-r-full" style={{ width: `${retailPct}%` }} title={`Retail: ${retailPct}%`} />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-blue-700">B2B — {b2bPct}%</p>
+                          <p className="text-[10px] text-gray-400">{p79Sym}{cvtB2B.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-gray-300 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-gray-600">{currentLanguage === 'tr' ? 'Perakende' : 'Retail'} — {retailPct}%</p>
+                          <p className="text-[10px] text-gray-400">{p79Sym}{cvtRetail.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ⌘K search shortcut banner */}
               <button
                 onClick={() => setGlobalSearchOpen(true)}
@@ -4720,6 +5678,102 @@ function AppContent() {
                 </div>
               </div>
 
+              {/* ── Phase 24: Today's Agenda ── */}
+              {(() => {
+                const toShip = orders.filter(o => o.status === 'Processing');
+                const staleLeads = leads.filter(l => {
+                  if (l.status === 'Closed') return false;
+                  const lastTouch = l.updatedAt
+                    ? (typeof (l.updatedAt as { toDate?: () => Date }).toDate === 'function'
+                        ? (l.updatedAt as { toDate: () => Date }).toDate()
+                        : new Date(l.updatedAt as string | number))
+                    : (l.createdAt
+                        ? (typeof (l.createdAt as { toDate?: () => Date }).toDate === 'function'
+                            ? (l.createdAt as { toDate: () => Date }).toDate()
+                            : new Date(l.createdAt as string | number))
+                        : null);
+                  return lastTouch ? (Date.now() - lastTouch.getTime()) > 30 * 86400000 : false;
+                });
+                const lowStockItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
+                const agendaItems = [
+                  ...toShip.slice(0, 3).map(o => ({
+                    key: `ship-${o.id}`,
+                    icon: Truck, color: 'text-blue-600' as const, bg: 'bg-blue-50' as const,
+                    title: currentLanguage === 'tr' ? `Kargoya ver: ${o.customerName}` : `Ship: ${o.customerName}`,
+                    sub: `#${o.shopifyOrderId || o.id?.slice(-6)} · ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
+                    onClick: () => { setActiveTab('orders'); },
+                  })),
+                  ...staleLeads.slice(0, 2).map(l => ({
+                    key: `lead-${l.id}`,
+                    icon: Users, color: 'text-amber-600' as const, bg: 'bg-amber-50' as const,
+                    title: currentLanguage === 'tr' ? `Hareketsiz: ${l.name}` : `Stale: ${l.name}`,
+                    sub: currentLanguage === 'tr' ? '30+ gündür iletişim yok' : '30+ days no contact',
+                    onClick: () => setActiveTab('crm'),
+                  })),
+                  ...lowStockItems.slice(0, 2).map(i => ({
+                    key: `stock-${i.id}`,
+                    icon: AlertTriangle, color: 'text-red-600' as const, bg: 'bg-red-50' as const,
+                    title: currentLanguage === 'tr' ? `Düşük stok: ${i.name}` : `Low stock: ${i.name}`,
+                    sub: `${i.stockLevel ?? 0} / ${i.lowStockThreshold ?? 5} ${currentLanguage === 'tr' ? 'adet' : 'units'}`,
+                    onClick: () => setActiveTab('inventory'),
+                  })),
+                ];
+                if (agendaItems.length === 0) return null;
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Bugünün Ajandası' : "Today's Agenda"}
+                      </h3>
+                      <span className="text-[10px] bg-amber-50 text-amber-600 font-bold px-2 py-0.5 rounded-full">
+                        {agendaItems.length} {currentLanguage === 'tr' ? 'eylem' : 'actions'}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {agendaItems.map(item => {
+                        const Icon = item.icon;
+                        return (
+                          <button key={item.key} onClick={item.onClick}
+                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 text-left transition-colors group">
+                            <div className={`w-8 h-8 rounded-lg ${item.bg} flex items-center justify-center flex-shrink-0`}>
+                              <Icon className={`w-4 h-4 ${item.color}`} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-gray-800 truncate">{item.title}</p>
+                              <p className="text-[10px] text-gray-400 truncate">{item.sub}</p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 flex-shrink-0 transition-colors" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 27: Quick Note / Scratchpad ── */}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    {currentLanguage === 'tr' ? 'Hızlı Not' : 'Quick Note'}
+                  </h3>
+                  {quickNote && (
+                    <span className="text-[9px] text-gray-400 font-medium">
+                      {currentLanguage === 'tr' ? 'Otomatik kaydediliyor' : 'Auto-saving'}
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  value={quickNote}
+                  onChange={e => handleQuickNoteChange(e.target.value)}
+                  rows={4}
+                  placeholder={currentLanguage === 'tr' ? 'Hızlı notlarınızı buraya yazın… (otomatik kaydedilir)' : 'Jot something down… (auto-saved locally)'}
+                  className="w-full bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-700 placeholder-gray-300 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
+                />
+              </div>
+
               {/* Recent Orders + Low Stock side by side */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -4735,7 +5789,7 @@ function AppContent() {
                           <p className="text-xs text-gray-400">#{o.shopifyOrderId || o.id?.slice(-6)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-bold text-[#1D1D1F]">₺{(o.totalPrice || o.totalAmount || 0).toLocaleString('tr-TR')}</p>
+                          <p className="text-sm font-bold text-[#1D1D1F]">{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?(o.totalPrice||o.totalAmount||0):(o.totalPrice||o.totalAmount||0)/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status === 'Delivered' ? 'bg-green-100 text-green-700' : o.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{o.status}</span>
                         </div>
                       </div>
@@ -4768,6 +5822,47 @@ function AppContent() {
                   </div>
                 </div>
               </div>
+
+              {/* ── Phase 47: Inventory Value Summary ── */}
+              {inventory.length > 0 && (() => {
+                const costValue   = inventory.reduce((s, i) => s + (i.costPrice || i.cost || 0) * (i.stockLevel ?? 0), 0);
+                const retailValue = inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
+                const margin      = retailValue > 0 ? Math.round(((retailValue - costValue) / retailValue) * 100) : 0;
+                const totalUnits  = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                        <Package className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Stok Değeri Özeti' : 'Inventory Value'}
+                      </h3>
+                      <button onClick={() => setActiveTab('inventory')} className="text-[10px] font-semibold text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'Stoka git' : 'View inventory'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {(() => {
+                        const ivRate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const ivSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                        const cvCost   = kpiCurrency === 'TRY' ? costValue   : costValue   / ivRate;
+                        const cvRetail = kpiCurrency === 'TRY' ? retailValue : retailValue / ivRate;
+                        return [
+                        { label: currentLanguage === 'tr' ? 'Maliyet Değeri' : 'Cost Value',   value: `${ivSym}${cvCost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,   color: 'text-gray-800',    sub: currentLanguage === 'tr' ? 'stok maliyeti' : 'at cost' },
+                        { label: currentLanguage === 'tr' ? 'Satış Değeri'  : 'Retail Value',  value: `${ivSym}${cvRetail.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,  color: 'text-emerald-700', sub: currentLanguage === 'tr' ? 'tavsiye fiyat' : 'at retail' },
+                        { label: currentLanguage === 'tr' ? 'Brüt Marj'     : 'Gross Margin',  value: `${margin}%`,  color: margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-600', sub: currentLanguage === 'tr' ? 'teorik oran' : 'theoretical' },
+                        { label: currentLanguage === 'tr' ? 'Toplam Adet'   : 'Total Units',   value: totalUnits.toLocaleString('tr-TR'), color: 'text-blue-700', sub: currentLanguage === 'tr' ? 'stokta' : 'in stock' },
+                        ].map((stat, i) => (
+                          <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : "bg-gray-50")}>
+                            <p className={`text-lg font-black ${stat.color}`}>{stat.value}</p>
+                            <p className={cn("text-[10px] font-bold mt-0.5 truncate", darkMode ? "text-white/50" : "text-gray-500")}>{stat.label}</p>
+                            <p className={cn("text-[9px] mt-0.5", darkMode ? "text-white/30" : "text-gray-400")}>{stat.sub}</p>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── 6-Month Revenue Trend + Top Products ── */}
               {(() => {
@@ -4821,7 +5916,12 @@ function AppContent() {
                       </div>
                       <div className="flex items-center gap-4 mb-3">
                         <div>
-                          <p className="text-xl font-bold text-gray-900">₺{totalRevAll.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                          {(() => {
+                            const r6Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                            const r6Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                            const r6Val  = kpiCurrency === 'TRY' ? totalRevAll : totalRevAll / r6Rate;
+                            return <p className="text-xl font-bold text-gray-900">{r6Sym}{r6Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>;
+                          })()}
                           <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '6 ay toplam ciro' : '6-month total revenue'}</p>
                         </div>
                         <div className="w-px h-8 bg-gray-100" />
@@ -4873,7 +5973,7 @@ function AppContent() {
                             <div key={i} className="space-y-1">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold text-gray-700 truncate max-w-[140px]">{p.name}</span>
-                                <span className="text-[10px] font-bold text-gray-500">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                                <span className="text-[10px] font-bold text-gray-500">{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?p.revenue:p.revenue/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
                               </div>
                               <div className="w-full bg-gray-100 rounded-full h-1.5">
                                 <div
@@ -4891,22 +5991,279 @@ function AppContent() {
                 );
               })()}
 
-              {/* Lead Pipeline Summary */}
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">{dashT.lead_summary}</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {(['New','Contacted','Qualified','Proposal','Negotiation','Closed Won'] as const).map(status => {
-                    const count = leads.filter(l => l.status === status).length;
-                    const colors: Record<string,string> = { New:'bg-gray-100 text-gray-600', Contacted:'bg-blue-100 text-blue-700', Qualified:'bg-purple-100 text-purple-700', Proposal:'bg-yellow-100 text-yellow-700', Negotiation:'bg-orange-100 text-orange-700', 'Closed Won':'bg-green-100 text-green-700' };
-                    return (
-                      <div key={status} className={`${colors[status]} rounded-xl p-3 text-center`}>
-                        <p className="text-2xl font-bold">{count}</p>
-                        <p className="text-xs font-semibold mt-1">{dashT.lead_labels[status]}</p>
-                      </div>
-                    );
-                  })}
+              {/* Lead Pipeline Funnel */}
+              {(() => {
+                const STAGES = [
+                  { key: 'New',         label: dashT.lead_labels['New'],         bar: 'bg-gray-400',    text: 'text-gray-600',   bg: 'bg-gray-50' },
+                  { key: 'Contacted',   label: dashT.lead_labels['Contacted'],   bar: 'bg-blue-500',    text: 'text-blue-700',   bg: 'bg-blue-50' },
+                  { key: 'Qualified',   label: dashT.lead_labels['Qualified'],   bar: 'bg-purple-500',  text: 'text-purple-700', bg: 'bg-purple-50' },
+                  { key: 'Proposal',    label: dashT.lead_labels['Proposal'],    bar: 'bg-yellow-500',  text: 'text-yellow-700', bg: 'bg-yellow-50' },
+                  { key: 'Negotiation', label: dashT.lead_labels['Negotiation'], bar: 'bg-orange-500',  text: 'text-orange-700', bg: 'bg-orange-50' },
+                  { key: 'Closed Won',  label: dashT.lead_labels['Closed Won'],  bar: 'bg-green-500',   text: 'text-green-700',  bg: 'bg-green-50' },
+                ] as const;
+                const counts = STAGES.map(s => leads.filter(l => l.status === s.key).length);
+                const maxCount = Math.max(...counts, 1);
+                const totalActive = counts.slice(0, 5).reduce((a, b) => a + b, 0);
+                const wonRate = totalActive > 0 ? ((counts[5] / (totalActive + counts[5])) * 100).toFixed(0) : '0';
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{dashT.lead_summary}</h3>
+                      <span className="text-xs font-bold text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
+                        {currentLanguage === 'tr' ? `Win Rate: ${wonRate}%` : `Win Rate: ${wonRate}%`}
+                      </span>
+                    </div>
+                    <div className="space-y-2.5">
+                      {STAGES.map((stage, i) => {
+                        const count = counts[i];
+                        const pct = Math.round((count / maxCount) * 100);
+                        const convPct = i > 0 && counts[i - 1] > 0 ? Math.round((count / counts[i - 1]) * 100) : null;
+                        return (
+                          <div key={stage.key}>
+                            <div className="flex items-center gap-3">
+                              <span className={`text-[10px] font-bold w-20 flex-shrink-0 ${stage.text}`}>{stage.label}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                                <div
+                                  className={`h-full ${stage.bar} rounded-full transition-all duration-500`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="text-sm font-bold text-gray-800 w-6 text-right">{count}</span>
+                              {convPct !== null && (
+                                <span className={`text-[9px] font-bold w-10 text-right ${convPct >= 50 ? 'text-green-500' : 'text-gray-400'}`}>
+                                  {convPct}%↓
+                                </span>
+                              )}
+                              {convPct === null && <span className="w-10" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between text-[10px] text-gray-400">
+                      <span>{currentLanguage === 'tr' ? `Toplam: ${leads.length} müşteri adayı` : `Total: ${leads.length} leads`}</span>
+                      <button onClick={() => setActiveTab('crm')} className="text-brand font-semibold hover:underline flex items-center gap-0.5">
+                        {currentLanguage === 'tr' ? 'CRM\'e git' : 'Open CRM'} <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 51: Upcoming Follow-ups (7-day strip) ── */}
+              {(() => {
+                const today7 = new Date(); today7.setHours(0, 0, 0, 0);
+                const in7 = new Date(today7.getTime() + 7 * 86400000);
+                const upcoming = leads
+                  .filter(l => {
+                    if (!l.nextFollowUpDate) return false;
+                    const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
+                      ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
+                      : new Date(l.nextFollowUpDate as unknown as string | number);
+                    return due >= today7 && due <= in7;
+                  })
+                  .sort((a, b) => {
+                    const getDate = (x: unknown) => typeof (x as { toDate?: () => Date }).toDate === 'function'
+                      ? (x as { toDate: () => Date }).toDate()
+                      : new Date(x as string | number);
+                    return getDate(a.nextFollowUpDate).getTime() - getDate(b.nextFollowUpDate).getTime();
+                  });
+                if (upcoming.length === 0) return null;
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                        <Calendar className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? '7 Günlük Takip Planı' : '7-Day Follow-up Plan'}
+                      </h3>
+                      <button onClick={() => { setActiveTab('crm'); setCrmTab('leads'); }} className="text-[10px] font-semibold text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'CRM\'e git' : 'Go to CRM'}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {upcoming.slice(0, 5).map(l => {
+                        const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
+                          ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
+                          : new Date(l.nextFollowUpDate as unknown as string | number);
+                        const daysLeft = Math.round((due.getTime() - today7.getTime()) / 86400000);
+                        return (
+                          <button key={l.id} onClick={() => { setActiveTab('crm'); setSelectedLead(l); }}
+                            className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors", darkMode ? "hover:bg-white/5" : "hover:bg-gray-50")}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black ${daysLeft === 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                              {daysLeft === 0 ? (currentLanguage === 'tr' ? 'BUG' : 'NOW') : `${daysLeft}g`}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className={cn("text-sm font-semibold truncate", darkMode ? "text-white/90" : "text-gray-800")}>{l.name}</p>
+                              <p className={cn("text-[10px] truncate", darkMode ? "text-white/40" : "text-gray-400")}>{l.company}</p>
+                            </div>
+                            <p className={cn("text-[11px] font-bold flex-shrink-0", darkMode ? "text-white/50" : "text-gray-400")}>
+                              {due.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 77: Top Customers by Revenue ── */}
+              {orders.length > 0 && (() => {
+                const custMap: Record<string, { revenue: number; orders: number }> = {};
+                for (const o of orders) {
+                  const k = o.customerName;
+                  custMap[k] = custMap[k] || { revenue: 0, orders: 0 };
+                  custMap[k].revenue += o.totalPrice || 0;
+                  custMap[k].orders  += 1;
+                }
+                const top5 = Object.entries(custMap)
+                  .map(([name, d]) => ({ name, ...d }))
+                  .sort((a, b) => b.revenue - a.revenue)
+                  .slice(0, 5);
+                if (top5.length === 0) return null;
+                const maxRev = top5[0].revenue;
+                const mtdTopRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const mtdTopSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? 'En Yüksek Cirolu Müşteriler' : 'Top Customers by Revenue'}
+                      </h3>
+                      <button onClick={() => setActiveTab('reports')} className="text-[10px] font-semibold text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'Raporlara git' : 'Open Reports'}
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {top5.map((c, i) => {
+                        const pct     = Math.round((c.revenue / maxRev) * 100);
+                        const cvtRev  = kpiCurrency === 'TRY' ? c.revenue : c.revenue / mtdTopRate;
+                        const medal   = ['🥇','🥈','🥉','',''][i] || '';
+                        return (
+                          <div key={c.name} className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-gray-700 truncate flex items-center gap-1.5">
+                                {medal && <span className="text-sm leading-none">{medal}</span>}
+                                {c.name}
+                              </span>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage === 'tr' ? 'sip.' : 'ord.'}</span>
+                                <span className="text-[10px] font-bold text-gray-700">
+                                  {mtdTopSymbol}{cvtRev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-700 ${i === 0 ? 'bg-brand' : 'bg-gray-300'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 73: Weekday Order Heatmap ── */}
+              {orders.length > 0 && (() => {
+                const DAYS_TR = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+                const DAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const counts = Array(7).fill(0);
+                for (const o of orders) {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) continue;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number | Date);
+                  counts[d.getDay()] += 1;
+                }
+                const maxC = Math.max(...counts, 1);
+                const totalO = counts.reduce((a, b) => a + b, 0);
+                const busiest = counts.indexOf(Math.max(...counts));
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? 'Haftalık Sipariş Dağılımı' : 'Orders by Weekday'}
+                      </h3>
+                      <span className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">
+                        {currentLanguage === 'tr' ? `En yoğun: ${DAYS_TR[busiest]}` : `Busiest: ${DAYS_EN[busiest]}`}
+                      </span>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      {counts.map((c, i) => {
+                        const pct = Math.round((c / maxC) * 100);
+                        const isToday = i === new Date().getDay();
+                        const isBusiest = i === busiest;
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
+                            {/* Bar */}
+                            <div className="w-full flex items-end justify-center" style={{ height: 64 }}>
+                              <div
+                                className={`w-full rounded-t-lg transition-all duration-700 ${
+                                  isBusiest ? 'bg-brand' : isToday ? 'bg-brand/50' : 'bg-gray-200'
+                                }`}
+                                style={{ height: `${Math.max(pct, 6)}%` }}
+                              />
+                            </div>
+                            {/* Count */}
+                            <span className={`text-[10px] font-bold ${isBusiest ? 'text-brand' : 'text-gray-600'}`}>{c}</span>
+                            {/* Day label */}
+                            <span className={`text-[9px] font-semibold ${isToday ? 'text-brand' : 'text-gray-400'}`}>
+                              {currentLanguage === 'tr' ? DAYS_TR[i] : DAYS_EN[i]}
+                              {isToday && <span className="block w-1 h-1 rounded-full bg-brand mx-auto mt-0.5" />}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-3">
+                      {currentLanguage === 'tr'
+                        ? `${totalO} siparişin haftanın günlerine göre dağılımı`
+                        : `Distribution of ${totalO} orders across weekdays`}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 38: Recently Viewed ── */}
+              {recentlyViewed.length > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <History className="w-4 h-4" />
+                    {currentLanguage === 'tr' ? 'Son Görüntülenenler' : 'Recently Viewed'}
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {recentlyViewed.map(item => (
+                      <button key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.tab);
+                          if (item.type === 'order') {
+                            const o = orders.find(o => o.id === item.id);
+                            if (o) setSelectedOrder(o);
+                          } else if (item.type === 'lead') {
+                            const l = leads.find(l => l.id === item.id);
+                            if (l) setSelectedLead(l);
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full text-xs font-medium text-gray-700 transition-colors"
+                      >
+                        {item.type === 'order' ? <Package className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                          : item.type === 'lead' ? <Users className="w-3 h-3 text-brand flex-shrink-0" />
+                          : <List className="w-3 h-3 text-purple-400 flex-shrink-0" />}
+                        <span className="truncate max-w-[140px]">{item.label}</span>
+                      </button>
+                    ))}
+                    <button onClick={() => { setRecentlyViewed([]); localStorage.removeItem('cetpa-recent'); }}
+                      className="text-[10px] text-gray-400 hover:text-gray-600 px-2 py-1.5 ml-auto self-center transition-colors">
+                      {currentLanguage === 'tr' ? 'Temizle' : 'Clear'}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
           )}
 
@@ -4927,6 +6284,69 @@ function AppContent() {
                     </button>
                     <button onClick={() => exportInventoryCSV(inventory, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
                       <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Envanter' : 'Inventory'}
+                    </button>
+                    {/* Phase 63: Full Report PDF */}
+                    <button
+                      onClick={() => {
+                        import('jspdf').then(({ jsPDF }) => {
+                          import('jspdf-autotable').then(({ default: autoTable }) => {
+                            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                            const tr63 = currentLanguage === 'tr';
+                            const today63 = new Date().toLocaleDateString(tr63 ? 'tr-TR' : 'en-US');
+                            // Cover
+                            pdf.setFillColor(26, 58, 92);
+                            pdf.rect(0, 0, 210, 40, 'F');
+                            pdf.setTextColor(255, 255, 255);
+                            pdf.setFontSize(18); pdf.setFont('helvetica', 'bold');
+                            pdf.text('CETPA', 14, 18);
+                            pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
+                            pdf.text(tr63 ? 'Yönetim Raporu' : 'Management Report', 14, 26);
+                            pdf.text(today63, 14, 34);
+                            pdf.setTextColor(0, 0, 0);
+                            // Section 1: Orders
+                            pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                            pdf.text(tr63 ? 'Sipariş Özeti' : 'Order Summary', 14, 52);
+                            const totalRev = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                            autoTable(pdf, {
+                              startY: 56,
+                              head: [[tr63 ? 'Durum' : 'Status', tr63 ? 'Adet' : 'Count', tr63 ? 'Oran' : 'Share']],
+                              body: ['Pending','Processing','Shipped','Delivered','Cancelled'].map(s => [
+                                s, orders.filter(o => o.status === s).length,
+                                `${orders.length > 0 ? Math.round((orders.filter(o => o.status === s).length / orders.length) * 100) : 0}%`
+                              ]),
+                              styles: { fontSize: 9 },
+                            });
+                            // Section 2: Top Customers
+                            const finalY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+                            pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                            pdf.text(tr63 ? 'En Yüksek Cirolu Müşteriler' : 'Top Customers by Revenue', 14, finalY);
+                            const custMap: Record<string, number> = {};
+                            for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + (o.totalPrice || 0); }
+                            const top5 = Object.entries(custMap).sort(([, a], [, b]) => b - a).slice(0, 5);
+                            autoTable(pdf, {
+                              startY: finalY + 4,
+                              head: [[tr63 ? 'Müşteri' : 'Customer', tr63 ? 'Ciro' : 'Revenue', tr63 ? 'Pay' : 'Share']],
+                              body: top5.map(([name, rev]) => [name, `₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
+                              styles: { fontSize: 9 },
+                            });
+                            // Section 3: Inventory highlights
+                            const finalY2 = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+                            pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                            pdf.text(tr63 ? 'Kritik Stok Uyarıları' : 'Critical Stock Alerts', 14, finalY2);
+                            const lowStock = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).slice(0, 10);
+                            autoTable(pdf, {
+                              startY: finalY2 + 4,
+                              head: [['SKU', tr63 ? 'Ürün' : 'Product', tr63 ? 'Stok' : 'Stock', tr63 ? 'Min' : 'Min']],
+                              body: lowStock.map(i => [i.sku, i.name, i.stockLevel ?? 0, i.lowStockThreshold ?? 5]),
+                              styles: { fontSize: 9 },
+                            });
+                            pdf.save(`cetpa-rapor-${new Date().toISOString().split('T')[0]}.pdf`);
+                          });
+                        });
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-300 bg-[#1a3a5c] hover:bg-[#243f60] text-white text-xs font-semibold transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'PDF Rapor' : 'PDF Report'}
                     </button>
                     <button
                       onClick={() => {
@@ -5060,19 +6480,208 @@ function AppContent() {
 
           {/* ── Satın Alma ── */}
           {activeTab === 'satin-alma' && (
-            <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               {!canAccess('satin-alma') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Satın Alma':'Purchasing'} /> : (
                 <>
                   {!hasFullAccess('satin-alma') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <PurchasingModule
-                    currentLanguage={currentLanguage}
-                    isAuthenticated={!!user && hasFullAccess('satin-alma')}
-                    userRole={userRole}
-                    inventory={inventory}
-                    orders={orders}
-                    onNavigate={setActiveTab}
-                    exchangeRates={exchangeRates}
-                  />
+
+                  {/* ── Sub-tab switcher ── */}
+                  <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+                    {([
+                      { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
+                      { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
+                    ] as { key: 'pos' | 'suppliers'; label: string; icon: React.ElementType }[]).map(t => (
+                      <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
+                        className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                          purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
+                        <t.icon className="w-4 h-4" /> {t.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Purchase Orders */}
+                  {purchasingSubTab === 'pos' && (
+                    <div className="space-y-4">
+                      {/* ── Phase 62: Purchasing Spend Trend ── */}
+                      {orders.length > 0 && (() => {
+                        // Approximate COGS trend from orders costPrice × quantities
+                        const months: { label: string; cost: number }[] = [];
+                        const now = new Date();
+                        for (let i = 5; i >= 0; i--) {
+                          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                          const label = d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+                          const cost = orders.filter(o => {
+                            const raw = o.createdAt ?? o.syncedAt;
+                            if (!raw) return false;
+                            const od = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                              ? (raw as { toDate: () => Date }).toDate()
+                              : new Date(raw as string | number);
+                            return `${od.getFullYear()}-${String(od.getMonth() + 1).padStart(2, '0')}` === key;
+                          }).reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
+                          months.push({ label, cost });
+                        }
+                        const maxCost = Math.max(...months.map(m => m.cost), 1);
+                        const totalCost6m = months.reduce((s, m) => s + m.cost, 0);
+                        if (totalCost6m === 0) return null;
+                        return (
+                          <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                            <div className="flex items-center justify-between mb-4">
+                              <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                                <BarChart3 className="w-3.5 h-3.5" />
+                                {currentLanguage === 'tr' ? '6 Aylık Maliyet Trendi' : '6-Month Cost Trend'}
+                              </h3>
+                              <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
+                                {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?totalCost6m:totalCost6m/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                              </span>
+                            </div>
+                            <div className="flex items-end gap-1.5 h-16">
+                              {months.map((m, i) => (
+                                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                  <div
+                                    className={cn("w-full rounded-t-md transition-all duration-700", m.cost > 0 ? "bg-emerald-400" : darkMode ? "bg-white/10" : "bg-gray-100")}
+                                    style={{ height: `${Math.max((m.cost / maxCost) * 100, m.cost > 0 ? 8 : 4)}%` }}
+                                    title={`₺${m.cost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                  />
+                                  <span className={cn("text-[9px] font-semibold", darkMode ? "text-white/40" : "text-gray-400")}>{m.label}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <PurchasingModule
+                        currentLanguage={currentLanguage}
+                        isAuthenticated={!!user && hasFullAccess('satin-alma')}
+                        userRole={userRole}
+                        inventory={inventory}
+                        orders={orders}
+                        onNavigate={setActiveTab}
+                        exchangeRates={exchangeRates}
+                      />
+                    </div>
+                  )}
+
+                  {/* ── Phase 29: Supplier Directory ── */}
+                  {purchasingSubTab === 'suppliers' && (
+                    <div className="space-y-4">
+                      <ModuleHeader
+                        title={currentLanguage === 'tr' ? 'Tedarikçi Rehberi' : 'Supplier Directory'}
+                        subtitle={currentLanguage === 'tr' ? 'Tedarikçi firmalar ve iletişim bilgileri' : 'Supplier companies and contact details'}
+                        icon={Building2}
+                        actionButton={
+                          hasFullAccess('satin-alma') && (
+                            <button onClick={() => { setAddingSupplier(true); setNewSupplier({}); }}
+                              className="apple-button-primary flex items-center gap-2">
+                              <Plus className="w-4 h-4" />
+                              {currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier'}
+                            </button>
+                          )
+                        }
+                      />
+
+                      {/* Search */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                        <input
+                          value={supplierSearch}
+                          onChange={e => setSupplierSearch(e.target.value)}
+                          placeholder={currentLanguage === 'tr' ? 'Tedarikçi ara…' : 'Search suppliers…'}
+                          className="apple-input pl-10 w-full"
+                        />
+                      </div>
+
+                      {/* Supplier Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {suppliers
+                          .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company ?? '').toLowerCase().includes(supplierSearch.toLowerCase()))
+                          .map(s => (
+                            <div key={s.id} className="apple-card p-5 space-y-3 group">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                  <Building2 className="w-5 h-5 text-emerald-600" />
+                                </div>
+                                {hasFullAccess('satin-alma') && (
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => { setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
+                                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button onClick={() => void handleDeleteSupplier(s.id)}
+                                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-bold text-gray-900 text-sm">{s.name}</p>
+                                {s.company && <p className="text-[11px] text-gray-500 mt-0.5">{s.company}</p>}
+                              </div>
+                              <div className="space-y-1.5 text-[11px] text-gray-500">
+                                {s.phone && <p className="flex items-center gap-1.5"><Phone className="w-3 h-3 flex-shrink-0" />{s.phone}</p>}
+                                {s.email && <p className="flex items-center gap-1.5 truncate"><Mail className="w-3 h-3 flex-shrink-0" />{s.email}</p>}
+                                {s.taxNo && <p className="flex items-center gap-1.5"><FileText className="w-3 h-3 flex-shrink-0" />VKN: {s.taxNo}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        {suppliers.length === 0 && (
+                          <div className="col-span-full text-center py-16 border-2 border-dashed border-gray-100 rounded-2xl">
+                            <Building2 className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                            <p className="text-sm text-gray-400 font-medium">{currentLanguage === 'tr' ? 'Henüz tedarikçi yok' : 'No suppliers yet'}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add / Edit Supplier Modal */}
+                  <AnimatePresence>
+                    {addingSupplier && (
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                        onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}>
+                        <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+                          onClick={e => e.stopPropagation()}
+                          className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h2 className="font-bold text-lg">
+                              {editingSupplier
+                                ? (currentLanguage === 'tr' ? 'Tedarikçi Düzenle' : 'Edit Supplier')
+                                : (currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier')}
+                            </h2>
+                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}>
+                              <X className="w-5 h-5 text-gray-400" />
+                            </button>
+                          </div>
+                          {[
+                            { key: 'name',      label: currentLanguage === 'tr' ? 'Ad *' : 'Name *',               required: true  },
+                            { key: 'company',   label: currentLanguage === 'tr' ? 'Firma' : 'Company',               required: false },
+                            { key: 'email',     label: currentLanguage === 'tr' ? 'E-posta' : 'Email',               required: false },
+                            { key: 'phone',     label: currentLanguage === 'tr' ? 'Telefon' : 'Phone',               required: false },
+                            { key: 'taxNo',     label: currentLanguage === 'tr' ? 'Vergi No' : 'Tax No',             required: false },
+                            { key: 'taxOffice', label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office',    required: false },
+                            { key: 'address',   label: currentLanguage === 'tr' ? 'Adres' : 'Address',               required: false },
+                          ].map(field => (
+                            <div key={field.key} className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
+                              <input
+                                value={(newSupplier as Record<string, string>)[field.key] ?? ''}
+                                onChange={e => setNewSupplier(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                className="apple-input w-full"
+                              />
+                            </div>
+                          ))}
+                          <div className="flex gap-2 pt-2">
+                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}
+                              className="apple-button-secondary flex-1">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            <button onClick={() => void handleSaveSupplier()}
+                              className="apple-button-primary flex-1">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                          </div>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </>
               )}
             </motion.div>
@@ -5084,11 +6693,71 @@ function AppContent() {
               {!canAccess('ik') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources'} /> : (
                 <>
                   {!hasFullAccess('ik') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <ModuleHeader 
-                    title={currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources'} 
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources'}
                     subtitle={currentLanguage === 'tr' ? 'Çalışan yönetimi, izin, seyahat, avans ve bordro' : 'Employee management, leave, travel, advance and payroll'}
                     icon={Users}
                   />
+                  {/* ── Phase 61: Employee Status Ring Chart ── */}
+                  {employees.length > 0 && (() => {
+                    const aktif  = employees.filter(e => e.status === 'Aktif').length;
+                    const izinli = employees.filter(e => e.status === 'İzinli').length;
+                    const ayrildi = employees.filter(e => e.status === 'Ayrıldı').length;
+                    const total  = employees.length;
+                    const deptMap: Record<string, number> = {};
+                    for (const e of employees) { if (e.status === 'Aktif') deptMap[e.department] = (deptMap[e.department] ?? 0) + 1; }
+                    const topDepts = Object.entries(deptMap).sort(([, a], [, b]) => b - a).slice(0, 4);
+                    return (
+                      <div className={cn("rounded-2xl border p-5 grid grid-cols-1 sm:grid-cols-2 gap-6", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                        {/* Status breakdown */}
+                        <div>
+                          <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                            <Users className="w-3.5 h-3.5" />
+                            {currentLanguage === 'tr' ? 'Çalışan Durumu' : 'Employee Status'}
+                          </h3>
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { label: currentLanguage === 'tr' ? 'Aktif' : 'Active',   count: aktif,   color: 'text-emerald-700', bg: 'bg-emerald-50'  },
+                              { label: currentLanguage === 'tr' ? 'İzinli' : 'On Leave', count: izinli,  color: 'text-amber-700',   bg: 'bg-amber-50'    },
+                              { label: currentLanguage === 'tr' ? 'Ayrıldı' : 'Left',   count: ayrildi, color: 'text-gray-500',    bg: 'bg-gray-50'     },
+                            ].map((s, i) => (
+                              <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : s.bg)}>
+                                <p className={`text-2xl font-black ${s.color}`}>{s.count}</p>
+                                <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/50" : "text-gray-500")}>{s.label}</p>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Active employees bar */}
+                          <div className="mt-4 space-y-1">
+                            <div className="flex justify-between text-[10px] text-gray-400">
+                              <span>{currentLanguage === 'tr' ? 'Aktiflik oranı' : 'Active rate'}</span>
+                              <span className="font-bold text-emerald-600">{total > 0 ? Math.round((aktif / total) * 100) : 0}%</span>
+                            </div>
+                            <div className={cn("h-2 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
+                              <div className="h-full bg-emerald-500 rounded-full transition-all duration-700" style={{ width: `${total > 0 ? (aktif / total) * 100 : 0}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                        {/* Department breakdown */}
+                        <div>
+                          <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4", darkMode ? "text-white/50" : "text-gray-400")}>
+                            {currentLanguage === 'tr' ? 'Departman Dağılımı' : 'By Department'}
+                          </h3>
+                          <div className="space-y-2">
+                            {topDepts.map(([dept, count]) => (
+                              <div key={dept} className="flex items-center gap-2">
+                                <p className={cn("text-[11px] w-24 truncate flex-shrink-0", darkMode ? "text-white/60" : "text-gray-600")}>{dept}</p>
+                                <div className={cn("flex-1 h-2 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
+                                  <div className="h-full bg-blue-400 rounded-full" style={{ width: `${(count / aktif) * 100}%` }} />
+                                </div>
+                                <span className={cn("text-[11px] font-bold w-4 text-right flex-shrink-0", darkMode ? "text-white/60" : "text-gray-700")}>{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <HRModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ik')} userRole={userRole} employees={employees} />
                 </>
               )}
@@ -5547,7 +7216,7 @@ function AppContent() {
           {/* ── Finance Panel ── */}
           {activeTab === 'finance' && (
             <motion.div key="finance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <FinancePanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} />
+              <FinancePanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} exchangeRates={exchangeRates} displayCurrency={kpiCurrency} />
             </motion.div>
           )}
 
@@ -5992,27 +7661,112 @@ function AppContent() {
 
     {/* SYSTEM STATUS */}
     {adminTab === 'system' && (
-      <div className="space-y-4">
+      <div className="space-y-6">
+        {/* Refresh button */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+            {currentLanguage === 'tr' ? 'Sistem Sağlık Durumu' : 'System Health'}
+          </h3>
+          <button
+            onClick={() => void fetchSystemHealth()}
+            disabled={healthLoading}
+            className="apple-button-secondary flex items-center gap-2 text-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${healthLoading ? 'animate-spin' : ''}`} />
+            {currentLanguage === 'tr' ? 'Yenile' : 'Refresh'}
+          </button>
+        </div>
+
+        {/* Service connectivity cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[
-            { name: 'Firebase Firestore', status: 'Aktif', ok: true, desc: currentLanguage==='tr'?'Gerçek zamanlı veritabanı':'Real-time database' },
-            { name: 'Firebase Auth', status: user?'Giriş Yapılmış':'Misafir', ok: true, desc: user?.email||'anonymous' },
-            { name: 'TCMB Kur API', status: exchangeRates?'Bağlı':'Bekleniyor', ok: !!exchangeRates, desc: exchangeRates?`1 USD = ₺${(exchangeRates.USD||0).toFixed(2)}`:'Güncelleniyor...' },
-            { name: 'Shopify', status: 'Manuel Sync', ok: true, desc: currentLanguage==='tr'?'Son sync: manuel':'Last sync: manual' },
-          ].map((s,i) => (
+            {
+              name: 'Firebase Firestore',
+              ok: healthData ? healthData.firebase : true,
+              status: healthData ? (healthData.firebase ? 'Aktif' : 'Hata') : 'Bekleniyor',
+              desc: currentLanguage==='tr' ? 'Gerçek zamanlı veritabanı' : 'Real-time database',
+            },
+            {
+              name: 'Firebase Auth',
+              ok: true,
+              status: user ? (currentLanguage==='tr' ? 'Giriş Yapıldı' : 'Authenticated') : (currentLanguage==='tr' ? 'Misafir' : 'Guest'),
+              desc: user?.email || 'anonymous',
+            },
+            {
+              name: 'TCMB Kur API',
+              ok: !!exchangeRates,
+              status: exchangeRates ? (currentLanguage==='tr' ? 'Bağlı' : 'Connected') : (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending'),
+              desc: exchangeRates ? `1 USD = ₺${(exchangeRates.USD||0).toFixed(2)}` : (currentLanguage==='tr' ? 'Güncelleniyor...' : 'Fetching...'),
+            },
+            {
+              name: 'Express Server',
+              ok: !!healthData,
+              status: healthData ? `${currentLanguage==='tr' ? 'Çalışıyor' : 'Running'} — ${Math.floor((healthData.uptime || 0) / 60)}m` : (currentLanguage==='tr' ? 'Bağlanılamadı' : 'Unreachable'),
+              desc: healthData ? healthData.env : '—',
+            },
+            {
+              name: 'Resend (E-posta)',
+              ok: !!healthData?.resend,
+              status: healthData?.resend ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'API Key Yok' : 'No API Key'),
+              desc: currentLanguage==='tr' ? 'Haftalık rapor & davet emaili' : 'Weekly report & invite emails',
+            },
+            {
+              name: 'WhatsApp (Twilio)',
+              ok: !!healthData?.whatsapp,
+              status: healthData?.whatsapp ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Credentials Yok' : 'No Credentials'),
+              desc: currentLanguage==='tr' ? 'Kargo bildirim mesajları' : 'Shipping notification messages',
+            },
+            {
+              name: 'İyzico (Ödeme)',
+              ok: !!healthData?.iyzico,
+              status: healthData?.iyzico ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'API Key Yok' : 'No API Key'),
+              desc: currentLanguage==='tr' ? 'B2B ödeme entegrasyonu' : 'B2B payment integration',
+            },
+            {
+              name: 'Shopify',
+              ok: true,
+              status: currentLanguage==='tr' ? 'Manuel Sync' : 'Manual Sync',
+              desc: currentLanguage==='tr' ? 'Son sync: manuel' : 'Last sync: manual',
+            },
+          ].map((s, i) => (
             <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-semibold text-gray-800">{s.name}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{s.desc}</div>
+                  <div className="font-semibold text-gray-800 text-sm">{s.name}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{s.desc}</div>
                 </div>
-                <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${s.ok?'bg-green-100 text-green-600':'bg-red-100 text-red-500'}`}>
-                  {s.ok?'●':' '} {s.status}
+                <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${s.ok ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
+                  {s.ok ? '● ' : '○ '}{s.status}
                 </span>
               </div>
             </div>
           ))}
         </div>
+
+        {/* Collection counts */}
+        {statsData && (
+          <div>
+            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">
+              {currentLanguage === 'tr' ? 'Koleksiyon Kayıt Sayıları' : 'Collection Record Counts'}
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Object.entries(statsData).map(([col, cnt]) => (
+                <div key={col} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between">
+                  <span className="text-xs text-gray-500 font-medium truncate">{col}</span>
+                  <span className="text-sm font-black text-brand ml-2">{cnt.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Last refreshed */}
+        {healthData && (
+          <p className="text-xs text-gray-300 text-right">
+            {currentLanguage === 'tr' ? 'Son güncelleme: ' : 'Last refreshed: '}
+            {new Date(healthData.timestamp).toLocaleTimeString('tr-TR')}
+          </p>
+        )}
       </div>
     )}
 
@@ -6413,6 +8167,62 @@ function AppContent() {
                 </div>
               </div>
 
+              {/* ── Phase 65: Notification Preferences ── */}
+              {(() => {
+                const prefKey = 'cetpa-notif-prefs';
+                const [prefs, setPrefs] = React.useState<Record<string, boolean>>(() => {
+                  try { return JSON.parse(localStorage.getItem(prefKey) ?? '{}'); } catch { return {}; }
+                });
+                const toggle = (key: string) => {
+                  setPrefs(prev => {
+                    const next = { ...prev, [key]: !prev[key] };
+                    localStorage.setItem(prefKey, JSON.stringify(next));
+                    return next;
+                  });
+                };
+                const items = [
+                  { key: 'lowStock',   icon: '📦', label: currentLanguage === 'tr' ? 'Düşük stok uyarıları' : 'Low stock alerts',       default: true  },
+                  { key: 'newOrder',   icon: '🛒', label: currentLanguage === 'tr' ? 'Yeni sipariş bildirimi' : 'New order notification',  default: true  },
+                  { key: 'newLead',    icon: '👤', label: currentLanguage === 'tr' ? 'Yeni müşteri adayı' : 'New lead',                   default: true  },
+                  { key: 'followUp',   icon: '📅', label: currentLanguage === 'tr' ? 'Takip hatırlatıcıları' : 'Follow-up reminders',     default: true  },
+                  { key: 'shipment',   icon: '🚚', label: currentLanguage === 'tr' ? 'Kargo durum değişikliği' : 'Shipment status change', default: false },
+                  { key: 'poDeadline', icon: '⏰', label: currentLanguage === 'tr' ? 'Satın alma son tarihi' : 'PO deadline alerts',       default: true  },
+                ];
+                return (
+                  <div className="apple-card p-6 space-y-4">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
+                        <Bell className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm">{currentLanguage === 'tr' ? 'Bildirim Tercihleri' : 'Notification Preferences'}</h3>
+                        <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Hangi bildirimleri almak istediğinizi seçin' : 'Choose which notifications you want to receive'}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {items.map(item => {
+                        const isOn = item.key in prefs ? prefs[item.key] : item.default;
+                        return (
+                          <div key={item.key} className="flex items-center justify-between py-1">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-base">{item.icon}</span>
+                              <span className="text-sm text-gray-700">{item.label}</span>
+                            </div>
+                            <button
+                              onClick={() => toggle(item.key)}
+                              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${isOn ? 'bg-brand' : 'bg-gray-200'}`}
+                            >
+                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isOn ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '* Tercihler bu cihazda yerel olarak saklanır.' : '* Preferences are stored locally on this device.'}</p>
+                  </div>
+                );
+              })()}
+
               {/* Dealer Portal info */}
               <div className="apple-card p-6 space-y-3 bg-purple-50/50 border border-purple-100">
                 <div className="flex items-center gap-3">
@@ -6436,14 +8246,131 @@ function AppContent() {
           {/* ── B2B Portal ── */}
           {activeTab === 'b2b' && (
             <motion.div key="b2b" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} />
+              <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
             </motion.div>
           )}
 
 
           {/* ── Inventory ── */}
           {activeTab === 'inventory' && (
-            <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {/* ── Phase 71: Inventory Reorder Alert Strip ── */}
+              {(() => {
+                const reorderItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
+                if (reorderItems.length === 0) return null;
+                const critical = reorderItems.filter(i => (i.stockLevel ?? 0) === 0).length;
+                const low      = reorderItems.length - critical;
+                return (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
+                      <Package className="w-4 h-4 text-red-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-red-800">
+                        {currentLanguage === 'tr'
+                          ? `${reorderItems.length} ürün yeniden sipariş eşiğinde`
+                          : `${reorderItems.length} product${reorderItems.length > 1 ? 's' : ''} at reorder threshold`}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {critical > 0 && (
+                          <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                            {critical} {currentLanguage === 'tr' ? 'Stok Yok' : 'Out of Stock'}
+                          </span>
+                        )}
+                        {low > 0 && (
+                          <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
+                            {low} {currentLanguage === 'tr' ? 'Düşük Stok' : 'Low Stock'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Scroll-to-first hint — top 3 items */}
+                    <div className="hidden sm:flex flex-col items-end gap-0.5 flex-shrink-0 max-w-[140px]">
+                      {reorderItems.slice(0, 3).map(i => (
+                        <span key={i.id} className="text-[9px] text-red-500 truncate max-w-full font-medium">
+                          {i.name} ({i.stockLevel ?? 0})
+                        </span>
+                      ))}
+                      {reorderItems.length > 3 && (
+                        <span className="text-[9px] text-red-400">+{reorderItems.length - 3} more</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 75: Inventory Category Distribution ── */}
+              {inventory.length > 0 && (() => {
+                const catMap: Record<string, { units: number; value: number }> = {};
+                for (const item of inventory) {
+                  const cat = item.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                  catMap[cat] = catMap[cat] || { units: 0, value: 0 };
+                  catMap[cat].units += item.stockLevel ?? 0;
+                  catMap[cat].value += (item.prices?.['Retail'] ?? item.price ?? 0) * (item.stockLevel ?? 0);
+                }
+                const catData = Object.entries(catMap)
+                  .map(([name, { units, value }]) => ({ name, units, value }))
+                  .sort((a, b) => b.value - a.value)
+                  .slice(0, 6);
+                if (catData.length < 2) return null;
+                const totalVal = catData.reduce((s, c) => s + c.value, 0);
+                const PALETTE = ['#ff4000', '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#6b7280'];
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? 'Kategori Dağılımı' : 'Category Distribution'}
+                      </h3>
+                      <span className="text-[10px] text-gray-400">
+                        {currentLanguage === 'tr' ? 'Perakende değerine göre' : 'By retail value'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      {/* Donut via Recharts */}
+                      <div className="flex-shrink-0">
+                        <ResponsiveContainer width={120} height={120}>
+                          <RePieChart>
+                            <Pie
+                              data={catData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={36}
+                              outerRadius={54}
+                              strokeWidth={2}
+                              stroke="#fff"
+                            >
+                              {catData.map((_, i) => (
+                                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v: number) => [`₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Değer' : 'Value']}
+                              contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                            />
+                          </RePieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      {/* Legend */}
+                      <div className="flex-1 space-y-1.5 min-w-0">
+                        {catData.map((c, i) => {
+                          const pct = totalVal > 0 ? Math.round((c.value / totalVal) * 100) : 0;
+                          return (
+                            <div key={c.name} className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
+                              <span className="text-xs text-gray-700 truncate flex-1">{c.name}</span>
+                              <span className="text-[10px] font-bold text-gray-500 flex-shrink-0">{pct}%</span>
+                              <span className="text-[10px] text-gray-400 flex-shrink-0 hidden sm:inline">{c.units} {currentLanguage === 'tr' ? 'ad.' : 'u.'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <InventoryView
                 inventory={inventory}
                 categories={inventoryCategories}
@@ -6552,7 +8479,17 @@ function AppContent() {
                             ) : sorted.map(order => (
                               <tr key={order.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedOrder(order)}>
                                 <td className="px-6 py-4 font-medium text-[#1D2226]">{order.shopifyOrderId}</td>
-                                <td className="px-6 py-4 text-gray-600">{order.customerName}</td>
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-gray-700 font-medium">{order.customerName}</span>
+                                    {/* Phase 46: CustomerType badge */}
+                                    {order.customerType && (
+                                      <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0", order.customerType === 'B2B' ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500")}>
+                                        {order.customerType}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td className="px-6 py-4 text-gray-500">
                                   {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
                                 </td>
@@ -6577,7 +8514,17 @@ function AppContent() {
                                     <option value="Cancelled">{currentT.cancelled}</option>
                                   </select>
                                 </td>
-                                <td className="px-6 py-4 text-right font-bold text-[#1D2226]">₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td className="px-6 py-4 text-right font-bold text-[#1D2226]">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {/* Phase 50: Notes indicator */}
+                                    {order.notes && (
+                                      <span title={order.notes} className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                                        <FileText className="w-2.5 h-2.5 text-amber-600" />
+                                      </span>
+                                    )}
+                                    ₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                                   <button onClick={() => handleDeleteOrder(order.id)} className="text-gray-400 hover:text-red-600 transition-colors p-1">
                                     <Trash2 className="w-4 h-4" />
@@ -6595,7 +8542,7 @@ function AppContent() {
 
               {/* CRM sub-tab: B2B Portal */}
               {crmTab === 'b2b' && (
-                <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} />
+                <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
               )}
 
               {crmTab === 'komisyon' && (
@@ -6659,9 +8606,104 @@ function AppContent() {
                 </label>
               </div>
 
+              {/* ── Phase 69: Lead Pipeline Funnel Strip ── */}
+              {leads.length > 0 && (() => {
+                const stages = [
+                  { key: 'New',       labelTR: 'Yeni',         color: 'bg-sky-400',     text: 'text-sky-700',     bg: 'bg-sky-50'     },
+                  { key: 'Contacted', labelTR: 'İrtibat',      color: 'bg-indigo-400',  text: 'text-indigo-700',  bg: 'bg-indigo-50'  },
+                  { key: 'Qualified', labelTR: 'Nitelikli',    color: 'bg-violet-400',  text: 'text-violet-700',  bg: 'bg-violet-50'  },
+                  { key: 'Closed',    labelTR: 'Kapandı',      color: 'bg-emerald-400', text: 'text-emerald-700', bg: 'bg-emerald-50' },
+                ];
+                const total = leads.length;
+                const counts = stages.map(s => ({ ...s, count: leads.filter(l => l.status === s.key).length }));
+                const maxCount = Math.max(...counts.map(s => s.count), 1);
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                      {currentLanguage === 'tr' ? 'Satış Hunisi' : 'Pipeline Funnel'}
+                      <span className="ml-2 text-gray-300 font-normal">{total} {currentLanguage === 'tr' ? 'aday' : 'leads'}</span>
+                    </p>
+                    <div className="grid grid-cols-4 gap-3">
+                      {counts.map((s) => {
+                        const pct = Math.round((s.count / total) * 100);
+                        const barH = Math.round((s.count / maxCount) * 48);
+                        return (
+                          <div key={s.key} className="flex flex-col items-center gap-1.5">
+                            {/* Mini bar */}
+                            <div className="w-full flex items-end justify-center h-12">
+                              <div
+                                className={`w-full rounded-t-lg transition-all duration-700 ${s.color} opacity-80`}
+                                style={{ height: `${Math.max(barH, 4)}px` }}
+                              />
+                            </div>
+                            {/* Count + label */}
+                            <div className={`w-full text-center px-2 py-1.5 rounded-xl ${s.bg}`}>
+                              <p className={`text-base font-black ${s.text}`}>{s.count}</p>
+                              <p className="text-[9px] font-bold text-gray-500 truncate">
+                                {currentLanguage === 'tr' ? s.labelTR : s.key}
+                              </p>
+                            </div>
+                            {/* Percentage */}
+                            <span className="text-[9px] text-gray-400 font-medium">{pct}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Conversion rate hint */}
+                    {(() => {
+                      const newCount = counts.find(s => s.key === 'New')?.count ?? 0;
+                      const closedCount = counts.find(s => s.key === 'Closed')?.count ?? 0;
+                      const conv = newCount > 0 ? Math.round((closedCount / total) * 100) : 0;
+                      return (
+                        <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between">
+                          <span className="text-[10px] text-gray-400">
+                            {currentLanguage === 'tr' ? 'Dönüşüm oranı' : 'Conversion rate'}
+                          </span>
+                          <span className={`text-[11px] font-bold ${conv >= 30 ? 'text-emerald-600' : conv >= 15 ? 'text-amber-600' : 'text-gray-500'}`}>
+                            {conv}%
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
+
               {viewMode === 'list' ? (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2 space-y-3">
+                    {/* ── Phase 72: Lead Status Filter Chips ── */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {(['All', 'New', 'Contacted', 'Qualified', 'Closed'] as const).map(s => {
+                        const count = s === 'All' ? leads.length : leads.filter(l => l.status === s).length;
+                        const isActive = leadStatusFilter === s;
+                        const chipColors: Record<string, string> = {
+                          All:       'bg-gray-900 text-white',
+                          New:       'bg-sky-500 text-white',
+                          Contacted: 'bg-indigo-500 text-white',
+                          Qualified: 'bg-violet-500 text-white',
+                          Closed:    'bg-emerald-500 text-white',
+                        };
+                        const labelTR: Record<string, string> = { All: 'Tümü', New: 'Yeni', Contacted: 'İrtibat', Qualified: 'Nitelikli', Closed: 'Kapandı' };
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => setLeadStatusFilter(s)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border",
+                              isActive
+                                ? `${chipColors[s]} border-transparent shadow-sm`
+                                : "bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-800"
+                            )}
+                          >
+                            {currentLanguage === 'tr' ? labelTR[s] : s}
+                            <span className={cn("text-[9px] px-1 py-0.5 rounded-full", isActive ? "bg-white/20" : "bg-gray-100 text-gray-500")}>
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                     {/* Sort bar */}
                     <div className="flex items-center gap-1 flex-wrap">
                       <span className="text-[10px] text-[#86868B] font-semibold uppercase mr-1">{currentLanguage === 'tr' ? 'Sırala:' : 'Sort:'}</span>
@@ -6686,9 +8728,10 @@ function AppContent() {
                     </div>
                     {(() => {
                       const filtered = leads.filter(l =>
-                        l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
+                        (leadStatusFilter === 'All' || l.status === leadStatusFilter) &&
+                        (l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                         l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                        l.email.toLowerCase().includes(crmSearch.toLowerCase())
+                        l.email.toLowerCase().includes(crmSearch.toLowerCase()))
                       );
                       const sorted = sortData(filtered, crmSort.key, crmSort.dir);
                       return sorted.length === 0 ? (
@@ -6705,7 +8748,42 @@ function AppContent() {
                             </div>
                             <div className="min-w-0">
                               <h4 className="font-bold text-[#1D2226] truncate">{lead.name}</h4>
-                              <p className="text-xs text-gray-500 truncate">{lead.company}</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-xs text-gray-500 truncate">{lead.company}</p>
+                                {/* Phase 49 + Phase 85: Lead-to-Order revenue badge with kpiCurrency */}
+                                {(() => {
+                                  const rev = orders
+                                    .filter(o => o.customerName === lead.name || o.customerName === lead.company)
+                                    .reduce((s, o) => s + (o.totalPrice || 0), 0);
+                                  if (rev === 0) return null;
+                                  const p85Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                                  const p85Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                                  const p85Val  = kpiCurrency === 'TRY' ? rev : rev / p85Rate;
+                                  return (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0">
+                                      {p85Sym}{p85Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                    </span>
+                                  );
+                                })()}
+                                {/* Phase 81: Lead Age Indicator */}
+                                {(() => {
+                                  if (!lead.createdAt) return null;
+                                  const created = typeof (lead.createdAt as { toDate?: () => Date }).toDate === 'function'
+                                    ? (lead.createdAt as { toDate: () => Date }).toDate()
+                                    : new Date(lead.createdAt as string | number);
+                                  const ageD = Math.round((Date.now() - created.getTime()) / 86400000);
+                                  if (ageD < 1) return null;
+                                  const ageColor = ageD <= 7 ? 'bg-emerald-50 text-emerald-600' : ageD <= 30 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-500';
+                                  const ageLabel = ageD < 30
+                                    ? `${ageD}${currentLanguage === 'tr' ? 'g' : 'd'}`
+                                    : `${Math.round(ageD / 30)}${currentLanguage === 'tr' ? 'a' : 'm'}`;
+                                  return (
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${ageColor}`} title={`Lead created ${ageD} days ago`}>
+                                      {ageLabel}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-3 sm:gap-6 shrink-0">
@@ -6716,9 +8794,31 @@ function AppContent() {
                               )}>
                                 {currentT[lead.status.toLowerCase()] || lead.status}
                               </span>
+                              {/* Phase 36: Follow-up due badge */}
+                              {lead.nextFollowUpDate && (() => {
+                                const due = typeof (lead.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
+                                  ? (lead.nextFollowUpDate as { toDate: () => Date }).toDate()
+                                  : new Date(lead.nextFollowUpDate as unknown as string | number);
+                                const today = new Date(); today.setHours(0, 0, 0, 0);
+                                const daysLeft = Math.round((due.getTime() - today.getTime()) / 86400000);
+                                const isOverdue = daysLeft < 0;
+                                const isToday   = daysLeft === 0;
+                                const isSoon    = daysLeft > 0 && daysLeft <= 7;
+                                if (!isOverdue && !isToday && !isSoon) return null;
+                                // Phase 36 + Phase 48: overdue, today, and upcoming
+                                return (
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full block mt-1 ${isOverdue ? 'bg-red-100 text-red-600' : isToday ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                                    {isOverdue
+                                      ? (currentLanguage === 'tr' ? '⚠ Gecikmiş' : '⚠ Overdue')
+                                      : isToday
+                                        ? (currentLanguage === 'tr' ? '📅 Bugün' : '📅 Today')
+                                        : (currentLanguage === 'tr' ? `📅 ${daysLeft}g` : `📅 ${daysLeft}d`)}
+                                  </span>
+                                );
+                              })()}
                               <p className="text-[10px] text-gray-400 mt-1">{lead.phone}</p>
                             </div>
-                            <button onClick={() => setSelectedLead(lead)} className="text-brand text-sm font-bold hover:underline">{currentT.view}</button>
+                            <button onClick={() => { setSelectedLead(lead); trackView({ type: 'lead', id: lead.id, label: lead.name, tab: 'crm' }); }} className="text-brand text-sm font-bold hover:underline">{currentT.view}</button>
                           </div>
                         </div>
                       )));
@@ -6771,6 +8871,128 @@ function AppContent() {
                         </div>
                       </div>
                     </div>
+
+                    {/* ── Phase 45: Customer Revenue Leaderboard ── */}
+                    {(() => {
+                      const revenueMap: Record<string, number> = {};
+                      for (const o of orders) {
+                        revenueMap[o.customerName] = (revenueMap[o.customerName] ?? 0) + (o.totalPrice || 0);
+                      }
+                      const top5 = Object.entries(revenueMap)
+                        .sort(([, a], [, b]) => b - a)
+                        .slice(0, 5);
+                      if (top5.length === 0) return null;
+                      const maxRev = top5[0][1];
+                      return (
+                        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                          <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4 text-brand" />
+                            {currentLanguage === 'tr' ? 'En Yüksek Ciro' : 'Top Customers'}
+                          </h3>
+                          <div className="space-y-3">
+                            {top5.map(([name, rev], i) => (
+                              <div key={name} className="flex items-center gap-2">
+                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : 'bg-gray-50 text-gray-400'}`}>
+                                  {i + 1}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <p className="text-[11px] font-semibold text-gray-700 truncate">{name}</p>
+                                    <p className="text-[11px] font-bold text-gray-800 ml-2 flex-shrink-0">
+                                      {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?rev:rev/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                                    </p>
+                                  </div>
+                                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-700 ${i === 0 ? 'bg-brand' : i === 1 ? 'bg-gray-400' : 'bg-gray-300'}`}
+                                      style={{ width: `${(rev / maxRev) * 100}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Phase 53: Sales Funnel ── */}
+                    {leads.length > 0 && (() => {
+                      const stages = [
+                        { key: 'New',       labelTR: 'Yeni',        color: 'bg-blue-400'    },
+                        { key: 'Contacted', labelTR: 'İletişim',    color: 'bg-purple-400'  },
+                        { key: 'Qualified', labelTR: 'Nitelikli',   color: 'bg-amber-400'   },
+                        { key: 'Closed',    labelTR: 'Kapandı',     color: 'bg-emerald-500' },
+                      ];
+                      const maxCount = Math.max(...stages.map(s => leads.filter(l => l.status === s.key).length), 1);
+                      return (
+                        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                          <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
+                            <Flame className="w-4 h-4 text-brand" />
+                            {currentLanguage === 'tr' ? 'Satış Hunisi' : 'Sales Funnel'}
+                          </h3>
+                          <div className="space-y-2">
+                            {stages.map((s, i) => {
+                              const count = leads.filter(l => l.status === s.key).length;
+                              const width = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                              // Funnel taper: each stage is slightly narrower
+                              const indent = i * 6;
+                              return (
+                                <div key={s.key} style={{ paddingLeft: `${indent}px`, paddingRight: `${indent}px` }}>
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="text-[10px] text-gray-400 w-16 shrink-0 truncate">
+                                      {currentLanguage === 'tr' ? s.labelTR : s.key}
+                                    </span>
+                                    <div className="flex-1 h-5 bg-gray-50 rounded-md overflow-hidden">
+                                      <div className={`h-full ${s.color} rounded-md flex items-center justify-end pr-1.5 transition-all duration-700`} style={{ width: `${Math.max(width, count > 0 ? 12 : 0)}%` }}>
+                                        <span className="text-[9px] font-black text-white">{count}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Phase 32: AI Score Histogram ── */}
+                    {leads.some(l => l.score != null) && (
+                      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                        <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-brand" />
+                          {currentLanguage === 'tr' ? 'AI Skor Dağılımı' : 'AI Score Distribution'}
+                        </h3>
+                        {(() => {
+                          const buckets = [
+                            { label: '0–20',   min: 0,  max: 20,  color: 'bg-red-400' },
+                            { label: '21–40',  min: 21, max: 40,  color: 'bg-orange-400' },
+                            { label: '41–60',  min: 41, max: 60,  color: 'bg-amber-400' },
+                            { label: '61–80',  min: 61, max: 80,  color: 'bg-blue-400' },
+                            { label: '81–100', min: 81, max: 100, color: 'bg-emerald-500' },
+                          ];
+                          const scored = leads.filter(l => l.score != null);
+                          const maxCount = Math.max(...buckets.map(b => scored.filter(l => (l.score ?? 0) >= b.min && (l.score ?? 0) <= b.max).length), 1);
+                          return (
+                            <div className="space-y-2">
+                              {buckets.map(b => {
+                                const count = scored.filter(l => (l.score ?? 0) >= b.min && (l.score ?? 0) <= b.max).length;
+                                return (
+                                  <div key={b.label} className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-400 font-mono w-12 shrink-0">{b.label}</span>
+                                    <div className="flex-1 h-4 bg-gray-50 rounded-full overflow-hidden">
+                                      <div className={`h-full ${b.color} rounded-full transition-all duration-500`} style={{ width: `${(count / maxCount) * 100}%` }} />
+                                    </div>
+                                    <span className="text-[10px] font-bold text-gray-600 w-5 text-right shrink-0">{count}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -6793,15 +9015,27 @@ function AppContent() {
                           l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                           l.email.toLowerCase().includes(crmSearch.toLowerCase())
                         )).map(lead => (
-                          <div key={lead.id} onClick={() => setSelectedLead(lead)} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:border-brand transition-colors">
-                            <div className="flex justify-between items-start mb-2">
-                              <h4 className="font-bold text-sm text-[#1D2226]">{lead.name}</h4>
-                              <div className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", (lead.score || 0) > 70 ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-500")}>
-                                {lead.score || '--'}
+                          /* Phase 87: score bar kanban card */
+                          <div key={lead.id} onClick={() => setSelectedLead(lead)} className="bg-white rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:border-brand transition-colors overflow-hidden">
+                            <div className="p-4">
+                              <div className="flex justify-between items-start mb-2">
+                                <h4 className="font-bold text-sm text-[#1D2226]">{lead.name}</h4>
+                                <div className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", (lead.score || 0) > 70 ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-500")}>
+                                  {lead.score || '--'}
+                                </div>
                               </div>
+                              <p className="text-xs text-gray-500 mb-2">{lead.company}</p>
+                              <p className="text-[10px] text-gray-400 truncate">{lead.email}</p>
                             </div>
-                            <p className="text-xs text-gray-500 mb-2">{lead.company}</p>
-                            <p className="text-[10px] text-gray-400 truncate">{lead.email}</p>
+                            {/* Score stripe */}
+                            {lead.score != null && (
+                              <div className="h-1 w-full bg-gray-100">
+                                <div
+                                  className={`h-full transition-all duration-700 ${lead.score >= 80 ? 'bg-emerald-400' : lead.score >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                                  style={{ width: `${lead.score}%` }}
+                                />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -6851,6 +9085,23 @@ function AppContent() {
                           <MessageSquare className="w-4 h-4" /> WhatsApp
                         </button>
                       )}
+                      {/* Phase 41: Quick Call + Email buttons */}
+                      {selectedLead.phone && (
+                        <a href={`tel:${selectedLead.phone}`}
+                          className="apple-button-secondary flex items-center gap-2 text-blue-700 hover:bg-blue-50"
+                          title={selectedLead.phone}>
+                          <Phone className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'Ara' : 'Call'}
+                        </a>
+                      )}
+                      {selectedLead.email && (
+                        <a href={`mailto:${selectedLead.email}`}
+                          className="apple-button-secondary flex items-center gap-2 text-purple-700 hover:bg-purple-50"
+                          title={selectedLead.email}>
+                          <Mail className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'E-posta' : 'Email'}
+                        </a>
+                      )}
                       <button
                         onClick={() => {
                           const leadOrders = orders.filter(o =>
@@ -6868,7 +9119,20 @@ function AppContent() {
                         <FileDown className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Ekstre PDF' : 'Statement PDF'}
                       </button>
-                      <button onClick={() => setIsAddingOrder(true)} className="apple-button-primary">
+                      {/* Phase 83: pre-fill order form from lead */}
+                      <button onClick={() => {
+                        setNewOrder(prev => ({
+                          ...prev,
+                          customerName: selectedLead.name,
+                          shippingAddress: selectedLead.company || '',
+                          customerType: selectedLead.customerType || 'B2B',
+                          faturali: selectedLead.customerType === 'B2B',
+                          faturaTipi: selectedLead.customerType === 'B2B' ? 'e-fatura' : 'e-arsiv',
+                          leadId: selectedLead.id,
+                        }));
+                        setOrderCustomerSearch(selectedLead.name);
+                        setIsAddingOrder(true);
+                      }} className="apple-button-primary">
                         <Plus className="w-4 h-4" /> {currentT.add_order}
                       </button>
                     </div>
@@ -6915,6 +9179,39 @@ function AppContent() {
                     <h3 className="font-bold mb-4">{currentT.notes_ai_insights}</h3>
                     <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedLead.notes || currentT.no_notes_available}</p>
                   </div>
+                  {/* ── Phase 58: Lead Quick-Note ── */}
+                  {(() => {
+                    const storageKey = `cetpa-lead-note-${selectedLead.id}`;
+                    const [lnText, setLnText] = React.useState<string>(() => localStorage.getItem(storageKey) ?? '');
+                    const lnTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+                    const handleLnChange = (val: string) => {
+                      setLnText(val);
+                      if (lnTimer.current) clearTimeout(lnTimer.current);
+                      lnTimer.current = setTimeout(() => localStorage.setItem(storageKey, val), 600);
+                    };
+                    return (
+                      <div className="bg-amber-50 border border-amber-100 p-5 rounded-xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
+                            <FileText className="w-4 h-4" />
+                            {currentLanguage === 'tr' ? 'Hızlı Not (Yerel)' : 'Quick Note (Local)'}
+                          </h3>
+                          {lnText && (
+                            <span className="text-[9px] text-amber-500 font-semibold">
+                              {currentLanguage === 'tr' ? 'Otomatik kaydediliyor' : 'Auto-saved'}
+                            </span>
+                          )}
+                        </div>
+                        <textarea
+                          value={lnText}
+                          onChange={e => handleLnChange(e.target.value)}
+                          rows={3}
+                          placeholder={currentLanguage === 'tr' ? 'Bu müşteri adayı için hızlı notunuzu yazın…' : 'Jot a quick note about this lead…'}
+                          className="w-full bg-white/70 rounded-lg px-3 py-2 text-sm text-gray-700 placeholder-amber-300 outline-none focus:ring-2 focus:ring-amber-200 resize-none leading-relaxed border border-amber-100"
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="lg:col-span-2 space-y-6">
@@ -7009,28 +9306,56 @@ function AppContent() {
                         </div>
                       </form>
                     )}
-                    <div className="space-y-4">
+                    {/* ── Phase 26: Enhanced Activity Timeline ── */}
+                    <div className="space-y-0">
                       {(!selectedLead.activities || selectedLead.activities.length === 0) ? (
                         <p className="text-sm text-gray-500 text-center py-4">{currentT.no_activities_logged}</p>
-                      ) : (
-                        [...selectedLead.activities].sort((a, b) => (typeof (b.date as { toDate?: () => Date }).toDate === 'function' ? (b.date as { toDate: () => Date }).toDate() : new Date(b.date as unknown as string | number | Date)).getTime() - (typeof (a.date as { toDate?: () => Date }).toDate === 'function' ? (a.date as { toDate: () => Date }).toDate() : new Date(a.date as unknown as string | number | Date)).getTime()).map(activity => (
-                          <div key={activity.id} className="flex gap-4">
-                            <div className="mt-1">
-                              {activity.type === 'Note' && <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><FileText className="w-4 h-4 text-gray-600" /></div>}
-                              {activity.type === 'Call' && <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center"><Phone className="w-4 h-4 text-blue-600" /></div>}
-                              {activity.type === 'Email' && <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center"><Mail className="w-4 h-4 text-emerald-600" /></div>}
-                              {activity.type === 'Meeting' && <div className="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center"><Users className="w-4 h-4 text-purple-600" /></div>}
-                            </div>
-                            <div className="flex-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                              <div className="flex justify-between items-start mb-1">
-                                <span className="font-bold text-sm">{currentT[activity.type.toLowerCase()]}</span>
-                                <span className="text-[10px] text-gray-400">{(typeof (activity.date as { toDate?: () => Date }).toDate === 'function' ? (activity.date as { toDate: () => Date }).toDate() : new Date(activity.date as unknown as string | number | Date)).toLocaleString()}</span>
+                      ) : (() => {
+                        const sorted = [...selectedLead.activities].sort((a, b) => {
+                          const getTs = (d: unknown) => typeof (d as { toDate?: () => Date }).toDate === 'function'
+                            ? (d as { toDate: () => Date }).toDate().getTime()
+                            : new Date(d as string | number).getTime();
+                          return getTs(b.date) - getTs(a.date);
+                        });
+                        const ICON_MAP: Record<string, { icon: React.ElementType; bg: string; color: string }> = {
+                          Note:    { icon: FileText, bg: 'bg-gray-100',    color: 'text-gray-600'    },
+                          Call:    { icon: Phone,    bg: 'bg-blue-50',     color: 'text-blue-600'    },
+                          Email:   { icon: Mail,     bg: 'bg-emerald-50',  color: 'text-emerald-600' },
+                          Meeting: { icon: Users,    bg: 'bg-purple-50',   color: 'text-purple-600'  },
+                        };
+                        return sorted.map((activity, idx) => {
+                          const cfg = ICON_MAP[activity.type] ?? ICON_MAP.Note;
+                          const Icon = cfg.icon;
+                          const dateStr = (() => {
+                            const d = typeof (activity.date as { toDate?: () => Date }).toDate === 'function'
+                              ? (activity.date as { toDate: () => Date }).toDate()
+                              : new Date(activity.date as unknown as string | number);
+                            return d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+                          })();
+                          return (
+                            <div key={activity.id} className="flex gap-3 relative">
+                              {/* Vertical connector line */}
+                              {idx < sorted.length - 1 && (
+                                <div className="absolute left-4 top-9 bottom-0 w-[2px] bg-gray-100" />
+                              )}
+                              {/* Icon bubble */}
+                              <div className="relative z-10 flex-shrink-0 mt-1">
+                                <div className={`w-8 h-8 rounded-full ${cfg.bg} flex items-center justify-center`}>
+                                  <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
+                                </div>
                               </div>
-                              <p className="text-sm text-gray-700 whitespace-pre-wrap">{activity.description}</p>
+                              {/* Content card */}
+                              <div className={`flex-1 bg-gray-50 p-3 rounded-xl border border-gray-100 ${idx < sorted.length - 1 ? 'mb-3' : ''}`}>
+                                <div className="flex justify-between items-start mb-1 gap-2">
+                                  <span className={`text-xs font-bold ${cfg.color}`}>{currentT[activity.type.toLowerCase()] ?? activity.type}</span>
+                                  <span className="text-[9px] text-gray-400 whitespace-nowrap">{dateStr}</span>
+                                </div>
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{activity.description}</p>
+                              </div>
                             </div>
-                          </div>
-                        ))
-                      )}
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
 
@@ -7151,6 +9476,86 @@ function AppContent() {
                 </div>
               )}
 
+              {/* ── Phase 55: Status Filter Chips ── */}
+              <div className="flex flex-wrap gap-1.5">
+                {(['All', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const).map(s => {
+                  const count = s === 'All' ? orders.length : orders.filter(o => o.status === s).length;
+                  const isActive = orderStatusFilter === s;
+                  const chipColors: Record<string, string> = {
+                    All:        'bg-gray-900 text-white',
+                    Pending:    'bg-amber-500 text-white',
+                    Processing: 'bg-purple-500 text-white',
+                    Shipped:    'bg-blue-500 text-white',
+                    Delivered:  'bg-emerald-500 text-white',
+                    Cancelled:  'bg-gray-400 text-white',
+                  };
+                  const labelTR: Record<string, string> = { All: 'Tümü', Pending: 'Bekliyor', Processing: 'Hazırlanıyor', Shipped: 'Kargoda', Delivered: 'Teslim', Cancelled: 'İptal' };
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => setOrderStatusFilter(s)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border",
+                        isActive
+                          ? `${chipColors[s]} border-transparent shadow-sm`
+                          : darkMode
+                            ? "bg-white/5 border-white/10 text-white/60 hover:bg-white/10"
+                            : "bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-800"
+                      )}
+                    >
+                      {currentLanguage === 'tr' ? labelTR[s] : s}
+                      <span className={cn("text-[9px] px-1 py-0.5 rounded-full", isActive ? "bg-white/20" : darkMode ? "bg-white/10" : "bg-gray-100 text-gray-500")}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ── Phase 70: Order Aging Alert ── */}
+              {(() => {
+                const now = Date.now();
+                const THREE_DAYS = 3 * 86400000;
+                const stuckOrders = orders.filter(o => {
+                  if (o.status !== 'Pending' && o.status !== 'Processing') return false;
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number | Date);
+                  return now - d.getTime() > THREE_DAYS;
+                });
+                if (stuckOrders.length === 0) return null;
+                const pendingStuck    = stuckOrders.filter(o => o.status === 'Pending').length;
+                const processingStuck = stuckOrders.filter(o => o.status === 'Processing').length;
+                return (
+                  <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-amber-800">
+                        {currentLanguage === 'tr'
+                          ? `${stuckOrders.length} sipariş 3+ gündür bekliyor`
+                          : `${stuckOrders.length} order${stuckOrders.length > 1 ? 's' : ''} stuck for 3+ days`}
+                      </p>
+                      <p className="text-[10px] text-amber-600 mt-0.5">
+                        {[
+                          pendingStuck    > 0 && `${pendingStuck} Pending`,
+                          processingStuck > 0 && `${processingStuck} Processing`,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setOrderStatusFilter('Pending')}
+                      className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-full transition-colors flex-shrink-0"
+                    >
+                      {currentLanguage === 'tr' ? 'İncele' : 'Review'}
+                    </button>
+                  </div>
+                );
+              })()}
+
               {/* Desktop Table View */}
               <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
@@ -7204,9 +9609,10 @@ function AppContent() {
                     <tbody className="divide-y divide-gray-100">
                       {(() => {
                         const filtered = orders.filter(o =>
-                          o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                          (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
+                          (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                           o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                          o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase())
+                          o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
                         );
                         const sorted = sortData(filtered, orderSort.key, orderSort.dir);
                         return sorted.length === 0 ? (
@@ -7215,7 +9621,7 @@ function AppContent() {
                           <tr
                             key={order.id}
                             className={cn("hover:bg-gray-50 transition-colors cursor-pointer", selectedOrderIds.has(order.id) && "bg-brand/5")}
-                            onClick={() => setSelectedOrder(order)}
+                            onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `#${order.shopifyOrderId || order.id.slice(-6)} — ${order.customerName}`, tab: 'orders' }); }}
                           >
                             <td className="pl-4 py-4 w-8" onClick={e => e.stopPropagation()}>
                               <input
@@ -7231,7 +9637,26 @@ function AppContent() {
                               />
                             </td>
                             <td className="px-6 py-4 font-medium text-[#1D2226]">{order.shopifyOrderId}</td>
-                            <td className="px-6 py-4 text-gray-600">{order.customerName}</td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-600">{order.customerName}</span>
+                                {/* Phase 46: CustomerType badge */}
+                                {order.customerType && (
+                                  <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0", order.customerType === 'B2B' ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500")}>
+                                    {order.customerType}
+                                  </span>
+                                )}
+                                {/* Phase 78: Notes indicator dot */}
+                                {order.notes && (
+                                  <span
+                                    className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 cursor-help"
+                                    title={order.notes}
+                                  >
+                                    <FileText className="w-2.5 h-2.5 text-amber-600" />
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-6 py-4 text-gray-500">
                               {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
                             </td>
@@ -7257,16 +9682,29 @@ function AppContent() {
                               </select>
                             </td>
                             <td className="px-6 py-4 text-right font-bold text-[#1D2226]">
-                              <div>₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                              {order.faturali ? (
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
-                                  {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
-                                </span>
-                              ) : (
-                                <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">
-                                  {currentLanguage === 'tr' ? 'FATURASIZ' : 'NO INVOICE'}
-                                </span>
-                              )}
+                              <div>{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?order.totalPrice:order.totalPrice/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                              <div className="flex flex-col items-end gap-0.5 mt-0.5">
+                                {order.faturali ? (
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
+                                    {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">
+                                    {currentLanguage === 'tr' ? 'FATURASIZ' : 'NO INVOICE'}
+                                  </span>
+                                )}
+                                {/* Phase 67: Mikro sync badge */}
+                                {order.mikroFaturaNo ? (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c] inline-flex items-center gap-0.5 max-w-[120px] truncate" title={`Mikro: ${order.mikroFaturaNo}`}>
+                                    ✓ {order.mikroFaturaNo}
+                                  </span>
+                                ) : order.faturali ? (
+                                  <span className="text-[9px] text-amber-500 font-medium inline-flex items-center gap-0.5" title={currentLanguage === 'tr' ? 'Mikro\'ya gönderilmedi' : 'Not pushed to Mikro'}>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+                                    Mikro
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-2">
@@ -7336,9 +9774,10 @@ function AppContent() {
               {/* Mobile Card View */}
               <div className="md:hidden space-y-4">
                 {sortData(orders.filter(o =>
-                  o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                  (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
+                  (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                   o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                  o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase())
+                  o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
                 ), orderSort.key, orderSort.dir).map(order => (
                   <div key={order.id} className="apple-card p-4 space-y-3" onClick={() => setSelectedOrder(order)}>
                     <div className="flex justify-between items-start">
@@ -7359,7 +9798,20 @@ function AppContent() {
                       <div className="text-xs text-gray-400">
                         {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
                       </div>
-                      <p className="font-bold text-brand">{order.totalPrice.toLocaleString()} TL</p>
+                      <div className="text-right">
+                        <p className="font-bold text-brand">{order.totalPrice.toLocaleString()} TL</p>
+                        {/* Phase 67: invoice mini-badge on mobile */}
+                        <div className="flex items-center justify-end gap-1 mt-0.5">
+                          {order.faturali ? (
+                            <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${order.faturaTipi === 'ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi === 'e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
+                              {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FTR'}
+                            </span>
+                          ) : null}
+                          {order.mikroFaturaNo ? (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">✓ MKR</span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -7444,6 +9896,27 @@ function AppContent() {
                         <Link className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Takip Linki' : 'Track Link'}
                       </button>
+                      {/* Phase 57: Copy Order Summary (WhatsApp-ready) */}
+                      <button
+                        onClick={() => {
+                          const o = selectedOrder;
+                          const trackUrl = `${window.location.origin}/?track=${o.id}`;
+                          const _waRate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                          const _waSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                          const _waAmt  = `${_waSym}${(kpiCurrency === 'TRY' ? (o.totalPrice||0) : (o.totalPrice||0) / _waRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                          const summary = currentLanguage === 'tr'
+                            ? `📦 *Sipariş Özeti*\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
+                            : `📦 *Order Summary*\nOrder: #${o.shopifyOrderId || o.id.slice(-6)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
+                          navigator.clipboard.writeText(summary).then(() =>
+                            toast(currentLanguage === 'tr' ? 'Sipariş özeti kopyalandı ✓' : 'Order summary copied ✓', 'success')
+                          ).catch(() => {});
+                        }}
+                        className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors"
+                        title={currentLanguage === 'tr' ? 'WhatsApp özeti kopyala' : 'Copy summary (WhatsApp-ready)'}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
+                      </button>
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
                         message: currentT.confirm_delete,
@@ -7465,6 +9938,10 @@ function AppContent() {
                   }
                 />
               </div>
+
+              {/* ── Order Status Timeline (Phase 23) ── */}
+              <OrderStatusTimeline status={selectedOrder.status} lang={currentLanguage} />
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="space-y-6">
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -7503,10 +9980,38 @@ function AppContent() {
                       </div>
                     </div>
                   </div>
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h3 className="font-bold mb-4">{currentT.notes}</h3>
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedOrder.notes || currentT.no_notes_available}</p>
-                  </div>
+                  {/* Phase 40: Order Quick Note */}
+                  {(() => {
+                    const [noteText, setNoteText] = React.useState(selectedOrder.notes ?? '');
+                    const [noteSaving, setNoteSaving] = React.useState(false);
+                    const [noteSaved, setNoteSaved] = React.useState(false);
+                    const saveNote = async () => {
+                      if (noteText === (selectedOrder.notes ?? '')) return;
+                      setNoteSaving(true);
+                      await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: noteText, updatedAt: serverTimestamp() });
+                      setSelectedOrder({ ...selectedOrder, notes: noteText });
+                      setNoteSaving(false); setNoteSaved(true);
+                      setTimeout(() => setNoteSaved(false), 2000);
+                    };
+                    return (
+                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-bold">{currentT.notes}</h3>
+                          {noteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kaydedildi' : 'Saved'}</span>}
+                        </div>
+                        <textarea
+                          value={noteText}
+                          onChange={e => { setNoteText(e.target.value); setNoteSaved(false); }}
+                          onBlur={() => void saveNote()}
+                          rows={4}
+                          placeholder={currentT.no_notes_available}
+                          className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
+                        />
+                        {noteSaving && <p className="text-[10px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…'}</p>}
+                      </div>
+                    );
+                  })()}
+
                 </div>
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -7554,6 +10059,45 @@ function AppContent() {
                         <p className="text-xs text-gray-400 mt-1">{currentT.product_picker_hint}</p>
                       </div>
                     )}
+
+                    {/* ── Phase 74: Gross Profit Summary ── */}
+                    {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && (() => {
+                      const hasCost = selectedOrder.lineItems.some(l => (l.costPrice ?? 0) > 0);
+                      if (!hasCost) return null;
+                      const revenue  = selectedOrder.lineItems.reduce((s, l) => s + l.price * l.quantity, 0);
+                      const cost     = selectedOrder.lineItems.reduce((s, l) => s + ((l.costPrice ?? 0) * l.quantity), 0);
+                      const gp       = revenue - cost;
+                      const gpPct    = revenue > 0 ? Math.round((gp / revenue) * 100) : 0;
+                      const gpColor  = gpPct >= 40 ? 'text-emerald-700' : gpPct >= 20 ? 'text-amber-700' : 'text-red-600';
+                      const gpBg     = gpPct >= 40 ? 'bg-emerald-50 border-emerald-100' : gpPct >= 20 ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100';
+                      const barColor = gpPct >= 40 ? 'bg-emerald-400' : gpPct >= 20 ? 'bg-amber-400' : 'bg-red-400';
+                      return (
+                        <div className={`rounded-xl border px-4 py-3 ${gpBg} mt-3`}>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                            {currentLanguage === 'tr' ? 'Tahmini Brüt Kâr' : 'Est. Gross Profit'}
+                          </p>
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className={`text-xl font-black ${gpColor}`}>
+                                ₺{gp.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">
+                                {currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}: ₺{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </p>
+                            </div>
+                            <div className="flex-1 max-w-[120px]">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</span>
+                                <span className={`text-sm font-black ${gpColor}`}>{gpPct}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div className={`${barColor} h-2 rounded-full transition-all duration-700`} style={{ width: `${Math.min(gpPct, 100)}%` }} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -7610,6 +10154,98 @@ function AppContent() {
 
               {/* Lojistik sub-tab: Sevkiyatlar (existing logistics content) */}
               {lojistikTab === 'sevkiyat' && <>
+              {/* ── Phase 60: Today's Shipment Summary ── */}
+              {(() => {
+                const todayStr = new Date().toDateString();
+                const shipped   = orders.filter(o => o.status === 'Shipped');
+                const delivered = orders.filter(o => o.status === 'Delivered');
+                const todayShipped = orders.filter(o => {
+                  if (o.status !== 'Shipped') return false;
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
+                  return d.toDateString() === todayStr;
+                });
+                const pending = orders.filter(o => o.status === 'Processing');
+                const stats = [
+                  { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit',      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
+                  { label: currentLanguage === 'tr' ? 'Bugün Gönderildi' : 'Shipped Today', value: todayShipped.length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Package     },
+                  { label: currentLanguage === 'tr' ? 'Hazırlanıyor' : 'Preparing',   value: pending.length,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
+                  { label: currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered',  value: delivered.length,   color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
+                ];
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                      <Truck className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'Sevkiyat Özeti' : 'Shipment Summary'}
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {stats.map((s, i) => {
+                        const Icon = s.icon;
+                        return (
+                          <div key={i} className={cn("rounded-xl p-4 flex flex-col gap-2", darkMode ? "bg-white/5" : s.bg)}>
+                            <Icon className={`w-5 h-5 ${s.color}`} />
+                            <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+                            <p className={cn("text-[10px] font-bold", darkMode ? "text-white/50" : "text-gray-500")}>{s.label}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 80: Cargo Company Performance ── */}
+              {(() => {
+                const cargoMap: Record<string, { total: number; delivered: number; inTransit: number }> = {};
+                for (const o of orders) {
+                  if (!o.cargoCompany) continue;
+                  const k = o.cargoCompany;
+                  cargoMap[k] = cargoMap[k] || { total: 0, delivered: 0, inTransit: 0 };
+                  cargoMap[k].total += 1;
+                  if (o.status === 'Delivered') cargoMap[k].delivered += 1;
+                  if (o.status === 'Shipped')   cargoMap[k].inTransit += 1;
+                }
+                const cargoList = Object.entries(cargoMap)
+                  .map(([name, d]) => ({ name, ...d, rate: d.total > 0 ? Math.round((d.delivered / d.total) * 100) : 0 }))
+                  .sort((a, b) => b.total - a.total)
+                  .slice(0, 5);
+                if (cargoList.length === 0) return null;
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                      <Truck className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'Kargo Firması Performansı' : 'Cargo Company Performance'}
+                    </h3>
+                    <div className="space-y-3">
+                      {cargoList.map(c => (
+                        <div key={c.name} className="space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-semibold text-gray-700 truncate flex-1">{c.name}</span>
+                            <div className="flex items-center gap-3 flex-shrink-0 text-[10px]">
+                              <span className="text-blue-500 font-bold">{c.inTransit} {currentLanguage === 'tr' ? 'yolda' : 'transit'}</span>
+                              <span className="text-emerald-600 font-bold">{c.delivered}/{c.total}</span>
+                              <span className={`font-black w-10 text-right ${c.rate >= 80 ? 'text-emerald-600' : c.rate >= 50 ? 'text-amber-600' : 'text-red-500'}`}>{c.rate}%</span>
+                            </div>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full transition-all duration-700 ${c.rate >= 80 ? 'bg-emerald-400' : c.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                              style={{ width: `${c.rate}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-3">
+                      {currentLanguage === 'tr' ? 'Teslimat başarı oranı (tamamlanan / toplam)' : 'Delivery success rate (completed / total)'}
+                    </p>
+                  </div>
+                );
+              })()}
+
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold">{currentT.logistics_tracking}</h2>
@@ -7866,11 +10502,18 @@ function AppContent() {
       <AnimatePresence>
         {isAddingLead && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !isScoring && setIsAddingLead(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!isScoring) { leadFromOrderRef.current = false; setIsAddingLead(false); } }} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold">{currentT.add_new_sales_lead}</h3>
-                <button onClick={() => !isScoring && setIsAddingLead(false)} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
+                <div>
+                  <h3 className="text-xl font-bold">{currentT.add_new_sales_lead}</h3>
+                  {leadFromOrderRef.current && (
+                    <p className="text-[11px] text-brand mt-0.5 font-medium">
+                      {currentLanguage === 'tr' ? '↩ Sipariş formuna otomatik eklenecek' : '↩ Will auto-select in order form'}
+                    </p>
+                  )}
+                </div>
+                <button onClick={() => { if (!isScoring) { leadFromOrderRef.current = false; setIsAddingLead(false); } }} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
               </div>
               <form onSubmit={handleAddLead} className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -7984,10 +10627,10 @@ function AppContent() {
                               <p className="px-4 py-3 text-xs text-[#86868B]">{currentLanguage === 'tr' ? 'Henüz müşteri yok' : 'No customers yet'}</p>
                             )}
                             <button type="button"
-                              onMouseDown={() => { setOrderCustomerOpen(false); setIsAddingLead(true); }}
+                              onMouseDown={() => { setOrderCustomerOpen(false); leadFromOrderRef.current = true; setIsAddingLead(true); }}
                               className="w-full text-left px-4 py-2.5 text-xs font-bold text-brand hover:bg-brand/5 flex items-center gap-2">
                               <Plus className="w-3.5 h-3.5" />
-                              {currentLanguage === 'tr' ? 'Yeni müşteri ekle' : 'Add new customer'}
+                              {currentLanguage === 'tr' ? 'Yeni müşteri adayı ekle' : 'Add new lead'}
                             </button>
                           </div>
                         )}
@@ -8543,6 +11186,98 @@ function AppContent() {
       )}
 
       <AIChat />
+
+      {/* ── Phase 28: Keyboard Shortcut Cheat-Sheet ── */}
+      <AnimatePresence>
+        {shortcutModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+            onClick={() => setShortcutModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.94, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">
+                  {currentLanguage === 'tr' ? 'Klavye Kısayolları' : 'Keyboard Shortcuts'}
+                </h2>
+                <button onClick={() => setShortcutModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+                {[
+                  {
+                    section: currentLanguage === 'tr' ? 'Genel' : 'General',
+                    shortcuts: [
+                      { keys: ['⌘', 'K'], desc: currentLanguage === 'tr' ? 'Global arama' : 'Global search' },
+                      { keys: ['?'],       desc: currentLanguage === 'tr' ? 'Bu ekranı göster' : 'Show this screen' },
+                      { keys: ['Esc'],     desc: currentLanguage === 'tr' ? 'Kapat / Geri dön' : 'Close / Go back' },
+                    ],
+                  },
+                  {
+                    section: currentLanguage === 'tr' ? 'Navigasyon' : 'Navigation',
+                    shortcuts: [
+                      { keys: ['D'],   desc: currentLanguage === 'tr' ? 'Dashboard' : 'Dashboard' },
+                      { keys: ['O'],   desc: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
+                      { keys: ['C'],   desc: 'CRM' },
+                      { keys: ['I'],   desc: currentLanguage === 'tr' ? 'Envanter' : 'Inventory' },
+                      { keys: ['R'],   desc: currentLanguage === 'tr' ? 'Raporlar' : 'Reports' },
+                    ],
+                  },
+                  {
+                    section: currentLanguage === 'tr' ? 'Oluştur' : 'Create',
+                    shortcuts: [
+                      { keys: ['N'], desc: currentLanguage === 'tr' ? 'Yeni sipariş / müşteri adayı (aktif sekme)' : 'New order / lead (active tab)' },
+                    ],
+                  },
+                  {
+                    section: currentLanguage === 'tr' ? 'Arama & Dışa Aktarma' : 'Search & Export',
+                    shortcuts: [
+                      { keys: ['⌘', 'E'], desc: currentLanguage === 'tr' ? 'CSV dışa aktar (aktif modül)' : 'Export CSV (active module)' },
+                      { keys: ['⌘', 'P'], desc: currentLanguage === 'tr' ? 'PDF oluştur / Yazdır' : 'Generate PDF / Print' },
+                    ],
+                  },
+                ].map(group => (
+                  <div key={group.section}>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">{group.section}</p>
+                    <div className="space-y-1.5">
+                      {group.shortcuts.map((sc, i) => (
+                        <div key={i} className="flex items-center justify-between">
+                          <span className="text-sm text-gray-700">{sc.desc}</span>
+                          <div className="flex items-center gap-1">
+                            {sc.keys.map((k, ki) => (
+                              <React.Fragment key={ki}>
+                                <kbd className="text-[10px] font-mono font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200 shadow-sm">{k}</kbd>
+                                {ki < sc.keys.length - 1 && <span className="text-gray-300 text-xs">+</span>}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-center">
+                <p className="text-[10px] text-gray-400">
+                  {currentLanguage === 'tr' ? 'Kısayolları kapatmak için ' : 'Press '}
+                  <kbd className="text-[10px] font-mono bg-white border border-gray-200 px-1 py-0.5 rounded shadow-sm">Esc</kbd>
+                  {currentLanguage === 'tr' ? ' tuşuna basın' : ' to close'}
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

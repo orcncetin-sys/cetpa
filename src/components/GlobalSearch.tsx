@@ -19,6 +19,7 @@ export interface SearchResult {
   subtitle: string;
   badge?:  string;
   badgeColor?: string;
+  score:   number; // Phase 64: relevance score
   data:    Order | Lead | InventoryItem;
 }
 
@@ -51,6 +52,17 @@ function match(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
+// Phase 64: field relevance scorer
+function fieldScore(haystack: string, needle: string): number {
+  if (!haystack) return 0;
+  const h = haystack.toLowerCase();
+  const n = needle.toLowerCase();
+  if (h === n) return 10;
+  if (h.startsWith(n)) return 7;
+  if (h.includes(n)) return 4;
+  return 0;
+}
+
 function buildResults(
   query: string,
   orders: Order[],
@@ -61,63 +73,73 @@ function buildResults(
   const q = query.trim();
   const results: SearchResult[] = [];
 
-  // Orders
+  // Orders — scored
+  const orderCandidates: (SearchResult & { score: number })[] = [];
   for (const o of orders) {
-    if (
-      match(o.customerName, q) ||
-      match(o.shopifyOrderId ?? '', q) ||
-      match(o.shippingAddress ?? '', q) ||
-      match(o.status, q)
-    ) {
-      results.push({
+    const s =
+      fieldScore(o.customerName, q) * 3 +
+      fieldScore(o.shopifyOrderId ?? '', q) * 2 +
+      fieldScore(o.shippingAddress ?? '', q) +
+      fieldScore(o.status, q);
+    if (s > 0) {
+      orderCandidates.push({
         type:       'order',
         id:         o.id,
         title:      o.customerName,
         subtitle:   `#${o.shopifyOrderId ?? o.id.slice(0, 8)} · ₺${o.totalPrice.toLocaleString('tr-TR')}`,
         badge:      o.status,
         badgeColor: STATUS_COLORS[o.status] ?? 'bg-gray-100 text-gray-600',
+        score:      s,
         data:       o,
       });
-      if (results.filter(r => r.type === 'order').length >= 5) break;
     }
   }
+  results.push(...orderCandidates.sort((a, b) => b.score - a.score).slice(0, 6));
 
-  // Leads
+  // Leads — scored
+  const leadCandidates: (SearchResult & { score: number })[] = [];
   for (const l of leads) {
-    if (
-      match(l.name, q) ||
-      match(l.company, q) ||
-      match(l.email ?? '', q) ||
-      match(l.phone ?? '', q)
-    ) {
-      results.push({
+    const s =
+      fieldScore(l.name, q) * 3 +
+      fieldScore(l.company, q) * 2 +
+      fieldScore(l.email ?? '', q) +
+      fieldScore(l.phone ?? '', q);
+    if (s > 0) {
+      leadCandidates.push({
         type:       'lead',
         id:         l.id,
         title:      l.name,
         subtitle:   l.company || l.email || '',
         badge:      l.status,
         badgeColor: STATUS_COLORS[l.status] ?? 'bg-gray-100 text-gray-600',
+        score:      s,
         data:       l,
       });
-      if (results.filter(r => r.type === 'lead').length >= 5) break;
     }
   }
+  results.push(...leadCandidates.sort((a, b) => b.score - a.score).slice(0, 6));
 
-  // Products
+  // Products — scored
+  const productCandidates: (SearchResult & { score: number })[] = [];
   for (const item of inventory) {
-    if (match(item.name, q) || match(item.sku, q) || match(item.category ?? '', q)) {
-      results.push({
-        type:     'product',
-        id:       item.id,
-        title:    item.name,
-        subtitle: `SKU: ${item.sku} · ${item.stockLevel ?? 0} adet`,
-        badge:    (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5) ? 'Düşük Stok' : undefined,
+    const s =
+      fieldScore(item.name, q) * 3 +
+      fieldScore(item.sku, q) * 2 +
+      fieldScore(item.category ?? '', q);
+    if (s > 0) {
+      productCandidates.push({
+        type:       'product',
+        id:         item.id,
+        title:      item.name,
+        subtitle:   `SKU: ${item.sku} · ${item.stockLevel ?? 0} adet`,
+        badge:      (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5) ? 'Düşük Stok' : undefined,
         badgeColor: 'bg-red-100 text-red-600',
-        data:     item,
+        score:      s,
+        data:       item,
       });
-      if (results.filter(r => r.type === 'product').length >= 5) break;
     }
   }
+  results.push(...productCandidates.sort((a, b) => b.score - a.score).slice(0, 6));
 
   return results;
 }
@@ -289,6 +311,8 @@ export default function GlobalSearch({
                                 {r.badge}
                               </span>
                             )}
+                            {/* Phase 64: relevance dot */}
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.score >= 20 ? 'bg-emerald-400' : r.score >= 8 ? 'bg-amber-400' : 'bg-gray-200'}`} title={`Score: ${r.score}`} />
                             {isActive && <ArrowRight className="w-3.5 h-3.5 text-brand flex-shrink-0" />}
                           </button>
                         );

@@ -3023,6 +3023,44 @@ async function startServer() {
     }
   });
 
+  // ── Health & Stats endpoints (all modes) ──────────────────────────────────
+
+  // GET /api/health — basic liveness probe
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+      env: process.env.NODE_ENV || 'development',
+      firebase: !!adminDb,
+      resend: !!process.env.RESEND_API_KEY,
+      whatsapp: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+      iyzico: !!(process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY),
+    });
+  });
+
+  // GET /api/admin/stats — Firestore collection doc counts
+  app.get('/api/admin/stats', async (_req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const COLLECTIONS = [
+      'inventory', 'orders', 'leads', 'shipments', 'purchaseOrders',
+      'quotations', 'payments', 'notifications', 'auditLog',
+      'inventoryMovements', 'priceLists', 'bom',
+    ];
+    try {
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        COLLECTIONS.map(async col => {
+          const snap = await adminDb!.collection(col).count().get();
+          counts[col] = snap.data().count;
+        })
+      );
+      return res.json({ counts, timestamp: new Date().toISOString() });
+    } catch (err) {
+      return res.status(500).json({ error: String(err) });
+    }
+  });
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp } from 'lucide-react';
+import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp, FileDown } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
@@ -9,6 +9,7 @@ import { tr } from 'date-fns/locale';
 import ConfirmModal from './ConfirmModal';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order } from '../types';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
@@ -291,6 +292,39 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     status: currentLanguage === 'tr' ? 'Durum' : 'Status',
     total: currentLanguage === 'tr' ? 'Toplam' : 'Total',
     actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
+    eta: currentLanguage === 'tr' ? 'Son Tarih' : 'Due Date',
+  };
+
+  // ── Phase 44: ETA badge helper ────────────────────────────────────────────
+  const getEtaBadge = (order: PurchaseOrder) => {
+    const done = order.status === 'Teslim Alındı' || order.status === 'İptal Edildi';
+    if (done || !order.expectedDate) return null;
+    const raw = order.expectedDate;
+    const etaDate = typeof raw === 'string'
+      ? new Date(raw)
+      : (raw && typeof raw === 'object' && 'toDate' in raw && typeof raw.toDate === 'function'
+          ? raw.toDate()
+          : null);
+    if (!etaDate) return null;
+    const daysLeft = Math.round((etaDate.getTime() - Date.now()) / 86400000);
+    if (daysLeft < 0) return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-600">
+        ⚠ {currentLanguage === 'tr' ? 'Gecikti' : 'Overdue'}
+      </span>
+    );
+    if (daysLeft === 0) return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+        {currentLanguage === 'tr' ? 'Bugün' : 'Today'}
+      </span>
+    );
+    return (
+      <span className={cn(
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold",
+        daysLeft <= 3 ? "bg-orange-50 text-orange-600" : "bg-emerald-50 text-emerald-700"
+      )}>
+        {daysLeft}{currentLanguage === 'tr' ? ' gün' : 'd'}
+      </span>
+    );
   };
 
   return (
@@ -399,6 +433,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 <SortHeader label={t.supplier} sortKey="supplier" currentSort={sortConfig} onSort={handleSort} />
                 <SortHeader label={t.date} sortKey="createdAt" currentSort={sortConfig} onSort={handleSort} />
                 <SortHeader label={t.status} sortKey="status" currentSort={sortConfig} onSort={handleSort} />
+                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{t.eta}</th>
                 <SortHeader label={t.total} sortKey="totalAmount" currentSort={sortConfig} onSort={handleSort} />
                 <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">{t.actions}</th>
               </tr>
@@ -432,6 +467,10 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                         order.status === 'İptal Edildi' ? 'İptal Edildi' : order.status
                       ) : order.status}
                     </span>
+                  </td>
+                  {/* Phase 44: ETA badge */}
+                  <td className="px-4 py-4">
+                    {getEtaBadge(order) ?? <span className="text-[11px] text-gray-300">—</span>}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <span className="text-sm font-bold text-gray-900">₺{order.totalAmount?.toLocaleString()}</span>
@@ -502,7 +541,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               ))}
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center">
+                  <td colSpan={7} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <ShoppingCart className="w-12 h-12 text-gray-100" />
                       <p className="text-sm text-gray-400">{t.noOrders}</p>
@@ -715,6 +754,26 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
               {/* Modal Footer */}
               <div className="px-8 py-6 bg-gray-50/50 border-t border-gray-100 flex items-center justify-end gap-3">
+                {viewingOrder && (
+                  <>
+                    <button
+                      onClick={() => exportPurchaseOrderPDF(viewingOrder, currentLanguage)}
+                      className="apple-button-secondary flex items-center gap-2"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      {currentLanguage === 'tr' ? 'SAS PDF' : 'PO PDF'}
+                    </button>
+                    {viewingOrder.status === 'Teslim Alındı' && (
+                      <button
+                        onClick={() => exportGoodsReceiptPDF(viewingOrder, currentLanguage)}
+                        className="apple-button-secondary flex items-center gap-2 text-green-600 border-green-200 bg-green-50 hover:bg-green-100"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Teslim Makbuzu' : 'Receipt Note'}
+                      </button>
+                    )}
+                  </>
+                )}
                 <button
                   onClick={() => {
                     setIsAddingOrder(false);
