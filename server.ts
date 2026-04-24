@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -24,6 +24,26 @@ try {
   console.log("Firebase Admin SDK initialised ✓");
 } catch (e) {
   console.warn("Firebase Admin SDK not initialised — webhook writes disabled:", (e as Error).message);
+}
+
+// ── Security: Firebase Auth middleware ──────────────────────────────────────
+/**
+ * Middleware that verifies a Firebase ID token in the Authorization header.
+ * Usage: app.post('/api/secret', requireAuth, handler)
+ */
+async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/, '');
+  if (!token) {
+    res.status(401).json({ error: 'Missing Authorization header.' });
+    return;
+  }
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    (req as Request & { uid: string }).uid = decoded.uid;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token.' });
+  }
 }
 
 // ── Luca API helpers ────────────────────────────────────────────────────────
@@ -242,7 +262,7 @@ async function getMikroToken(creds: MikroCreds): Promise<string> {
     access_token: data.access_token,
     expiresAt:    now + (data.expires_in || 21600) * 1000,
   });
-  console.log(`Mikro token alındı ✓ alias=${creds.alias} (${Math.round((data.expires_in || 21600) / 60)} dk geçerli)`);
+  // Token acquired — do not log alias or token details in production
   return data.access_token;
 }
 
@@ -484,7 +504,12 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
 
-  app.use(express.json());
+  // Capture raw body for Shopify webhook HMAC verification (must come before express.json)
+  app.use(express.json({
+    verify: (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => {
+      req.rawBody = buf;
+    },
+  }));
 
   // ... (keep existing routes)
   
@@ -629,10 +654,22 @@ async function startServer() {
   });
 
   // ── Shopify Webhook Handler ──────────────────────────────────────────────
-  app.post("/api/shopify/webhook", async (req: Request, res: Response) => {
+  app.post("/api/shopify/webhook", async (req: Request & { rawBody?: Buffer }, res: Response) => {
+    // ── HMAC Verification ────────────────────────────────────────────────
+    const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
+    const shopifyHmac   = req.headers['x-shopify-hmac-sha256'] as string | undefined;
+    if (webhookSecret && shopifyHmac && req.rawBody) {
+      const computed = createHmac('sha256', webhookSecret)
+        .update(req.rawBody)
+        .digest('base64');
+      if (computed !== shopifyHmac) {
+        res.status(401).send('Invalid signature');
+        return;
+      }
+    }
+
     const topic = req.headers['x-shopify-topic'] as string;
-    const body = req.body;
-    console.log(`Shopify Webhook: ${topic}`);
+    const body  = req.body;
 
     // Acknowledge immediately so Shopify doesn't retry
     res.status(200).send("ok");
@@ -1093,7 +1130,7 @@ async function startServer() {
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
-  app.post('/api/inventory/auto-reorder', async (_req: Request, res: Response) => {
+  app.post('/api/inventory/auto-reorder', requireAuth, async (_req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
       const snap = await adminDb.collection('inventory').get();
@@ -2264,9 +2301,9 @@ async function startServer() {
     res.json({ configured: !!creds });
   });
 
-  // POST /api/email/send — generic send (used by UI)
+  // POST /api/email/send — generic send (used by UI, requires auth)
   // Body: { to, subject, html }
-  app.post('/api/email/send', async (req: Request, res: Response) => {
+  app.post('/api/email/send', requireAuth, async (req: Request, res: Response) => {
     const { to, subject, html } = req.body as { to: string; subject: string; html: string };
     if (!to || !subject || !html) return res.status(400).json({ success: false, error: 'to, subject, html gerekli.' });
     const result = await sendEmail(to, subject, html);
@@ -3025,22 +3062,17 @@ async function startServer() {
 
   // ── Health & Stats endpoints (all modes) ──────────────────────────────────
 
-  // GET /api/health — basic liveness probe
+  // GET /api/health — basic liveness probe (no service-key disclosure)
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
-      env: process.env.NODE_ENV || 'development',
-      firebase: !!adminDb,
-      resend: !!process.env.RESEND_API_KEY,
-      whatsapp: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
-      iyzico: !!(process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY),
     });
   });
 
-  // GET /api/admin/stats — Firestore collection doc counts
-  app.get('/api/admin/stats', async (_req: Request, res: Response) => {
+  // GET /api/admin/stats — Firestore collection doc counts (admin only)
+  app.get('/api/admin/stats', requireAuth, async (_req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const COLLECTIONS = [
       'inventory', 'orders', 'leads', 'shipments', 'purchaseOrders',

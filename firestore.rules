@@ -14,19 +14,17 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        (
-          (request.auth.token.email == "orcncetin@gmail.com" && request.auth.token.email_verified == true) ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin')
-        );
+      // Admin status determined solely by the 'role' field in the users collection.
+      // Never hardcode email addresses — use the Admin SDK to set roles server-side.
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
     function hasRole(roles) {
-      return isAuthenticated() && 
-        (
-          (request.auth.token.email == "orcncetin@gmail.com" && request.auth.token.email_verified == true) ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles)
-        );
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
     }
 
     function isValidEmail(email) {
@@ -67,7 +65,9 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      // Users may only read their own profile; admins can read all.
+      // Managers need to list users for assignment dropdowns — allowed via hasRole.
+      allow read: if isOwner(userId) || hasRole(['Admin', 'Manager', 'HR']);
       allow create: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data)));
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role));
       allow delete: if isAdmin();

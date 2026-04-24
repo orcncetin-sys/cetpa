@@ -276,7 +276,8 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // Redact PII (email) before logging — only log error code and operation
+  console.error('Firestore Error:', errInfo.error, '|', errInfo.operationType, errInfo.path);
   throw new Error(JSON.stringify(errInfo));
 }
 

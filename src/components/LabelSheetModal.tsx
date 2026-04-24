@@ -93,13 +93,14 @@ export default function LabelSheetModal({ items, currentLanguage = 'tr', onClose
   const handlePrint = () => {
     const style = document.createElement('style');
     style.id = '__label_print_style__';
-    style.innerHTML = `
-      @media print {
-        body > *:not(#__label_sheet__) { display: none !important; }
-        #__label_sheet__ { display: block !important; position: fixed; top: 0; left: 0; width: 100%; }
-        @page { size: A4 portrait; margin: 8mm; }
-      }
-    `;
+    // Use textContent instead of innerHTML to avoid XSS foothold
+    style.textContent = [
+      '@media print {',
+      '  body > *:not(#__label_sheet__) { display: none !important; }',
+      '  #__label_sheet__ { display: block !important; position: fixed; top: 0; left: 0; width: 100%; }',
+      '  @page { size: A4 portrait; margin: 8mm; }',
+      '}',
+    ].join('\n');
     document.head.appendChild(style);
     window.print();
     setTimeout(() => document.getElementById('__label_print_style__')?.remove(), 500);
