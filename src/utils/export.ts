@@ -32,10 +32,14 @@ function ts(): string {
 export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = orders.map(o => ({
-    [tr ? 'Sipariş No'         : 'Order No']:       o.shopifyOrderId ?? o.id.slice(0, 8),
-    [tr ? 'Müşteri'            : 'Customer']:        o.customerName,
-    [tr ? 'Durum'              : 'Status']:          o.status,
-    [tr ? 'Toplam (₺)'        : 'Total (₺)']:       o.totalPrice,
+    [tr ? 'Sipariş No'         : 'Order No']:        o.shopifyOrderId ?? o.id.slice(0, 8),
+    [tr ? 'Müşteri'            : 'Customer']:         o.customerName,
+    [tr ? 'Müşteri Tipi'       : 'Customer Type']:   o.customerType ?? '',
+    [tr ? 'Durum'              : 'Status']:           o.status,
+    [tr ? 'Ödeme Durumu'       : 'Payment Status']:  o.paid ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Unpaid'),
+    [tr ? 'Toplam (₺)'         : 'Total (₺)']:       o.totalPrice,
+    [tr ? 'Fatura Tipi'        : 'Invoice Type']:    o.faturaTipi ?? (o.faturali ? 'e-fatura' : ''),
+    [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? 0,
     [tr ? 'Kargo No'           : 'Tracking No']:     o.trackingNumber ?? '',
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',
     [tr ? 'Teslimat Adresi'    : 'Shipping Address']:o.shippingAddress ?? '',

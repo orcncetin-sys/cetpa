@@ -131,6 +131,10 @@ export interface Order {
   iyzicoSandbox?: boolean;
   lucaFaturaNo?: string;
   lucaSynced?: boolean;
+  // Phase 89: payment tracking
+  paid?: boolean;
+  paidAt?: unknown;
+  paymentMethod?: 'cash' | 'bank_transfer' | 'credit_card' | 'check' | 'other';
 }
 
 export interface InventoryMovement {

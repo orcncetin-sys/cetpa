@@ -4342,6 +4342,25 @@ function AppContent() {
     }
   };
 
+  // ── Phase 89: Toggle order payment status ─────────────────────────────────
+  const handleToggleOrderPaid = async (order: Order) => {
+    const next = !order.paid;
+    try {
+      await updateDoc(doc(db, 'orders', order.id), {
+        paid:   next,
+        paidAt: next ? serverTimestamp() : null,
+      });
+      toast(
+        next
+          ? (currentLanguage === 'tr' ? '✓ Ödeme alındı olarak işaretlendi' : '✓ Marked as paid')
+          : (currentLanguage === 'tr' ? 'Ödeme bekliyor olarak işaretlendi' : 'Marked as unpaid'),
+        next ? 'success' : 'info'
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+    }
+  };
+
   const handleDeleteOrder = async (orderId: string) => {
     try {
       await deleteDoc(doc(db, 'orders', orderId));
@@ -5374,6 +5393,114 @@ function AppContent() {
                         </button>
                       );
                     })}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 90: Smart Insights Strip ── */}
+              {(() => {
+                const insights: { icon: string; text: string; color: string; bg: string; borderColor: string }[] = [];
+
+                // Insight 1: low-stock products
+                const lowStock = inventory.filter(i => (i.stock ?? 0) > 0 && (i.stock ?? 0) <= (i.minStock ?? 5));
+                if (lowStock.length > 0) {
+                  const top = lowStock.sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0))[0];
+                  insights.push({
+                    icon: '📦',
+                    text: currentLanguage === 'tr'
+                      ? `${top.name} kritik stokta (${top.stock ?? 0} adet kaldı)`
+                      : `${top.name} is low in stock (${top.stock ?? 0} left)`,
+                    color: 'text-amber-700',
+                    bg: 'bg-amber-50',
+                    borderColor: 'border-amber-200',
+                  });
+                }
+
+                // Insight 2: unpaid orders total
+                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                if (unpaidOrders.length > 0) {
+                  const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                  insights.push({
+                    icon: '💳',
+                    text: currentLanguage === 'tr'
+                      ? `${unpaidOrders.length} siparişte ₺${unpaidTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ödeme bekliyor`
+                      : `${unpaidOrders.length} order${unpaidOrders.length > 1 ? 's' : ''} pending payment (₺${unpaidTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })})`,
+                    color: 'text-red-700',
+                    bg: 'bg-red-50',
+                    borderColor: 'border-red-200',
+                  });
+                }
+
+                // Insight 3: overdue leads (no follow-up in 7+ days with Contacted status)
+                const now7 = Date.now();
+                const overdueleads = leads.filter(l => {
+                  if (l.status === 'Closed') return false;
+                  const raw = l.updatedAt ?? l.createdAt;
+                  if (!raw) return true;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
+                  return now7 - d.getTime() > 7 * 86400000;
+                });
+                if (overdueleads.length > 0) {
+                  insights.push({
+                    icon: '🎯',
+                    text: currentLanguage === 'tr'
+                      ? `${overdueleads.length} müşteri adayı 7+ gündür güncellenmedi`
+                      : `${overdueleads.length} lead${overdueleads.length > 1 ? 's' : ''} haven't been updated in 7+ days`,
+                    color: 'text-purple-700',
+                    bg: 'bg-purple-50',
+                    borderColor: 'border-purple-200',
+                  });
+                }
+
+                // Insight 4: top revenue month-over-month rise
+                const nowD = new Date();
+                const thisMonthRev = orders
+                  .filter(o => {
+                    const raw = o.syncedAt ?? o.createdAt;
+                    if (!raw) return false;
+                    const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                    return d.getFullYear() === nowD.getFullYear() && d.getMonth() === nowD.getMonth();
+                  })
+                  .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                const lastMonthRev = orders
+                  .filter(o => {
+                    const raw = o.syncedAt ?? o.createdAt;
+                    if (!raw) return false;
+                    const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                    const lm = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
+                    return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth();
+                  })
+                  .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                if (lastMonthRev > 0 && thisMonthRev > lastMonthRev * 1.1) {
+                  const pct = Math.round(((thisMonthRev - lastMonthRev) / lastMonthRev) * 100);
+                  insights.push({
+                    icon: '📈',
+                    text: currentLanguage === 'tr'
+                      ? `Bu ay gelir geçen aya göre %${pct} artışta`
+                      : `Revenue is up ${pct}% vs last month`,
+                    color: 'text-emerald-700',
+                    bg: 'bg-emerald-50',
+                    borderColor: 'border-emerald-200',
+                  });
+                }
+
+                if (insights.length === 0) return null;
+
+                return (
+                  <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100 shadow-sm'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5 ${darkMode ? 'text-white/40' : 'text-gray-400'}`}>
+                      ✨ {currentLanguage === 'tr' ? 'Akıllı İçgörüler' : 'Smart Insights'}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {insights.slice(0, 4).map((ins, i) => (
+                        <div key={i} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium ${ins.bg} ${ins.borderColor} ${ins.color}`}>
+                          <span className="text-sm">{ins.icon}</span>
+                          <span>{ins.text}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 );
               })()}
@@ -8607,6 +8734,40 @@ function AppContent() {
                 </label>
               </div>
 
+              {/* ── Phase 91: CRM Win-Rate & Conversion Stats Header ── */}
+              {leads.length > 0 && (() => {
+                const total      = leads.length;
+                const closed     = leads.filter(l => l.status === 'Closed').length;
+                const qualified  = leads.filter(l => l.status === 'Qualified').length;
+                const winRate    = total > 0 ? Math.round((closed / total) * 100) : 0;
+                const convRate   = total > 0 ? Math.round(((closed + qualified) / total) * 100) : 0;
+                const pipelineVal = leads
+                  .filter(l => l.status !== 'Closed')
+                  .reduce((s, l) => s + (l.creditLimit ?? 0), 0);
+                const avgScore   = leads.filter(l => l.score != null).length > 0
+                  ? Math.round(leads.filter(l => l.score != null).reduce((s, l) => s + (l.score ?? 0), 0) / leads.filter(l => l.score != null).length)
+                  : null;
+                const p91Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                const p91Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const p91Val  = kpiCurrency === 'TRY' ? pipelineVal : pipelineVal / p91Rate;
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { label: currentLanguage === 'tr' ? 'Toplam Aday' : 'Total Leads',    value: total.toString(),       sub: null,                        color: 'text-gray-800' },
+                      { label: currentLanguage === 'tr' ? 'Kazanma Oranı' : 'Win Rate',      value: `${winRate}%`,          sub: `${closed} ${currentLanguage==='tr'?'kapandı':'closed'}`, color: winRate >= 40 ? 'text-emerald-700' : winRate >= 20 ? 'text-amber-700' : 'text-red-600' },
+                      { label: currentLanguage === 'tr' ? 'Pipeline Değeri' : 'Pipeline Value', value: `${p91Sym}${p91Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, sub: currentLanguage==='tr'?'aktif adaylar':'active leads', color: 'text-blue-700' },
+                      { label: currentLanguage === 'tr' ? 'Ort. AI Puanı' : 'Avg AI Score',  value: avgScore != null ? `${avgScore}/100` : '—',  sub: `${convRate}% ${currentLanguage==='tr'?'dönüşüm':'conversion'}`, color: avgScore != null && avgScore >= 70 ? 'text-emerald-700' : 'text-gray-700' },
+                    ].map((s, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
+                        <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
+                        <p className="text-[10px] font-bold text-gray-400 mt-0.5 uppercase tracking-wide">{s.label}</p>
+                        {s.sub && <p className="text-[9px] text-gray-400 mt-0.5">{s.sub}</p>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 69: Lead Pipeline Funnel Strip ── */}
               {leads.length > 0 && (() => {
                 const stages = [
@@ -9120,6 +9281,48 @@ function AppContent() {
                         <FileDown className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Ekstre PDF' : 'Statement PDF'}
                       </button>
+                      {/* Phase 92: Mark as Won / Reopen */}
+                      {selectedLead.status !== 'Closed' ? (
+                        <button
+                          onClick={() => openConfirm({
+                            title: currentLanguage === 'tr' ? 'Aday Kazanıldı mı?' : 'Mark Lead as Won?',
+                            message: currentLanguage === 'tr'
+                              ? `"${selectedLead.name}" adayını Kapandı (Kazanıldı) olarak işaretlemek istiyor musunuz?`
+                              : `Mark "${selectedLead.name}" as Closed (Won)?`,
+                            confirmLabel: currentLanguage === 'tr' ? 'Kazanıldı ✓' : 'Mark Won ✓',
+                            onConfirm: async () => {
+                              try {
+                                await updateDoc(doc(db, 'leads', selectedLead.id), { status: 'Closed', updatedAt: serverTimestamp() });
+                                setSelectedLead({ ...selectedLead, status: 'Closed' });
+                                toast(currentLanguage === 'tr' ? '🎉 Aday kazanıldı olarak işaretlendi!' : '🎉 Lead marked as won!', 'success');
+                              } catch(err) { handleFirestoreError(err, OperationType.UPDATE, `leads/${selectedLead.id}`); }
+                            },
+                          })}
+                          className="apple-button-secondary text-emerald-700 hover:bg-emerald-50"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'Kazanıldı' : 'Mark Won'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => openConfirm({
+                            title: currentLanguage === 'tr' ? 'Aday Yeniden Aç?' : 'Reopen Lead?',
+                            message: currentLanguage === 'tr' ? `"${selectedLead.name}" adayını yeniden açmak istiyor musunuz?` : `Reopen lead "${selectedLead.name}"?`,
+                            confirmLabel: currentLanguage === 'tr' ? 'Yeniden Aç' : 'Reopen',
+                            onConfirm: async () => {
+                              try {
+                                await updateDoc(doc(db, 'leads', selectedLead.id), { status: 'Qualified', updatedAt: serverTimestamp() });
+                                setSelectedLead({ ...selectedLead, status: 'Qualified' });
+                                toast(currentLanguage === 'tr' ? 'Aday yeniden açıldı' : 'Lead reopened', 'info');
+                              } catch(err) { handleFirestoreError(err, OperationType.UPDATE, `leads/${selectedLead.id}`); }
+                            },
+                          })}
+                          className="apple-button-secondary text-amber-700 hover:bg-amber-50"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'Yeniden Aç' : 'Reopen'}
+                        </button>
+                      )}
                       {/* Phase 83: pre-fill order form from lead */}
                       <button onClick={() => {
                         setNewOrder(prev => ({
@@ -9402,13 +9605,30 @@ function AppContent() {
                         className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-full text-sm outline-none focus:border-brand w-full sm:w-64 transition-all"
                       />
                     </div>
+                    {/* Phase 93: Export filtered orders to CSV */}
                     <button
-                      onClick={() => exportOrdersCSV(orders, currentLanguage)}
+                      onClick={() => {
+                        const filtered = orders.filter(o =>
+                          (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
+                          (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                          (o.shopifyOrderId ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
+                          (o.shippingAddress ?? '').toLowerCase().includes(orderSearch.toLowerCase()))
+                        );
+                        exportOrdersCSV(filtered, currentLanguage);
+                        toast(
+                          currentLanguage === 'tr'
+                            ? `${filtered.length} sipariş CSV olarak indirildi`
+                            : `${filtered.length} order${filtered.length !== 1 ? 's' : ''} exported to CSV`,
+                          'success'
+                        );
+                      }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors"
-                      title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download as CSV'}
+                      title={currentLanguage === 'tr' ? 'Filtrelenmiş siparişleri CSV olarak indir' : 'Export filtered orders as CSV'}
                     >
                       <Download className="w-3.5 h-3.5" />
-                      CSV
+                      {orderStatusFilter !== 'All'
+                        ? `CSV (${orders.filter(o => o.status === orderStatusFilter).length})`
+                        : 'CSV'}
                     </button>
                     <button onClick={() => { setSelectedLead(null); setIsAddingOrder(true); }}
                       className="apple-button-primary">
@@ -9705,6 +9925,14 @@ function AppContent() {
                                     Mikro
                                   </span>
                                 ) : null}
+                                {/* Phase 89: Payment status badge */}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
+                                  title={order.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-colors ${order.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
+                                >
+                                  {order.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
+                                </button>
                               </div>
                             </td>
                             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -9917,6 +10145,21 @@ function AppContent() {
                       >
                         <MessageSquare className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
+                      </button>
+                      {/* Phase 89: Mark Paid / Unpaid toggle in detail header */}
+                      <button
+                        onClick={() => handleToggleOrderPaid(selectedOrder)}
+                        className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border transition-colors ${
+                          selectedOrder.paid
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                        }`}
+                        title={selectedOrder.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Bekliyor — tıkla: ödendi yap' : 'Pending — click to mark paid')}
+                      >
+                        <CreditCard className="w-4 h-4" />
+                        {selectedOrder.paid
+                          ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid')
+                          : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                       </button>
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
