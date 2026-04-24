@@ -320,67 +320,73 @@ export default function LandingPage({
       <ScrollBar />
 
       {/* ── Navigation ──────────────────────────────────────────────────────── */}
-      <nav className={cn(
-        'fixed top-2 left-0 right-0 z-50 transition-all duration-300 px-4',
-      )}>
+      <nav className="fixed top-0 left-0 right-0 z-50">
+        {/* Always-visible backdrop — subtle at top, stronger on scroll */}
         <div className={cn(
-          'max-w-6xl mx-auto flex items-center justify-between h-14 px-5 rounded-2xl border transition-all duration-300',
+          'transition-all duration-300',
           scrolled
-            ? d('bg-[#0f0f14]/90 border-white/10 backdrop-blur-xl shadow-2xl', 'bg-white/90 border-black/8 backdrop-blur-xl shadow-lg')
-            : d('bg-transparent border-transparent', 'bg-transparent border-transparent'),
+            ? d('bg-[#08080f]/85 border-b border-white/8 backdrop-blur-2xl shadow-2xl shadow-black/40', 'bg-white/92 border-b border-black/8 backdrop-blur-2xl shadow-lg shadow-black/8')
+            : d('bg-[#05050a]/50 border-b border-white/4 backdrop-blur-sm', 'bg-white/70 border-b border-black/5 backdrop-blur-sm')
         )}>
-          {/* Logo + nav links */}
-          <div className="flex items-center gap-8">
-            <img src="/cetpalogo.avif" alt="CETPA" className="h-7 w-auto object-contain" />
-            <div className="hidden md:flex items-center gap-6">
-              {[
-                { id: 'how', label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
-                { id: 'features', label: isTR ? 'Özellikler' : 'Features' },
-                { id: 'pricing', label: isTR ? 'Fiyatlar' : 'Pricing' },
-                { id: 'solutions', label: isTR ? 'Sektörler' : 'Industries' },
-              ].map(({ id, label }) => (
-                <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
-                  className={cn('text-sm font-medium transition-colors', d('text-white/50 hover:text-white', 'text-black/50 hover:text-black'))}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className="max-w-6xl mx-auto flex items-center justify-between h-[60px] px-5 sm:px-8">
 
-          {/* Right controls */}
-          <div className="flex items-center gap-2">
-            <button onClick={onLanguageToggle}
-              className={cn('text-xs font-bold px-2.5 py-1.5 rounded-xl border transition-all', d('border-white/10 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
-              {currentLanguage === 'tr' ? 'EN' : 'TR'}
-            </button>
-            <button onClick={onDarkModeToggle}
-              className={cn('w-9 h-9 flex items-center justify-center rounded-xl border transition-all', d('border-white/10 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            {!isLoggedIn ? (
-              <>
-                <button onClick={onLoginClick}
-                  className={cn('text-sm font-semibold px-4 py-2 transition-colors', d('text-white/70 hover:text-white', 'text-black/70 hover:text-black'))}>
-                  {isTR ? 'Giriş' : 'Sign In'}
-                </button>
-                <button onClick={onTryClick}
-                  className="bg-brand text-white px-5 py-2 rounded-xl text-sm font-bold hover:bg-orange-500 transition-all shadow-lg shadow-brand/25 active:scale-95">
-                  {isTR ? 'Ücretsiz Dene →' : 'Try Free →'}
-                </button>
-              </>
-            ) : (
-              <button onClick={onDashboardClick}
-                className="bg-brand text-white px-5 py-2 rounded-xl text-sm font-bold hover:bg-orange-500 transition-all shadow-lg shadow-brand/25 flex items-center gap-2">
-                <LayoutDashboard className="w-4 h-4" />
-                {isTR ? 'Panele Git' : 'Dashboard'}
+            {/* Logo + nav links */}
+            <div className="flex items-center gap-8">
+              <img src="/cetpalogo.avif" alt="CETPA" className="h-7 w-auto object-contain flex-shrink-0" />
+              <div className="hidden md:flex items-center gap-7">
+                {[
+                  { id: 'how',      label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
+                  { id: 'features', label: isTR ? 'Özellikler'    : 'Features'     },
+                  { id: 'pricing',  label: isTR ? 'Fiyatlar'      : 'Pricing'      },
+                  { id: 'solutions',label: isTR ? 'Sektörler'     : 'Industries'   },
+                ].map(({ id, label }) => (
+                  <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
+                    className={cn('text-[13px] font-medium whitespace-nowrap transition-colors', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Right controls */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {/* Language */}
+              <button onClick={onLanguageToggle}
+                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
-            )}
+              {/* Dark mode */}
+              <button onClick={onDarkModeToggle}
+                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                {darkMode ? <Sun className="w-[15px] h-[15px]" /> : <Moon className="w-[15px] h-[15px]" />}
+              </button>
+
+              {!isLoggedIn ? (
+                <>
+                  <button onClick={onLoginClick}
+                    className={cn('text-[13px] font-semibold px-3 py-1.5 whitespace-nowrap transition-colors', d('text-white/65 hover:text-white', 'text-black/65 hover:text-black'))}>
+                    {isTR ? 'Giriş' : 'Sign In'}
+                  </button>
+                  <button onClick={onTryClick}
+                    className="bg-brand text-white px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap hover:bg-orange-500 transition-all shadow-md shadow-brand/30 active:scale-95 flex items-center gap-1.5">
+                    {isTR ? 'Ücretsiz Dene' : 'Try Free'}
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : (
+                <button onClick={onDashboardClick}
+                  className="bg-brand text-white px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap hover:bg-orange-500 transition-all shadow-md shadow-brand/30 flex items-center gap-1.5">
+                  <LayoutDashboard className="w-3.5 h-3.5" />
+                  {isTR ? 'Panele Git' : 'Dashboard'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </nav>
 
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
-      <section className={cn('relative min-h-screen flex flex-col items-center justify-center pt-20 pb-16 overflow-hidden cetpa-grid-bg')}>
+      <section className={cn('relative min-h-screen flex flex-col items-center justify-center pt-24 pb-16 overflow-hidden cetpa-grid-bg')}>
 
         {/* Background orbs */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full blur-[200px] pointer-events-none"
@@ -446,67 +452,163 @@ export default function LandingPage({
             {isTR ? '✓ Kredi kartı gerekmez · ✓ 14 gün ücretsiz · ✓ İstediğiniz zaman iptal' : '✓ No credit card · ✓ 14-day free trial · ✓ Cancel anytime'}
           </motion.p>
 
-          {/* Hero image with floating stat cards */}
-          <motion.div initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9, delay: 0.4 }} className="relative mt-16">
+          {/* ── MacBook marketing-shot mockup ── */}
+          <motion.div
+            initial={{ opacity: 0, y: 70 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="relative mt-14 px-4 sm:px-0"
+          >
+            {/* Ambient glow under MacBook */}
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-0 w-3/4 h-24 blur-[60px] pointer-events-none rounded-full"
+              style={{ background: 'radial-gradient(ellipse, rgba(255,64,0,0.28) 0%, rgba(255,140,0,0.12) 60%, transparent 100%)' }} />
 
-            {/* Glow ring */}
-            <div className="absolute inset-0 rounded-[2.5rem] blur-2xl scale-95 opacity-30 pointer-events-none"
-              style={{ background: 'linear-gradient(135deg, rgba(255,64,0,0.4) 0%, rgba(255,140,0,0.2) 100%)' }} />
+            {/* MacBook outer wrapper — perspective tilt */}
+            <div style={{ perspective: '1800px' }}>
+              <div style={{ transform: 'rotateX(4deg)', transformOrigin: 'bottom center' }}>
 
-            {/* Browser chrome mockup */}
-            <div className={cn('relative rounded-[2rem] border overflow-hidden cetpa-glow cetpa-noise', d('border-white/8 bg-[#111118]', 'border-black/8 bg-white'))}>
-              {/* Browser bar */}
-              <div className={cn('flex items-center gap-2 px-4 h-10 border-b', d('border-white/6 bg-white/3', 'border-black/6 bg-gray-50'))}>
-                <div className="flex gap-1.5">
-                  <div className="w-3 h-3 rounded-full bg-red-400/80" />
-                  <div className="w-3 h-3 rounded-full bg-amber-400/80" />
-                  <div className="w-3 h-3 rounded-full bg-emerald-400/80" />
+                {/* ── Screen lid ── */}
+                <div
+                  className="relative mx-auto rounded-t-[18px] rounded-b-[4px] overflow-hidden"
+                  style={{
+                    background: d(
+                      'linear-gradient(180deg, #1c1c1e 0%, #2a2a2e 100%)',
+                      'linear-gradient(180deg, #c8c8cc 0%, #b8b8bc 100%)'
+                    ),
+                    padding: '10px 10px 0',
+                    boxShadow: d(
+                      'inset 0 1px 0 rgba(255,255,255,0.08), 0 -1px 0 rgba(255,255,255,0.04)',
+                      'inset 0 1px 0 rgba(255,255,255,0.6), 0 -1px 0 rgba(0,0,0,0.08)'
+                    ),
+                    maxWidth: '860px',
+                    margin: '0 auto',
+                  }}
+                >
+                  {/* Camera notch */}
+                  <div className="absolute top-[14px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
+                    <div className="w-1.5 h-1.5 rounded-full bg-black/40" />
+                  </div>
+
+                  {/* Screen bezel */}
+                  <div
+                    className="rounded-t-[10px] rounded-b-0 overflow-hidden"
+                    style={{
+                      background: '#000',
+                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)',
+                    }}
+                  >
+                    {/* Browser chrome inside screen */}
+                    <div style={{ background: d('#111116', '#f0f0f5'), height: '34px', display: 'flex', alignItems: 'center', padding: '0 14px', gap: '8px', borderBottom: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }}>
+                      {/* Traffic lights */}
+                      <div style={{ display: 'flex', gap: '5px', flexShrink: 0 }}>
+                        <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#ff5f56', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
+                        <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#febc2e', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
+                        <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#28c840', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
+                      </div>
+                      {/* URL bar */}
+                      <div style={{ flex: 1, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.07)'), borderRadius: 6, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 40px' }}>
+                        <span style={{ fontSize: 10, color: d('rgba(255,255,255,0.35)', 'rgba(0,0,0,0.4)'), fontFamily: 'system-ui, sans-serif', letterSpacing: '0.01em' }}>
+                          🔒 app.cetpa.io/dashboard
+                        </span>
+                      </div>
+                      {/* Dots */}
+                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                        {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: d('rgba(255,255,255,0.15)', 'rgba(0,0,0,0.15)') }} />)}
+                      </div>
+                    </div>
+                    {/* Dashboard screenshot */}
+                    <img
+                      src={heroImageUrl}
+                      alt="CETPA Dashboard"
+                      className="w-full block"
+                      style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }}
+                    />
+                  </div>
                 </div>
-                <div className={cn('flex-1 mx-4 h-5 rounded-md text-[10px] flex items-center px-3 font-mono', d('bg-white/5 text-white/30', 'bg-black/5 text-black/30'))}>
-                  app.cetpa.io/dashboard
+
+                {/* ── Hinge shadow strip ── */}
+                <div className="mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
+
+                {/* ── Base / keyboard deck ── */}
+                <div
+                  className="mx-auto"
+                  style={{
+                    maxWidth: '900px',
+                    background: d(
+                      'linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)',
+                      'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'
+                    ),
+                    borderRadius: '0 0 16px 16px',
+                    padding: '10px 32px 0',
+                    boxShadow: d(
+                      '0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)',
+                      '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)'
+                    ),
+                  }}
+                >
+                  {/* Keyboard area (decorative) */}
+                  <div style={{ height: 52, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, opacity: 0.6 }}>
+                    {[3, 4, 3].map((cols, ri) => (
+                      <div key={ri} style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        {Array.from({ length: 10 }).map((_, ki) => (
+                          <div key={ki} style={{ height: 5, flex: 1, borderRadius: 2, background: d('rgba(255,255,255,0.08)', 'rgba(0,0,0,0.12)') }} />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Trackpad */}
+                  <div style={{ width: 100, height: 60, borderRadius: 10, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.10)'), margin: '8px auto 10px', border: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }} />
                 </div>
+
+                {/* ── Foot/table reflection ── */}
+                <div className="mx-auto" style={{ maxWidth: '920px', height: '1px', background: d('rgba(255,255,255,0.04)', 'rgba(0,0,0,0.06)') }} />
               </div>
-              <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full h-auto block" />
             </div>
 
-            {/* Floating stat card — top left */}
-            <div className={cn('absolute -left-6 top-1/4 cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:block', d('bg-[#111]/90 border-white/10 text-white', 'bg-white/95 border-black/8 text-black'))}
-              style={{ animationDelay: '0s', animationDuration: '5s' }}>
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-wide">{isTR ? 'Bu Ay Ciro' : 'Monthly Revenue'}</p>
-                  <p className="text-sm font-black">₺2.4M</p>
-                </div>
+            {/* ── Floating stat cards ── */}
+            {/* Left card — Revenue */}
+            <div
+              className={cn('absolute left-0 sm:-left-4 lg:-left-10 top-[18%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
+              style={{ animationDelay: '0s', animationDuration: '5s' }}
+            >
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                <TrendingUp className="w-4.5 h-4.5 text-emerald-500" style={{ width: 18, height: 18 }} />
+              </div>
+              <div>
+                <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest">{isTR ? 'Bu Ay Ciro' : 'Monthly Revenue'}</p>
+                <p className="text-base font-black leading-tight mt-0.5">₺2.4M</p>
+                <p className="text-[9px] text-emerald-500 font-bold mt-0.5">↑ 12% {isTR ? 'geçen aya göre' : 'vs last month'}</p>
               </div>
             </div>
 
-            {/* Floating stat card — top right */}
-            <div className={cn('absolute -right-6 top-16 cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:block', d('bg-[#111]/90 border-white/10 text-white', 'bg-white/95 border-black/8 text-black'))}
-              style={{ animationDelay: '1.5s', animationDuration: '6s' }}>
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-brand/15 flex items-center justify-center">
-                  <Package className="w-4 h-4 text-brand" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-wide">{isTR ? 'Aktif Sipariş' : 'Active Orders'}</p>
-                  <p className="text-sm font-black">1,247</p>
-                </div>
+            {/* Right card — Orders */}
+            <div
+              className={cn('absolute right-0 sm:-right-4 lg:-right-10 top-[12%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
+              style={{ animationDelay: '1.2s', animationDuration: '6s' }}
+            >
+              <div className="w-9 h-9 rounded-xl bg-brand/15 flex items-center justify-center flex-shrink-0">
+                <Package style={{ width: 18, height: 18 }} className="text-brand" />
+              </div>
+              <div>
+                <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest">{isTR ? 'Aktif Sipariş' : 'Active Orders'}</p>
+                <p className="text-base font-black leading-tight mt-0.5">1,247</p>
+                <p className="text-[9px] text-brand font-bold mt-0.5">↑ 34 {isTR ? 'bugün eklendi' : 'added today'}</p>
               </div>
             </div>
 
-            {/* Floating stat card — bottom right */}
-            <div className={cn('absolute -right-4 bottom-16 cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden lg:block', d('bg-[#111]/90 border-white/10 text-white', 'bg-white/95 border-black/8 text-black'))}
-              style={{ animationDelay: '3s', animationDuration: '7s' }}>
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-500/15 flex items-center justify-center">
-                  <BarChart3 className="w-4 h-4 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-wide">{isTR ? 'AI Lead Skoru' : 'AI Lead Score'}</p>
-                  <p className="text-sm font-black">94 / 100</p>
+            {/* Bottom right card — AI Score */}
+            <div
+              className={cn('absolute right-2 sm:right-4 lg:-right-6 bottom-[22%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden lg:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
+              style={{ animationDelay: '2.8s', animationDuration: '7s' }}
+            >
+              <div className="w-9 h-9 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                <BarChart3 style={{ width: 18, height: 18 }} className="text-violet-500" />
+              </div>
+              <div>
+                <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest">{isTR ? 'AI Lead Skoru' : 'AI Lead Score'}</p>
+                <p className="text-base font-black leading-tight mt-0.5">94 / 100</p>
+                <div className="w-24 h-1.5 bg-violet-500/20 rounded-full mt-1.5 overflow-hidden">
+                  <div className="h-full bg-violet-500 rounded-full" style={{ width: '94%' }} />
                 </div>
               </div>
             </div>
