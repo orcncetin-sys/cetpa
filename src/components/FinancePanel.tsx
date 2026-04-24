@@ -10,6 +10,7 @@ interface Order {
   cost?: number;
   status?: string;
   hasInvoice?: boolean;
+  paid?: boolean;        // Phase 98
   syncedAt?: { toDate?: () => Date } | string | number;
   createdAt?: { toDate?: () => Date } | string | number;
 }
@@ -82,8 +83,38 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, ex
     { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `${sym}${cvt(profit)}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
   ];
 
+  // Phase 98: Unpaid revenue analytics
+  const unpaidOrders  = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+  const unpaidRevenue = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+  const paidRevenue   = orders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+  const collectionRate = totalRevenue > 0 ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      {/* Phase 98: Unpaid Revenue Alert */}
+      {unpaidOrders.length > 0 && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+            <AlertCircle className="w-5 h-5 text-amber-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-amber-800">
+              {currentLanguage === 'tr'
+                ? `${unpaidOrders.length} siparişte ödeme tahsil edilmedi`
+                : `${unpaidOrders.length} order${unpaidOrders.length !== 1 ? 's' : ''} with pending payment`}
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              {sym}{cvt(unpaidRevenue)} {currentLanguage === 'tr' ? 'tahsil bekliyor' : 'outstanding'} · {currentLanguage === 'tr' ? 'Tahsilat Oranı' : 'Collection Rate'}: <strong>{collectionRate}%</strong>
+            </p>
+          </div>
+          <div className="flex-shrink-0">
+            <div className="w-24 bg-amber-200 rounded-full h-2">
+              <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${collectionRate}%` }} />
+            </div>
+            <p className="text-[9px] text-amber-600 font-bold text-right mt-1">{collectionRate}% {currentLanguage === 'tr' ? 'tahsil' : 'collected'}</p>
+          </div>
+        </div>
+      )}
       {/* KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {kpis.map((k, i) => {

@@ -8427,6 +8427,39 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 94: Inventory KPI Summary Strip ── */}
+              {inventory.length > 0 && (() => {
+                const totalSKUs    = inventory.length;
+                const totalUnits   = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
+                const outOfStock   = inventory.filter(i => (i.stockLevel ?? 0) === 0).length;
+                const stockVal     = inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
+                const costVal      = inventory.reduce((s, i) => s + (i.costPrice ?? 0) * (i.stockLevel ?? 0), 0);
+                const avgMarginPct = stockVal > 0 && costVal > 0
+                  ? Math.round(((stockVal - costVal) / stockVal) * 100)
+                  : null;
+                const p94Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                const p94Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const p94Val  = kpiCurrency === 'TRY' ? stockVal : stockVal / p94Rate;
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: currentLanguage === 'tr' ? 'Toplam SKU' : 'Total SKUs',       value: totalSKUs.toString(),  icon: '📋', color: 'text-gray-800',    bg: 'bg-white' },
+                      { label: currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value',     value: `${p94Sym}${p94Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, icon: '💰', color: 'text-blue-700', bg: 'bg-blue-50' },
+                      { label: currentLanguage === 'tr' ? 'Stok Dışı' : 'Out of Stock',      value: outOfStock.toString(), icon: '⚠️', color: outOfStock > 0 ? 'text-red-600' : 'text-emerald-700', bg: outOfStock > 0 ? 'bg-red-50' : 'bg-emerald-50' },
+                      { label: currentLanguage === 'tr' ? 'Ort. Marj' : 'Avg Margin',        value: avgMarginPct != null ? `${avgMarginPct}%` : `${totalUnits.toLocaleString()} ${currentLanguage==='tr'?'birim':'units'}`, icon: avgMarginPct != null ? '📊' : '📦', color: avgMarginPct != null ? (avgMarginPct >= 40 ? 'text-emerald-700' : avgMarginPct >= 20 ? 'text-amber-700' : 'text-red-600') : 'text-purple-700', bg: 'bg-white' },
+                    ].map((s, i) => (
+                      <div key={i} className={`rounded-xl border border-gray-100 shadow-sm px-4 py-3 ${s.bg}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-base">{s.icon}</span>
+                          <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
+                        </div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 75: Inventory Category Distribution ── */}
               {inventory.length > 0 && (() => {
                 const catMap: Record<string, { units: number; value: number }> = {};
@@ -9423,6 +9456,31 @@ function AppContent() {
                     <h3 className="font-bold mb-4 flex items-center gap-2">
                       <Package className="w-5 h-5 text-brand" /> {currentT.associated_orders}
                     </h3>
+                    {/* Phase 96: Financial summary for this customer */}
+                    {(() => {
+                      const custOrders = orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name);
+                      if (custOrders.length === 0) return null;
+                      const totalRev  = custOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                      const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                      const unpaidRev = totalRev - paidRev;
+                      const p96Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                      const p96Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                      const fmt       = (v: number) => `${p96Sym}${(kpiCurrency === 'TRY' ? v : v / p96Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                      return (
+                        <div className="grid grid-cols-3 gap-2 mb-4">
+                          {[
+                            { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Lifetime Revenue', value: fmt(totalRev), color: 'text-gray-800' },
+                            { label: currentLanguage === 'tr' ? 'Ödenen' : 'Paid',   value: fmt(paidRev),   color: 'text-emerald-700' },
+                            { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Unpaid', value: fmt(unpaidRev), color: unpaidRev > 0 ? 'text-amber-600' : 'text-gray-400' },
+                          ].map((s, i) => (
+                            <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
+                              <p className={`text-base font-black ${s.color}`}>{s.value}</p>
+                              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{s.label}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <div className="space-y-3">
                       {orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name).length === 0 ? (
                         <div className="text-center py-12 border-2 border-dashed border-gray-100 rounded-xl">
@@ -9434,7 +9492,7 @@ function AppContent() {
                         </div>
                       ) : (
                         orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name).map(order => (
-                          <div key={order.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
+                          <div key={order.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => { setActiveTab('orders'); setSelectedOrder(order); }}>
                             <div>
                               <p className="font-bold text-sm text-[#1D2226]">{order.shopifyOrderId}</p>
                               <p className="text-xs text-gray-500 mt-1">
@@ -9443,24 +9501,33 @@ function AppContent() {
                               <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-2">
-                              <button onClick={() => handleDeleteOrder(order.id)} className="text-gray-400 hover:text-red-600 transition-colors">
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="text-gray-400 hover:text-red-600 transition-colors">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                               <div>
                                 <p className="font-bold text-lg text-[#1D2226]">{formatCurrency(order.totalPrice, exchangeRates)}</p>
-                                <select value={order.status} onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value as Order['status'])}
-                                  className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block mt-2 outline-none cursor-pointer appearance-none",
-                                    order.status === 'Pending' ? "bg-amber-50 text-amber-600" :
-                                      order.status === 'Processing' ? "bg-purple-50 text-purple-600" :
-                                        order.status === 'Shipped' ? "bg-blue-50 text-blue-600" :
-                                          order.status === 'Delivered' ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-500"
-                                  )}>
-                                  <option value="Pending">{currentT.pending}</option>
-                                  <option value="Processing">{currentT.processing}</option>
-                                  <option value="Shipped">{currentT.shipped}</option>
-                                  <option value="Delivered">{currentT.delivered}</option>
-                                  <option value="Cancelled">{currentT.cancelled}</option>
-                                </select>
+                                <div className="flex items-center gap-1.5 mt-1 justify-end flex-wrap">
+                                  <select value={order.status} onChange={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order.id, e.target.value as Order['status']); }}
+                                    className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block outline-none cursor-pointer appearance-none",
+                                      order.status === 'Pending' ? "bg-amber-50 text-amber-600" :
+                                        order.status === 'Processing' ? "bg-purple-50 text-purple-600" :
+                                          order.status === 'Shipped' ? "bg-blue-50 text-blue-600" :
+                                            order.status === 'Delivered' ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-500"
+                                    )} onClick={e => e.stopPropagation()}>
+                                    <option value="Pending">{currentT.pending}</option>
+                                    <option value="Processing">{currentT.processing}</option>
+                                    <option value="Shipped">{currentT.shipped}</option>
+                                    <option value="Delivered">{currentT.delivered}</option>
+                                    <option value="Cancelled">{currentT.cancelled}</option>
+                                  </select>
+                                  {/* Phase 96: payment badge in lead's order list */}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-colors ${order.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-50 text-amber-600'}`}
+                                  >
+                                    {order.paid ? '✓' : '⏳'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -9664,6 +9731,35 @@ function AppContent() {
                       → {s}
                     </button>
                   ))}
+                  <div className="w-px h-5 bg-white/20" />
+                  {/* Phase 97: Bulk mark as paid */}
+                  <button
+                    disabled={bulkActionLoading}
+                    onClick={() => openConfirm({
+                      title: currentLanguage === 'tr' ? 'Toplu Ödeme Onayla' : 'Bulk Mark Paid',
+                      message: `${selectedOrderIds.size} ${currentLanguage === 'tr' ? 'sipariş ödendi olarak işaretlensin mi?' : 'orders marked as paid?'}`,
+                      confirmLabel: currentLanguage === 'tr' ? '✓ Ödendi Yap' : '✓ Mark Paid',
+                      onConfirm: async () => {
+                        setBulkActionLoading(true);
+                        const sel = orders.filter(o => selectedOrderIds.has(o.id));
+                        for (const o of sel) {
+                          if (!o.paid) await handleToggleOrderPaid(o);
+                        }
+                        setSelectedOrderIds(new Set());
+                        setBulkActionLoading(false);
+                        toast(
+                          currentLanguage === 'tr'
+                            ? `${sel.length} sipariş ödendi olarak işaretlendi ✓`
+                            : `${sel.length} order${sel.length !== 1 ? 's' : ''} marked as paid ✓`,
+                          'success'
+                        );
+                      },
+                    })}
+                    className="text-xs font-bold px-3 py-1.5 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    {currentLanguage === 'tr' ? 'Ödendi' : 'Mark Paid'}
+                  </button>
                   <div className="w-px h-5 bg-white/20" />
                   <button
                     onClick={() => {
@@ -10222,6 +10318,36 @@ function AppContent() {
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.date}</span>
                         <span className="font-medium">{selectedOrder.syncedAt ? (typeof (selectedOrder.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (selectedOrder.syncedAt as { toDate: () => Date }).toDate() : new Date(selectedOrder.syncedAt as unknown as string | number | Date)).toLocaleString() : currentT.unknown_date}</span>
                       </div>
+                      {/* Phase 95: Payment status + estimated delivery in detail grid */}
+                      <div>
+                        <span className="text-gray-500 block text-[10px] uppercase font-bold">
+                          {currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}
+                        </span>
+                        <button
+                          onClick={() => handleToggleOrderPaid(selectedOrder)}
+                          className={`mt-0.5 text-xs font-bold px-2.5 py-1 rounded-full transition-colors ${selectedOrder.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
+                        >
+                          {selectedOrder.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
+                        </button>
+                      </div>
+                      {selectedOrder.estimatedDelivery && (() => {
+                        const ed = typeof (selectedOrder.estimatedDelivery as { toDate?: () => Date }).toDate === 'function'
+                          ? (selectedOrder.estimatedDelivery as { toDate: () => Date }).toDate()
+                          : new Date(selectedOrder.estimatedDelivery as string | number);
+                        const isOverdue = ed < new Date() && selectedOrder.status !== 'Delivered' && selectedOrder.status !== 'Cancelled';
+                        return (
+                          <div>
+                            <span className="text-gray-500 block text-[10px] uppercase font-bold">
+                              {currentLanguage === 'tr' ? 'Tahmini Teslimat' : 'Est. Delivery'}
+                            </span>
+                            <span className={`font-medium text-sm flex items-center gap-1.5 mt-0.5 ${isOverdue ? 'text-red-600' : 'text-gray-800'}`}>
+                              {isOverdue && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
+                              {ed.toLocaleDateString()}
+                              {isOverdue && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'GECİKTİ' : 'OVERDUE'}</span>}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   {/* Phase 40: Order Quick Note */}
