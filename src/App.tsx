@@ -234,6 +234,7 @@ interface B2BPortalProps {
   userRole: UserRole;
   leads: Lead[];
   inventory: InventoryItem[];
+  orders?: Order[];
   currentT: Record<string, string>;
   currentLanguage: string;
   exchangeRates?: Record<string, number> | null;
@@ -370,7 +371,7 @@ const SortHeader = ({
 // QuotationItem, Quotation, B2BPortalProps, PriceList are imported from ./types
 
 // --- B2B Portal Components ---
-const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage, exchangeRates }: B2BPortalProps) => {
+const B2BPortal = ({ user, userRole, leads, inventory, orders: portalOrders = [], currentT, currentLanguage, exchangeRates }: B2BPortalProps) => {
   const [b2bTab, setB2bTab] = useState<'quotations'|'dealers'|'pricelists'|'komisyon'>('quotations');
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -719,6 +720,39 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
           </div>
             );
           })()}
+
+          {/* ── Phase 136: Credit Limit Alerts ── */}
+          {dealers.length > 0 && (() => {
+            // Find dealers where their open orders exceed credit limit
+            const overLimit = dealers.filter(d => {
+              const limit = (d.creditLimit as number) || 0;
+              if (!limit) return false;
+              const usage = portalOrders.filter(o =>
+                (o.customerName === (d.name as string) || o.customerEmail === (d.email as string)) &&
+                o.status !== 'Cancelled' && !o.paid
+              ).reduce((s, o) => s + (o.totalPrice || 0), 0);
+              return usage > limit;
+            });
+            if (overLimit.length === 0) return null;
+            return (
+              <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-red-800">
+                    {overLimit.length} {currentLanguage === 'tr' ? 'bayi kredi limitini aştı' : 'dealer(s) over credit limit'}
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {overLimit.map(d => (
+                      <span key={d.id as string} className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                        {d.name as string}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Dealers table */}
           <div className="apple-card p-0 overflow-hidden">
             <div className="overflow-x-auto">
@@ -2575,6 +2609,115 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </table>
               {inventory.length > 10 && <p className="text-xs text-center text-gray-400 mt-3 py-2">{currentLanguage==='tr'?`+${inventory.length-10} ürün daha — Envanter sekmesine gidin`:`+${inventory.length-10} more items — Go to Inventory tab`}</p>}
             </div>
+
+          {/* ── Phase 135: Product Profitability ── */}
+          {orders.length > 0 && inventory.length > 0 && (() => {
+            type ProdProfit = { name: string; sku: string; revenue: number; cogs: number; margin: number; units: number };
+            const prodMap: Record<string, ProdProfit> = {};
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              for (const li of (o.lineItems || [])) {
+                const key = li.inventoryId || li.name;
+                if (!prodMap[key]) {
+                  const inv = inventory.find(i => i.id === li.inventoryId || i.name === li.name);
+                  prodMap[key] = { name: li.name, sku: li.sku || inv?.sku || '—', revenue: 0, cogs: 0, margin: 0, units: 0 };
+                }
+                prodMap[key].revenue += li.price * li.quantity;
+                prodMap[key].cogs += ((li.costPrice ?? 0) || 0) * li.quantity;
+                prodMap[key].units += li.quantity;
+              }
+            }
+            const prods = Object.values(prodMap)
+              .map(p => ({ ...p, margin: p.revenue > 0 ? Math.round(((p.revenue - p.cogs) / p.revenue) * 100) : 0 }))
+              .sort((a, b) => b.revenue - a.revenue)
+              .slice(0, 10);
+            if (prods.length === 0) return null;
+            return (
+              <div className="apple-card p-6 mt-4">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💰 Ürün Kârlılık Analizi' : '💰 Product Profitability'}</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        <th className="text-left py-2 px-3">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                        <th className="text-right py-2 px-3">{currentLanguage === 'tr' ? 'Adet' : 'Units'}</th>
+                        <th className="text-right py-2 px-3 hidden sm:table-cell">{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</th>
+                        <th className="text-right py-2 px-3 hidden md:table-cell">{currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}</th>
+                        <th className="text-right py-2 px-3">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {prods.map(p => (
+                        <tr key={p.name} className="hover:bg-gray-50/50 transition-all">
+                          <td className="py-3 px-3">
+                            <p className="text-xs font-bold text-gray-800 truncate max-w-[180px]">{p.name}</p>
+                            <p className="text-[9px] text-gray-400">{p.sku}</p>
+                          </td>
+                          <td className="py-3 px-3 text-right text-xs font-semibold text-gray-600">{p.units}</td>
+                          <td className="py-3 px-3 text-right text-xs font-bold text-gray-800 hidden sm:table-cell">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="py-3 px-3 text-right text-xs text-gray-500 hidden md:table-cell">₺{p.cogs.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="py-3 px-3 text-right">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : p.margin >= 15 ? 'bg-amber-100 text-amber-700' : p.cogs > 0 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}>
+                              {p.cogs > 0 ? `%${p.margin}` : '—'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Phase 137: Inventory Valuation by Category ── */}
+          {inventory.length > 0 && (() => {
+            type CatVal = { category: string; items: number; stockValue: number; costValue: number; margin: number };
+            const catMap: Record<string, CatVal> = {};
+            for (const item of inventory) {
+              const cat = item.category || (currentLanguage === 'tr' ? 'Kategorisiz' : 'Uncategorized');
+              if (!catMap[cat]) catMap[cat] = { category: cat, items: 0, stockValue: 0, costValue: 0, margin: 0 };
+              const retail = item.prices?.['Retail'] ?? item.price ?? 0;
+              const cost = item.costPrice ?? item.cost ?? 0;
+              const qty = item.stockLevel ?? 0;
+              catMap[cat].items++;
+              catMap[cat].stockValue += retail * qty;
+              catMap[cat].costValue += cost * qty;
+            }
+            const cats = Object.values(catMap).map(c => ({
+              ...c, margin: c.stockValue > 0 ? Math.round(((c.stockValue - c.costValue) / c.stockValue) * 100) : 0
+            })).sort((a, b) => b.stockValue - a.stockValue);
+            const maxVal = Math.max(...cats.map(c => c.stockValue), 1);
+            const totalStockVal = cats.reduce((s, c) => s + c.stockValue, 0);
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📦 Kategori Bazında Stok Değeri' : '📦 Inventory Valuation by Category'}</h3>
+                <div className="space-y-3">
+                  {cats.map(c => (
+                    <div key={c.category}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-gray-800">{c.category}</p>
+                          <span className="text-[9px] text-gray-400">{c.items} {currentLanguage === 'tr' ? 'ürün' : 'items'}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="text-gray-500">₺{(c.stockValue / 1000).toFixed(1)}K</span>
+                          {c.costValue > 0 && <span className={`font-bold ${c.margin >= 30 ? 'text-emerald-600' : c.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{c.margin}</span>}
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                        <div className="h-2 bg-brand/60 rounded-full transition-all duration-700" style={{ width: `${(c.stockValue / maxVal) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between text-xs font-bold text-gray-600">
+                  <span>{cats.length} {currentLanguage === 'tr' ? 'kategori' : 'categories'}</span>
+                  <span>{currentLanguage === 'tr' ? 'Toplam Stok Değeri' : 'Total Stock Value'}: ₺{(totalStockVal / 1000).toFixed(1)}K</span>
+                </div>
+              </div>
+            );
+          })()}
           </div>
         </div>
       )}
@@ -2653,6 +2796,48 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </table>
             </div>
           </div>
+
+          {/* ── Phase 140: Cargo Company Performance Analysis ── */}
+          {orders.filter(o => o.cargoCompany).length > 0 && (() => {
+            type CargoStat = { name: string; shipments: number; delivered: number; deliveryRate: number; avgRevenue: number };
+            const cargoMap: Record<string, CargoStat> = {};
+            for (const o of orders) {
+              if (!o.cargoCompany) continue;
+              const co = o.cargoCompany;
+              if (!cargoMap[co]) cargoMap[co] = { name: co, shipments: 0, delivered: 0, deliveryRate: 0, avgRevenue: 0 };
+              cargoMap[co].shipments++;
+              cargoMap[co].avgRevenue += o.totalPrice || 0;
+              if (o.status === 'Delivered') cargoMap[co].delivered++;
+            }
+            const cargos = Object.values(cargoMap).map(c => ({
+              ...c,
+              deliveryRate: c.shipments > 0 ? Math.round((c.delivered / c.shipments) * 100) : 0,
+              avgRevenue: c.shipments > 0 ? c.avgRevenue / c.shipments : 0,
+            })).sort((a, b) => b.deliveryRate - a.deliveryRate);
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🚚 Kargo Firması Performansı' : '🚚 Cargo Company Performance'}</h3>
+                <div className="space-y-3">
+                  {cargos.map(c => (
+                    <div key={c.name}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-gray-800">{c.name}</p>
+                          <span className="text-[9px] text-gray-400">{c.shipments} {currentLanguage === 'tr' ? 'gönderi' : 'shipments'}</span>
+                        </div>
+                        <span className={`text-xs font-bold ${c.deliveryRate >= 80 ? 'text-emerald-600' : c.deliveryRate >= 60 ? 'text-amber-600' : 'text-red-500'}`}>
+                          %{c.deliveryRate} {currentLanguage === 'tr' ? 'teslimat' : 'delivery'}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                        <div className={`h-2 rounded-full transition-all duration-700 ${c.deliveryRate >= 80 ? 'bg-emerald-400' : c.deliveryRate >= 60 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${c.deliveryRate}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2733,6 +2918,67 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           </div>
         </div>
       )}
+
+      {/* ── Phase 139: Customer Retention Analysis ── */}
+      {reportsTab === 'crm' && orders.length > 3 && (() => {
+        // New vs Returning customers per month (last 6 months)
+        const now139 = new Date();
+        const months139 = Array.from({ length: 6 }, (_, i) => {
+          const d = new Date(now139.getFullYear(), now139.getMonth() - (5 - i), 1);
+          return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
+        });
+        const getOD139 = (o: Order): Date => {
+          const raw = o.createdAt ?? o.syncedAt;
+          if (!raw) return new Date(0);
+          return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+        };
+        // Build first-order date per customer
+        const firstOrderMap: Record<string, Date> = {};
+        for (const o of [...orders].sort((a, b) => getOD139(a).getTime() - getOD139(b).getTime())) {
+          if (!firstOrderMap[o.customerName]) firstOrderMap[o.customerName] = getOD139(o);
+        }
+        const data139 = months139.map(m => {
+          const monthOrders = orders.filter(o => {
+            const d = getOD139(o);
+            return d.getFullYear() === m.year && d.getMonth() === m.month;
+          });
+          const customers = [...new Set(monthOrders.map(o => o.customerName))];
+          const newCustomers = customers.filter(c => {
+            const first = firstOrderMap[c];
+            return first && first.getFullYear() === m.year && first.getMonth() === m.month;
+          }).length;
+          return { label: m.label, new: newCustomers, returning: customers.length - newCustomers };
+        });
+        const maxBar = Math.max(...data139.map(d => d.new + d.returning), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '🔄 Müşteri Tutma Analizi' : '🔄 Customer Retention'}</h3>
+            <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Yeni vs Geri dönen müşteriler' : 'New vs returning customers per month'}</p>
+            <div className="flex items-end gap-3 h-32 mb-3">
+              {data139.map((d, i) => {
+                const totalH = (d.new + d.returning) / maxBar * 100;
+                const newH = (d.new / maxBar) * 100;
+                const retH = (d.returning / maxBar) * 100;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex flex-col justify-end" style={{ height: '100px' }}>
+                      <div className="w-full flex flex-col overflow-hidden rounded-t-md" style={{ height: `${totalH}%` }}>
+                        <div style={{ height: `${totalH > 0 ? (retH / totalH) * 100 : 0}%` }} className="w-full bg-brand/40 rounded-t-sm" />
+                        <div style={{ height: `${totalH > 0 ? (newH / totalH) * 100 : 0}%` }} className="w-full bg-brand" />
+                      </div>
+                    </div>
+                    <span className="text-[9px] text-gray-400 font-semibold">{d.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 pt-3 border-t border-gray-50">
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand flex-shrink-0" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Yeni' : 'New'}</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand/40 flex-shrink-0" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Geri Dönen' : 'Returning'}</span></div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -2949,7 +3195,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'>('genel');
 
   // ── Dashboard summary (30-day KPI deltas) ─────────────────────────────────
   const [summaryData, setSummaryData] = useState<{
@@ -3061,7 +3307,7 @@ function AppContent() {
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard'>('pos');
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -7318,8 +7564,10 @@ function AppContent() {
                       { id: 'ap',           label: currentLanguage === 'tr' ? 'Ödenecekler (AP)' : 'Payables (AP)',     icon: Building2  },
                       { id: 'butce',        label: currentLanguage === 'tr' ? 'Bütçe Planı'      : 'Budget Plan',       icon: BarChart3  },
                       { id: 'banka',        label: currentLanguage === 'tr' ? 'Banka Mutabakatı'  : 'Bank Recon',        icon: CreditCard },
-                      { id: 'sabit-kiymet', label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
-                      { id: 'maliyet',      label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
+                      { id: 'sabit-kiymet',      label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
+                      { id: 'maliyet',           label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
+                      { id: 'ar-aging',          label: currentLanguage === 'tr' ? 'Müşteri Yaşlandırma': 'AR Aging',         icon: Users },
+                      { id: 'finansal-oranlar',  label: currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios',  icon: Activity },
                     ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
                       const Icon = tab.icon;
                       const isActive = muhasebeTab === tab.id;
@@ -7759,6 +8007,183 @@ function AppContent() {
                       />
                     </motion.div>
                   )}
+
+                  {/* ── Phase 131: AR Aging per Customer ── */}
+                  {muhasebeTab === 'ar-aging' && (
+                    <motion.div key="muhasebe-ar-aging" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      <ModuleHeader
+                        title={currentLanguage === 'tr' ? 'Müşteri Alacak Yaşlandırması' : 'Customer AR Aging'}
+                        subtitle={currentLanguage === 'tr' ? 'Müşteri bazında ödenmemiş alacakların vade analizi' : 'Per-customer unpaid receivables aging analysis'}
+                        icon={Users}
+                      />
+                      {(() => {
+                        const now131 = Date.now();
+                        const unpaid131 = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                        // Group by customer
+                        type CustAR = { name: string; total: number; b0_30: number; b31_60: number; b61_90: number; b90p: number; oldest: number };
+                        const custMap: Record<string, CustAR> = {};
+                        for (const o of unpaid131) {
+                          const name = o.customerName || '—';
+                          if (!custMap[name]) custMap[name] = { name, total: 0, b0_30: 0, b31_60: 0, b61_90: 0, b90p: 0, oldest: 0 };
+                          const raw = o.createdAt ?? o.syncedAt;
+                          const d = raw
+                            ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number))
+                            : new Date();
+                          const days = Math.floor((now131 - d.getTime()) / 86400000);
+                          const amt = o.totalPrice || 0;
+                          custMap[name].total += amt;
+                          custMap[name].oldest = Math.max(custMap[name].oldest, days);
+                          if (days <= 30) custMap[name].b0_30 += amt;
+                          else if (days <= 60) custMap[name].b31_60 += amt;
+                          else if (days <= 90) custMap[name].b61_90 += amt;
+                          else custMap[name].b90p += amt;
+                        }
+                        const custs = Object.values(custMap).sort((a, b) => b.total - a.total);
+                        const totalAR = custs.reduce((s, c) => s + c.total, 0);
+                        if (custs.length === 0) return (
+                          <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                            <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-200" />
+                            <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tüm siparişler tahsil edildi.' : 'All orders collected.'}</p>
+                          </div>
+                        );
+                        const r131 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const s131 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                        const f131 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r131).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                        return (
+                          <div className="space-y-3">
+                            {/* Summary cards */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                              {[
+                                { label: '0–30 gün', val: custs.reduce((s, c) => s + c.b0_30, 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                                { label: '31–60 gün', val: custs.reduce((s, c) => s + c.b31_60, 0), color: 'text-amber-600', bg: 'bg-amber-50' },
+                                { label: '61–90 gün', val: custs.reduce((s, c) => s + c.b61_90, 0), color: 'text-orange-600', bg: 'bg-orange-50' },
+                                { label: '90+ gün', val: custs.reduce((s, c) => s + c.b90p, 0), color: 'text-red-600', bg: 'bg-red-50' },
+                              ].map(k => (
+                                <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
+                                  <p className={`text-xl font-bold ${k.color}`}>{s131}{f131(k.val)}</p>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Per-customer table */}
+                            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                              <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 grid grid-cols-6 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                <span className="col-span-2">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</span>
+                                <span className="text-right">0–30</span>
+                                <span className="text-right">31–60</span>
+                                <span className="text-right">61–90</span>
+                                <span className="text-right">90+</span>
+                              </div>
+                              <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto">
+                                {custs.map(c => (
+                                  <div key={c.name} className="px-5 py-3 grid grid-cols-6 items-center hover:bg-gray-50/50 transition-all">
+                                    <div className="col-span-2 min-w-0">
+                                      <p className="text-xs font-bold text-gray-800 truncate">{c.name}</p>
+                                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}: {s131}{f131(c.total)} · {c.oldest}g</p>
+                                    </div>
+                                    {[c.b0_30, c.b31_60, c.b61_90, c.b90p].map((v, i) => (
+                                      <span key={i} className={`text-xs font-bold text-right ${v > 0 ? i === 0 ? 'text-emerald-600' : i === 1 ? 'text-amber-600' : i === 2 ? 'text-orange-600' : 'text-red-600' : 'text-gray-200'}`}>
+                                        {v > 0 ? s131 + f131(v) : '—'}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-between text-xs font-bold">
+                                <span className="text-gray-500">{custs.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</span>
+                                <span className="text-gray-800">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total AR'}: {s131}{f131(totalAR)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
+
+                  {/* ── Phase 132: Financial Ratios ── */}
+                  {muhasebeTab === 'finansal-oranlar' && (
+                    <motion.div key="muhasebe-ratios" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      <ModuleHeader
+                        title={currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios'}
+                        subtitle={currentLanguage === 'tr' ? 'SAP / NetSuite benzeri likidite, karlılık ve verimlilik göstergeleri' : 'SAP/NetSuite-style liquidity, profitability and efficiency ratios'}
+                        icon={Activity}
+                      />
+                      {(() => {
+                        const totalRevenue132 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const totalCOGS132 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
+                        const grossProfit132 = totalRevenue132 - totalCOGS132;
+                        const totalAR132 = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const totalAP132 = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status)).reduce((s, po) => s + (po.totalAmount || 0), 0);
+                        const inventoryValue132 = inventory.reduce((s, i) => s + ((i.stockLevel ?? 0) * (i.prices?.['Retail'] ?? i.price ?? 0)), 0);
+                        const totalAssets = totalAR132 + inventoryValue132;
+
+                        const grossMargin = totalRevenue132 > 0 ? (grossProfit132 / totalRevenue132) * 100 : 0;
+                        const currentRatio = totalAP132 > 0 ? totalAssets / totalAP132 : null;
+                        const arTurnover = totalAR132 > 0 ? totalRevenue132 / totalAR132 : null;
+                        const dso = totalRevenue132 > 0 ? (totalAR132 / totalRevenue132) * 365 : null;
+                        const inventoryTurnover = inventoryValue132 > 0 ? totalCOGS132 / inventoryValue132 : null;
+
+                        const ratios = [
+                          {
+                            label: currentLanguage === 'tr' ? 'Brüt Kâr Marjı' : 'Gross Profit Margin',
+                            value: `%${grossMargin.toFixed(1)}`,
+                            desc: currentLanguage === 'tr' ? 'Satışlardan elde edilen brüt kâr yüzdesi' : 'Gross profit as % of revenue',
+                            status: grossMargin >= 30 ? 'good' : grossMargin >= 15 ? 'warn' : 'bad',
+                            benchmark: currentLanguage === 'tr' ? 'İdeal: %30+' : 'Benchmark: 30%+',
+                          },
+                          {
+                            label: currentLanguage === 'tr' ? 'Cari Oran' : 'Current Ratio',
+                            value: currentRatio !== null ? currentRatio.toFixed(2) : '—',
+                            desc: currentLanguage === 'tr' ? 'Dönen varlıklar / Kısa vadeli borçlar' : 'Current assets / Current liabilities',
+                            status: currentRatio === null ? 'neutral' : currentRatio >= 2 ? 'good' : currentRatio >= 1 ? 'warn' : 'bad',
+                            benchmark: currentLanguage === 'tr' ? 'İdeal: 1.5–2.5' : 'Benchmark: 1.5–2.5',
+                          },
+                          {
+                            label: currentLanguage === 'tr' ? 'Alacak Devir Hızı' : 'AR Turnover',
+                            value: arTurnover !== null ? arTurnover.toFixed(1) + 'x' : '—',
+                            desc: currentLanguage === 'tr' ? 'Yıllık ciro / Alacak bakiyesi' : 'Annual revenue / AR balance',
+                            status: arTurnover === null ? 'neutral' : arTurnover >= 8 ? 'good' : arTurnover >= 4 ? 'warn' : 'bad',
+                            benchmark: currentLanguage === 'tr' ? 'İdeal: 8x+' : 'Benchmark: 8x+',
+                          },
+                          {
+                            label: currentLanguage === 'tr' ? 'Alacak Tahsilat Günü (DSO)' : 'Days Sales Outstanding',
+                            value: dso !== null ? `${Math.round(dso)} gün` : '—',
+                            desc: currentLanguage === 'tr' ? 'Ortalama tahsilat süresi (gün)' : 'Average days to collect payment',
+                            status: dso === null ? 'neutral' : dso <= 30 ? 'good' : dso <= 60 ? 'warn' : 'bad',
+                            benchmark: currentLanguage === 'tr' ? 'İdeal: 30 gün' : 'Benchmark: 30 days',
+                          },
+                          {
+                            label: currentLanguage === 'tr' ? 'Stok Devir Hızı' : 'Inventory Turnover',
+                            value: inventoryTurnover !== null ? inventoryTurnover.toFixed(2) + 'x' : '—',
+                            desc: currentLanguage === 'tr' ? 'Maliyet / Ortalama stok değeri' : 'COGS / Average inventory value',
+                            status: inventoryTurnover === null ? 'neutral' : inventoryTurnover >= 6 ? 'good' : inventoryTurnover >= 3 ? 'warn' : 'bad',
+                            benchmark: currentLanguage === 'tr' ? 'İdeal: 6x+' : 'Benchmark: 6x+',
+                          },
+                        ];
+
+                        const statusCfg = { good: 'text-emerald-700 bg-emerald-50 border-emerald-100', warn: 'text-amber-700 bg-amber-50 border-amber-100', bad: 'text-red-700 bg-red-50 border-red-100', neutral: 'text-gray-700 bg-gray-50 border-gray-100' };
+                        const dotCfg = { good: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-500', neutral: 'bg-gray-300' };
+
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {ratios.map(r => (
+                              <div key={r.label} className={`border rounded-2xl p-5 ${statusCfg[r.status as keyof typeof statusCfg]}`}>
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <div>
+                                    <p className="text-sm font-bold">{r.label}</p>
+                                    <p className="text-[10px] opacity-70 mt-0.5">{r.desc}</p>
+                                  </div>
+                                  <span className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${dotCfg[r.status as keyof typeof dotCfg]}`} />
+                                </div>
+                                <p className="text-3xl font-black mt-3">{r.value}</p>
+                                <p className="text-[10px] opacity-60 mt-1">{r.benchmark}</p>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
                 </>
               )}
             </motion.div>
@@ -7776,8 +8201,9 @@ function AppContent() {
                     {([
                       { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
                       { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
-                      { key: 'scorecard', label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
-                    ] as { key: 'pos' | 'suppliers' | 'scorecard'; label: string; icon: React.ElementType }[]).map(t => (
+                      { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
+                      { key: 'odeme-takvimi',  label: currentLanguage === 'tr' ? 'Ödeme Takvimi' : 'Payment Schedule',    icon: Calendar },
+                    ] as { key: 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'; label: string; icon: React.ElementType }[]).map(t => (
                       <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
                         className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
                           purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
@@ -8128,6 +8554,70 @@ function AppContent() {
                               : 'Score = Delivery rate − (Cancel rate × 0.5). Based on Purchase Orders data.'}
                           </div>
                         </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 134: Vendor Payment Schedule ── */}
+                  {purchasingSubTab === 'odeme-takvimi' && (() => {
+                    const openPOs = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status));
+                    if (openPOs.length === 0) return (
+                      <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                        <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-200" />
+                        <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Bekleyen ödeme yok.' : 'No pending payments.'}</p>
+                      </div>
+                    );
+                    // Group by month using expectedDelivery or createdAt + 30 days
+                    type PayGroup = { month: string; pos: typeof openPOs; total: number };
+                    const groupMap: Record<string, PayGroup> = {};
+                    const now134 = new Date();
+                    for (const po of openPOs) {
+                      const raw = (po as Record<string, unknown>).expectedDelivery ?? (po as Record<string, unknown>).createdAt;
+                      let dueDate: Date;
+                      if (raw) {
+                        dueDate = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                        // If no expected delivery, add 30 days to creation
+                        if (!(po as Record<string, unknown>).expectedDelivery) dueDate = new Date(dueDate.getTime() + 30 * 86400000);
+                      } else {
+                        dueDate = new Date(now134.getTime() + 30 * 86400000);
+                      }
+                      const key = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+                      const label = dueDate.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' });
+                      if (!groupMap[key]) groupMap[key] = { month: label, pos: [], total: 0 };
+                      groupMap[key].pos.push(po);
+                      groupMap[key].total += po.totalAmount || 0;
+                    }
+                    const groups = Object.entries(groupMap).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+                    const grandTotal = groups.reduce((s, g) => s + g.total, 0);
+                    return (
+                      <div className="space-y-4">
+                        <ModuleHeader
+                          title={currentLanguage === 'tr' ? 'Tedarikçi Ödeme Takvimi' : 'Vendor Payment Schedule'}
+                          subtitle={currentLanguage === 'tr' ? `${openPOs.length} açık sipariş · Toplam ₺${grandTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${openPOs.length} open POs · Total ₺${grandTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                          icon={Calendar}
+                        />
+                        {groups.map(g => (
+                          <div key={g.month} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                            <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                              <span className="text-sm font-bold text-gray-700 capitalize">{g.month}</span>
+                              <span className="text-sm font-black text-brand">₺{g.total.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                            </div>
+                            <div className="divide-y divide-gray-50">
+                              {g.pos.map(po => (
+                                <div key={po.id} className="flex items-center gap-4 px-5 py-3">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-gray-800">{po.supplier || '—'}</p>
+                                    <p className="text-[10px] text-gray-400">{po.status}</p>
+                                  </div>
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                    po.status === 'Onaylandı' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                  }`}>{po.status}</span>
+                                  <span className="text-sm font-bold text-gray-800 flex-shrink-0">₺{(po.totalAmount || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     );
                   })()}
@@ -8500,6 +8990,53 @@ function AppContent() {
                               </div>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 138: Leave Calendar ── */}
+                  {leaveRequests.filter(l => l.status === 'approved').length > 0 && (() => {
+                    const approved = leaveRequests.filter(l => l.status === 'approved');
+                    const today138 = new Date();
+                    const thisMonth138 = today138.getMonth();
+                    const thisYear138 = today138.getFullYear();
+                    // Show leaves active in current month
+                    const current = approved.filter(l => {
+                      const start = l.startDate ? new Date(l.startDate) : null;
+                      const end = l.endDate ? new Date(l.endDate) : null;
+                      if (!start || !end) return false;
+                      return (
+                        (start.getFullYear() === thisYear138 && start.getMonth() === thisMonth138) ||
+                        (end.getFullYear() === thisYear138 && end.getMonth() === thisMonth138) ||
+                        (start <= today138 && end >= today138)
+                      );
+                    });
+                    if (current.length === 0) return null;
+                    return (
+                      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                          <Calendar size={16} className="text-purple-400" />
+                          <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bu Ay İzinli Personel' : 'Employees on Leave This Month'}</h3>
+                          <span className="ml-auto text-[10px] font-bold text-purple-500 bg-purple-50 px-2 py-0.5 rounded-full">{current.length}</span>
+                        </div>
+                        <div className="divide-y divide-gray-50">
+                          {current.map(l => {
+                            const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: currentLanguage === 'tr' ? 'Hastalık' : 'Sick', unpaid: currentLanguage === 'tr' ? 'Ücretsiz' : 'Unpaid', other: currentLanguage === 'tr' ? 'Diğer' : 'Other' }[l.type] || l.type;
+                            const isNow = l.startDate && l.endDate && new Date(l.startDate) <= today138 && new Date(l.endDate) >= today138;
+                            return (
+                              <div key={l.id} className="flex items-center gap-4 px-5 py-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs font-bold text-gray-800">{l.employeeName}</p>
+                                    {isNow && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? '🟢 Şu an' : '🟢 Now'}</span>}
+                                  </div>
+                                  <p className="text-[10px] text-gray-400">{typeLabel} · {l.startDate} → {l.endDate}</p>
+                                </div>
+                                <span className="text-xs font-bold text-gray-600 flex-shrink-0">{l.days} {currentLanguage === 'tr' ? 'gün' : 'd'}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -9995,7 +10532,7 @@ function AppContent() {
           {/* ── B2B Portal ── */}
           {activeTab === 'b2b' && (
             <motion.div key="b2b" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
+              <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} orders={orders} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
             </motion.div>
           )}
 
@@ -10488,7 +11025,7 @@ function AppContent() {
 
               {/* CRM sub-tab: B2B Portal */}
               {crmTab === 'b2b' && (
-                <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
+                <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} orders={orders} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
               )}
 
               {crmTab === 'komisyon' && (
