@@ -11,6 +11,7 @@ import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order } from '../types';
+import { submitApprovalRequest } from './ApprovalQueue';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -57,9 +58,11 @@ interface PurchasingModuleProps {
   orders: Order[];
   onNavigate?: (tab: string) => void;
   exchangeRates?: Record<string, number> | null;
+  prefillProduct?: { name: string; sku: string };
+  onPrefillConsumed?: () => void;
 }
 
-export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory, onNavigate, exchangeRates }: PurchasingModuleProps) {
+export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory, onNavigate, exchangeRates, prefillProduct, onPrefillConsumed }: PurchasingModuleProps) {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
@@ -85,6 +88,16 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     expectedDate: format(new Date(), 'yyyy-MM-dd')
   });
   const [productSearch, setProductSearch] = useState('');
+
+  // Phase 102: auto-open form when a prefill product is passed from low-stock panel
+  useEffect(() => {
+    if (!prefillProduct) return;
+    setIsAddingOrder(true);
+    setProductSearch(prefillProduct.name);
+    setNewOrder(prev => ({ ...prev, notes: `${currentLanguage === 'tr' ? 'Düşük stok uyarısı:' : 'Low-stock alert:'} ${prefillProduct.name} (${prefillProduct.sku})` }));
+    onPrefillConsumed?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillProduct]);
 
   const handleAddOrderItem = (product: { id: string, name: string, sku: string, price?: number, prices?: Record<string, number> }) => {
     if (newOrder.items.find(i => i.id === product.id)) {
@@ -122,24 +135,63 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       return;
     }
 
+    const total = calculateTotal(newOrder.items);
+    const isPrivileged = userRole === 'Admin' || userRole === 'Manager' || userRole === 'Purchasing';
+
     try {
       // Pre-generate doc ref so its ID drives the PO number — no random needed
       const poDocRef = doc(collection(db, 'purchaseOrders'));
       const orderNumber = `PO-${poDocRef.id.slice(0, 8).toUpperCase()}`;
-      await setDoc(poDocRef, {
-        orderNumber,
-        supplier: newOrder.supplier,
-        items: newOrder.items,
-        status: 'Taslak',
-        totalAmount: calculateTotal(newOrder.items),
-        expectedDate: newOrder.expectedDate,
-        notes: newOrder.notes,
-        createdAt: serverTimestamp()
-      });
+
+      if (isPrivileged) {
+        // Admin/Manager/Purchasing → create directly
+        await setDoc(poDocRef, {
+          orderNumber,
+          supplier: newOrder.supplier,
+          items: newOrder.items,
+          status: 'Taslak',
+          totalAmount: total,
+          expectedDate: newOrder.expectedDate,
+          notes: newOrder.notes,
+          createdAt: serverTimestamp()
+        });
+      } else {
+        // Other roles → route through approval queue (eBA)
+        await submitApprovalRequest({
+          type: 'purchase_order',
+          title: currentLanguage === 'tr'
+            ? `Satınalma Talebi: ${newOrder.supplier} (${newOrder.items.length} kalem)`
+            : `Purchase Request: ${newOrder.supplier} (${newOrder.items.length} items)`,
+          description: currentLanguage === 'tr'
+            ? `Tedarikçi: ${newOrder.supplier} · Toplam: ₺${total.toLocaleString()} · Beklenen: ${newOrder.expectedDate}${newOrder.notes ? ' · Not: ' + newOrder.notes : ''}`
+            : `Supplier: ${newOrder.supplier} · Total: ₺${total.toLocaleString()} · Due: ${newOrder.expectedDate}${newOrder.notes ? ' · Note: ' + newOrder.notes : ''}`,
+          requestedBy: 'current_user',
+          requestedByRole: userRole || 'Employee',
+          targetModule: 'satin-alma',
+          status: 'pending',
+          priority: total > 50000 ? 'high' : total > 10000 ? 'medium' : 'low',
+          amount: total,
+          payload: {
+            orderNumber,
+            supplier: newOrder.supplier,
+            items: JSON.stringify(newOrder.items.map(i => `${i.name} x${i.quantity}`)),
+            totalAmount: total,
+            expectedDate: newOrder.expectedDate,
+            notes: newOrder.notes || '',
+          },
+        });
+        showValidationError(
+          currentLanguage === 'tr'
+            ? '✓ Talep yönetici onayına gönderildi!'
+            : '✓ Request sent to manager for approval!'
+        );
+      }
+
       setIsAddingOrder(false);
       setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
     } catch (error) {
       console.error('Error adding purchase order:', error);
+      showValidationError(currentLanguage === 'tr' ? 'Hata oluştu. Tekrar deneyin.' : 'Error occurred. Please try again.');
     }
   };
 
@@ -788,16 +840,29 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 {validationError && (
                   <span className="text-xs text-red-500 font-medium flex-1">{validationError}</span>
                 )}
-                {!viewingOrder && (
-                  <button
-                    onClick={editingOrder ? handleUpdateOrder : handleSubmitOrder}
-                    className="apple-button-primary px-12"
-                  >
-                    {editingOrder
-                      ? (currentLanguage === 'tr' ? 'Güncelle' : 'Update')
-                      : (currentLanguage === 'tr' ? 'Siparişi Oluştur' : 'Create Order')}
-                  </button>
-                )}
+                {!viewingOrder && (() => {
+                  const isPrivileged = userRole === 'Admin' || userRole === 'Manager' || userRole === 'Purchasing';
+                  return (
+                    <>
+                      {!isPrivileged && !editingOrder && (
+                        <span className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {currentLanguage === 'tr' ? 'Yönetici onayına gönderilecek' : 'Will be sent for manager approval'}
+                        </span>
+                      )}
+                      <button
+                        onClick={editingOrder ? handleUpdateOrder : handleSubmitOrder}
+                        className="apple-button-primary px-12"
+                      >
+                        {editingOrder
+                          ? (currentLanguage === 'tr' ? 'Güncelle' : 'Update')
+                          : isPrivileged
+                            ? (currentLanguage === 'tr' ? 'Siparişi Oluştur' : 'Create Order')
+                            : (currentLanguage === 'tr' ? 'Onaya Gönder' : 'Submit for Approval')}
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             </motion.div>
           </div>

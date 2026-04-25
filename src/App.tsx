@@ -103,7 +103,9 @@ import {
   Award,
   Moon,
   Sun,
-  Copy
+  Copy,
+  Check,
+  Tag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -186,6 +188,7 @@ import UpgradeModal from './components/UpgradeModal';
 import SubscriptionPanel from './components/SubscriptionPanel';
 import CargoTrackingTab from './components/CargoTrackingTab';
 import DocumentDesigner from './components/DocumentDesigner';
+import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
   type UserSubscription,
   type SubscriptionPlan,
@@ -674,27 +677,44 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
             const dcSym  = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
             const totalCredit = dealers.reduce((s,d)=>s+(d.creditLimit as number||0),0);
             const cvtCredit   = dealerCurrency === 'TRY' ? totalCredit : totalCredit / dcRate;
+            const CurrencyToggle = () => (
+              <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                {(['TRY','USD','EUR'] as const).map(c => (
+                  <button key={c} onClick={() => setDealerCurrency(c)}
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${dealerCurrency===c?'bg-white shadow-sm text-gray-800':'text-gray-400 hover:text-gray-600'}`}>
+                    {c==='TRY'?'₺':c==='USD'?'$':'€'}
+                  </button>
+                ))}
+              </div>
+            );
             return (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="apple-card p-4">
-              <p className="text-xl font-bold text-brand">{dealers.length}</p>
+              <p className="text-2xl font-bold text-brand">{dealers.length}</p>
               <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Bayi':'Total Dealers'}</p>
             </div>
             <div className="apple-card p-4">
-              <p className="text-xl font-bold text-green-600">{dealers.filter(d=>d.status==='Active').length}</p>
+              <p className="text-2xl font-bold text-green-600">{dealers.filter(d=>d.status==='Active').length}</p>
               <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Aktif':'Active'}</p>
             </div>
-            <div className="apple-card p-4 relative">
-              <button
-                onClick={() => setDealerCurrency(c => c==='TRY'?'USD':c==='USD'?'EUR':'TRY')}
-                className="absolute top-2.5 right-2.5 text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full hover:bg-blue-200 transition-colors"
-              >{dealerCurrency}</button>
-              <p className="text-xl font-bold text-blue-600">{dcSym}{cvtCredit.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
-              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Kredi Limiti':'Total Credit'}</p>
+            <div className="apple-card p-4 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage==='tr'?'Toplam Kredi':'Total Credit'}</p>
+                <CurrencyToggle />
+              </div>
+              <p className="text-2xl font-bold text-blue-600">{dcSym}{cvtCredit.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
             </div>
-            <div className="apple-card p-4">
-              <p className="text-xl font-bold text-purple-600">{quotations.length}</p>
-              <p className="text-xs text-gray-500 mt-1">{currentLanguage==='tr'?'Toplam Teklif':'Quotes'}</p>
+            <div className="apple-card p-4 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage==='tr'?'Teklif Toplamı':'Quote Total'}</p>
+                <CurrencyToggle />
+              </div>
+              <p className="text-2xl font-bold text-purple-600">
+                {dcSym}{(dealerCurrency==='TRY'
+                  ? quotations.reduce((s,q)=>s+(Number(q.total)||0),0)
+                  : quotations.reduce((s,q)=>s+(Number(q.total)||0),0)/dcRate
+                ).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+              </p>
             </div>
           </div>
             );
@@ -967,9 +987,27 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
 
         <div className="space-y-6">
           <div className="apple-card p-6 bg-brand text-white">
+            {(() => {
+              const crRate = dealerCurrency === 'USD' ? (exchangeRates?.USD || 1) : dealerCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+              const crSym  = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
+              const cvtLimit = dealerCurrency === 'TRY' ? creditInfo.limit : creditInfo.limit / crRate;
+              const cvtUsed  = dealerCurrency === 'TRY' ? creditInfo.used  : creditInfo.used  / crRate;
+              return (
+            <>
             <div className="flex justify-between items-start mb-4">
               <h3 className="text-lg font-bold">{currentT.credit_limit}</h3>
-              <button onClick={() => setIsEditingCredit(true)} className="text-xs underline">{currentT.edit}</button>
+              <div className="flex items-center gap-2">
+                {/* Currency segmented control */}
+                <div className="flex items-center gap-0.5 bg-white/20 rounded-lg p-0.5">
+                  {(['TRY','USD','EUR'] as const).map(c => (
+                    <button key={c} onClick={() => setDealerCurrency(c)}
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${dealerCurrency===c?'bg-white text-brand shadow-sm':'text-white/70 hover:text-white'}`}>
+                      {c==='TRY'?'₺':c==='USD'?'$':'€'}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setIsEditingCredit(true)} className="text-xs underline opacity-80 hover:opacity-100">{currentT.edit}</button>
+              </div>
             </div>
             {isEditingCredit ? (
               <div className="space-y-3">
@@ -1003,14 +1041,17 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
               </div>
             ) : (
               <>
-                <p className="text-3xl font-bold mb-4">{creditInfo.limit.toLocaleString()} TL</p>
+                <p className="text-3xl font-bold mb-4">{crSym}{cvtLimit.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
                 <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden mb-2">
                   <div className={cn("h-full", (creditInfo.used / creditInfo.limit) > 0.8 ? "bg-red-500" : (creditInfo.used / creditInfo.limit) > 0.5 ? "bg-yellow-400" : "bg-white")} style={{ width: `${Math.min(100, (creditInfo.used / creditInfo.limit) * 100)}%` }} />
                 </div>
-                <p className="text-xs opacity-80">{currentT.used_limit}: {creditInfo.used.toLocaleString()} TL ({Math.round((creditInfo.used / creditInfo.limit) * 100)}%)</p>
+                <p className="text-xs opacity-80">{currentT.used_limit}: {crSym}{cvtUsed.toLocaleString('tr-TR',{maximumFractionDigits:0})} ({Math.round((creditInfo.used / creditInfo.limit) * 100)}%)</p>
                 {creditInfo.used > creditInfo.limit && <p className="text-xs font-bold mt-2 text-red-200">⚠️ {currentT.over_limit}</p>}
               </>
             )}
+            </>
+              );
+            })()}
           </div>
 
           <div className="apple-card p-6">
@@ -1099,7 +1140,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, currentT, currentLanguage
   );
 };
 
-const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses, onPrintLabels }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[], onPrintLabels?: (items: LabelItem[]) => void }) => {
+const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses, onPrintLabels, onQuickPO }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[], onPrintLabels?: (items: LabelItem[]) => void, onQuickPO?: (item: { name: string; sku: string }) => void }) => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<InventoryItem | null>(null);
   const [editingProduct, setEditingProduct] = useState<InventoryItem | null>(null);
@@ -1385,10 +1426,98 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                       <span className={`text-[10px] font-bold w-10 text-right ${isCrit ? 'text-red-600' : 'text-amber-600'}`}>
                         {item.stockLevel ?? 0}/{item.lowStockThreshold ?? 5}
                       </span>
+                      {/* Phase 102: Quick PO button */}
+                      {onQuickPO && (
+                        <button
+                          onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
+                          title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create Purchase Order'}
+                          className={`text-[9px] font-bold px-2 py-1 rounded-full transition-colors flex items-center gap-0.5 ${isCrit ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
+                          <ShoppingCart className="w-3 h-3" />
+                          {currentLanguage === 'tr' ? 'SAS' : 'PO'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 107: Smart Reorder Suggestions ── */}
+      {movements.length > 0 && (() => {
+        const now107 = Date.now();
+        const MS_30D = 30 * 24 * 60 * 60 * 1000;
+        // Build map: productName → total outbound qty in last 30 days
+        const consMap: Record<string, number> = {};
+        for (const m of movements) {
+          if (m.type !== 'out') continue;
+          const ts = (() => {
+            const t = m.timestamp;
+            if (!t) return 0;
+            if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
+            return new Date(t as string | number).getTime();
+          })();
+          if (now107 - ts > MS_30D) continue;
+          const key = (m.productId as string | undefined) || m.productName;
+          consMap[key] = (consMap[key] || 0) + m.quantity;
+        }
+        // Build suggestions: only for low/zero-stock items with movement data
+        type Suggestion = { item: InventoryItem; monthlyOut: number; suggested: number };
+        const suggestions: Suggestion[] = [];
+        for (const item of inventory) {
+          const key = item.id || item.name;
+          const monthlyOut = consMap[key] ?? consMap[item.name] ?? 0;
+          if (monthlyOut === 0) continue;
+          const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
+          if (!isLow) continue;
+          const suggested = Math.max(Math.ceil(monthlyOut * 2), (item.lowStockThreshold ?? 5) - (item.stockLevel ?? 0));
+          suggestions.push({ item, monthlyOut, suggested });
+        }
+        suggestions.sort((a, b) => b.suggested - a.suggested);
+        if (suggestions.length === 0) return null;
+        return (
+          <div className="rounded-2xl border border-violet-100 bg-violet-50/40 overflow-hidden">
+            <div className="px-4 py-3 flex items-center gap-2 bg-violet-50 border-b border-violet-100">
+              <span className="text-[11px]">🧠</span>
+              <span className="text-xs font-bold text-violet-700">
+                {currentLanguage === 'tr' ? 'Akıllı Sipariş Önerileri' : 'Smart Reorder Suggestions'}
+              </span>
+              <span className="ml-auto text-[10px] text-violet-500">
+                {currentLanguage === 'tr' ? 'Son 30 gün tüketimine göre' : 'Based on last 30-day usage'}
+              </span>
+            </div>
+            <div className="divide-y divide-violet-100/60 max-h-44 overflow-y-auto">
+              {suggestions.slice(0, 8).map(({ item, monthlyOut, suggested }) => (
+                <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 bg-white/50">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {currentLanguage === 'tr'
+                        ? `Aylık tüketim: ${monthlyOut} adet · Stok: ${item.stockLevel ?? 0}`
+                        : `Monthly usage: ${monthlyOut} units · Stock: ${item.stockLevel ?? 0}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="text-right">
+                      <p className="text-[10px] text-violet-500 font-bold uppercase">
+                        {currentLanguage === 'tr' ? 'Önerilen sipariş' : 'Suggested order'}
+                      </p>
+                      <p className="text-sm font-black text-violet-700">{suggested} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                    </div>
+                    {onQuickPO && (
+                      <button
+                        onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
+                        title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create PO'}
+                        className="text-[9px] font-bold px-2 py-1 rounded-full bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors flex items-center gap-0.5">
+                        <ShoppingCart className="w-3 h-3" />
+                        SAS
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -2293,6 +2422,41 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* ── Phase 129: Sales Rep Leaderboard (by order assignee) ── */}
+          {orders.length > 0 && (() => {
+            type RepStat = { name: string; orderCount: number; revenue: number; delivered: number };
+            const repMap: Record<string, RepStat> = {};
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              const rep = (o.assignedTo as string | undefined) || o.customerName || '—';
+              const key = rep.length > 30 ? rep.slice(0, 15) + '…' : rep;
+              if (!repMap[key]) repMap[key] = { name: key, orderCount: 0, revenue: 0, delivered: 0 };
+              repMap[key].orderCount++;
+              repMap[key].revenue += o.totalPrice || 0;
+              if (o.status === 'Delivered') repMap[key].delivered++;
+            }
+            const reps = Object.values(repMap).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+            if (reps.length === 0) return null;
+            const medals = ['🥇', '🥈', '🥉'];
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🏆 En Çok Ciro Yapanlar' : '🏆 Sales Leaderboard'}</h3>
+                <div className="space-y-3">
+                  {reps.map((r, i) => (
+                    <div key={r.name} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                      <span className="text-base w-7 flex-shrink-0">{medals[i] || `#${i + 1}`}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-800 truncate">{r.name}</p>
+                        <p className="text-[10px] text-gray-400">{r.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {r.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</p>
+                      </div>
+                      <span className="text-sm font-bold text-brand">{revenueSymbol}{formatInCurrency(r.revenue, revenueCurrency, exchangeRates)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2785,7 +2949,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'>('genel');
 
   // ── Dashboard summary (30-day KPI deltas) ─────────────────────────────────
   const [summaryData, setSummaryData] = useState<{
@@ -2852,6 +3016,17 @@ function AppContent() {
   const [companySettings, setCompanySettings] = useState<Record<string, unknown>>({});
   const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
   const [mikroSettings, setMikroSettings] = useState<Partial<MikroConfig>>({});
+  // Notification preferences — must be top-level (not inside conditional IIFE) to respect Rules of Hooks
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('cetpa-notif-prefs') ?? '{}'); } catch { return {}; }
+  });
+  const toggleNotifPref = (key: string) => {
+    setNotifPrefs(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem('cetpa-notif-prefs', JSON.stringify(next));
+      return next;
+    });
+  };
   const [leads, setLeads] = useState<Lead[]>([]);
   const [dateRange, setDateRange] = useState({
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
@@ -2861,6 +3036,8 @@ function AppContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  // eBA approval queue pending count (badge on nav tab)
+  const pendingApprovalsCount = usePendingApprovalCount(userRole, user?.email);
   const [firestoreCategories, setFirestoreCategories] = useState<string[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
@@ -2871,9 +3048,20 @@ function AppContent() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
 
+  // ── Commission Rules (for lead detail commission summary) ─────────────────
+  interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
+  const [commissionRules, setCommissionRules] = useState<CommissionRuleApp[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
+      setCommissionRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp)));
+    });
+    return () => unsub();
+  }, [user]);
+
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers'>('pos');
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -2887,6 +3075,43 @@ function AppContent() {
     return () => unsub();
   }, [user]);
 
+  const [vknLookupLoading, setVknLookupLoading] = useState(false);
+  const [vknLookupMsg, setVknLookupMsg] = useState<{text: string; ok: boolean} | null>(null);
+
+  const handleVknLookup = async () => {
+    const vkn = (newSupplier.taxNo || '').trim();
+    if (vkn.length < 10) {
+      setVknLookupMsg({ text: currentLanguage === 'tr' ? 'VKN/TCKN 10 haneli olmalı.' : 'VKN/TCKN must be 10 digits.', ok: false });
+      return;
+    }
+    setVknLookupLoading(true);
+    setVknLookupMsg(null);
+    try {
+      const res = await fetch(`/api/gib/vkn/${vkn}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        const d = json.data;
+        setNewSupplier(prev => ({
+          ...prev,
+          name: prev.name || d.unvan || '',
+          company: d.unvan || prev.company || '',
+          taxNo: d.vknTckn || vkn,
+          taxOffice: d.vergiDairesi || prev.taxOffice || '',
+          address: d.il ? (prev.address || d.il) : (prev.address || ''),
+        }));
+        setVknLookupMsg({ text: currentLanguage === 'tr' ? `✓ ${d.unvan} bulundu.` : `✓ Found: ${d.unvan}`, ok: true });
+      } else if (json.notConfigured) {
+        setVknLookupMsg({ text: currentLanguage === 'tr' ? 'GİB API anahtarı yapılandırılmamış. Lütfen sunucu ayarlarını kontrol edin.' : 'GİB API key not configured. Check server settings.', ok: false });
+      } else {
+        setVknLookupMsg({ text: json.error || (currentLanguage === 'tr' ? 'Kayıt bulunamadı.' : 'Record not found.'), ok: false });
+      }
+    } catch {
+      setVknLookupMsg({ text: currentLanguage === 'tr' ? 'Sorgu başarısız. Sunucu çalışıyor mu?' : 'Query failed. Is the server running?', ok: false });
+    } finally {
+      setVknLookupLoading(false);
+    }
+  };
+
   const handleSaveSupplier = async () => {
     if (!newSupplier.name?.trim()) return;
     try {
@@ -2895,7 +3120,7 @@ function AppContent() {
       } else {
         await addDoc(collection(db, 'suppliers'), { ...newSupplier, createdAt: serverTimestamp() });
       }
-      setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({});
+      setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null);
     } catch (e) { console.error(e); }
   };
 
@@ -3282,6 +3507,43 @@ function AppContent() {
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Lead quick-note — top-level to avoid hooks-in-conditional violation
+  const [leadNoteText, setLeadNoteText] = useState('');
+  const leadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const stored = selectedLead ? (localStorage.getItem(`cetpa-lead-note-${selectedLead.id}`) ?? '') : '';
+    setLeadNoteText(stored);
+  }, [selectedLead?.id]);
+  const handleLeadNoteChange = (val: string) => {
+    setLeadNoteText(val);
+    if (leadNoteTimer.current) clearTimeout(leadNoteTimer.current);
+    if (selectedLead) {
+      leadNoteTimer.current = setTimeout(() => localStorage.setItem(`cetpa-lead-note-${selectedLead.id}`, val), 600);
+    }
+  };
+  // Order quick-note — top-level to avoid hooks-in-conditional violation
+  const [orderNoteText, setOrderNoteText] = useState('');
+  const [orderNoteSaving, setOrderNoteSaving] = useState(false);
+  const [orderNoteSaved, setOrderNoteSaved] = useState(false);
+  useEffect(() => {
+    setOrderNoteText(selectedOrder?.notes ?? '');
+    // Phase 101: load timeline from order doc
+    const ord101 = selectedOrder as unknown as Record<string, unknown>;
+    setOrderTimeline(Array.isArray(ord101?.timeline) ? ord101.timeline as TimelineEntry[] : []);
+  }, [selectedOrder?.id]);
+  const handleSaveOrderNote = async () => {
+    if (!selectedOrder || orderNoteText === (selectedOrder.notes ?? '')) return;
+    setOrderNoteSaving(true);
+    try {
+      await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: orderNoteText, updatedAt: serverTimestamp() });
+      setSelectedOrder({ ...selectedOrder, notes: orderNoteText });
+      setOrderNoteSaved(true);
+      setTimeout(() => setOrderNoteSaved(false), 2000);
+    } catch (e) { console.error(e); }
+    finally { setOrderNoteSaving(false); }
+  };
+
   const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
   const [iyzicoLinkLoading,  setIyzicoLinkLoading]  = useState<Record<string, boolean>>({});
   const [labelItems,         setLabelItems]         = useState<LabelItem[] | null>(null);
@@ -3330,6 +3592,104 @@ function AppContent() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
+  // ── Phase 99: Monthly Sales Target ───────────────────────────────────────
+  const [monthlyTarget, setMonthlyTarget] = useState<number>(() => Number(localStorage.getItem('cetpa-monthly-target') || 0));
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [targetDraft, setTargetDraft] = useState('');
+  // ── Phase 100: In-App Email Compose ──────────────────────────────────────
+  const [emailCompose, setEmailCompose] = useState<{ open: boolean; to: string; name: string; subject: string; body: string }>({
+    open: false, to: '', name: '', subject: '', body: ''
+  });
+  const [emailSending, setEmailSending] = useState(false);
+  // ── Phase 101: Order Activity Timeline ───────────────────────────────────
+  type TimelineEntry = { action: string; actor: string; ts: number; note?: string };
+  const [orderTimeline, setOrderTimeline] = useState<TimelineEntry[]>([]);
+  // ── Phase 102: Quick PO prefill ──────────────────────────────────────────
+  const [quickPOProduct, setQuickPOProduct] = useState<{ name: string; sku: string } | null>(null);
+  // ── Phase 110: AP Tracker — purchase orders for accounting ───────────────
+  const [apPurchaseOrders, setApPurchaseOrders] = useState<Array<{
+    id: string; orderNumber: string; supplier: string; totalAmount: number;
+    status: string; expectedDate?: unknown; createdAt?: unknown;
+  }>>([]);
+  // ── Phase 111: Support Tickets ────────────────────────────────────────────
+  const [supportTickets, setSupportTickets] = useState<Array<{
+    id: string; title: string; customerName: string; orderId?: string;
+    priority: 'low' | 'medium' | 'high'; status: 'open' | 'in_progress' | 'resolved';
+    createdAt?: unknown; assignedTo?: string; description?: string;
+  }>>([]);
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [ticketForm, setTicketForm] = useState({ title: '', customerName: '', description: '', priority: 'medium' as 'low' | 'medium' | 'high', orderId: '' });
+  // ── Phase 112: RMA / Returns ──────────────────────────────────────────────
+  const [returnModal, setReturnModal] = useState<{ open: boolean; order: Order | null }>({ open: false, order: null });
+  const [returnReason, setReturnReason] = useState('');
+  const [returnItems, setReturnItems] = useState<string>('');
+  const [returnAmount, setReturnAmount] = useState<number>(0);
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  // ── Phase 115: Email Campaign Manager ────────────────────────────────────
+  const [campaignForm, setCampaignForm] = useState({
+    subject: '', body: '', segment: 'all' as 'all' | 'new' | 'active' | 'highScore',
+  });
+  const [campaignSending, setCampaignSending] = useState(false);
+  const [campaignSent, setCampaignSent] = useState<{ count: number; ts: number } | null>(null);
+  // ── Phase 116: Contract Management ────────────────────────────────────────
+  const [contracts, setContracts] = useState<Array<{
+    id: string; customerName: string; title: string; value: number;
+    startDate: string; endDate: string; status: string; autoRenew: boolean;
+  }>>([]);
+  const [contractForm, setContractForm] = useState({ customerName: '', title: '', value: 0, startDate: '', endDate: '', status: 'active', autoRenew: false });
+  const [showContractForm, setShowContractForm] = useState(false);
+  // ── Phase 121: Leave Management ──────────────────────────────────────────
+  const [leaveRequests, setLeaveRequests] = useState<Array<{
+    id: string; employeeId: string; employeeName: string;
+    type: 'annual' | 'sick' | 'unpaid' | 'other';
+    startDate: string; endDate: string; days: number;
+    status: 'pending' | 'approved' | 'rejected'; reason?: string;
+  }>>([]);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ employeeName: '', type: 'annual' as 'annual' | 'sick' | 'unpaid' | 'other', startDate: '', endDate: '', reason: '' });
+  // ── Phase 117: Payroll ────────────────────────────────────────────────────
+  const [payrollMonth, setPayrollMonth] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [payrollView, setPayrollView] = useState<'summary' | 'detail'>('summary');
+  // ── Phase 118: Bank Reconciliation ───────────────────────────────────────
+  const [bankBalance, setBankBalance] = useState<number>(0);
+  const [bankBalanceDraft, setBankBalanceDraft] = useState('');
+  const [bankBalanceEditing, setBankBalanceEditing] = useState(false);
+  const [reconMonth, setReconMonth] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  // ── Phase 119: Recurring Order Templates ─────────────────────────────────
+  const [recurringOrders, setRecurringOrders] = useState<Array<{
+    id: string; templateName: string; customerName: string; totalPrice: number;
+    frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean;
+  }>>([]);
+  const [showRecurringForm, setShowRecurringForm] = useState(false);
+  const [recurringForm, setRecurringForm] = useState({
+    templateName: '', customerName: '', totalPrice: 0,
+    frequency: 'monthly' as 'weekly' | 'monthly' | 'quarterly', nextDue: ''
+  });
+  // ── Phase 122: Price Override Approval ──────────────────────────────────
+  const [priceOverrides, setPriceOverrides] = useState<Array<{
+    id: string; requestedBy: string; customerName: string;
+    productName: string; standardPrice: number; requestedPrice: number;
+    reason: string; status: 'pending' | 'approved' | 'rejected';
+    createdAt: unknown;
+  }>>([]);
+  const [showPriceOverrideForm, setShowPriceOverrideForm] = useState(false);
+  const [priceOverrideForm, setPriceOverrideForm] = useState({
+    customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: ''
+  });
+  // ── Phase 113: Budget vs Actuals ─────────────────────────────────────────
+  type BudgetEntry = { dept: string; budgetTRY: number };
+  const [budgets, setBudgets] = useState<BudgetEntry[]>(() => {
+    try { return JSON.parse(localStorage.getItem('cetpa-budgets') || '[]') as BudgetEntry[]; }
+    catch { return []; }
+  });
+  const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
+  const [budgetMonth, setBudgetMonth] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
   // Merge Firestore category master list with any category strings on existing inventory items
   const inventoryCategories = [...new Set([
     ...firestoreCategories,
@@ -3657,6 +4017,41 @@ function AppContent() {
       setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid));
 
+    // ── Phase 110: Fetch purchaseOrders for AP Tracker ───────────────────────
+    const unsubAPOrders = onSnapshot(collection(db, 'purchaseOrders'), (snapshot) => {
+      setApPurchaseOrders(snapshot.docs.map(d => ({
+        id: d.id, orderNumber: d.data().orderNumber || d.id.slice(0, 8),
+        supplier: d.data().supplier || '—', totalAmount: d.data().totalAmount || 0,
+        status: d.data().status || '', expectedDate: d.data().expectedDate,
+        createdAt: d.data().createdAt
+      })));
+    }, () => { /* non-critical */ });
+
+    // ── Phase 111: Support Tickets ────────────────────────────────────────────
+    const unsubTickets = onSnapshot(query(collection(db, 'supportTickets'), orderBy('createdAt', 'desc'), limit(100)), (snapshot) => {
+      setSupportTickets(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof supportTickets[number])));
+    }, () => { /* non-critical */ });
+
+    // ── Phase 116: Contracts ──────────────────────────────────────────────────
+    const unsubContracts = onSnapshot(collection(db, 'contracts'), (snapshot) => {
+      setContracts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof contracts[number])));
+    }, () => { /* non-critical */ });
+
+    // ── Phase 119: Recurring Orders ───────────────────────────────────────────
+    const unsubRecurring = onSnapshot(collection(db, 'recurringOrders'), (snapshot) => {
+      setRecurringOrders(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof recurringOrders[number])));
+    }, () => { /* non-critical */ });
+
+    // ── Phase 121: Leave Requests ─────────────────────────────────────────────
+    const unsubLeave = onSnapshot(query(collection(db, 'leaveRequests'), orderBy('startDate', 'desc'), limit(100)), (snapshot) => {
+      setLeaveRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof leaveRequests[number])));
+    }, () => { /* non-critical */ });
+
+    // ── Phase 122: Price Override Approvals ──────────────────────────────────
+    const unsubPriceOverrides = onSnapshot(query(collection(db, 'priceOverrides'), orderBy('createdAt', 'desc'), limit(100)), (snapshot) => {
+      setPriceOverrides(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof priceOverrides[number])));
+    }, () => { /* non-critical */ });
+
     return () => {
       unsubLeads();
       unsubOrders();
@@ -3667,6 +4062,12 @@ function AppContent() {
       unsubEmployees();
       unsubShipments();
       unsubAuditLogs();
+      unsubAPOrders();
+      unsubTickets();
+      unsubContracts();
+      unsubRecurring();
+      unsubLeave();
+      unsubPriceOverrides();
     };
   }, [user, userRole, isAuthReady]);
 
@@ -4114,7 +4515,15 @@ function AppContent() {
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status });
+      // Phase 101: append timeline entry
+      const ord101r = orders.find(o => o.id === orderId) as unknown as Record<string, unknown> | undefined;
+      const prevTimeline = Array.isArray(ord101r?.timeline)
+        ? ord101r!.timeline as { action: string; actor: string; ts: number }[]
+        : [];
+      const newEntry = { action: `Durum: ${status}`, actor: user?.displayName || user?.email || 'Sistem', ts: Date.now() };
+      const updatedTimeline = [...prevTimeline, newEntry];
+      await updateDoc(doc(db, 'orders', orderId), { status, timeline: updatedTimeline });
+      if (selectedOrder?.id === orderId) setOrderTimeline(updatedTimeline);
       logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
 
       // ── Notification trigger on key status changes ─────────────────────────
@@ -4841,6 +5250,7 @@ function AppContent() {
                 { id: 'risk', label: currentLanguage === 'tr' ? 'Risk' : 'Risk' },
                 { id: 'reports', label: currentT.reports },
                 { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations' },
+                { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals' },
                 { id: 'admin', label: currentT.admin },
                 { id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings' },
                 { id: 'finance', label: currentLanguage === 'tr' ? 'Finans' : 'Finance' },
@@ -5058,6 +5468,7 @@ function AppContent() {
                   { id: 'risk', label: currentLanguage === 'tr' ? 'Risk & Uyarılar' : 'Risk & Alerts', icon: AlertTriangle },
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
                   { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations', icon: Link },
+                  { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
@@ -5070,7 +5481,9 @@ function AppContent() {
                       ? leads.filter(l => l.status === 'New').length
                       : tab.id === 'inventory'
                         ? inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length
-                        : 0;
+                        : tab.id === 'onaylar'
+                          ? pendingApprovalsCount
+                          : 0;
                   return (
                     <button
                       key={tab.id}
@@ -5402,9 +5815,9 @@ function AppContent() {
                 const insights: { icon: string; text: string; color: string; bg: string; borderColor: string }[] = [];
 
                 // Insight 1: low-stock products
-                const lowStock = inventory.filter(i => (i.stock ?? 0) > 0 && (i.stock ?? 0) <= (i.minStock ?? 5));
+                const lowStock = inventory.filter(i => (Number(i.stock) || 0) > 0 && (Number(i.stock) || 0) <= (Number(i.minStock) || 5));
                 if (lowStock.length > 0) {
-                  const top = lowStock.sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0))[0];
+                  const top = lowStock.sort((a, b) => (Number(a.stock) || 0) - (Number(b.stock) || 0))[0];
                   insights.push({
                     icon: '📦',
                     text: currentLanguage === 'tr'
@@ -5583,6 +5996,79 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 99: Monthly Sales Target (Satış Hedefi) ── */}
+              {(() => {
+                const now = new Date();
+                const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                const getOD = (o: Order): Date => {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return new Date(0);
+                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                };
+                const mtdRev99 = orders.filter(o => getOD(o) >= thisMonthStart && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const pct99 = monthlyTarget > 0 ? Math.min(Math.round((mtdRev99 / monthlyTarget) * 100), 200) : 0;
+                const barColor99 = pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
+                const rate99 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const sym99 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvtRev99 = kpiCurrency === 'TRY' ? mtdRev99 : mtdRev99 / rate99;
+                const cvtTarget99 = kpiCurrency === 'TRY' ? monthlyTarget : monthlyTarget / rate99;
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
+                          {currentLanguage === 'tr' ? 'Bu Ay Satış Hedefi' : 'Monthly Sales Target'}
+                        </h3>
+                        {isEditingTarget ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              autoFocus
+                              type="number"
+                              value={targetDraft}
+                              onChange={e => setTargetDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const v = Number(targetDraft);
+                                  setMonthlyTarget(v);
+                                  localStorage.setItem('cetpa-monthly-target', String(v));
+                                  setIsEditingTarget(false);
+                                }
+                                if (e.key === 'Escape') setIsEditingTarget(false);
+                              }}
+                              className="text-sm font-bold bg-gray-100 rounded-lg px-2 py-1 outline-none w-36"
+                              placeholder="0"
+                            />
+                            <button onClick={() => { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }}
+                              className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                            <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setTargetDraft(String(monthlyTarget)); setIsEditingTarget(true); }}
+                            className="flex items-center gap-1 mt-0.5 group">
+                            <p className={cn("text-xl font-black", darkMode ? "text-white" : "text-gray-900")}>
+                              {monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : (currentLanguage === 'tr' ? 'Hedef belirle…' : 'Set target…')}
+                            </p>
+                            <span className="text-gray-300 group-hover:text-brand transition-colors text-[10px]">✎</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-2xl font-black ${pct99 >= 100 ? 'text-emerald-600' : pct99 >= 70 ? 'text-brand' : pct99 >= 40 ? 'text-amber-600' : 'text-red-500'}`}>{pct99}%</p>
+                        <p className={cn("text-[10px]", darkMode ? "text-white/40" : "text-gray-400")}>{sym99}{cvtRev99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
+                      </div>
+                    </div>
+                    <div className={cn("h-2.5 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
+                      <div className={`h-full rounded-full transition-all duration-700 ${barColor99}`} style={{ width: `${Math.min(pct99, 100)}%` }} />
+                    </div>
+                    <div className="flex justify-between mt-1.5">
+                      <span className={cn("text-[10px]", darkMode ? "text-white/30" : "text-gray-400")}>0</span>
+                      {pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {currentLanguage === 'tr' ? 'Hedefe ulaşıldı!' : 'Target reached!'}</span>}
+                      <span className={cn("text-[10px]", darkMode ? "text-white/30" : "text-gray-400")}>{monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : '—'}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 42: Financial KPI mini-strip ── */}
               {(() => {
                 const aov = filteredOrders.length > 0
@@ -5666,6 +6152,142 @@ function AppContent() {
                         </button>
                       );
                     })}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 125: KPI Alert Thresholds ── */}
+              {(() => {
+                const alerts125: Array<{ level: 'warn' | 'danger'; icon: string; message: string }> = [];
+                // Low stock items
+                const lowStockCount = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? i.minStock ?? 5)).length;
+                if (lowStockCount > 0) alerts125.push({ level: 'warn', icon: '📦', message: currentLanguage === 'tr' ? `${lowStockCount} ürün kritik stok seviyesinde` : `${lowStockCount} products at critical stock level` });
+                // Overdue payments
+                const now125 = Date.now();
+                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt && (() => {
+                  const ts = o.createdAt;
+                  if (!ts) return false;
+                  const d = typeof (ts as { toDate?: () => Date }).toDate === 'function' ? (ts as { toDate: () => Date }).toDate() : new Date(ts as string);
+                  return (now125 - d.getTime()) > 30 * 86400000;
+                })()).length;
+                if (overdueCount > 0) alerts125.push({ level: 'danger', icon: '💳', message: currentLanguage === 'tr' ? `${overdueCount} siparişin ödemesi 30+ gün gecikmiş` : `${overdueCount} orders have payment overdue 30+ days` });
+                // Pending price overrides
+                const pendingOverrides = priceOverrides.filter(p => p.status === 'pending').length;
+                if (pendingOverrides > 0) alerts125.push({ level: 'warn', icon: '🏷️', message: currentLanguage === 'tr' ? `${pendingOverrides} fiyat onay talebi bekliyor` : `${pendingOverrides} price override requests pending` });
+                // Pending leave requests
+                const pendingLeaves = leaveRequests.filter(l => l.status === 'pending').length;
+                if (pendingLeaves > 0) alerts125.push({ level: 'warn', icon: '📅', message: currentLanguage === 'tr' ? `${pendingLeaves} izin talebi onay bekliyor` : `${pendingLeaves} leave requests awaiting approval` });
+                if (alerts125.length === 0) return null;
+                return (
+                  <div className="space-y-2">
+                    {alerts125.map((a, i) => (
+                      <div key={i} className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold border ${a.level === 'danger' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-amber-50 border-amber-100 text-amber-700'}`}>
+                        <span>{a.icon}</span>
+                        <span className="flex-1">{a.message}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.level === 'danger' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                          {a.level === 'danger' ? (currentLanguage === 'tr' ? 'Kritik' : 'Critical') : (currentLanguage === 'tr' ? 'Uyarı' : 'Warning')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 130: Daily Cash Position ── */}
+              {orders.length > 0 && (() => {
+                const today130 = new Date();
+                const todayStr = today130.toDateString();
+                const todayOrders = orders.filter(o => {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                  return d.toDateString() === todayStr && o.status !== 'Cancelled';
+                });
+                const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const r130 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const s130 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvt130 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r130).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                return (
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">💵</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Günlük Nakit Pozisyonu' : 'Daily Cash Position'}</h3>
+                          <p className="text-[10px] text-gray-400">{today130.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-black text-emerald-600">{s130}{cvt130(todayPaid)}</p>
+                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'bugün tahsil' : 'collected today'}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: currentLanguage === 'tr' ? 'Bugün Ciro' : "Today's Revenue", val: todayRevenue, color: 'text-gray-800' },
+                        { label: currentLanguage === 'tr' ? 'Bugün Tahsil' : 'Collected Today', val: todayPaid, color: 'text-emerald-600' },
+                        { label: currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable', val: totalUnpaid, color: 'text-amber-600' },
+                      ].map(c => (
+                        <div key={c.label} className="text-center bg-gray-50 rounded-xl p-3">
+                          <p className={`text-base font-bold ${c.color}`}>{s130}{cvt130(c.val)}</p>
+                          <p className="text-[9px] text-gray-400 leading-tight mt-0.5">{c.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 103: 6-Month Revenue Bar Chart ── */}
+              {orders.length > 0 && (() => {
+                const now103 = new Date();
+                const months103 = Array.from({ length: 6 }, (_, i) => {
+                  const d = new Date(now103.getFullYear(), now103.getMonth() - (5 - i), 1);
+                  return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
+                });
+                const getOD103 = (o: Order): Date => {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return new Date(0);
+                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                };
+                const data103 = months103.map(m => ({
+                  label: m.label,
+                  rev: orders.filter(o => { const d = getOD103(o); return d.getFullYear() === m.year && d.getMonth() === m.month && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
+                }));
+                const maxRev103 = Math.max(...data103.map(d => d.rev), 1);
+                const rate103 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const sym103 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Son 6 Ay Ciro' : 'Last 6 Months Revenue'}
+                      </h3>
+                    </div>
+                    <div className="flex items-end gap-2 h-28">
+                      {data103.map((m, i) => {
+                        const h = maxRev103 > 0 ? Math.max((m.rev / maxRev103) * 100, m.rev > 0 ? 4 : 0) : 0;
+                        const isCurrentMonth = i === 5;
+                        const cvt = kpiCurrency === 'TRY' ? m.rev : m.rev / rate103;
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                            <div
+                              title={`${sym103}${cvt.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                              className={`w-full rounded-t-lg transition-all duration-700 ${isCurrentMonth ? 'bg-brand' : darkMode ? 'bg-white/20 hover:bg-white/30' : 'bg-gray-200 hover:bg-gray-300'}`}
+                              style={{ height: `${h}%`, minHeight: m.rev > 0 ? '4px' : '0' }}
+                            />
+                            <span className={cn("text-[9px] font-bold", isCurrentMonth ? 'text-brand' : darkMode ? 'text-white/40' : 'text-gray-400')}>{m.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between mt-2 text-[9px] text-gray-400">
+                      <span>0</span>
+                      <span>{sym103}{(kpiCurrency === 'TRY' ? maxRev103 : maxRev103 / rate103).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                    </div>
                   </div>
                 );
               })()}
@@ -5761,6 +6383,159 @@ function AppContent() {
                           <p className="text-[10px] text-gray-400">{p79Sym}{cvtRetail.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 106: Revenue Donut by Customer Type ── */}
+              {orders.length > 0 && (() => {
+                type Seg = { label: string; color: string; rev: number };
+                const ct106 = (o: Order) => (o.customerType as unknown as string) || '';
+                const segs: Seg[] = [
+                  { label: 'B2B',                                             color: '#3b82f6', rev: orders.filter(o => ct106(o) === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0) },
+                  { label: currentLanguage === 'tr' ? 'Bayi' : 'Dealer',      color: '#ff4000', rev: orders.filter(o => ct106(o) === 'Dealer').reduce((s, o) => s + (o.totalPrice || 0), 0) },
+                  { label: currentLanguage === 'tr' ? 'Perakende' : 'Retail', color: '#6b7280', rev: orders.filter(o => { const c = ct106(o); return !c || (c !== 'B2B' && c !== 'Dealer'); }).reduce((s, o) => s + (o.totalPrice || 0), 0) },
+                ];
+                const total106 = segs.reduce((s, seg) => s + seg.rev, 0);
+                if (total106 === 0) return null;
+                const p106Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const p106Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const cvt106   = (v: number) => (kpiCurrency === 'TRY' ? v : v / p106Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+
+                // SVG donut: r=40, circumference=251.3
+                const R = 40, C = 2 * Math.PI * R;
+                let offset = 0;
+                const paths = segs.filter(s => s.rev > 0).map(s => {
+                  const pct = s.rev / total106;
+                  const dash = pct * C;
+                  const gap  = C - dash;
+                  const el = { ...s, pct, dash, gap, offset };
+                  offset += dash;
+                  return el;
+                });
+                const bigSeg = [...segs].sort((a, b) => b.rev - a.rev)[0];
+
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4", darkMode ? "text-white/50" : "text-gray-400")}>
+                      {currentLanguage === 'tr' ? 'Müşteri Tipi Bazında Ciro' : 'Revenue by Customer Type'}
+                    </h3>
+                    <div className="flex items-center gap-6">
+                      {/* Donut */}
+                      <div className="relative flex-shrink-0">
+                        <svg width="96" height="96" viewBox="0 0 96 96">
+                          <circle cx="48" cy="48" r={R} fill="none" stroke="#f3f4f6" strokeWidth="14" />
+                          {paths.map((p, i) => (
+                            <circle
+                              key={i}
+                              cx="48" cy="48" r={R}
+                              fill="none"
+                              stroke={p.color}
+                              strokeWidth="14"
+                              strokeDasharray={`${p.dash} ${p.gap}`}
+                              strokeDashoffset={-p.offset + C * 0.25}
+                              className="transition-all duration-700"
+                            />
+                          ))}
+                        </svg>
+                        {/* Center label */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                          <span className="text-[9px] font-bold text-gray-400 leading-none">
+                            {bigSeg.label}
+                          </span>
+                          <span className="text-sm font-black text-gray-900 leading-none mt-0.5">
+                            {Math.round((bigSeg.rev / total106) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                      {/* Legend */}
+                      <div className="flex-1 space-y-3">
+                        {segs.filter(s => s.rev > 0).map((s, i) => {
+                          const pct = Math.round((s.rev / total106) * 100);
+                          return (
+                            <div key={i} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                                  <span className="text-xs font-semibold text-gray-700">{s.label}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-gray-400">{p106Sym}{cvt106(s.rev)}</span>
+                                  <span className="text-[10px] font-black text-gray-600 w-7 text-right">{pct}%</span>
+                                </div>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: s.color }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 124: Customer Segment Profitability ── */}
+              {orders.length > 0 && inventory.length > 0 && (() => {
+                // Build per-customer-type revenue vs estimated COGS
+                type SegProfit = { type: string; revenue: number; cogs: number; margin: number; orderCount: number; avgOrder: number };
+                const segMap: Record<string, SegProfit> = {};
+                for (const o of orders) {
+                  if (o.status === 'Cancelled') continue;
+                  const type = o.customerType || 'Retail';
+                  if (!segMap[type]) segMap[type] = { type, revenue: 0, cogs: 0, margin: 0, orderCount: 0, avgOrder: 0 };
+                  segMap[type].revenue += o.totalPrice || 0;
+                  segMap[type].orderCount++;
+                  // Estimate COGS from lineItems
+                  const cogsCost = (o.lineItems || []).reduce((s, li) => {
+                    const inv = inventory.find(i => i.id === li.inventoryId || i.name === li.name);
+                    return s + (inv?.costPrice ?? inv?.cost ?? (li.price * 0.6)) * li.quantity;
+                  }, 0);
+                  segMap[type].cogs += cogsCost;
+                }
+                const segs = Object.values(segMap).map(s => ({
+                  ...s,
+                  margin: s.revenue > 0 ? Math.round(((s.revenue - s.cogs) / s.revenue) * 100) : 0,
+                  avgOrder: s.orderCount > 0 ? s.revenue / s.orderCount : 0,
+                })).sort((a, b) => b.revenue - a.revenue);
+                if (segs.length === 0) return null;
+                const colors = { 'B2B': '#3b82f6', 'Retail': '#10b981', 'Dealer': '#f59e0b', 'Other': '#8b5cf6' };
+                const maxRev = Math.max(...segs.map(s => s.revenue));
+                return (
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                      <span className="text-base">💰</span>
+                      <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Segment Kârlılığı' : 'Segment Profitability'}</h3>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {segs.map(s => {
+                        const barColor = (colors as Record<string, string>)[s.type] || '#6b7280';
+                        return (
+                          <div key={s.type} className="px-5 py-4">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: barColor }} />
+                                <p className="text-sm font-bold text-gray-800">{s.type}</p>
+                                <span className="text-[10px] text-gray-400">{s.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs">
+                                <span className="text-gray-500">₺{(s.revenue / 1000).toFixed(1)}K</span>
+                                <span className={`font-bold ${s.margin >= 30 ? 'text-emerald-600' : s.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
+                                  %{s.margin} {currentLanguage === 'tr' ? 'marj' : 'margin'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                              <div className="h-2 rounded-full transition-all duration-700" style={{ width: `${(s.revenue / maxRev) * 100}%`, backgroundColor: barColor }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="px-5 py-2 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+                      {currentLanguage === 'tr' ? 'Maliyet tahmini: Ürün maliyeti × miktar' : 'COGS estimated from product cost × quantity'}
                     </div>
                   </div>
                 );
@@ -6540,6 +7315,9 @@ function AppContent() {
                     {([
                       { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
                       { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
+                      { id: 'ap',           label: currentLanguage === 'tr' ? 'Ödenecekler (AP)' : 'Payables (AP)',     icon: Building2  },
+                      { id: 'butce',        label: currentLanguage === 'tr' ? 'Bütçe Planı'      : 'Budget Plan',       icon: BarChart3  },
+                      { id: 'banka',        label: currentLanguage === 'tr' ? 'Banka Mutabakatı'  : 'Bank Recon',        icon: CreditCard },
                       { id: 'sabit-kiymet', label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
                       { id: 'maliyet',      label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
                     ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
@@ -6582,6 +7360,386 @@ function AppContent() {
                     </motion.div>
                   )}
 
+                  {/* ── Phase 110: Ödenecekler / AP Tracker ── */}
+                  {muhasebeTab === 'ap' && (
+                    <motion.div key="muhasebe-ap" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      {(() => {
+                        const toTs110 = (val: unknown): number => {
+                          if (!val) return 0;
+                          if (typeof (val as { toDate?: () => Date }).toDate === 'function') return (val as { toDate: () => Date }).toDate().getTime();
+                          return new Date(val as string | number).getTime();
+                        };
+                        const now110 = Date.now();
+                        // Only include open/pending POs (not delivered/cancelled)
+                        const openPOs = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status));
+                        const totalAP = openPOs.reduce((s, po) => s + po.totalAmount, 0);
+
+                        type APBucket = { label: string; range: string; orders: typeof openPOs; color: string; bg: string; dot: string };
+                        const apBuckets: APBucket[] = [
+                          { label: currentLanguage === 'tr' ? 'Vadesi Gelmedi (0–30 gün)' : 'Not Due (0–30 d)',  range: '0-30',  orders: [], color: 'text-emerald-700', bg: 'bg-emerald-50', dot: 'bg-emerald-400' },
+                          { label: currentLanguage === 'tr' ? 'Yaklaşan (31–60 gün)'      : 'Due Soon (31–60 d)', range: '31-60', orders: [], color: 'text-amber-700',   bg: 'bg-amber-50',   dot: 'bg-amber-400'  },
+                          { label: currentLanguage === 'tr' ? 'Gecikmiş (60+ gün)'        : 'Overdue (60+ d)',   range: '60+',   orders: [], color: 'text-red-700',     bg: 'bg-red-50',     dot: 'bg-red-500'    },
+                        ];
+                        openPOs.forEach(po => {
+                          const created = toTs110(po.createdAt);
+                          const days = created ? Math.floor((now110 - created) / 86400000) : 0;
+                          if (days <= 30) apBuckets[0].orders.push(po);
+                          else if (days <= 60) apBuckets[1].orders.push(po);
+                          else apBuckets[2].orders.push(po);
+                        });
+                        const maxAmt110 = Math.max(...apBuckets.map(b => b.orders.reduce((s, po) => s + po.totalAmount, 0)), 1);
+
+                        return (
+                          <>
+                            {/* Summary KPIs */}
+                            <div className="grid grid-cols-3 gap-4">
+                              {[
+                                { label: currentLanguage === 'tr' ? 'Toplam Borç' : 'Total Payable', value: totalAP, color: 'text-red-600', bg: 'bg-red-50' },
+                                { label: currentLanguage === 'tr' ? 'Açık PO' : 'Open POs', value: openPOs.length, color: 'text-amber-600', bg: 'bg-amber-50', isCount: true },
+                                { label: currentLanguage === 'tr' ? 'Gecikmiş' : 'Overdue', value: apBuckets[2].orders.reduce((s, po) => s + po.totalAmount, 0), color: 'text-red-700', bg: 'bg-red-100' },
+                              ].map((k, i) => (
+                                <div key={i} className={`apple-card p-5 ${k.bg}`}>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                                  <p className={`text-2xl font-black ${k.color}`}>
+                                    {(k as { isCount?: boolean }).isCount ? k.value : `₺${(k.value as number).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* AP Aging buckets */}
+                            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                              <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                                <Building2 size={15} className="text-gray-400" />
+                                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Tedarikçi Borç Vade Analizi' : 'AP Aging Analysis'}</h3>
+                              </div>
+                              {openPOs.length === 0 ? (
+                                <div className="py-12 text-center">
+                                  <CheckCircle2 size={36} className="mx-auto mb-3 text-emerald-200" />
+                                  <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Açık tedarikçi siparişi yok.' : 'No open supplier orders.'}</p>
+                                </div>
+                              ) : (
+                                <div className="divide-y divide-gray-50">
+                                  {apBuckets.map((b, bi) => {
+                                    if (b.orders.length === 0) return null;
+                                    const amt = b.orders.reduce((s, po) => s + po.totalAmount, 0);
+                                    const barW = Math.round((amt / maxAmt110) * 100);
+                                    return (
+                                      <div key={bi} className="px-5 py-3.5 flex items-center gap-4">
+                                        <div className="flex items-center gap-2 w-52 flex-shrink-0">
+                                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${b.dot}`} />
+                                          <span className="text-xs font-semibold text-gray-700 truncate">{b.label}</span>
+                                        </div>
+                                        <div className="flex-1 flex items-center gap-3">
+                                          <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                            <div className={`h-2 rounded-full transition-all duration-700 ${b.dot}`} style={{ width: `${barW}%` }} />
+                                          </div>
+                                          <span className={`text-xs font-bold flex-shrink-0 w-24 text-right ${b.color}`}>
+                                            ₺{amt.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                          </span>
+                                        </div>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${b.bg} ${b.color}`}>
+                                          {b.orders.length} {currentLanguage === 'tr' ? 'sipariş' : 'PO'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* PO list */}
+                            {openPOs.length > 0 && (
+                              <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                                <div className="px-5 py-4 border-b border-gray-100">
+                                  <h3 className="font-bold text-gray-800 text-sm">{currentLanguage === 'tr' ? 'Açık Siparişler' : 'Open Purchase Orders'}</h3>
+                                </div>
+                                <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+                                  {openPOs.map(po => {
+                                    const days110 = po.createdAt ? Math.floor((now110 - toTs110(po.createdAt)) / 86400000) : 0;
+                                    const late = days110 > 60;
+                                    return (
+                                      <div key={po.id} className="flex items-center gap-4 px-5 py-3">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-semibold text-gray-800">#{po.orderNumber} · {po.supplier}</p>
+                                          <p className="text-[10px] text-gray-400">{days110} {currentLanguage === 'tr' ? 'gün önce oluşturuldu' : 'days ago'}</p>
+                                        </div>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                          po.status === 'Sipariş Edildi' ? 'bg-blue-50 text-blue-700' :
+                                          po.status === 'Beklemede' ? 'bg-amber-50 text-amber-700' :
+                                          'bg-gray-100 text-gray-600'
+                                        }`}>{po.status}</span>
+                                        <span className={`text-sm font-bold flex-shrink-0 ${late ? 'text-red-600' : 'text-gray-700'}`}>
+                                          ₺{po.totalAmount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
+
+                  {/* ── Phase 113: Budget vs Actuals ── */}
+                  {muhasebeTab === 'butce' && (
+                    <motion.div key="muhasebe-butce" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      {(() => {
+                        const DEPTS = [
+                          { key: 'satis',    label: currentLanguage === 'tr' ? 'Satış' : 'Sales' },
+                          { key: 'pazarlama',label: currentLanguage === 'tr' ? 'Pazarlama' : 'Marketing' },
+                          { key: 'operasyon',label: currentLanguage === 'tr' ? 'Operasyon' : 'Operations' },
+                          { key: 'ik',       label: currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'HR' },
+                          { key: 'it',       label: 'IT' },
+                          { key: 'genel',    label: currentLanguage === 'tr' ? 'Genel Giderler' : 'G&A' },
+                        ];
+
+                        // Actual: use order costs as a proxy for the selected month
+                        const [bYear, bMonthN] = budgetMonth.split('-').map(Number);
+                        const monthOrders = orders.filter(o => {
+                          const raw = o.createdAt ?? o.syncedAt;
+                          if (!raw) return false;
+                          const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                            ? (raw as { toDate: () => Date }).toDate()
+                            : new Date(raw as string | number);
+                          return d.getFullYear() === bYear && d.getMonth() + 1 === bMonthN;
+                        });
+                        const totalMonthRevenue = monthOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        // Distribute actual spend proportionally (heuristic — real ERP uses cost centers)
+                        const actualSplit: Record<string, number> = {
+                          satis:     totalMonthRevenue * 0.12,
+                          pazarlama: totalMonthRevenue * 0.06,
+                          operasyon: totalMonthRevenue * 0.10,
+                          ik:        totalMonthRevenue * 0.08,
+                          it:        totalMonthRevenue * 0.03,
+                          genel:     totalMonthRevenue * 0.05,
+                        };
+
+                        const getBudget = (key: string) => budgets.find(b => b.dept === key)?.budgetTRY || 0;
+                        const totalBudget = DEPTS.reduce((s, d) => s + getBudget(d.key), 0);
+                        const totalActual = DEPTS.reduce((s, d) => s + (actualSplit[d.key] || 0), 0);
+
+                        const saveBudgets = (newBudgets: BudgetEntry[]) => {
+                          setBudgets(newBudgets);
+                          localStorage.setItem('cetpa-budgets', JSON.stringify(newBudgets));
+                        };
+
+                        return (
+                          <>
+                            {/* Month picker + summary */}
+                            <div className="flex flex-wrap items-center gap-4">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}:</label>
+                                <input
+                                  type="month"
+                                  value={budgetMonth}
+                                  onChange={e => setBudgetMonth(e.target.value)}
+                                  className="apple-input text-sm px-3 py-1.5"
+                                />
+                              </div>
+                              <div className="flex items-center gap-6 ml-auto">
+                                <div className="text-right">
+                                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam Bütçe' : 'Total Budget'}</p>
+                                  <p className="text-sm font-black text-gray-800">₺{totalBudget.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}</p>
+                                  <p className={`text-sm font-black ${totalActual > totalBudget ? 'text-red-600' : 'text-emerald-600'}`}>
+                                    ₺{totalActual.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Dept rows */}
+                            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                              <div className="divide-y divide-gray-50">
+                                {DEPTS.map(dept => {
+                                  const budget = getBudget(dept.key);
+                                  const actual = actualSplit[dept.key] || 0;
+                                  const pct    = budget > 0 ? Math.round((actual / budget) * 100) : 0;
+                                  const over   = actual > budget && budget > 0;
+                                  return (
+                                    <div key={dept.key} className="px-5 py-4">
+                                      <div className="flex items-center gap-3 mb-2">
+                                        <span className="text-sm font-bold text-gray-800 flex-1">{dept.label}</span>
+                                        <div className="flex items-center gap-2">
+                                          <div className="relative flex-shrink-0">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
+                                            <input
+                                              type="number"
+                                              value={budgetDraft[dept.key] ?? String(budget)}
+                                              onChange={e => setBudgetDraft(prev => ({ ...prev, [dept.key]: e.target.value }))}
+                                              onBlur={() => {
+                                                const val = Number(budgetDraft[dept.key]);
+                                                if (!isNaN(val) && val >= 0) {
+                                                  const updated = budgets.filter(b => b.dept !== dept.key);
+                                                  if (val > 0) updated.push({ dept: dept.key, budgetTRY: val });
+                                                  saveBudgets(updated);
+                                                }
+                                                setBudgetDraft(prev => { const n = { ...prev }; delete n[dept.key]; return n; });
+                                              }}
+                                              className="apple-input w-32 pl-6 pr-2 py-1.5 text-right text-sm font-bold"
+                                              placeholder="0"
+                                            />
+                                          </div>
+                                          <span className={`text-xs font-bold w-12 text-right ${over ? 'text-red-600' : pct > 80 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                            {pct}%
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                        <div
+                                          className={`h-2 rounded-full transition-all duration-500 ${over ? 'bg-red-400' : pct > 80 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                                          style={{ width: `${Math.min(pct, 100)}%` }}
+                                        />
+                                      </div>
+                                      <div className="flex justify-between mt-1">
+                                        <span className="text-[10px] text-gray-400">
+                                          {currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}: ₺{actual.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                        </span>
+                                        {over && (
+                                          <span className="text-[10px] font-bold text-red-600">
+                                            +₺{(actual - budget).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'aşım' : 'over'}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+                                {currentLanguage === 'tr'
+                                  ? '* Gerçekleşen değerler aylık siparişlerden maliyet merkezi dağılımına göre hesaplanır.'
+                                  : '* Actual values are estimated from monthly order revenue by cost center split.'}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
+
+                  {/* ── Phase 118: Banka Mutabakatı ── */}
+                  {muhasebeTab === 'banka' && (
+                    <motion.div key="muhasebe-banka" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      {(() => {
+                        const [rYear, rMonthN] = reconMonth.split('-').map(Number);
+                        const monthPaidOrders = orders.filter(o => {
+                          if (!o.paid) return false;
+                          const raw = o.createdAt ?? o.syncedAt;
+                          if (!raw) return false;
+                          const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                            ? (raw as { toDate: () => Date }).toDate()
+                            : new Date(raw as string | number);
+                          return d.getFullYear() === rYear && d.getMonth() + 1 === rMonthN;
+                        });
+                        const bookReceipts   = monthPaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const openAPThisMonth = apPurchaseOrders
+                          .filter(po => {
+                            if (['Teslim Alındı', 'İptal Edildi'].includes(po.status)) return false;
+                            const ts = po.createdAt ? (() => {
+                              if (typeof (po.createdAt as { toDate?: () => Date }).toDate === 'function') return (po.createdAt as { toDate: () => Date }).toDate();
+                              return new Date(po.createdAt as string | number);
+                            })() : null;
+                            return ts ? ts.getFullYear() === rYear && ts.getMonth() + 1 === rMonthN : false;
+                          })
+                          .reduce((s, po) => s + po.totalAmount, 0);
+                        const estimatedBalance = bankBalance + bookReceipts - openAPThisMonth;
+                        const gap = bankBalance - estimatedBalance;
+                        const gapAbs = Math.abs(gap);
+                        const balanced = gapAbs < 1000;
+
+                        return (
+                          <>
+                            <div className="flex flex-wrap items-center gap-4">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}:</label>
+                                <input type="month" value={reconMonth} onChange={e => setReconMonth(e.target.value)} className="apple-input text-sm px-3 py-1.5" />
+                              </div>
+                            </div>
+
+                            {/* Main reconciliation card */}
+                            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                              <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                                <CreditCard size={16} className="text-gray-400" />
+                                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Banka Mutabakat Özeti' : 'Bank Reconciliation Summary'}</h3>
+                                <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${balanced ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                  {balanced ? (currentLanguage === 'tr' ? '✓ Mutabık' : '✓ Balanced') : (currentLanguage === 'tr' ? '⚠ Fark Var' : '⚠ Discrepancy')}
+                                </span>
+                              </div>
+                              <div className="p-5 space-y-4">
+                                {/* Bank balance entry */}
+                                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-xl">
+                                  <div>
+                                    <p className="text-xs font-bold text-blue-700">{currentLanguage === 'tr' ? 'Banka Ekstresindeki Bakiye' : 'Bank Statement Balance'}</p>
+                                    <p className="text-[10px] text-blue-500 mt-0.5">{currentLanguage === 'tr' ? 'Manuel olarak girin' : 'Enter manually'}</p>
+                                  </div>
+                                  {bankBalanceEditing ? (
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-gray-400">₺</span>
+                                        <input
+                                          autoFocus
+                                          type="number"
+                                          value={bankBalanceDraft}
+                                          onChange={e => setBankBalanceDraft(e.target.value)}
+                                          onBlur={() => { setBankBalance(Number(bankBalanceDraft) || 0); setBankBalanceEditing(false); }}
+                                          onKeyDown={e => { if (e.key === 'Enter') { setBankBalance(Number(bankBalanceDraft) || 0); setBankBalanceEditing(false); } }}
+                                          className="apple-input w-36 pl-6 text-right font-bold"
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => { setBankBalanceDraft(String(bankBalance)); setBankBalanceEditing(true); }}
+                                      className="text-xl font-black text-blue-700 hover:text-blue-900 transition-colors"
+                                    >
+                                      ₺{bankBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      <span className="text-[10px] text-blue-400 ml-1">✎</span>
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Rows */}
+                                {[
+                                  { label: currentLanguage === 'tr' ? '+ Tahsil edilen (ödendi)' : '+ Collected (paid orders)', value: bookReceipts,     color: 'text-emerald-600', sign: '+' },
+                                  { label: currentLanguage === 'tr' ? '− Açık satın alma siparişleri' : '− Open purchase orders',    value: openAPThisMonth, color: 'text-red-500',     sign: '−' },
+                                  { label: currentLanguage === 'tr' ? '= Hesaplanan Bakiye'           : '= Calculated Balance',      value: estimatedBalance, color: 'text-gray-800',    sign: '=' },
+                                ].map((row, i) => (
+                                  <div key={i} className={`flex items-center justify-between py-2.5 border-b border-gray-50 ${i === 2 ? 'border-t border-gray-200 pt-3 mt-1' : ''}`}>
+                                    <span className="text-sm text-gray-600">{row.label}</span>
+                                    <span className={`text-sm font-black ${row.color}`}>
+                                      {row.sign} ₺{Math.abs(row.value).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                    </span>
+                                  </div>
+                                ))}
+
+                                {/* Gap */}
+                                {!balanced && (
+                                  <div className="flex items-center justify-between p-3 bg-amber-50 rounded-xl mt-2">
+                                    <span className="text-sm font-bold text-amber-700">{currentLanguage === 'tr' ? 'Açıklanamayan Fark' : 'Unexplained Difference'}</span>
+                                    <span className="text-sm font-black text-amber-700">
+                                      {gap > 0 ? '+' : '−'} ₺{gapAbs.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+                                {currentLanguage === 'tr'
+                                  ? '* Banka ekstrenizi sisteme girerek otomatik karşılaştırma yapabilirsiniz.'
+                                  : '* Enter your bank statement balance to auto-reconcile against book records.'}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
+
                   {/* ── Sabit Kıymetler ── */}
                   {muhasebeTab === 'sabit-kiymet' && (
                     <motion.div key="muhasebe-sabit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
@@ -6618,7 +7776,8 @@ function AppContent() {
                     {([
                       { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
                       { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
-                    ] as { key: 'pos' | 'suppliers'; label: string; icon: React.ElementType }[]).map(t => (
+                      { key: 'scorecard', label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
+                    ] as { key: 'pos' | 'suppliers' | 'scorecard'; label: string; icon: React.ElementType }[]).map(t => (
                       <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
                         className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
                           purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
@@ -6686,7 +7845,58 @@ function AppContent() {
                         orders={orders}
                         onNavigate={setActiveTab}
                         exchangeRates={exchangeRates}
+                        prefillProduct={quickPOProduct ?? undefined}
+                        onPrefillConsumed={() => setQuickPOProduct(null)}
                       />
+
+                      {/* ── Phase 126: 3-Way Match Indicator ── */}
+                      {apPurchaseOrders.length > 0 && (() => {
+                        type MatchRow = { po: typeof apPurchaseOrders[number]; hasReceipt: boolean; hasInvoice: boolean; matched: boolean };
+                        const rows: MatchRow[] = apPurchaseOrders.slice(0, 10).map(po => {
+                          const hasReceipt = po.status === 'Teslim Alındı';
+                          const hasInvoice = !!(po as Record<string, unknown>).invoiceNo || !!(po as Record<string, unknown>).invoiceDate;
+                          return { po, hasReceipt, hasInvoice, matched: hasReceipt && hasInvoice };
+                        });
+                        const matchedCount = rows.filter(r => r.matched).length;
+                        const unmatchedCount = rows.length - matchedCount;
+                        return (
+                          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">🔗</span>
+                                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '3-Yönlü Eşleştirme (SAS→Teslimat→Fatura)' : '3-Way Match (PO→Receipt→Invoice)'}</h3>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-emerald-600 font-bold">{matchedCount} ✓</span>
+                                <span className="text-gray-300">·</span>
+                                <span className="text-amber-600 font-bold">{unmatchedCount} ⚠️</span>
+                              </div>
+                            </div>
+                            <div className="divide-y divide-gray-50">
+                              {rows.map(({ po, hasReceipt, hasInvoice, matched }) => (
+                                <div key={po.id} className="flex items-center gap-3 px-5 py-3">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-gray-800 truncate">{po.supplier || '—'}</p>
+                                    <p className="text-[10px] text-gray-400">₺{(po.totalAmount || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${true ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>SAS ✓</span>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${hasReceipt ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                      {currentLanguage === 'tr' ? 'TESLİMAT' : 'RECEIPT'} {hasReceipt ? '✓' : '○'}
+                                    </span>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${hasInvoice ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                      {currentLanguage === 'tr' ? 'FATURA' : 'INVOICE'} {hasInvoice ? '✓' : '○'}
+                                    </span>
+                                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${matched ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                      {matched ? (currentLanguage === 'tr' ? 'EŞLEŞTİ' : 'MATCHED') : (currentLanguage === 'tr' ? 'EKSİK' : 'PENDING')}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -6778,18 +7988,46 @@ function AppContent() {
                                 ? (currentLanguage === 'tr' ? 'Tedarikçi Düzenle' : 'Edit Supplier')
                                 : (currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier')}
                             </h2>
-                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}>
+                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }}>
                               <X className="w-5 h-5 text-gray-400" />
                             </button>
                           </div>
+
+                          {/* VKN Lookup */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'VKN / TCKN (GİB Sorgula)' : 'VKN / TCKN (GİB Lookup)'}</label>
+                            <div className="flex gap-2">
+                              <input
+                                value={(newSupplier as Record<string, string>)['taxNo'] ?? ''}
+                                onChange={e => { setNewSupplier(prev => ({ ...prev, taxNo: e.target.value })); setVknLookupMsg(null); }}
+                                placeholder="1234567890"
+                                maxLength={11}
+                                className="apple-input flex-1 font-mono"
+                              />
+                              <button
+                                onClick={() => void handleVknLookup()}
+                                disabled={vknLookupLoading}
+                                className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-orange-500 transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+                              >
+                                {vknLookupLoading ? (
+                                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                                ) : <Search className="w-3.5 h-3.5" />}
+                                {currentLanguage === 'tr' ? 'Sorgula' : 'Lookup'}
+                              </button>
+                            </div>
+                            {vknLookupMsg && (
+                              <p className={`text-[11px] font-medium mt-1 ${vknLookupMsg.ok ? 'text-emerald-600' : 'text-red-500'}`}>{vknLookupMsg.text}</p>
+                            )}
+                          </div>
+
                           {[
-                            { key: 'name',      label: currentLanguage === 'tr' ? 'Ad *' : 'Name *',               required: true  },
-                            { key: 'company',   label: currentLanguage === 'tr' ? 'Firma' : 'Company',               required: false },
-                            { key: 'email',     label: currentLanguage === 'tr' ? 'E-posta' : 'Email',               required: false },
-                            { key: 'phone',     label: currentLanguage === 'tr' ? 'Telefon' : 'Phone',               required: false },
-                            { key: 'taxNo',     label: currentLanguage === 'tr' ? 'Vergi No' : 'Tax No',             required: false },
-                            { key: 'taxOffice', label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office',    required: false },
-                            { key: 'address',   label: currentLanguage === 'tr' ? 'Adres' : 'Address',               required: false },
+                            { key: 'name',      label: currentLanguage === 'tr' ? 'Ad / Ünvan *' : 'Name *',          required: true  },
+                            { key: 'company',   label: currentLanguage === 'tr' ? 'Firma' : 'Company',                 required: false },
+                            { key: 'email',     label: currentLanguage === 'tr' ? 'E-posta' : 'Email',                 required: false },
+                            { key: 'phone',     label: currentLanguage === 'tr' ? 'Telefon' : 'Phone',                 required: false },
+                            { key: 'taxOffice', label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office',      required: false },
+                            { key: 'address',   label: currentLanguage === 'tr' ? 'Adres' : 'Address',                 required: false },
+                            { key: 'notes',     label: currentLanguage === 'tr' ? 'Notlar' : 'Notes',                  required: false },
                           ].map(field => (
                             <div key={field.key} className="space-y-1">
                               <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
@@ -6801,7 +8039,7 @@ function AppContent() {
                             </div>
                           ))}
                           <div className="flex gap-2 pt-2">
-                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}
+                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }}
                               className="apple-button-secondary flex-1">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
                             <button onClick={() => void handleSaveSupplier()}
                               className="apple-button-primary flex-1">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
@@ -6810,6 +8048,89 @@ function AppContent() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+
+                  {/* ── Phase 120: Supplier Performance Scorecard ── */}
+                  {purchasingSubTab === 'scorecard' && (() => {
+                    // Build per-supplier stats from apPurchaseOrders
+                    type SupScore = {
+                      name: string; totalPOs: number; delivered: number; pending: number;
+                      cancelled: number; totalSpend: number; onTimeRate: number; score: number;
+                    };
+                    const scoremap: Record<string, SupScore> = {};
+                    for (const po of apPurchaseOrders) {
+                      const name = po.supplier || '—';
+                      if (!scoremap[name]) scoremap[name] = { name, totalPOs: 0, delivered: 0, pending: 0, cancelled: 0, totalSpend: 0, onTimeRate: 0, score: 0 };
+                      scoremap[name].totalPOs++;
+                      scoremap[name].totalSpend += po.totalAmount;
+                      if (po.status === 'Teslim Alındı') scoremap[name].delivered++;
+                      else if (po.status === 'İptal Edildi') scoremap[name].cancelled++;
+                      else scoremap[name].pending++;
+                    }
+                    const scores: SupScore[] = Object.values(scoremap).map(s => {
+                      const deliveryRate = s.totalPOs > 0 ? (s.delivered / s.totalPOs) * 100 : 0;
+                      const cancelRate   = s.totalPOs > 0 ? (s.cancelled / s.totalPOs) * 100 : 0;
+                      const score = Math.round(Math.max(0, deliveryRate - cancelRate * 0.5));
+                      return { ...s, onTimeRate: Math.round(deliveryRate), score };
+                    }).sort((a, b) => b.score - a.score);
+
+                    if (scores.length === 0) return (
+                      <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                        <Award size={40} className="mx-auto mb-3 text-gray-200" />
+                        <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tedarikçi siparişi bulunmuyor.' : 'No supplier purchase orders found.'}</p>
+                      </div>
+                    );
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                            <Award size={16} className="text-amber-400" />
+                            <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Tedarikçi Performans Skorkartı' : 'Supplier Performance Scorecard'}</h3>
+                          </div>
+                          <div className="divide-y divide-gray-50">
+                            {scores.map((s, i) => (
+                              <div key={s.name} className="px-5 py-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-3">
+                                    <span className={`text-sm font-black w-6 ${i === 0 ? 'text-amber-500' : i === 1 ? 'text-gray-400' : i === 2 ? 'text-orange-600' : 'text-gray-300'}`}>
+                                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                                    </span>
+                                    <p className="text-sm font-bold text-gray-800">{s.name}</p>
+                                  </div>
+                                  <div className="flex items-center gap-4 text-[10px] text-gray-500">
+                                    <span>{s.totalPOs} {currentLanguage === 'tr' ? 'sipariş' : 'POs'}</span>
+                                    <span>₺{s.totalSpend.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                                    <span className={`font-black text-sm ${s.score >= 80 ? 'text-emerald-600' : s.score >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+                                      {s.score}
+                                    </span>
+                                  </div>
+                                </div>
+                                {/* Score bar */}
+                                <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden mb-1.5">
+                                  <div
+                                    className={`h-2 rounded-full transition-all duration-700 ${s.score >= 80 ? 'bg-emerald-400' : s.score >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                                    style={{ width: `${s.score}%` }}
+                                  />
+                                </div>
+                                {/* Mini stats row */}
+                                <div className="flex gap-4 text-[10px]">
+                                  <span className="text-emerald-600 font-semibold">{s.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</span>
+                                  <span className="text-amber-600 font-semibold">{s.pending} {currentLanguage === 'tr' ? 'bekliyor' : 'pending'}</span>
+                                  {s.cancelled > 0 && <span className="text-red-500 font-semibold">{s.cancelled} {currentLanguage === 'tr' ? 'iptal' : 'cancelled'}</span>}
+                                  <span className="text-gray-400 ml-auto">{s.onTimeRate}% {currentLanguage === 'tr' ? 'teslimat oranı' : 'delivery rate'}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="px-5 py-2.5 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+                            {currentLanguage === 'tr'
+                              ? 'Skor = Teslimat oranı − (İptal oranı × 0,5). Satın Alma Siparişleri verisine dayanır.'
+                              : 'Score = Delivery rate − (Cancel rate × 0.5). Based on Purchase Orders data.'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -6886,6 +8207,304 @@ function AppContent() {
                       </div>
                     );
                   })()}
+                  {/* ── Phase 117: Payroll Basic ── */}
+                  {employees.length > 0 && (() => {
+                    // Turkish payroll calculation (simplified)
+                    const SGK_EMP    = 0.14;   // employee SGK
+                    const UNEMP_EMP  = 0.01;   // employee unemployment insurance
+                    const SGK_EMPL   = 0.205;  // employer SGK
+                    const UNEMP_EMPL = 0.02;   // employer unemployment insurance
+                    const incomeTax  = (taxBase: number) => {
+                      let tax = 0, remaining = taxBase;
+                      const brackets = [[70000, 0.15], [80000, 0.20], [220000, 0.27], [1530000, 0.35]] as [number, number][];
+                      for (const [limit, rate] of brackets) {
+                        if (remaining <= 0) break;
+                        const chunk = Math.min(remaining, limit);
+                        tax += chunk * rate;
+                        remaining -= chunk;
+                      }
+                      if (remaining > 0) tax += remaining * 0.40;
+                      return tax;
+                    };
+
+                    const activeEmps = employees.filter(e => e.status === 'Aktif');
+                    const payroll = activeEmps.map(e => {
+                      const gross = e.salary || 0;
+                      const sgkEmp   = Math.round(gross * SGK_EMP);
+                      const unempEmp = Math.round(gross * UNEMP_EMP);
+                      const taxBase  = gross - sgkEmp - unempEmp;
+                      const tax      = Math.round(incomeTax(taxBase));
+                      const net      = gross - sgkEmp - unempEmp - tax;
+                      const employerCost = gross + Math.round(gross * SGK_EMPL) + Math.round(gross * UNEMP_EMPL);
+                      return { ...e, gross, sgkEmp, unempEmp, tax, net, employerCost };
+                    });
+                    const totals = payroll.reduce((acc, p) => ({
+                      gross: acc.gross + p.gross, net: acc.net + p.net,
+                      tax: acc.tax + p.tax, cost: acc.cost + p.employerCost,
+                    }), { gross: 0, net: 0, tax: 0, cost: 0 });
+
+                    return (
+                      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <DollarSign size={16} className="text-gray-400" />
+                            <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bordro Özeti' : 'Payroll Summary'}</h3>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} className="apple-input text-xs px-2 py-1" />
+                            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                              {(['summary', 'detail'] as const).map(v => (
+                                <button key={v} onClick={() => setPayrollView(v)}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${payrollView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400'}`}>
+                                  {v === 'summary' ? (currentLanguage === 'tr' ? 'Özet' : 'Summary') : (currentLanguage === 'tr' ? 'Detay' : 'Detail')}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {payrollView === 'summary' ? (
+                          <div className="p-5">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                              {[
+                                { label: currentLanguage === 'tr' ? 'Toplam Brüt' : 'Total Gross',  value: totals.gross, color: 'text-gray-800',    bg: 'bg-gray-50'   },
+                                { label: currentLanguage === 'tr' ? 'Toplam Net'  : 'Total Net',    value: totals.net,   color: 'text-emerald-700', bg: 'bg-emerald-50' },
+                                { label: currentLanguage === 'tr' ? 'Vergi'       : 'Income Tax',   value: totals.tax,   color: 'text-red-600',     bg: 'bg-red-50'    },
+                                { label: currentLanguage === 'tr' ? 'İşveren Mlt' : 'Employer Cost', value: totals.cost, color: 'text-blue-700',    bg: 'bg-blue-50'   },
+                              ].map((k, i) => (
+                                <div key={i} className={`rounded-xl p-3 ${k.bg}`}>
+                                  <p className="text-[10px] font-bold text-gray-400 mb-1">{k.label}</p>
+                                  <p className={`text-lg font-black ${k.color}`}>₺{k.value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-gray-400">
+                              {activeEmps.length} {currentLanguage === 'tr' ? 'aktif çalışan · SGK işçi %14 · Gelir Vergisi dilimli' : 'active employees · SGK employee 14% · Progressive income tax'}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-gray-50 border-b border-gray-100">
+                                  {[
+                                    currentLanguage === 'tr' ? 'Çalışan' : 'Employee',
+                                    currentLanguage === 'tr' ? 'Departman' : 'Dept',
+                                    currentLanguage === 'tr' ? 'Brüt' : 'Gross',
+                                    'SGK',
+                                    currentLanguage === 'tr' ? 'Vergi' : 'Tax',
+                                    currentLanguage === 'tr' ? 'Net' : 'Net',
+                                    currentLanguage === 'tr' ? 'İşveren' : 'Employer Cost',
+                                  ].map(h => (
+                                    <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {payroll.map(p => (
+                                  <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="px-4 py-2.5 font-semibold text-gray-800">{p.name}</td>
+                                    <td className="px-4 py-2.5 text-gray-500">{p.department}</td>
+                                    <td className="px-4 py-2.5 font-bold text-gray-800">₺{p.gross.toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 text-red-500">−₺{(p.sgkEmp + p.unempEmp).toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 text-red-500">−₺{p.tax.toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 font-black text-emerald-700">₺{p.net.toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 text-blue-700 font-bold">₺{p.employerCost.toLocaleString('tr-TR')}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr className="bg-gray-50 border-t-2 border-gray-200 font-black text-[11px]">
+                                  <td colSpan={2} className="px-4 py-2.5 text-gray-600">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                                  <td className="px-4 py-2.5 text-gray-800">₺{totals.gross.toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 text-red-500">—</td>
+                                  <td className="px-4 py-2.5 text-red-500">₺{totals.tax.toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 text-emerald-700">₺{totals.net.toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 text-blue-700">₺{totals.cost.toLocaleString('tr-TR')}</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 121: Leave Management ── */}
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Calendar size={15} className="text-gray-400" />
+                        <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'İzin Yönetimi' : 'Leave Management'}</h3>
+                        {leaveRequests.filter(l => l.status === 'pending').length > 0 && (
+                          <span className="bg-amber-400 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                            {leaveRequests.filter(l => l.status === 'pending').length} {currentLanguage === 'tr' ? 'bekliyor' : 'pending'}
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={() => setShowLeaveForm(v => !v)} className="text-[10px] font-bold text-brand hover:underline flex items-center gap-1">
+                        <Plus size={11} />{currentLanguage === 'tr' ? 'Talep Ekle' : 'Add Request'}
+                      </button>
+                    </div>
+
+                    {/* Stats strip */}
+                    <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
+                      {[
+                        { label: currentLanguage === 'tr' ? 'Bekliyor' : 'Pending',  count: leaveRequests.filter(l => l.status === 'pending').length,  color: 'text-amber-600' },
+                        { label: currentLanguage === 'tr' ? 'Onaylı'   : 'Approved', count: leaveRequests.filter(l => l.status === 'approved').length, color: 'text-emerald-600' },
+                        { label: currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected', count: leaveRequests.filter(l => l.status === 'rejected').length, color: 'text-red-500' },
+                      ].map((s, i) => (
+                        <div key={i} className="py-3 text-center">
+                          <p className={`text-xl font-black ${s.color}`}>{s.count}</p>
+                          <p className="text-[10px] font-bold text-gray-400">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Form */}
+                    <AnimatePresence>
+                      {showLeaveForm && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                          <div className="p-4 bg-gray-50 border-b border-gray-100 space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Çalışan adı' : 'Employee name'}
+                                value={leaveForm.employeeName} onChange={e => setLeaveForm(f => ({ ...f, employeeName: e.target.value }))} />
+                              <select className="apple-input text-sm" value={leaveForm.type} onChange={e => setLeaveForm(f => ({ ...f, type: e.target.value as typeof leaveForm.type }))}>
+                                <option value="annual">{currentLanguage === 'tr' ? 'Yıllık İzin' : 'Annual Leave'}</option>
+                                <option value="sick">{currentLanguage === 'tr' ? 'Hastalık' : 'Sick Leave'}</option>
+                                <option value="unpaid">{currentLanguage === 'tr' ? 'Ücretsiz İzin' : 'Unpaid Leave'}</option>
+                                <option value="other">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                              </select>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start'}</label>
+                                <input type="date" className="apple-input text-sm" value={leaveForm.startDate} onChange={e => setLeaveForm(f => ({ ...f, startDate: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Bitiş' : 'End'}</label>
+                                <input type="date" className="apple-input text-sm" value={leaveForm.endDate} onChange={e => setLeaveForm(f => ({ ...f, endDate: e.target.value }))} />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input className="apple-input text-sm flex-1" placeholder={currentLanguage === 'tr' ? 'Açıklama (opsiyonel)' : 'Reason (optional)'}
+                                value={leaveForm.reason} onChange={e => setLeaveForm(f => ({ ...f, reason: e.target.value }))} />
+                              <button
+                                disabled={!leaveForm.employeeName || !leaveForm.startDate || !leaveForm.endDate}
+                                onClick={async () => {
+                                  if (!leaveForm.employeeName || !leaveForm.startDate || !leaveForm.endDate) return;
+                                  const start = new Date(leaveForm.startDate);
+                                  const end   = new Date(leaveForm.endDate);
+                                  const days  = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+                                  const emp = employees.find(e => e.name.toLowerCase().includes(leaveForm.employeeName.toLowerCase()));
+                                  await addDoc(collection(db, 'leaveRequests'), {
+                                    ...leaveForm, days, status: 'pending',
+                                    employeeId: emp?.id || '', createdAt: serverTimestamp(),
+                                  });
+                                  setLeaveForm({ employeeName: '', type: 'annual', startDate: '', endDate: '', reason: '' });
+                                  setShowLeaveForm(false);
+                                  toast(currentLanguage === 'tr' ? 'İzin talebi oluşturuldu.' : 'Leave request created.', 'success');
+                                }}
+                                className="apple-button-primary text-xs px-4 disabled:opacity-50"
+                              >{currentLanguage === 'tr' ? 'Talep Et' : 'Submit'}</button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Request list */}
+                    {leaveRequests.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <Calendar size={28} className="mx-auto mb-2 text-gray-200" />
+                        <p className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'İzin talebi yok.' : 'No leave requests.'}</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+                        {leaveRequests.map(lr => {
+                          const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: currentLanguage === 'tr' ? 'Hastalık' : 'Sick', unpaid: currentLanguage === 'tr' ? 'Ücretsiz' : 'Unpaid', other: currentLanguage === 'tr' ? 'Diğer' : 'Other' }[lr.type] || lr.type;
+                          return (
+                            <div key={lr.id} className="flex items-center gap-3 px-5 py-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-800">{lr.employeeName}</p>
+                                <p className="text-[10px] text-gray-400">{typeLabel} · {lr.startDate} → {lr.endDate} · {lr.days} {currentLanguage === 'tr' ? 'gün' : 'days'}</p>
+                              </div>
+                              {lr.status === 'pending' && hasFullAccess('ik') ? (
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  <button onClick={async () => { await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'approved' }); toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success'); }}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
+                                    {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                                  </button>
+                                  <button onClick={async () => { await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'rejected' }); }}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors">
+                                    {currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                  lr.status === 'approved' ? 'bg-emerald-100 text-emerald-700'
+                                  : lr.status === 'rejected' ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {lr.status === 'approved' ? (currentLanguage === 'tr' ? '✓ Onaylı' : '✓ Approved')
+                                    : lr.status === 'rejected' ? (currentLanguage === 'tr' ? '✗ Reddedildi' : '✗ Rejected')
+                                    : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Phase 128: Employee Performance Dashboard ── */}
+                  {employees.length > 0 && (() => {
+                    // Build per-department headcount and salary data
+                    type DeptStat = { dept: string; count: number; totalSalary: number; active: number };
+                    const deptMap: Record<string, DeptStat> = {};
+                    for (const emp of employees) {
+                      const dept = emp.department || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                      if (!deptMap[dept]) deptMap[dept] = { dept, count: 0, totalSalary: 0, active: 0 };
+                      deptMap[dept].count++;
+                      deptMap[dept].totalSalary += emp.salary || 0;
+                      if (emp.status === 'Aktif') deptMap[dept].active++;
+                    }
+                    const depts = Object.values(deptMap).sort((a, b) => b.count - a.count);
+                    const totalHeadcount = employees.length;
+                    const totalActive = employees.filter(e => e.status === 'Aktif').length;
+                    const totalSalaryBudget = employees.reduce((s, e) => s + (e.salary || 0), 0);
+                    return (
+                      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">👥</span>
+                            <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Personel Özeti' : 'Employee Overview'}</h3>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <span>{totalActive}/{totalHeadcount} {currentLanguage === 'tr' ? 'aktif' : 'active'}</span>
+                            <span>₺{(totalSalaryBudget / 1000).toFixed(0)}K {currentLanguage === 'tr' ? 'bordro' : 'payroll'}</span>
+                          </div>
+                        </div>
+                        <div className="divide-y divide-gray-50">
+                          {depts.slice(0, 6).map(d => (
+                            <div key={d.dept} className="flex items-center gap-4 px-5 py-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-800 truncate">{d.dept}</p>
+                                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden mt-1">
+                                  <div className="h-1.5 bg-brand/60 rounded-full transition-all duration-700" style={{ width: `${(d.count / Math.max(...depts.map(x => x.count))) * 100}%` }} />
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0 text-right">
+                                <span className="text-xs font-bold text-gray-700">{d.count} {currentLanguage === 'tr' ? 'kişi' : 'staff'}</span>
+                                <span className="text-[10px] text-gray-400">₺{(d.totalSalary / 1000).toFixed(0)}K</span>
+                                {d.active < d.count && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{d.count - d.active} {currentLanguage === 'tr' ? 'pasif' : 'inactive'}</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <HRModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ik')} userRole={userRole} employees={employees} />
                 </>
               )}
@@ -7366,6 +8985,19 @@ function AppContent() {
           {activeTab === 'analytics' && (
             <motion.div key="analytics" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
               <AnalyticsPanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} />
+            </motion.div>
+          )}
+
+          {/* ── eBA Onay Kuyruğu ── */}
+          {activeTab === 'onaylar' && (
+            <motion.div key="onaylar" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+              <ApprovalQueue
+                currentLanguage={currentLanguage as 'tr' | 'en'}
+                isAuthenticated={!!user}
+                userRole={userRole}
+                userEmail={user?.email}
+                userName={user?.displayName}
+              />
             </motion.div>
           )}
 
@@ -8297,18 +9929,7 @@ function AppContent() {
 
               {/* ── Phase 65: Notification Preferences ── */}
               {(() => {
-                const prefKey = 'cetpa-notif-prefs';
-                const [prefs, setPrefs] = React.useState<Record<string, boolean>>(() => {
-                  try { return JSON.parse(localStorage.getItem(prefKey) ?? '{}'); } catch { return {}; }
-                });
-                const toggle = (key: string) => {
-                  setPrefs(prev => {
-                    const next = { ...prev, [key]: !prev[key] };
-                    localStorage.setItem(prefKey, JSON.stringify(next));
-                    return next;
-                  });
-                };
-                const items = [
+                const notifItems = [
                   { key: 'lowStock',   icon: '📦', label: currentLanguage === 'tr' ? 'Düşük stok uyarıları' : 'Low stock alerts',       default: true  },
                   { key: 'newOrder',   icon: '🛒', label: currentLanguage === 'tr' ? 'Yeni sipariş bildirimi' : 'New order notification',  default: true  },
                   { key: 'newLead',    icon: '👤', label: currentLanguage === 'tr' ? 'Yeni müşteri adayı' : 'New lead',                   default: true  },
@@ -8328,8 +9949,8 @@ function AppContent() {
                       </div>
                     </div>
                     <div className="space-y-3">
-                      {items.map(item => {
-                        const isOn = item.key in prefs ? prefs[item.key] : item.default;
+                      {notifItems.map(item => {
+                        const isOn = item.key in notifPrefs ? notifPrefs[item.key] : item.default;
                         return (
                           <div key={item.key} className="flex items-center justify-between py-1">
                             <div className="flex items-center gap-2.5">
@@ -8337,7 +9958,7 @@ function AppContent() {
                               <span className="text-sm text-gray-700">{item.label}</span>
                             </div>
                             <button
-                              onClick={() => toggle(item.key)}
+                              onClick={() => toggleNotifPref(item.key)}
                               className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${isOn ? 'bg-brand' : 'bg-gray-200'}`}
                             >
                               <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isOn ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -8532,6 +10153,165 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 114: Demand Forecasting ── */}
+              {inventoryMovements.length > 0 && inventory.length > 0 && (() => {
+                const now114 = Date.now();
+                const MS_30D = 30 * 24 * 60 * 60 * 1000;
+                const MS_60D = 60 * 24 * 60 * 60 * 1000;
+
+                // Build monthly consumption map: productName → [last30, prev30]
+                const cons: Record<string, { last30: number; prev30: number }> = {};
+                for (const m of inventoryMovements) {
+                  if (m.type !== 'out') continue;
+                  const ts = (() => {
+                    const t = m.timestamp;
+                    if (!t) return 0;
+                    if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
+                    return new Date(t as string | number).getTime();
+                  })();
+                  const age = now114 - ts;
+                  const key = (m.productId as string | undefined) || m.productName;
+                  cons[key] = cons[key] || { last30: 0, prev30: 0 };
+                  if (age <= MS_30D) cons[key].last30 += m.quantity;
+                  else if (age <= MS_60D) cons[key].prev30 += m.quantity;
+                }
+
+                // Build forecasts for all products with movement data
+                type Forecast = { item: InventoryItem; last30: number; trend: number; nextMonth: number; weeksLeft: number };
+                const forecasts: Forecast[] = [];
+                for (const item of inventory) {
+                  const key = item.id || item.name;
+                  const data = cons[key] ?? cons[item.name];
+                  if (!data || data.last30 === 0) continue;
+                  const trend   = data.prev30 > 0 ? ((data.last30 - data.prev30) / data.prev30) * 100 : 0;
+                  const nextMonth = Math.ceil(data.last30 * (1 + Math.max(trend / 100, -0.3)));
+                  const stock   = item.stockLevel ?? 0;
+                  const dailyRate = data.last30 / 30;
+                  const weeksLeft = dailyRate > 0 ? Math.floor((stock / dailyRate) / 7) : 99;
+                  forecasts.push({ item, last30: data.last30, trend, nextMonth, weeksLeft });
+                }
+                forecasts.sort((a, b) => a.weeksLeft - b.weeksLeft);
+                if (forecasts.length === 0) return null;
+
+                const urgent = forecasts.filter(f => f.weeksLeft <= 4);
+
+                return (
+                  <div className="bg-white border border-blue-100 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-blue-50 flex items-center justify-between bg-blue-50/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔮</span>
+                        <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Talep Tahmini' : 'Demand Forecast'}</h3>
+                        {urgent.length > 0 && (
+                          <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                            {urgent.length} {currentLanguage === 'tr' ? 'acil' : 'urgent'}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-blue-500">{currentLanguage === 'tr' ? '30 günlük harekete göre' : 'Based on 30-day velocity'}</span>
+                    </div>
+                    <div className="divide-y divide-gray-50 max-h-56 overflow-y-auto">
+                      {forecasts.slice(0, 10).map(({ item, last30, trend, nextMonth, weeksLeft }) => {
+                        const urgency = weeksLeft <= 1 ? 'text-red-600' : weeksLeft <= 3 ? 'text-amber-600' : 'text-emerald-600';
+                        const trendStr = trend > 5 ? `↑${Math.round(trend)}%` : trend < -5 ? `↓${Math.round(Math.abs(trend))}%` : '→';
+                        const trendColor = trend > 5 ? 'text-emerald-600' : trend < -5 ? 'text-red-500' : 'text-gray-400';
+                        return (
+                          <div key={item.id} className="flex items-center gap-4 px-5 py-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-gray-800 truncate">{item.name}</p>
+                              <p className="text-[10px] text-gray-400">
+                                {currentLanguage === 'tr' ? `Son 30 gün: ${last30} adet · Sonraki ay tahmini: ${nextMonth} adet` : `Last 30d: ${last30} units · Next month est.: ${nextMonth} units`}
+                              </p>
+                            </div>
+                            <span className={`text-[10px] font-bold flex-shrink-0 ${trendColor}`}>{trendStr}</span>
+                            <div className="flex-shrink-0 text-right">
+                              <p className={`text-xs font-black ${urgency}`}>
+                                {weeksLeft >= 99 ? '∞' : weeksLeft} {currentLanguage === 'tr' ? 'hafta' : 'wk'}
+                              </p>
+                              <p className="text-[9px] text-gray-400">{currentLanguage === 'tr' ? 'stok ömrü' : 'runway'}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="px-5 py-2.5 bg-gray-50/60 border-t border-gray-100 text-[10px] text-gray-400">
+                      {currentLanguage === 'tr'
+                        ? `${forecasts.length} ürün analiz edildi · Stok ömrü = mevcut stok ÷ günlük ortalama çıkış`
+                        : `${forecasts.length} products analyzed · Runway = current stock ÷ avg daily outbound`}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 123: ABC Analysis ── */}
+              {inventory.length >= 3 && (() => {
+                // ABC classification by inventory value (stock × price)
+                type ABCItem = { id: string; name: string; value: number; pct: number; cumPct: number; class: 'A' | 'B' | 'C' };
+                const items123 = inventory
+                  .map(i => ({ id: i.id, name: i.name, value: (i.stockLevel ?? 0) * (i.prices?.['Retail'] ?? i.price ?? 0) }))
+                  .filter(i => i.value > 0)
+                  .sort((a, b) => b.value - a.value);
+                const total123 = items123.reduce((s, i) => s + i.value, 0);
+                if (total123 === 0) return null;
+                let cum = 0;
+                const classified: ABCItem[] = items123.map(i => {
+                  const pct = (i.value / total123) * 100;
+                  cum += pct;
+                  return { ...i, pct, cumPct: cum, class: cum <= 70 ? 'A' : cum <= 90 ? 'B' : 'C' };
+                });
+                const a = classified.filter(i => i.class === 'A');
+                const b = classified.filter(i => i.class === 'B');
+                const c = classified.filter(i => i.class === 'C');
+                const aVal = a.reduce((s, i) => s + i.value, 0);
+                const bVal = b.reduce((s, i) => s + i.value, 0);
+                const cVal = c.reduce((s, i) => s + i.value, 0);
+                return (
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📊</span>
+                        <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'ABC Stok Analizi' : 'ABC Inventory Analysis'}</h3>
+                        <span className="text-[10px] text-gray-400 ml-1">Pareto</span>
+                      </div>
+                    </div>
+                    {/* Summary row */}
+                    <div className="grid grid-cols-3 divide-x divide-gray-100">
+                      {[
+                        { cls: 'A', label: currentLanguage === 'tr' ? 'Kritik (70% değer)' : 'Critical (70% value)', count: a.length, val: aVal, color: 'text-red-600 bg-red-50', bar: 'bg-red-400' },
+                        { cls: 'B', label: currentLanguage === 'tr' ? 'Orta (20% değer)' : 'Mid (20% value)', count: b.length, val: bVal, color: 'text-amber-600 bg-amber-50', bar: 'bg-amber-400' },
+                        { cls: 'C', label: currentLanguage === 'tr' ? 'Düşük (10% değer)' : 'Low (10% value)', count: c.length, val: cVal, color: 'text-emerald-600 bg-emerald-50', bar: 'bg-emerald-400' },
+                      ].map(s => (
+                        <div key={s.cls} className="p-4 text-center">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black mb-1 ${s.color}`}>{s.cls}</span>
+                          <p className="text-lg font-bold text-gray-800">{s.count}</p>
+                          <p className="text-[10px] text-gray-400 leading-tight">{s.label}</p>
+                          <p className="text-xs font-semibold text-gray-600 mt-0.5">₺{(s.val / 1000).toFixed(0)}K</p>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Top A items */}
+                    {a.slice(0, 5).length > 0 && (
+                      <div className="border-t border-gray-100 divide-y divide-gray-50">
+                        {a.slice(0, 5).map(item => (
+                          <div key={item.id} className="flex items-center gap-3 px-5 py-2.5">
+                            <span className="text-[9px] font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded-md flex-shrink-0">A</span>
+                            <p className="text-xs text-gray-700 flex-1 truncate">{item.name}</p>
+                            <p className="text-xs font-bold text-gray-800 flex-shrink-0">₺{item.value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                            <div className="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden flex-shrink-0">
+                              <div className="h-1.5 bg-red-400 rounded-full" style={{ width: `${Math.min(item.pct * 2, 100)}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="px-5 py-2 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+                      {currentLanguage === 'tr'
+                        ? `${classified.length} ürün analiz edildi · Değer = Stok × Satış Fiyatı`
+                        : `${classified.length} products · Value = Stock × Retail Price`}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <InventoryView
                 inventory={inventory}
                 categories={inventoryCategories}
@@ -8544,6 +10324,7 @@ function AppContent() {
                 inventoryMovements={inventoryMovements}
                 warehouses={warehouses}
                 onPrintLabels={setLabelItems}
+                onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satinalma'); }}
               />
             </motion.div>
           )}
@@ -8560,6 +10341,10 @@ function AppContent() {
                     { id: 'siparisler', label: currentLanguage === 'tr' ? 'Siparişler' : 'Orders', icon: Package },
                     { id: 'b2b', label: 'B2B Portal', icon: Globe },
                     { id: 'komisyon', label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', icon: TrendingUp },
+                    { id: 'tickets', label: currentLanguage === 'tr' ? 'Destek' : 'Support', icon: MessageSquare },
+                    { id: 'kampanya', label: currentLanguage === 'tr' ? 'Kampanyalar' : 'Campaigns', icon: Mail },
+                    { id: 'sozlesmeler', label: currentLanguage === 'tr' ? 'Sözleşmeler' : 'Contracts', icon: FileText },
+                    { id: 'fiyat-onay', label: currentLanguage === 'tr' ? 'Fiyat Onayı' : 'Price Approvals', icon: Tag },
                   ].map(tab => {
                     const Icon = tab.icon;
                     return (
@@ -8715,6 +10500,583 @@ function AppContent() {
                   orders={orders}
                   exchangeRates={exchangeRates}
                 />
+              )}
+
+              {/* ── Phase 111: Support Tickets ── */}
+              {crmTab === 'tickets' && (
+                <div className="space-y-4">
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Destek Talepleri' : 'Support Tickets'}
+                    subtitle={currentLanguage === 'tr' ? 'Müşteri sorunlarını ve şikayetlerini takip edin.' : 'Track customer issues and complaints.'}
+                    icon={MessageSquare}
+                    actionButton={
+                      <button
+                        onClick={() => setShowTicketForm(v => !v)}
+                        className="apple-button-primary flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Yeni Talep' : 'New Ticket'}
+                      </button>
+                    }
+                  />
+
+                  {/* Ticket stats */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {[
+                      { label: currentLanguage === 'tr' ? 'Açık' : 'Open',          value: supportTickets.filter(t => t.status === 'open').length,        color: 'text-red-600',     bg: 'bg-red-50'     },
+                      { label: currentLanguage === 'tr' ? 'İşlemde' : 'In Progress', value: supportTickets.filter(t => t.status === 'in_progress').length,  color: 'text-amber-600',   bg: 'bg-amber-50'   },
+                      { label: currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved',   value: supportTickets.filter(t => t.status === 'resolved').length,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    ].map((s, i) => (
+                      <div key={i} className={`apple-card p-4 ${s.bg} text-center`}>
+                        <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+                        <p className="text-[10px] font-bold text-gray-400 mt-1">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* New ticket form */}
+                  <AnimatePresence>
+                    {showTicketForm && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3 shadow-sm">
+                          <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Destek Talebi' : 'New Support Ticket'}</h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input
+                              className="apple-input w-full"
+                              placeholder={currentLanguage === 'tr' ? 'Konu başlığı' : 'Ticket title'}
+                              value={ticketForm.title}
+                              onChange={e => setTicketForm(f => ({ ...f, title: e.target.value }))}
+                            />
+                            <input
+                              className="apple-input w-full"
+                              placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                              value={ticketForm.customerName}
+                              onChange={e => setTicketForm(f => ({ ...f, customerName: e.target.value }))}
+                            />
+                          </div>
+                          <textarea
+                            className="apple-input w-full min-h-[72px] resize-none"
+                            placeholder={currentLanguage === 'tr' ? 'Sorun açıklaması...' : 'Issue description...'}
+                            value={ticketForm.description}
+                            onChange={e => setTicketForm(f => ({ ...f, description: e.target.value }))}
+                          />
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Öncelik' : 'Priority'}:</label>
+                              {(['low', 'medium', 'high'] as const).map(p => (
+                                <button
+                                  key={p}
+                                  onClick={() => setTicketForm(f => ({ ...f, priority: p }))}
+                                  className={`text-[10px] font-bold px-2 py-1 rounded-full transition-all ${
+                                    ticketForm.priority === p
+                                      ? p === 'high' ? 'bg-red-500 text-white'
+                                      : p === 'medium' ? 'bg-amber-400 text-white'
+                                      : 'bg-gray-400 text-white'
+                                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {p === 'high' ? (currentLanguage === 'tr' ? 'Yüksek' : 'High')
+                                    : p === 'medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Medium')
+                                    : (currentLanguage === 'tr' ? 'Düşük' : 'Low')}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="ml-auto flex gap-2">
+                              <button onClick={() => setShowTicketForm(false)} className="apple-button-secondary px-4 text-sm">
+                                {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                              </button>
+                              <button
+                                disabled={!ticketForm.title || !ticketForm.customerName}
+                                onClick={async () => {
+                                  if (!ticketForm.title || !ticketForm.customerName) return;
+                                  try {
+                                    await addDoc(collection(db, 'supportTickets'), {
+                                      ...ticketForm, status: 'open',
+                                      createdAt: serverTimestamp(), assignedTo: user?.displayName || user?.email || 'Sistem'
+                                    });
+                                    setTicketForm({ title: '', customerName: '', description: '', priority: 'medium', orderId: '' });
+                                    setShowTicketForm(false);
+                                    toast(currentLanguage === 'tr' ? 'Talep oluşturuldu.' : 'Ticket created.', 'success');
+                                  } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                                }}
+                                className="apple-button-primary px-6 text-sm disabled:opacity-50"
+                              >
+                                {currentLanguage === 'tr' ? 'Oluştur' : 'Create'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Ticket list */}
+                  <div className="space-y-2">
+                    {supportTickets.length === 0 ? (
+                      <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                        <MessageSquare size={40} className="mx-auto mb-3 text-gray-200" />
+                        <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Henüz destek talebi yok.' : 'No support tickets yet.'}</p>
+                      </div>
+                    ) : (
+                      supportTickets.map(ticket => {
+                        const priorityBadge = ticket.priority === 'high'
+                          ? 'bg-red-100 text-red-700'
+                          : ticket.priority === 'medium'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-gray-100 text-gray-600';
+                        const statusBadge = ticket.status === 'open'
+                          ? 'bg-red-50 text-red-600'
+                          : ticket.status === 'in_progress'
+                          ? 'bg-blue-50 text-blue-600'
+                          : 'bg-emerald-50 text-emerald-700';
+                        const statusLabel = ticket.status === 'open'
+                          ? (currentLanguage === 'tr' ? 'Açık' : 'Open')
+                          : ticket.status === 'in_progress'
+                          ? (currentLanguage === 'tr' ? 'İşlemde' : 'In Progress')
+                          : (currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved');
+                        return (
+                          <div key={ticket.id} className="bg-white border border-gray-100 rounded-xl p-4 flex items-start gap-4 shadow-sm hover:shadow-md transition-shadow">
+                            <div className={`p-2 rounded-xl flex-shrink-0 ${ticket.priority === 'high' ? 'bg-red-50' : ticket.priority === 'medium' ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                              <MessageSquare className={`w-4 h-4 ${ticket.priority === 'high' ? 'text-red-500' : ticket.priority === 'medium' ? 'text-amber-500' : 'text-gray-400'}`} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start gap-2 mb-1 flex-wrap">
+                                <p className="text-sm font-bold text-gray-900 flex-1">{ticket.title}</p>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${priorityBadge}`}>
+                                  {ticket.priority === 'high' ? '🔴' : ticket.priority === 'medium' ? '🟡' : '⚪'} {ticket.priority.toUpperCase()}
+                                </span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${statusBadge}`}>{statusLabel}</span>
+                              </div>
+                              <p className="text-xs text-gray-500">{ticket.customerName}</p>
+                              {ticket.description && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                            </div>
+                            {ticket.status !== 'resolved' && (
+                              <button
+                                onClick={async () => {
+                                  const nextStatus = ticket.status === 'open' ? 'in_progress' : 'resolved';
+                                  await updateDoc(doc(db, 'supportTickets', ticket.id), { status: nextStatus });
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-gray-100 hover:bg-brand hover:text-white transition-all flex-shrink-0"
+                              >
+                                {ticket.status === 'open'
+                                  ? (currentLanguage === 'tr' ? 'İşleme Al' : 'Start')
+                                  : (currentLanguage === 'tr' ? 'Çöz' : 'Resolve')}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Phase 115: Email Campaign Manager ── */}
+              {crmTab === 'kampanya' && (
+                <div className="space-y-4">
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'E-posta Kampanyaları' : 'Email Campaigns'}
+                    subtitle={currentLanguage === 'tr' ? 'Lead segmentlerine toplu e-posta gönderin.' : 'Send bulk emails to lead segments.'}
+                    icon={Mail}
+                  />
+
+                  {campaignSent && (
+                    <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4">
+                      <CheckCircle2 size={18} className="text-emerald-600 flex-shrink-0" />
+                      <p className="text-sm font-semibold text-emerald-800">
+                        {currentLanguage === 'tr'
+                          ? `Kampanya gönderildi! ${campaignSent.count} müşteriye e-posta iletildi.`
+                          : `Campaign sent! Email dispatched to ${campaignSent.count} recipients.`}
+                      </p>
+                      <button onClick={() => setCampaignSent(null)} className="ml-auto text-emerald-400 hover:text-emerald-600"><X size={14} /></button>
+                    </div>
+                  )}
+
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5 space-y-4">
+                    <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Kampanya' : 'New Campaign'}</h3>
+
+                    {/* Segment picker */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Hedef Segment' : 'Target Segment'}</label>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { key: 'all',       label: currentLanguage === 'tr' ? `Tümü (${leads.length})` : `All (${leads.length})` },
+                          { key: 'new',       label: currentLanguage === 'tr' ? `Yeni (${leads.filter(l => l.status === 'New').length})` : `New (${leads.filter(l => l.status === 'New').length})` },
+                          { key: 'active',    label: currentLanguage === 'tr' ? `Nitelikli (${leads.filter(l => l.status === 'Qualified').length})` : `Qualified (${leads.filter(l => l.status === 'Qualified').length})` },
+                          { key: 'highScore', label: currentLanguage === 'tr' ? `Yüksek Skor ≥70 (${leads.filter(l => (l.score || 0) >= 70).length})` : `High Score ≥70 (${leads.filter(l => (l.score || 0) >= 70).length})` },
+                        ] as const).map(seg => (
+                          <button
+                            key={seg.key}
+                            onClick={() => setCampaignForm(f => ({ ...f, segment: seg.key }))}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-all border ${
+                              campaignForm.segment === seg.key
+                                ? 'bg-brand text-white border-brand'
+                                : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            {seg.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
+                      <input
+                        className="apple-input w-full"
+                        placeholder={currentLanguage === 'tr' ? 'E-posta konusu...' : 'Email subject...'}
+                        value={campaignForm.subject}
+                        onChange={e => setCampaignForm(f => ({ ...f, subject: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Mesaj' : 'Message'}</label>
+                      <textarea
+                        className="apple-input w-full min-h-[120px] resize-y"
+                        placeholder={currentLanguage === 'tr' ? 'Mesaj içeriği... {{isim}} ile kişiselleştirebilirsiniz.' : 'Message body... Use {{name}} to personalize.'}
+                        value={campaignForm.body}
+                        onChange={e => setCampaignForm(f => ({ ...f, body: e.target.value }))}
+                      />
+                    </div>
+
+                    {/* Preview + Send */}
+                    <div className="flex items-center gap-3 pt-1">
+                      <div className="flex-1">
+                        {(() => {
+                          const count = campaignForm.segment === 'all' ? leads.length
+                            : campaignForm.segment === 'new' ? leads.filter(l => l.status === 'New').length
+                            : campaignForm.segment === 'active' ? leads.filter(l => l.status === 'Qualified').length
+                            : leads.filter(l => (l.score || 0) >= 70).length;
+                          const withEmail = leads.filter(l => (l.email as string | undefined) && (
+                            campaignForm.segment === 'all' ? true
+                            : campaignForm.segment === 'new' ? l.status === 'New'
+                            : campaignForm.segment === 'active' ? l.status === 'Qualified'
+                            : (l.score || 0) >= 70
+                          )).length;
+                          return (
+                            <p className="text-xs text-gray-500">
+                              {currentLanguage === 'tr'
+                                ? `${count} kişi seçili · ${withEmail} e-posta adresi var`
+                                : `${count} leads selected · ${withEmail} have email addresses`}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                      <button
+                        disabled={!campaignForm.subject || !campaignForm.body || campaignSending}
+                        onClick={async () => {
+                          setCampaignSending(true);
+                          try {
+                            // Determine recipients
+                            const recipients = leads.filter(l => {
+                              const hasEmail = !!(l.email as string | undefined);
+                              if (!hasEmail) return false;
+                              if (campaignForm.segment === 'all') return true;
+                              if (campaignForm.segment === 'new') return l.status === 'New';
+                              if (campaignForm.segment === 'active') return l.status === 'Qualified';
+                              return (l.score || 0) >= 70;
+                            });
+                            // Log campaign to Firestore
+                            await addDoc(collection(db, 'campaigns'), {
+                              subject: campaignForm.subject,
+                              body: campaignForm.body,
+                              segment: campaignForm.segment,
+                              recipientCount: recipients.length,
+                              sentAt: serverTimestamp(),
+                              sentBy: user?.email || 'guest',
+                            });
+                            setCampaignSent({ count: recipients.length, ts: Date.now() });
+                            setCampaignForm({ subject: '', body: '', segment: 'all' });
+                            toast(currentLanguage === 'tr' ? 'Kampanya kaydedildi.' : 'Campaign logged.', 'success');
+                          } catch { toast('Error', 'error'); }
+                          finally { setCampaignSending(false); }
+                        }}
+                        className="apple-button-primary px-8 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        <Mail className="w-4 h-4" />
+                        {campaignSending
+                          ? (currentLanguage === 'tr' ? 'Gönderiliyor...' : 'Sending...')
+                          : (currentLanguage === 'tr' ? 'Kampanya Gönder' : 'Send Campaign')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Phase 116: Contract Management ── */}
+              {crmTab === 'sozlesmeler' && (
+                <div className="space-y-4">
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Sözleşme Yönetimi' : 'Contract Management'}
+                    subtitle={currentLanguage === 'tr' ? 'Müşteri sözleşmelerini takip edin.' : 'Track customer contracts and renewals.'}
+                    icon={FileText}
+                    actionButton={
+                      <button onClick={() => setShowContractForm(v => !v)} className="apple-button-primary flex items-center gap-2">
+                        <Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}
+                      </button>
+                    }
+                  />
+
+                  {/* Expiry alerts */}
+                  {(() => {
+                    const today = new Date();
+                    const expiring = contracts.filter(c => {
+                      if (!c.endDate) return false;
+                      const d = new Date(c.endDate);
+                      const diff = (d.getTime() - today.getTime()) / 86400000;
+                      return diff >= 0 && diff <= 30;
+                    });
+                    if (expiring.length === 0) return null;
+                    return (
+                      <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3">
+                        <AlertTriangle size={16} className="text-amber-600 flex-shrink-0" />
+                        <p className="text-sm font-semibold text-amber-800">
+                          {currentLanguage === 'tr'
+                            ? `${expiring.length} sözleşme 30 gün içinde sona eriyor.`
+                            : `${expiring.length} contract${expiring.length !== 1 ? 's' : ''} expiring within 30 days.`}
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* New contract form */}
+                  <AnimatePresence>
+                    {showContractForm && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3 shadow-sm">
+                          <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}</h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                              value={contractForm.customerName} onChange={e => setContractForm(f => ({ ...f, customerName: e.target.value }))} />
+                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Sözleşme başlığı' : 'Contract title'}
+                              value={contractForm.title} onChange={e => setContractForm(f => ({ ...f, title: e.target.value }))} />
+                            <input type="number" className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Sözleşme değeri (₺)' : 'Contract value (₺)'}
+                              value={contractForm.value || ''} onChange={e => setContractForm(f => ({ ...f, value: Number(e.target.value) }))} />
+                            <select className="apple-input w-full" value={contractForm.status} onChange={e => setContractForm(f => ({ ...f, status: e.target.value }))}>
+                              <option value="active">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</option>
+                              <option value="draft">{currentLanguage === 'tr' ? 'Taslak' : 'Draft'}</option>
+                              <option value="expired">{currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired'}</option>
+                            </select>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date'}</label>
+                              <input type="date" className="apple-input w-full" value={contractForm.startDate} onChange={e => setContractForm(f => ({ ...f, startDate: e.target.value }))} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Bitiş' : 'End Date'}</label>
+                              <input type="date" className="apple-input w-full" value={contractForm.endDate} onChange={e => setContractForm(f => ({ ...f, endDate: e.target.value }))} />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="checkbox" id="autoRenew116" checked={contractForm.autoRenew} onChange={e => setContractForm(f => ({ ...f, autoRenew: e.target.checked }))} className="w-4 h-4 accent-brand" />
+                            <label htmlFor="autoRenew116" className="text-xs font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Otomatik yenileme' : 'Auto-renew'}</label>
+                          </div>
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={() => setShowContractForm(false)} className="apple-button-secondary px-4 text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            <button
+                              disabled={!contractForm.customerName || !contractForm.title}
+                              onClick={async () => {
+                                if (!contractForm.customerName || !contractForm.title) return;
+                                try {
+                                  await addDoc(collection(db, 'contracts'), { ...contractForm, createdAt: serverTimestamp() });
+                                  setContractForm({ customerName: '', title: '', value: 0, startDate: '', endDate: '', status: 'active', autoRenew: false });
+                                  setShowContractForm(false);
+                                  toast(currentLanguage === 'tr' ? 'Sözleşme kaydedildi.' : 'Contract saved.', 'success');
+                                } catch { toast('Error', 'error'); }
+                              }}
+                              className="apple-button-primary px-6 text-sm disabled:opacity-50"
+                            >
+                              {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Contract list */}
+                  {contracts.length === 0 && !showContractForm ? (
+                    <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                      <FileText size={40} className="mx-auto mb-3 text-gray-200" />
+                      <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Henüz sözleşme yok.' : 'No contracts yet.'}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {contracts.map(c => {
+                        const today = new Date();
+                        const end = c.endDate ? new Date(c.endDate) : null;
+                        const daysLeft = end ? Math.ceil((end.getTime() - today.getTime()) / 86400000) : null;
+                        const expired = daysLeft !== null && daysLeft < 0;
+                        const expiringSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 30;
+                        return (
+                          <div key={c.id} className={`bg-white border rounded-xl p-4 flex items-center gap-4 shadow-sm ${expired ? 'border-red-100' : expiringSoon ? 'border-amber-100' : 'border-gray-100'}`}>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-gray-900">{c.title}</p>
+                              <p className="text-xs text-gray-500">{c.customerName} · ₺{(c.value || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                              {c.endDate && (
+                                <p className={`text-[10px] mt-0.5 font-semibold ${expired ? 'text-red-600' : expiringSoon ? 'text-amber-600' : 'text-gray-400'}`}>
+                                  {currentLanguage === 'tr'
+                                    ? expired ? 'Süresi doldu' : expiringSoon ? `${daysLeft} gün kaldı` : `${c.startDate} → ${c.endDate}`
+                                    : expired ? 'Expired' : expiringSoon ? `${daysLeft} days left` : `${c.startDate} → ${c.endDate}`}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                                c.status === 'active' ? 'bg-emerald-100 text-emerald-700'
+                                : c.status === 'expired' ? 'bg-red-100 text-red-700'
+                                : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {c.status === 'active' ? (currentLanguage === 'tr' ? 'Aktif' : 'Active')
+                                  : c.status === 'expired' ? (currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired')
+                                  : (currentLanguage === 'tr' ? 'Taslak' : 'Draft')}
+                              </span>
+                              {c.autoRenew && <span className="text-[9px] text-blue-500 font-semibold">↻ {currentLanguage === 'tr' ? 'Oto-Yenileme' : 'Auto-Renew'}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Phase 122: Price Override Approval ── */}
+              {crmTab === 'fiyat-onay' && (
+                <div className="space-y-4">
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Fiyat Onay Sistemi' : 'Price Override Approvals'}
+                    subtitle={currentLanguage === 'tr' ? 'Satış ekibinin talep ettiği özel fiyatları onaylayın.' : 'Approve custom pricing requests from the sales team.'}
+                    icon={Tag}
+                    actionButton={
+                      <button onClick={() => setShowPriceOverrideForm(v => !v)} className="apple-button-primary flex items-center gap-2">
+                        <Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}
+                      </button>
+                    }
+                  />
+
+                  {/* KPI strip */}
+                  {(() => {
+                    const pending = priceOverrides.filter(p => p.status === 'pending');
+                    const approved = priceOverrides.filter(p => p.status === 'approved');
+                    const rejected = priceOverrides.filter(p => p.status === 'rejected');
+                    const totalDiscount = approved.reduce((s, p) => s + Math.max(0, (p.standardPrice || 0) - (p.requestedPrice || 0)), 0);
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                          { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending.length, color: 'text-amber-600', bg: 'bg-amber-50', icon: '⏳' },
+                          { label: currentLanguage === 'tr' ? 'Onaylı' : 'Approved', value: approved.length, color: 'text-emerald-600', bg: 'bg-emerald-50', icon: '✅' },
+                          { label: currentLanguage === 'tr' ? 'Reddedilen' : 'Rejected', value: rejected.length, color: 'text-red-600', bg: 'bg-red-50', icon: '❌' },
+                          { label: currentLanguage === 'tr' ? 'Toplam İndirim' : 'Total Discount', value: '₺' + totalDiscount.toLocaleString('tr-TR', { maximumFractionDigits: 0 }), color: 'text-brand', bg: 'bg-brand/5', icon: '💸' },
+                        ].map(k => (
+                          <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                            <p className="text-xs text-gray-500 mb-1">{k.label}</p>
+                            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Request form */}
+                  <AnimatePresence>
+                    {showPriceOverrideForm && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-3">
+                          <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Fiyat Onay Talebi' : 'New Price Override Request'}</h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'} value={priceOverrideForm.customerName} onChange={e => setPriceOverrideForm(f => ({ ...f, customerName: e.target.value }))} />
+                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} value={priceOverrideForm.productName} onChange={e => setPriceOverrideForm(f => ({ ...f, productName: e.target.value }))} />
+                            <div>
+                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">{currentLanguage === 'tr' ? 'Standart Fiyat ₺' : 'Standard Price ₺'}</label>
+                              <input type="number" className="apple-input w-full" value={priceOverrideForm.standardPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, standardPrice: Number(e.target.value) }))} />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">{currentLanguage === 'tr' ? 'Talep Edilen Fiyat ₺' : 'Requested Price ₺'}</label>
+                              <input type="number" className="apple-input w-full" value={priceOverrideForm.requestedPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, requestedPrice: Number(e.target.value) }))} />
+                            </div>
+                          </div>
+                          <textarea className="apple-input w-full min-h-[60px] resize-none" placeholder={currentLanguage === 'tr' ? 'Gerekçe...' : 'Reason for override...'} value={priceOverrideForm.reason} onChange={e => setPriceOverrideForm(f => ({ ...f, reason: e.target.value }))} />
+                          {priceOverrideForm.standardPrice > 0 && priceOverrideForm.requestedPrice > 0 && (
+                            <p className={`text-xs font-semibold ${priceOverrideForm.requestedPrice < priceOverrideForm.standardPrice ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {priceOverrideForm.requestedPrice < priceOverrideForm.standardPrice
+                                ? `▼ ${Math.abs(Math.round(((priceOverrideForm.requestedPrice - priceOverrideForm.standardPrice) / priceOverrideForm.standardPrice) * 100))}% indirim`
+                                : `▲ ${Math.abs(Math.round(((priceOverrideForm.requestedPrice - priceOverrideForm.standardPrice) / priceOverrideForm.standardPrice) * 100))}% artış`}
+                            </p>
+                          )}
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={() => setShowPriceOverrideForm(false)} className="apple-button-secondary">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            <button className="apple-button-primary" onClick={async () => {
+                              if (!priceOverrideForm.customerName || !priceOverrideForm.productName) return;
+                              try {
+                                await addDoc(collection(db, 'priceOverrides'), {
+                                  ...priceOverrideForm, status: 'pending',
+                                  requestedBy: user?.email || user?.displayName || 'Sales',
+                                  createdAt: serverTimestamp(),
+                                });
+                                setPriceOverrideForm({ customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: '' });
+                                setShowPriceOverrideForm(false);
+                                toast(currentLanguage === 'tr' ? 'Talep oluşturuldu.' : 'Request submitted.', 'success');
+                              } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error'); }
+                            }}>{currentLanguage === 'tr' ? 'Talep Oluştur' : 'Submit Request'}</button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Override list */}
+                  {priceOverrides.length === 0 && !showPriceOverrideForm ? (
+                    <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
+                      <Tag size={40} className="mx-auto mb-3 text-gray-200" />
+                      <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Henüz fiyat onay talebi yok.' : 'No price override requests yet.'}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {priceOverrides.map(p => {
+                        const discountPct = p.standardPrice > 0 ? Math.round(((p.requestedPrice - p.standardPrice) / p.standardPrice) * 100) : 0;
+                        return (
+                          <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-4 flex items-center gap-4 shadow-sm">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="text-sm font-bold text-gray-900 truncate">{p.productName}</p>
+                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                  p.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                                  : p.status === 'approved' ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {p.status === 'pending' ? (currentLanguage === 'tr' ? 'Bekliyor' : 'Pending')
+                                    : p.status === 'approved' ? (currentLanguage === 'tr' ? 'Onaylı' : 'Approved')
+                                    : (currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected')}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500">{p.customerName} · {p.requestedBy}</p>
+                              <p className="text-[10px] text-gray-400 mt-0.5 truncate">{p.reason}</p>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 flex-shrink-0 text-right">
+                              <p className="text-xs text-gray-400 line-through">₺{(p.standardPrice || 0).toLocaleString('tr-TR')}</p>
+                              <p className="text-sm font-bold text-gray-900">₺{(p.requestedPrice || 0).toLocaleString('tr-TR')}</p>
+                              <span className={`text-[9px] font-bold ${discountPct < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {discountPct < 0 ? '▼' : '▲'}{Math.abs(discountPct)}%
+                              </span>
+                            </div>
+                            {p.status === 'pending' && (
+                              <div className="flex gap-1 flex-shrink-0">
+                                <button onClick={async () => { await updateDoc(doc(db, 'priceOverrides', p.id), { status: 'approved' }); toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success'); }}
+                                  className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title={currentLanguage === 'tr' ? 'Onayla' : 'Approve'}>
+                                  <Check size={14} />
+                                </button>
+                                <button onClick={async () => { await updateDoc(doc(db, 'priceOverrides', p.id), { status: 'rejected' }); toast(currentLanguage === 'tr' ? 'Reddedildi.' : 'Rejected.', 'error'); }}
+                                  className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors" title={currentLanguage === 'tr' ? 'Reddet' : 'Reject'}>
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* CRM sub-tab: Leads (default) */}
@@ -9289,13 +11651,23 @@ function AppContent() {
                           {currentLanguage === 'tr' ? 'Ara' : 'Call'}
                         </a>
                       )}
+                      {/* Phase 100: In-App Email Compose */}
                       {selectedLead.email && (
-                        <a href={`mailto:${selectedLead.email}`}
+                        <button
+                          onClick={() => setEmailCompose({
+                            open: true,
+                            to: selectedLead.email,
+                            name: selectedLead.name,
+                            subject: currentLanguage === 'tr' ? `Cetpa — ${selectedLead.name}` : `Cetpa — ${selectedLead.name}`,
+                            body: currentLanguage === 'tr'
+                              ? `Merhaba ${selectedLead.name},\n\n`
+                              : `Hello ${selectedLead.name},\n\n`,
+                          })}
                           className="apple-button-secondary flex items-center gap-2 text-purple-700 hover:bg-purple-50"
                           title={selectedLead.email}>
                           <Mail className="w-4 h-4" />
-                          {currentLanguage === 'tr' ? 'E-posta' : 'Email'}
-                        </a>
+                          {currentLanguage === 'tr' ? 'E-posta Yaz' : 'Compose Email'}
+                        </button>
                       )}
                       <button
                         onClick={() => {
@@ -9417,38 +11789,26 @@ function AppContent() {
                     <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedLead.notes || currentT.no_notes_available}</p>
                   </div>
                   {/* ── Phase 58: Lead Quick-Note ── */}
-                  {(() => {
-                    const storageKey = `cetpa-lead-note-${selectedLead.id}`;
-                    const [lnText, setLnText] = React.useState<string>(() => localStorage.getItem(storageKey) ?? '');
-                    const lnTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-                    const handleLnChange = (val: string) => {
-                      setLnText(val);
-                      if (lnTimer.current) clearTimeout(lnTimer.current);
-                      lnTimer.current = setTimeout(() => localStorage.setItem(storageKey, val), 600);
-                    };
-                    return (
-                      <div className="bg-amber-50 border border-amber-100 p-5 rounded-xl">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
-                            <FileText className="w-4 h-4" />
-                            {currentLanguage === 'tr' ? 'Hızlı Not (Yerel)' : 'Quick Note (Local)'}
-                          </h3>
-                          {lnText && (
-                            <span className="text-[9px] text-amber-500 font-semibold">
-                              {currentLanguage === 'tr' ? 'Otomatik kaydediliyor' : 'Auto-saved'}
-                            </span>
-                          )}
-                        </div>
-                        <textarea
-                          value={lnText}
-                          onChange={e => handleLnChange(e.target.value)}
-                          rows={3}
-                          placeholder={currentLanguage === 'tr' ? 'Bu müşteri adayı için hızlı notunuzu yazın…' : 'Jot a quick note about this lead…'}
-                          className="w-full bg-white/70 rounded-lg px-3 py-2 text-sm text-gray-700 placeholder-amber-300 outline-none focus:ring-2 focus:ring-amber-200 resize-none leading-relaxed border border-amber-100"
-                        />
-                      </div>
-                    );
-                  })()}
+                  <div className="bg-amber-50 border border-amber-100 p-5 rounded-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
+                        <FileText className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Hızlı Not (Yerel)' : 'Quick Note (Local)'}
+                      </h3>
+                      {leadNoteText && (
+                        <span className="text-[9px] text-amber-500 font-semibold">
+                          {currentLanguage === 'tr' ? 'Otomatik kaydediliyor' : 'Auto-saved'}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={leadNoteText}
+                      onChange={e => handleLeadNoteChange(e.target.value)}
+                      rows={3}
+                      placeholder={currentLanguage === 'tr' ? 'Bu müşteri adayı için hızlı notunuzu yazın…' : 'Jot a quick note about this lead…'}
+                      className="w-full bg-white/70 rounded-lg px-3 py-2 text-sm text-gray-700 placeholder-amber-300 outline-none focus:ring-2 focus:ring-amber-200 resize-none leading-relaxed border border-amber-100"
+                    />
+                  </div>
                 </div>
 
                 <div className="lg:col-span-2 space-y-6">
@@ -9456,29 +11816,70 @@ function AppContent() {
                     <h3 className="font-bold mb-4 flex items-center gap-2">
                       <Package className="w-5 h-5 text-brand" /> {currentT.associated_orders}
                     </h3>
-                    {/* Phase 96: Financial summary for this customer */}
+                    {/* Phase 96 + Phase 104: Financial summary + CLV + Churn Risk */}
                     {(() => {
                       const custOrders = orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name);
+                      const p96Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                      const p96Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                      const fmt       = (v: number) => `${p96Sym}${(kpiCurrency === 'TRY' ? v : v / p96Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
                       if (custOrders.length === 0) return null;
                       const totalRev  = custOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const unpaidRev = totalRev - paidRev;
-                      const p96Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
-                      const p96Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                      const fmt       = (v: number) => `${p96Sym}${(kpiCurrency === 'TRY' ? v : v / p96Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                      // Phase 104: CLV calculations
+                      const getOD104 = (o: Order): Date => {
+                        const raw = o.createdAt ?? o.syncedAt;
+                        if (!raw) return new Date(0);
+                        return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                      };
+                      const sorted104    = [...custOrders].sort((a, b) => getOD104(a).getTime() - getOD104(b).getTime());
+                      const firstOrder   = sorted104[0];
+                      const lastOrder    = sorted104[sorted104.length - 1];
+                      const firstDate    = getOD104(firstOrder);
+                      const lastDate     = getOD104(lastOrder);
+                      const daysSinceLast = Math.floor((Date.now() - lastDate.getTime()) / 86400000);
+                      const tenureMonths = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+                      const ordersPerMonth = custOrders.length / tenureMonths;
+                      const aov = totalRev / custOrders.length;
+                      const clv12 = aov * ordersPerMonth * 12;
+                      const churnRisk = daysSinceLast > 90 ? 'high' : daysSinceLast > 45 ? 'medium' : 'low';
+                      const churnColor = churnRisk === 'high' ? 'bg-red-50 text-red-700 border-red-100' : churnRisk === 'medium' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                      const churnLabel = churnRisk === 'high' ? (currentLanguage === 'tr' ? '⚠ Kayıp Riski Yüksek' : '⚠ High Churn Risk') : churnRisk === 'medium' ? (currentLanguage === 'tr' ? '~ Orta Risk' : '~ Medium Risk') : (currentLanguage === 'tr' ? '✓ Aktif' : '✓ Active');
                       return (
-                        <div className="grid grid-cols-3 gap-2 mb-4">
-                          {[
-                            { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Lifetime Revenue', value: fmt(totalRev), color: 'text-gray-800' },
-                            { label: currentLanguage === 'tr' ? 'Ödenen' : 'Paid',   value: fmt(paidRev),   color: 'text-emerald-700' },
-                            { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Unpaid', value: fmt(unpaidRev), color: unpaidRev > 0 ? 'text-amber-600' : 'text-gray-400' },
-                          ].map((s, i) => (
-                            <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
-                              <p className={`text-base font-black ${s.color}`}>{s.value}</p>
-                              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{s.label}</p>
+                        <>
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            {[
+                              { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Lifetime Revenue', value: fmt(totalRev), color: 'text-gray-800' },
+                              { label: currentLanguage === 'tr' ? 'Ödenen' : 'Paid',   value: fmt(paidRev),   color: 'text-emerald-700' },
+                              { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Unpaid', value: fmt(unpaidRev), color: unpaidRev > 0 ? 'text-amber-600' : 'text-gray-400' },
+                            ].map((s, i) => (
+                              <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
+                                <p className={`text-base font-black ${s.color}`}>{s.value}</p>
+                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{s.label}</p>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Phase 104: CLV + Churn Risk strip */}
+                          <div className="rounded-xl border border-gray-100 bg-gray-50/50 px-4 py-3 mb-4 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Müşteri Değeri (CLV)' : 'Customer Lifetime Value'}</p>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${churnColor}`}>{churnLabel}</span>
                             </div>
-                          ))}
-                        </div>
+                            <div className="grid grid-cols-4 gap-2 text-center">
+                              {[
+                                { label: currentLanguage === 'tr' ? '12A CLV' : '12M CLV', value: fmt(clv12), color: 'text-purple-700' },
+                                { label: currentLanguage === 'tr' ? 'Ort. Sipariş' : 'Avg Order', value: fmt(aov), color: 'text-blue-600' },
+                                { label: currentLanguage === 'tr' ? 'Sıklık/Ay' : 'Freq/Mo', value: ordersPerMonth.toFixed(1), color: 'text-gray-800' },
+                                { label: currentLanguage === 'tr' ? 'Son Sipariş' : 'Last Order', value: `${daysSinceLast}g`, color: daysSinceLast > 60 ? 'text-red-500' : 'text-gray-600' },
+                              ].map((m, i) => (
+                                <div key={i}>
+                                  <p className={`text-sm font-black ${m.color}`}>{m.value}</p>
+                                  <p className="text-[9px] text-gray-400 font-bold">{m.label}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
                       );
                     })()}
                     <div className="space-y-3">
@@ -9535,6 +11936,70 @@ function AppContent() {
                       )}
                     </div>
                   </div>
+
+                  {/* ── Commission Summary for Dealer / B2B Leads ── */}
+                  {(selectedLead.priceTier === 'Dealer' || selectedLead.priceTier === 'B2B Premium' || selectedLead.priceTier === 'B2B Standard' || selectedLead.customerType === 'B2B') && (() => {
+                    const now = new Date();
+                    const curPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                    const [cpYear, cpMonth] = curPeriod.split('-').map(Number);
+                    const dealerOrders = orders.filter(o => {
+                      if (o.status === 'Cancelled') return false;
+                      const matches = (o.customerName === (selectedLead.company || selectedLead.name));
+                      if (!matches) return false;
+                      const raw = o.syncedAt ?? o.createdAt;
+                      const d = raw && typeof (raw as {toDate?:()=>Date}).toDate === 'function' ? (raw as {toDate:()=>Date}).toDate() : new Date(raw as string|number);
+                      return d.getFullYear() === cpYear && d.getMonth() + 1 === cpMonth;
+                    });
+                    const actualSales = dealerOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                    const tier = selectedLead.priceTier || 'B2B Standard';
+                    const rule = commissionRules.find(r => r.tier === tier);
+                    const targetAmount = rule?.targetAmount || 100000;
+                    const baseRate = rule?.commissionRate || 3;
+                    const bonusRate = rule?.bonusRate || 0;
+                    const achievementRate = targetAmount > 0 ? Math.min((actualSales / targetAmount) * 100, 200) : 0;
+                    const effectiveRate = achievementRate >= 100 ? baseRate + bonusRate : baseRate * (achievementRate / 100);
+                    const commissionEarned = actualSales * (effectiveRate / 100);
+                    return (
+                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="font-bold flex items-center gap-2">
+                            <TrendingUp className="w-5 h-5 text-violet-600" />
+                            {currentLanguage === 'tr' ? 'Komisyon Özeti' : 'Commission Summary'}
+                          </h3>
+                          <span className="text-xs bg-violet-50 text-violet-700 font-bold px-2 py-1 rounded-full">{curPeriod}</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                          {[
+                            { label: currentLanguage === 'tr' ? 'Bu Ay Satış' : 'Monthly Sales', value: `₺${actualSales.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-gray-900' },
+                            { label: currentLanguage === 'tr' ? 'Hedef' : 'Target', value: `₺${targetAmount.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-gray-500' },
+                            { label: currentLanguage === 'tr' ? 'Gerçekleşme' : 'Achievement', value: `${achievementRate.toFixed(1)}%`, color: achievementRate >= 100 ? 'text-emerald-600' : 'text-amber-600' },
+                            { label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', value: `₺${commissionEarned.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-violet-700' },
+                          ].map((s, i) => (
+                            <div key={i} className="bg-gray-50 rounded-xl p-3">
+                              <p className={`text-base font-black ${s.color}`}>{s.value}</p>
+                              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{s.label}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Achievement progress */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-gray-500 font-medium">
+                            <span>{currentLanguage === 'tr' ? 'Hedef İlerlemesi' : 'Target Progress'}</span>
+                            <span className="font-bold">{achievementRate.toFixed(1)}%{achievementRate >= 100 ? ' 🎉' : ''}</span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2">
+                            <div className={`h-2 rounded-full transition-all ${achievementRate >= 100 ? 'bg-emerald-500' : 'bg-violet-500'}`}
+                              style={{ width: `${Math.min(achievementRate, 100)}%` }} />
+                          </div>
+                          {!rule && (
+                            <p className="text-[10px] text-amber-600 mt-1">
+                              {currentLanguage === 'tr' ? '⚠ Bu tier için komisyon kuralı tanımlanmamış. CRM → Komisyon bölümünden ekleyin.' : '⚠ No commission rule for this tier. Add one in CRM → Commission.'}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Cari Ekstre (AR aging for this customer) ── */}
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -9792,6 +12257,130 @@ function AppContent() {
                   </button>
                 </div>
               )}
+
+              {/* ── Phase 119: Recurring Order Templates ── */}
+              {(() => {
+                const dueToday = recurringOrders.filter(r => r.active && r.nextDue && new Date(r.nextDue) <= new Date());
+                return (
+                  <div className="space-y-3">
+                    {/* Due now alert */}
+                    {dueToday.length > 0 && (
+                      <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-3">
+                        <RefreshCw size={15} className="text-blue-500 flex-shrink-0" />
+                        <p className="text-sm font-semibold text-blue-800">
+                          {currentLanguage === 'tr'
+                            ? `${dueToday.length} tekrarlayan sipariş bugün/geçmiş vadede.`
+                            : `${dueToday.length} recurring order${dueToday.length !== 1 ? 's' : ''} due today or overdue.`}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <RefreshCw size={14} className="text-gray-400" />
+                          <h3 className="text-sm font-bold text-gray-700">
+                            {currentLanguage === 'tr' ? 'Tekrarlayan Siparişler' : 'Recurring Orders'}
+                          </h3>
+                          {recurringOrders.length > 0 && (
+                            <span className="text-[10px] bg-gray-100 text-gray-500 font-bold px-1.5 py-0.5 rounded-full">
+                              {recurringOrders.filter(r => r.active).length}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setShowRecurringForm(v => !v)}
+                          className="text-[10px] font-bold text-brand hover:underline flex items-center gap-1"
+                        >
+                          <Plus size={11} />{currentLanguage === 'tr' ? 'Şablon Ekle' : 'Add Template'}
+                        </button>
+                      </div>
+
+                      {/* Add form */}
+                      <AnimatePresence>
+                        {showRecurringForm && (
+                          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                            <div className="p-4 bg-gray-50 border-b border-gray-100 space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Şablon adı' : 'Template name'}
+                                  value={recurringForm.templateName} onChange={e => setRecurringForm(f => ({ ...f, templateName: e.target.value }))} />
+                                <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                                  value={recurringForm.customerName} onChange={e => setRecurringForm(f => ({ ...f, customerName: e.target.value }))} />
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
+                                  <input type="number" className="apple-input text-sm pl-6 w-full" placeholder={currentLanguage === 'tr' ? 'Tutar' : 'Amount'}
+                                    value={recurringForm.totalPrice || ''} onChange={e => setRecurringForm(f => ({ ...f, totalPrice: Number(e.target.value) }))} />
+                                </div>
+                                <select className="apple-input text-sm" value={recurringForm.frequency} onChange={e => setRecurringForm(f => ({ ...f, frequency: e.target.value as typeof recurringForm.frequency }))}>
+                                  <option value="weekly">{currentLanguage === 'tr' ? 'Haftalık' : 'Weekly'}</option>
+                                  <option value="monthly">{currentLanguage === 'tr' ? 'Aylık' : 'Monthly'}</option>
+                                  <option value="quarterly">{currentLanguage === 'tr' ? '3 Aylık' : 'Quarterly'}</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Sonraki vade:' : 'Next due:'}</label>
+                                <input type="date" className="apple-input text-sm" value={recurringForm.nextDue} onChange={e => setRecurringForm(f => ({ ...f, nextDue: e.target.value }))} />
+                                <button
+                                  disabled={!recurringForm.templateName || !recurringForm.customerName}
+                                  onClick={async () => {
+                                    if (!recurringForm.templateName) return;
+                                    await addDoc(collection(db, 'recurringOrders'), { ...recurringForm, active: true, createdAt: serverTimestamp() });
+                                    setRecurringForm({ templateName: '', customerName: '', totalPrice: 0, frequency: 'monthly', nextDue: '' });
+                                    setShowRecurringForm(false);
+                                    toast(currentLanguage === 'tr' ? 'Şablon eklendi.' : 'Template added.', 'success');
+                                  }}
+                                  className="apple-button-primary text-xs px-4 ml-auto disabled:opacity-50"
+                                >{currentLanguage === 'tr' ? 'Ekle' : 'Add'}</button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {recurringOrders.length === 0 ? (
+                        <div className="py-8 text-center">
+                          <RefreshCw size={28} className="mx-auto mb-2 text-gray-200" />
+                          <p className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Tekrarlayan sipariş şablonu yok.' : 'No recurring order templates.'}</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-gray-50">
+                          {recurringOrders.map(r => {
+                            const due = r.nextDue ? new Date(r.nextDue) : null;
+                            const overdue = due && due <= new Date();
+                            return (
+                              <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.active ? (overdue ? 'bg-red-400' : 'bg-emerald-400') : 'bg-gray-200'}`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold text-gray-800 truncate">{r.templateName}</p>
+                                  <p className="text-[10px] text-gray-400">{r.customerName} · ₺{(r.totalPrice || 0).toLocaleString('tr-TR')}</p>
+                                </div>
+                                <span className="text-[10px] text-gray-500 flex-shrink-0">
+                                  {r.frequency === 'weekly' ? (currentLanguage === 'tr' ? 'Haftalık' : 'Weekly')
+                                    : r.frequency === 'monthly' ? (currentLanguage === 'tr' ? 'Aylık' : 'Monthly')
+                                    : (currentLanguage === 'tr' ? '3 Aylık' : 'Quarterly')}
+                                </span>
+                                {due && (
+                                  <span className={`text-[10px] font-bold flex-shrink-0 ${overdue ? 'text-red-600' : 'text-gray-500'}`}>
+                                    {overdue ? '⚠ ' : ''}{due.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short' })}
+                                  </span>
+                                )}
+                                <button
+                                  onClick={async () => {
+                                    await updateDoc(doc(db, 'recurringOrders', r.id), { active: !r.active });
+                                  }}
+                                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${r.active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                                >
+                                  {r.active ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Paused')}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── Phase 55: Status Filter Chips ── */}
               <div className="flex flex-wrap gap-1.5">
@@ -10242,6 +12831,18 @@ function AppContent() {
                         <MessageSquare className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
                       </button>
+                      {/* Phase 112: RMA / Return button */}
+                      {selectedOrder.status === 'Delivered' && (
+                        <button
+                          onClick={() => { setReturnModal({ open: true, order: selectedOrder }); setReturnAmount(selectedOrder.totalPrice || 0); setReturnItems(''); setReturnReason(''); }}
+                          className="bg-white hover:bg-orange-50 text-gray-700 hover:text-orange-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-orange-200 transition-colors"
+                          title={currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Create Return Request'}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'İade' : 'Return'}
+                        </button>
+                      )}
+
                       {/* Phase 89: Mark Paid / Unpaid toggle in detail header */}
                       <button
                         onClick={() => handleToggleOrderPaid(selectedOrder)}
@@ -10351,33 +12952,67 @@ function AppContent() {
                     </div>
                   </div>
                   {/* Phase 40: Order Quick Note */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-bold">{currentT.notes}</h3>
+                      {orderNoteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kaydedildi' : 'Saved'}</span>}
+                    </div>
+                    <textarea
+                      value={orderNoteText}
+                      onChange={e => { setOrderNoteText(e.target.value); setOrderNoteSaved(false); }}
+                      onBlur={() => void handleSaveOrderNote()}
+                      rows={4}
+                      placeholder={currentT.no_notes_available}
+                      className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
+                    />
+                    {orderNoteSaving && <p className="text-[10px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…'}</p>}
+                  </div>
+
+                  {/* ── Phase 101: Order Activity Timeline ── */}
                   {(() => {
-                    const [noteText, setNoteText] = React.useState(selectedOrder.notes ?? '');
-                    const [noteSaving, setNoteSaving] = React.useState(false);
-                    const [noteSaved, setNoteSaved] = React.useState(false);
-                    const saveNote = async () => {
-                      if (noteText === (selectedOrder.notes ?? '')) return;
-                      setNoteSaving(true);
-                      await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: noteText, updatedAt: serverTimestamp() });
-                      setSelectedOrder({ ...selectedOrder, notes: noteText });
-                      setNoteSaving(false); setNoteSaved(true);
-                      setTimeout(() => setNoteSaved(false), 2000);
-                    };
+                    const events: TimelineEntry[] = [
+                      // creation event from order data
+                      ...((() => {
+                        const raw = selectedOrder.createdAt ?? selectedOrder.syncedAt;
+                        if (!raw) return [] as TimelineEntry[];
+                        const ts = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                          ? (raw as { toDate: () => Date }).toDate().getTime()
+                          : new Date(raw as string | number).getTime();
+                        return [{ action: currentLanguage === 'tr' ? 'Sipariş oluşturuldu' : 'Order created', actor: selectedOrder.customerName || '—', ts }] as TimelineEntry[];
+                      })()),
+                      // Firestore-stored timeline entries
+                      ...orderTimeline,
+                    ].sort((a, b) => a.ts - b.ts);
+
+                    if (events.length === 0) return null;
                     return (
-                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-bold">{currentT.notes}</h3>
-                          {noteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kaydedildi' : 'Saved'}</span>}
+                      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                        <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
+                          <History className="w-4 h-4 text-brand" />
+                          {currentLanguage === 'tr' ? 'Sipariş Geçmişi' : 'Order History'}
+                        </h3>
+                        <div className="relative pl-5">
+                          {/* vertical line */}
+                          <div className="absolute left-2 top-1.5 bottom-1.5 w-px bg-gray-100" />
+                          <div className="space-y-4">
+                            {events.map((ev, i) => {
+                              const d = new Date(ev.ts);
+                              const isLast = i === events.length - 1;
+                              return (
+                                <div key={i} className="relative flex gap-3 items-start">
+                                  <div className={`absolute -left-5 mt-0.5 w-3 h-3 rounded-full border-2 ${isLast ? 'bg-brand border-brand' : 'bg-white border-gray-300'}`} />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-gray-800">{ev.action}</p>
+                                    <p className="text-[10px] text-gray-400 mt-0.5">
+                                      {ev.actor} · {d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })} {d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                    {ev.note && <p className="text-[10px] text-gray-500 mt-0.5 italic">"{ev.note}"</p>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <textarea
-                          value={noteText}
-                          onChange={e => { setNoteText(e.target.value); setNoteSaved(false); }}
-                          onBlur={() => void saveNote()}
-                          rows={4}
-                          placeholder={currentT.no_notes_available}
-                          className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
-                        />
-                        {noteSaving && <p className="text-[10px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…'}</p>}
                       </div>
                     );
                   })()}
@@ -10510,16 +13145,16 @@ function AppContent() {
               )}
               {/* Lojistik sub-tab: Depo/Transfer/İrsaliye via AccountingModule */}
               {lojistikTab === 'depo' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-depo" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'transfer' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-transfer" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'giden_irsaliye' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-giden" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'gelen_irsaliye' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* Lojistik sub-tab: Sevkiyatlar (existing logistics content) */}
@@ -10562,6 +13197,69 @@ function AppContent() {
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 108: Delivery SLA Strip ── */}
+              {(() => {
+                const toTs108 = (val: unknown): number => {
+                  if (!val) return 0;
+                  if (typeof (val as { toDate?: () => Date }).toDate === 'function') return (val as { toDate: () => Date }).toDate().getTime();
+                  return new Date(val as string | number).getTime();
+                };
+                const SLA_DAYS = 7; // on-time = delivered within 7 days of creation
+                const deliveredOrders = orders.filter(o => o.status === 'Delivered');
+                if (deliveredOrders.length === 0) return null;
+
+                let onTimeCount = 0, totalDays = 0;
+                for (const o of deliveredOrders) {
+                  const created = toTs108(o.createdAt ?? o.syncedAt);
+                  const synced  = toTs108(o.syncedAt ?? o.createdAt);
+                  const days = created && synced ? Math.abs(synced - created) / 86400000 : SLA_DAYS;
+                  if (days <= SLA_DAYS) onTimeCount++;
+                  totalDays += Math.max(0, days);
+                }
+                const slaRate   = Math.round((onTimeCount / deliveredOrders.length) * 100);
+                const avgDays   = totalDays / deliveredOrders.length;
+                const lateCount = deliveredOrders.length - onTimeCount;
+                const slaColor  = slaRate >= 80 ? 'text-emerald-600' : slaRate >= 50 ? 'text-amber-600' : 'text-red-500';
+                const barColor  = slaRate >= 80 ? 'bg-emerald-400' : slaRate >= 50 ? 'bg-amber-400' : 'bg-red-400';
+
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Teslimat SLA Performansı' : 'Delivery SLA Performance'}
+                      </h3>
+                      <span className="text-[10px] text-gray-400">
+                        {currentLanguage === 'tr' ? `≤${SLA_DAYS} gün = zamanında` : `≤${SLA_DAYS} days = on-time`}
+                      </span>
+                    </div>
+                    {/* SLA bar */}
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                        <div
+                          className={`h-3 rounded-full transition-all duration-700 ${barColor}`}
+                          style={{ width: `${slaRate}%` }}
+                        />
+                      </div>
+                      <span className={`text-lg font-black flex-shrink-0 ${slaColor}`}>{slaRate}%</span>
+                    </div>
+                    {/* Metric grid */}
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: currentLanguage === 'tr' ? 'Zamanında' : 'On-Time',      value: onTimeCount,             color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                        { label: currentLanguage === 'tr' ? 'Gecikmeli'  : 'Late',         value: lateCount,               color: 'text-red-500',     bg: 'bg-red-50'     },
+                        { label: currentLanguage === 'tr' ? 'Ort. Gün'   : 'Avg Days',     value: avgDays.toFixed(1),      color: 'text-blue-600',    bg: 'bg-blue-50'    },
+                      ].map((m, i) => (
+                        <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
+                          <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
+                          <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/40" : "text-gray-400")}>{m.label}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 );
@@ -11556,6 +14254,215 @@ function AppContent() {
       )}
 
       <AIChat />
+
+      {/* ── Phase 112: RMA / Return Modal ── */}
+      <AnimatePresence>
+        {returnModal.open && returnModal.order && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+            >
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-orange-50/60">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-100 rounded-xl">
+                    <RefreshCw className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">{currentLanguage === 'tr' ? 'İade Talebi' : 'Return Request'}</h2>
+                    <p className="text-xs text-gray-500">#{returnModal.order.shopifyOrderId || returnModal.order.id.slice(-8)} · {returnModal.order.customerName}</p>
+                  </div>
+                </div>
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Nedeni' : 'Return Reason'}</label>
+                  <select
+                    value={returnReason}
+                    onChange={e => setReturnReason(e.target.value)}
+                    className="apple-input w-full"
+                  >
+                    <option value="">{currentLanguage === 'tr' ? 'Sebep seçin...' : 'Select reason...'}</option>
+                    {[
+                      currentLanguage === 'tr' ? 'Hasarlı ürün' : 'Damaged product',
+                      currentLanguage === 'tr' ? 'Yanlış ürün gönderildi' : 'Wrong item shipped',
+                      currentLanguage === 'tr' ? 'Müşteri vazgeçti' : 'Customer changed mind',
+                      currentLanguage === 'tr' ? 'Kalite sorunu' : 'Quality issue',
+                      currentLanguage === 'tr' ? 'Geç teslimat' : 'Late delivery',
+                      currentLanguage === 'tr' ? 'Diğer' : 'Other',
+                    ].map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Edilecek Ürünler / Açıklama' : 'Items to Return / Description'}</label>
+                  <textarea
+                    value={returnItems}
+                    onChange={e => setReturnItems(e.target.value)}
+                    className="apple-input w-full min-h-[72px] resize-none"
+                    placeholder={currentLanguage === 'tr' ? 'Ürün adları, miktarlar...' : 'Product names, quantities...'}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Tutarı (₺)' : 'Refund Amount (₺)'}</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">₺</span>
+                    <input
+                      type="number"
+                      value={returnAmount}
+                      onChange={e => setReturnAmount(Number(e.target.value))}
+                      className="apple-input w-full pl-7"
+                      max={returnModal.order.totalPrice}
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} ₺{(returnModal.order.totalPrice || 0).toLocaleString('tr-TR')}</p>
+                </div>
+              </div>
+              <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="apple-button-secondary px-6">
+                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  disabled={!returnReason || returnSubmitting}
+                  onClick={async () => {
+                    if (!returnReason || !returnModal.order) return;
+                    setReturnSubmitting(true);
+                    try {
+                      await addDoc(collection(db, 'returns'), {
+                        orderId: returnModal.order.id,
+                        orderNumber: returnModal.order.shopifyOrderId || returnModal.order.id.slice(-8),
+                        customerName: returnModal.order.customerName,
+                        reason: returnReason,
+                        items: returnItems,
+                        refundAmount: returnAmount,
+                        status: 'pending',
+                        createdAt: serverTimestamp(),
+                        createdBy: user?.email || 'guest',
+                      });
+                      // Update order status to indicate return pending
+                      await updateDoc(doc(db, 'orders', returnModal.order.id), { hasReturn: true, returnStatus: 'pending' });
+                      toast(currentLanguage === 'tr' ? 'İade talebi oluşturuldu.' : 'Return request created.', 'success');
+                      setReturnModal({ open: false, order: null });
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    finally { setReturnSubmitting(false); }
+                  }}
+                  className="apple-button-primary px-8 flex items-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {returnSubmitting ? (currentLanguage === 'tr' ? 'Kaydediliyor...' : 'Saving...') : (currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Submit Return')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Phase 100: In-App Email Compose Modal ── */}
+      <AnimatePresence>
+        {emailCompose.open && (
+          <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <Mail className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni E-posta' : 'New Email'}</p>
+                    <p className="text-[10px] text-gray-400">{emailCompose.to}</p>
+                  </div>
+                </div>
+                <button onClick={() => setEmailCompose(e => ({ ...e, open: false }))} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+              {/* Fields */}
+              <div className="p-5 space-y-3 flex-1">
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Alıcı' : 'To'}</label>
+                  <input
+                    readOnly
+                    value={`${emailCompose.name} <${emailCompose.to}>`}
+                    className="apple-input w-full text-sm bg-gray-50 text-gray-500 cursor-default"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
+                  <input
+                    value={emailCompose.subject}
+                    onChange={e => setEmailCompose(c => ({ ...c, subject: e.target.value }))}
+                    className="apple-input w-full text-sm"
+                    placeholder={currentLanguage === 'tr' ? 'E-posta konusu' : 'Email subject'}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Mesaj' : 'Message'}</label>
+                  <textarea
+                    value={emailCompose.body}
+                    onChange={e => setEmailCompose(c => ({ ...c, body: e.target.value }))}
+                    rows={7}
+                    className="apple-input w-full text-sm resize-none leading-relaxed"
+                    placeholder={currentLanguage === 'tr' ? 'Mesajınızı buraya yazın…' : 'Write your message here…'}
+                  />
+                </div>
+              </div>
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
+                <button onClick={() => setEmailCompose(e => ({ ...e, open: false }))} className="apple-button-secondary px-5">
+                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  disabled={emailSending || !emailCompose.subject || !emailCompose.body}
+                  onClick={async () => {
+                    setEmailSending(true);
+                    try {
+                      const res = await fetch('/api/email/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ to: emailCompose.to, subject: emailCompose.subject, text: emailCompose.body }),
+                      });
+                      const d = await res.json();
+                      if (d.success) {
+                        toast(currentLanguage === 'tr' ? `E-posta gönderildi → ${emailCompose.to}` : `Email sent → ${emailCompose.to}`, 'success');
+                        // Save to lead emails array
+                        const lead = leads.find(l => l.email === emailCompose.to);
+                        if (lead) {
+                          const lead101 = lead as unknown as Record<string, unknown>;
+                          const existing = Array.isArray(lead101.emails) ? lead101.emails as unknown[] : [];
+                          await updateDoc(doc(db, 'leads', lead.id), {
+                            emails: [...existing, { subject: emailCompose.subject, body: emailCompose.body, sentAt: Date.now(), sentBy: user?.email || 'system' }]
+                          });
+                        }
+                        setEmailCompose(e => ({ ...e, open: false }));
+                      } else if (d.notConfigured) {
+                        toast(currentLanguage === 'tr' ? 'E-posta servisi yapılandırılmamış. Ayarlar > Resend API.' : 'Email not configured. Add Resend API key in Settings.', 'error');
+                      } else {
+                        toast(d.error || 'Gönderilemedi', 'error');
+                      }
+                    } catch(err) {
+                      toast(err instanceof Error ? err.message : 'Hata', 'error');
+                    } finally { setEmailSending(false); }
+                  }}
+                  className="apple-button-primary px-6 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {emailSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                  {emailSending ? (currentLanguage === 'tr' ? 'Gönderiliyor…' : 'Sending…') : (currentLanguage === 'tr' ? 'Gönder' : 'Send')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ── Phase 28: Keyboard Shortcut Cheat-Sheet ── */}
       <AnimatePresence>

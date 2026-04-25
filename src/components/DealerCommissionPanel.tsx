@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   TrendingUp, Target, Award, Plus, Edit2, Trash2, X,
-  DollarSign, CheckCircle2, AlertCircle, BarChart3
+  DollarSign, CheckCircle2, AlertCircle, BarChart3, Lock
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
@@ -85,9 +85,46 @@ export default function DealerCommissionPanel({
   });
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
+  const [seedingDefaults, setSeedingDefaults] = useState(false);
+
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSeedDefaults = async () => {
+    if (!isAuthenticated) {
+      showToast(
+        currentLanguage === 'tr' ? 'Kural eklemek için giriş yapmanız gerekiyor.' : 'Please sign in to add commission rules.',
+        'error'
+      );
+      return;
+    }
+    setSeedingDefaults(true);
+    try {
+      const defaults = [
+        { tier: 'Dealer',       targetAmount: 200000, commissionRate: 5,   bonusRate: 2,   period: 'monthly' as const },
+        { tier: 'B2B Premium',  targetAmount: 150000, commissionRate: 4,   bonusRate: 1.5, period: 'monthly' as const },
+        { tier: 'B2B Standard', targetAmount: 100000, commissionRate: 3,   bonusRate: 1,   period: 'monthly' as const },
+        { tier: 'Retail',       targetAmount: 50000,  commissionRate: 2,   bonusRate: 0.5, period: 'monthly' as const },
+      ];
+      for (const rule of defaults) {
+        await addDoc(collection(db, 'commissionRules'), { ...rule, createdAt: serverTimestamp() });
+      }
+      showToast(currentLanguage === 'tr' ? 'Varsayılan komisyon kuralları eklendi.' : 'Default commission rules added.');
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : '';
+      const isPermission = msg.includes('permission') || msg.includes('Missing or insufficient');
+      showToast(
+        isPermission
+          ? (currentLanguage === 'tr' ? 'Yetki hatası — lütfen giriş yapın.' : 'Permission denied — please sign in.')
+          : (currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.'),
+        'error'
+      );
+    } finally {
+      setSeedingDefaults(false);
+    }
   };
 
   const [ruleForm, setRuleForm] = useState<Omit<CommissionRule, 'id' | 'createdAt'>>({
@@ -110,6 +147,13 @@ export default function DealerCommissionPanel({
   }, []);
 
   const handleSaveRule = async () => {
+    if (!isAuthenticated) {
+      showToast(
+        currentLanguage === 'tr' ? 'Kural eklemek için giriş yapmanız gerekiyor.' : 'Please sign in to save rules.',
+        'error'
+      );
+      return;
+    }
     try {
       if (editingRuleId) {
         await updateDoc(doc(db, 'commissionRules', editingRuleId), { ...ruleForm, updatedAt: serverTimestamp() });
@@ -123,7 +167,14 @@ export default function DealerCommissionPanel({
       setRuleForm({ tier: 'Dealer', targetAmount: 100000, commissionRate: 3, bonusRate: 1.5, period: 'monthly' });
     } catch (err) {
       console.error(err);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+      const msg = err instanceof Error ? err.message : '';
+      const isPermission = msg.includes('permission') || msg.includes('Missing or insufficient');
+      showToast(
+        isPermission
+          ? (currentLanguage === 'tr' ? 'Yetki hatası — lütfen giriş yapın.' : 'Permission denied — please sign in.')
+          : (currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.'),
+        'error'
+      );
     }
   };
 
@@ -215,10 +266,24 @@ export default function DealerCommissionPanel({
               onChange={e => setSelectedPeriod(e.target.value)}
               className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-brand/20"
             />
-            {isAuthenticated && activeTab === 'rules' && (
-              <button onClick={() => setShowRuleModal(true)} className="apple-button-primary">
-                <Plus size={16} /> {currentLanguage === 'tr' ? 'Kural Ekle' : 'Add Rule'}
-              </button>
+            {activeTab === 'rules' && (
+              <div className="flex items-center gap-2">
+                {commissionRules.length === 0 && (
+                  <button
+                    onClick={() => void handleSeedDefaults()}
+                    disabled={seedingDefaults}
+                    className="apple-button-secondary text-sm flex items-center gap-1.5"
+                  >
+                    {seedingDefaults ? (
+                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                    ) : <BarChart3 size={15} />}
+                    {currentLanguage === 'tr' ? 'Hızlı Kurulum' : 'Quick Setup'}
+                  </button>
+                )}
+                <button onClick={() => { setRuleForm({ tier: 'Dealer', targetAmount: 100000, commissionRate: 3, bonusRate: 1.5, period: 'monthly' }); setEditingRuleId(null); setShowRuleModal(true); }} className="apple-button-primary">
+                  <Plus size={16} /> {currentLanguage === 'tr' ? 'Kural Ekle' : 'Add Rule'}
+                </button>
+              </div>
             )}
           </div>
         }
@@ -434,15 +499,36 @@ export default function DealerCommissionPanel({
 
         {activeTab === 'rules' && (
           <motion.div key="rules" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+            {!isAuthenticated && (
+              <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-3">
+                <Lock size={16} className="text-blue-400 flex-shrink-0" />
+                <p className="text-sm text-blue-600 font-medium">
+                  {currentLanguage === 'tr'
+                    ? 'Kural eklemek veya düzenlemek için giriş yapmanız gerekiyor.'
+                    : 'Sign in to add or edit commission rules.'}
+                </p>
+              </div>
+            )}
             {commissionRules.length === 0 ? (
               <div className="apple-card p-12 text-center">
                 <Target className="mx-auto mb-3 text-gray-200" size={48} />
-                <p className="text-gray-400 font-medium mb-6">{currentLanguage === 'tr' ? 'Henüz komisyon kuralı yok.' : 'No commission rules yet.'}</p>
-                {isAuthenticated && (
-                  <button onClick={() => setShowRuleModal(true)} className="apple-button-primary px-8">
+                <p className="text-gray-400 font-medium mb-2">{currentLanguage === 'tr' ? 'Henüz komisyon kuralı yok.' : 'No commission rules yet.'}</p>
+                <p className="text-gray-300 text-sm mb-6">{currentLanguage === 'tr' ? 'Hızlı kurulum ile tüm tier\'lar için varsayılan kurallar ekleyin veya kendiniz oluşturun.' : 'Use Quick Setup to add default rules for all tiers, or create your own.'}</p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <button
+                    onClick={() => void handleSeedDefaults()}
+                    disabled={seedingDefaults}
+                    className="apple-button-secondary px-8 flex items-center gap-2"
+                  >
+                    {seedingDefaults ? (
+                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                    ) : <BarChart3 size={16} />}
+                    {currentLanguage === 'tr' ? 'Hızlı Kurulum (4 Tier)' : 'Quick Setup (4 Tiers)'}
+                  </button>
+                  <button onClick={() => { setRuleForm({ tier: 'Dealer', targetAmount: 100000, commissionRate: 3, bonusRate: 1.5, period: 'monthly' }); setEditingRuleId(null); setShowRuleModal(true); }} className="apple-button-primary px-8">
                     <Plus size={16} /> {currentLanguage === 'tr' ? 'İlk Kuralı Ekle' : 'Add First Rule'}
                   </button>
-                )}
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -455,30 +541,28 @@ export default function DealerCommissionPanel({
                         </span>
                         <span className="ml-2 text-xs text-gray-400">{periodLabel(rule.period)}</span>
                       </div>
-                      {isAuthenticated && (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => {
-                              setRuleForm({ tier: rule.tier, targetAmount: rule.targetAmount, commissionRate: rule.commissionRate, bonusRate: rule.bonusRate, period: rule.period });
-                              setEditingRuleId(rule.id);
-                              setShowRuleModal(true);
-                            }}
-                            className="p-2 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
-                          ><Edit2 size={14} /></button>
-                          <button
-                            onClick={() => setConfirmModal({
-                              isOpen: true,
-                              title: currentLanguage === 'tr' ? 'Kuralı Sil' : 'Delete Rule',
-                              message: currentLanguage === 'tr' ? 'Bu komisyon kuralını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this commission rule?',
-                              onConfirm: async () => {
-                                await deleteDoc(doc(db, 'commissionRules', rule.id));
-                                showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
-                              }
-                            })}
-                            className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
-                          ><Trash2 size={14} /></button>
-                        </div>
-                      )}
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => {
+                            setRuleForm({ tier: rule.tier, targetAmount: rule.targetAmount, commissionRate: rule.commissionRate, bonusRate: rule.bonusRate, period: rule.period });
+                            setEditingRuleId(rule.id);
+                            setShowRuleModal(true);
+                          }}
+                          className="p-2 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
+                        ><Edit2 size={14} /></button>
+                        <button
+                          onClick={() => setConfirmModal({
+                            isOpen: true,
+                            title: currentLanguage === 'tr' ? 'Kuralı Sil' : 'Delete Rule',
+                            message: currentLanguage === 'tr' ? 'Bu komisyon kuralını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this commission rule?',
+                            onConfirm: async () => {
+                              await deleteDoc(doc(db, 'commissionRules', rule.id));
+                              showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
+                            }
+                          })}
+                          className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
+                        ><Trash2 size={14} /></button>
+                      </div>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="text-center">

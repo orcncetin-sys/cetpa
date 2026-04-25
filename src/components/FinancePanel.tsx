@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves } from 'lucide-react';
 
 interface Order {
   id?: string;
@@ -89,8 +89,58 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, ex
   const paidRevenue   = orders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
   const collectionRate = totalRevenue > 0 ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
 
+  // ── Phase 127: Financial Health Score ───────────────────────────────────
+  const marginPct = totalRevenue > 0 ? Math.round(((totalRevenue - totalCost) / totalRevenue) * 100) : 0;
+  const deliveryRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100) : 0;
+  const healthScore = Math.round((collectionRate * 0.4) + (Math.min(marginPct, 50) * 0.6) + (deliveryRate * 0.2)) ;
+  const clampedScore = Math.min(100, Math.max(0, healthScore));
+  const scoreColor = clampedScore >= 70 ? 'text-emerald-600' : clampedScore >= 40 ? 'text-amber-600' : 'text-red-500';
+  const scoreLabel = clampedScore >= 70
+    ? (currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy')
+    : clampedScore >= 40
+    ? (currentLanguage === 'tr' ? 'Orta' : 'Moderate')
+    : (currentLanguage === 'tr' ? 'Dikkat' : 'Attention');
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      {/* ── Phase 127: Financial Health Score ── */}
+      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Finansal Sağlık Skoru' : 'Financial Health Score'}</h3>
+            <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Tahsilat · Kâr Marjı · Teslimat' : 'Collection · Margin · Delivery'}</p>
+          </div>
+          <div className="text-right">
+            <span className={`text-3xl font-black ${scoreColor}`}>{clampedScore}</span>
+            <span className="text-gray-300 text-lg font-bold">/100</span>
+            <p className={`text-xs font-bold ${scoreColor}`}>{scoreLabel}</p>
+          </div>
+        </div>
+        {/* Score bar */}
+        <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden mb-3">
+          <div
+            className={`h-3 rounded-full transition-all duration-1000 ${clampedScore >= 70 ? 'bg-emerald-400' : clampedScore >= 40 ? 'bg-amber-400' : 'bg-red-400'}`}
+            style={{ width: `${clampedScore}%` }}
+          />
+        </div>
+        {/* Component metrics */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: currentLanguage === 'tr' ? 'Tahsilat' : 'Collection', value: collectionRate, unit: '%', weight: 40 },
+            { label: currentLanguage === 'tr' ? 'Kâr Marjı' : 'Margin', value: marginPct, unit: '%', weight: 40 },
+            { label: currentLanguage === 'tr' ? 'Teslimat' : 'Delivery', value: deliveryRate, unit: '%', weight: 20 },
+          ].map(m => (
+            <div key={m.label} className="text-center">
+              <p className={`text-lg font-bold ${m.value >= 50 ? 'text-emerald-600' : m.value >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{m.value}{m.unit}</p>
+              <p className="text-[10px] text-gray-400">{m.label}</p>
+              <div className="w-full bg-gray-100 rounded-full h-1 mt-1 overflow-hidden">
+                <div className={`h-1 rounded-full ${m.value >= 50 ? 'bg-emerald-400' : m.value >= 25 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${Math.min(m.value, 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Phase 98: Unpaid Revenue Alert */}
       {unpaidOrders.length > 0 && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
@@ -115,6 +165,75 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, ex
           </div>
         </div>
       )}
+      {/* ── Phase 105: Invoice Aging Table ── */}
+      {unpaidOrders.length > 0 && (() => {
+        const now = Date.now();
+        type AgingBucket = { label: string; days: string; orders: Order[]; color: string; bg: string; dot: string };
+        const buckets: AgingBucket[] = [
+          { label: currentLanguage === 'tr' ? 'Güncel (0–30 gün)' : 'Current (0–30 d)',  days: '0-30',  orders: [], color: 'text-emerald-700', bg: 'bg-emerald-50', dot: 'bg-emerald-400' },
+          { label: currentLanguage === 'tr' ? 'Orta (31–60 gün)'  : 'Moderate (31–60 d)', days: '31-60', orders: [], color: 'text-amber-700',   bg: 'bg-amber-50',   dot: 'bg-amber-400'  },
+          { label: currentLanguage === 'tr' ? 'Kritik (61–90 gün)': 'Serious (61–90 d)',  days: '61-90', orders: [], color: 'text-orange-700',  bg: 'bg-orange-50',  dot: 'bg-orange-400' },
+          { label: currentLanguage === 'tr' ? 'Gecikmiş (90+ gün)': 'Overdue (90+ d)',    days: '90+',   orders: [], color: 'text-red-700',     bg: 'bg-red-50',     dot: 'bg-red-500'    },
+        ];
+        unpaidOrders.forEach(o => {
+          const d = toDate(o.createdAt);
+          const days = Math.floor((now - d.getTime()) / 86400000);
+          if      (days <= 30) buckets[0].orders.push(o);
+          else if (days <= 60) buckets[1].orders.push(o);
+          else if (days <= 90) buckets[2].orders.push(o);
+          else                 buckets[3].orders.push(o);
+        });
+        const activeBuckets = buckets.filter(b => b.orders.length > 0);
+        if (activeBuckets.length === 0) return null;
+        const maxAmt = Math.max(...activeBuckets.map(b => b.orders.reduce((s, o) => s + (o.totalPrice || 0), 0)), 1);
+        return (
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <AlarmClock size={16} className="text-orange-400" />
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Alacak Vade Analizi' : 'AR Aging Analysis'}</h3>
+              <span className="ml-auto text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                {currentLanguage === 'tr' ? 'Ödenmemiş siparişler' : 'Unpaid orders'}
+              </span>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {buckets.map((b, bi) => {
+                if (b.orders.length === 0) return null;
+                const amt = b.orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const barW = Math.round((amt / maxAmt) * 100);
+                return (
+                  <div key={bi} className="px-5 py-3.5 flex items-center gap-4">
+                    <div className="flex items-center gap-2 w-44 flex-shrink-0">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${b.dot}`} />
+                      <span className="text-xs font-semibold text-gray-700 truncate">{b.label}</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-3">
+                      <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-2 rounded-full transition-all duration-700 ${b.dot}`}
+                          style={{ width: `${barW}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-bold flex-shrink-0 w-20 text-right ${b.color}`}>
+                        {sym}{cvt(amt)}
+                      </span>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${b.bg} ${b.color}`}>
+                      {b.orders.length} {currentLanguage === 'tr' ? 'sipariş' : 'order'}{b.orders.length !== 1 ? (currentLanguage === 'en' ? 's' : '') : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-2.5 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
+              <span className="text-[10px] text-gray-400">
+                {currentLanguage === 'tr' ? 'Toplam tahsil edilmemiş' : 'Total outstanding'}
+              </span>
+              <span className="text-xs font-black text-gray-800">{sym}{cvt(unpaidRevenue)}</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {kpis.map((k, i) => {
@@ -159,6 +278,100 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, ex
           );
         })}
       </div>
+
+      {/* ── Phase 109: Cash Flow Forecast ── */}
+      {(() => {
+        const now109 = new Date();
+        const startOfWeek = (d: Date) => {
+          const copy = new Date(d);
+          copy.setHours(0, 0, 0, 0);
+          copy.setDate(copy.getDate() - copy.getDay());
+          return copy;
+        };
+        const weekLabel = (offset: number) => {
+          const d = new Date(now109);
+          d.setDate(d.getDate() + offset * 7);
+          return d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' });
+        };
+
+        // Build 8 weeks: -3 past, current, +4 future
+        const weeks = Array.from({ length: 8 }, (_, i) => {
+          const weekOffset = i - 3;
+          const weekStart = startOfWeek(new Date(now109.getTime() + weekOffset * 7 * 86400000));
+          const weekEnd   = new Date(weekStart.getTime() + 7 * 86400000);
+          const isCurrent = weekOffset === 0;
+          const isFuture  = weekOffset > 0;
+
+          const relevant = orders.filter(o => {
+            const raw = o.syncedAt || o.createdAt;
+            if (!raw) return false;
+            const d = toDate(raw as Order['syncedAt']);
+            return d >= weekStart && d < weekEnd;
+          });
+
+          const collected = relevant.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const expected  = relevant.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const inflow    = isFuture ? expected : collected;
+
+          return { weekOffset, isCurrent, isFuture, inflow, collected, expected, label: weekLabel(weekOffset * 7) };
+        });
+
+        const maxVal = Math.max(...weeks.map(w => w.inflow), 1);
+        const totalForecast = weeks.filter(w => w.isFuture).reduce((s, w) => s + w.inflow, 0);
+
+        return (
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Waves size={16} className="text-blue-400" />
+                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Nakit Akış Tahmini' : 'Cash Flow Forecast'}</h3>
+              </div>
+              <span className="text-[10px] text-gray-400">
+                {currentLanguage === 'tr' ? '4 haftalık tahmin' : '4-week projection'} · {sym}{cvt(totalForecast)}
+              </span>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex items-end gap-1.5 h-28">
+                {weeks.map((w, i) => {
+                  const barH = maxVal > 0 ? Math.max((w.inflow / maxVal) * 100, w.inflow > 0 ? 8 : 0) : 0;
+                  const barColor = w.isCurrent
+                    ? 'bg-brand'
+                    : w.isFuture
+                    ? 'bg-blue-300'
+                    : 'bg-emerald-300';
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${w.label}: ${sym}${cvt(w.inflow)}`}>
+                      <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
+                        <div
+                          className={`w-full rounded-t-md transition-all duration-500 ${barColor} ${w.isFuture ? 'opacity-60' : ''}`}
+                          style={{ height: `${barH}%` }}
+                        />
+                      </div>
+                      <span className={`text-[8px] font-bold text-center leading-tight ${w.isCurrent ? 'text-brand' : 'text-gray-400'}`}>
+                        {w.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-emerald-300 flex-shrink-0" />
+                  <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Tahsil edilen' : 'Collected'}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-brand flex-shrink-0" />
+                  <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-blue-300 flex-shrink-0" />
+                  <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Beklenen' : 'Expected'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Recent Invoices Table */}
       <div className="apple-card overflow-hidden">
