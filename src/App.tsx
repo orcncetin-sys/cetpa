@@ -6221,6 +6221,299 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 221: Discount Leakage Analysis ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        // Orders where totalPrice < sum(lineItems at list price) indicates discount
+        let totalListPrice = 0;
+        let totalActualPrice = 0;
+        const discountByCustomer: Record<string, { discount: number; orders: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const listPrice = (o.lineItems ?? []).reduce((s, li) => {
+            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+            const retail = inv?.prices?.['Retail'] ?? li.price;
+            return s + retail * li.quantity;
+          }, 0);
+          const actual = o.totalPrice || 0;
+          totalListPrice += listPrice;
+          totalActualPrice += actual;
+          const discount = listPrice - actual;
+          if (discount > 0) {
+            const name = o.customerName || '—';
+            if (!discountByCustomer[name]) discountByCustomer[name] = { discount: 0, orders: 0 };
+            discountByCustomer[name].discount += discount;
+            discountByCustomer[name].orders++;
+          }
+        }
+        const totalDiscount = totalListPrice - totalActualPrice;
+        if (totalDiscount <= 0 || totalListPrice === 0) return null;
+        const discountRate = Math.round((totalDiscount / totalListPrice) * 100);
+        const topDiscountCusts = Object.entries(discountByCustomer)
+          .sort(([,a],[,b]) => b.discount - a.discount)
+          .slice(0, 5);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '💸 İskonto Sızıntı Analizi' : '💸 Discount Leakage Analysis'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${discountRate >= 20 ? 'bg-red-100 text-red-700' : discountRate >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                %{discountRate} {currentLanguage === 'tr' ? 'ortalama iskonto' : 'avg discount'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-red-50 rounded-xl p-3 text-center">
+                <p className="text-2xl font-black text-red-600">₺{(totalDiscount/1000).toFixed(0)}K</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam İskonto' : 'Total Discount Given'}</p>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 text-center">
+                <p className="text-2xl font-black text-gray-700">₺{(totalListPrice/1000).toFixed(0)}K</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Liste Fiyatı Toplamı' : 'Total List Price'}</p>
+              </div>
+            </div>
+            {topDiscountCusts.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-2">{currentLanguage === 'tr' ? 'En Çok İskonto Alan Müşteriler:' : 'Top Discounted Customers:'}</p>
+                <div className="space-y-1.5">
+                  {topDiscountCusts.map(([name, d]) => (
+                    <div key={name} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-700 truncate">{name}</span>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-[10px] text-gray-400">{d.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                        <span className="font-bold text-red-500">-₺{(d.discount/1000).toFixed(0)}K</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 222: Backlog & Pipeline Value ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && (() => {
+        const now222 = new Date();
+        void now222;
+        const backlogOrders = orders.filter(o => o.status === 'Pending' || o.status === 'Processing');
+        const shippedOrders = orders.filter(o => o.status === 'Shipped');
+        const backlogValue = backlogOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const shippedValue = shippedOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const totalPipeline = backlogValue + shippedValue;
+        if (totalPipeline === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📋 Sipariş Biriktirme & Boru Hattı Değeri' : '📋 Order Backlog & Pipeline Value'}</h3>
+              <span className="text-sm font-black text-blue-600">₺{(totalPipeline/1000).toFixed(0)}K</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Sipariş Birikimi' : 'Order Backlog', count: backlogOrders.length, value: backlogValue, color: 'text-amber-600', bg: 'bg-amber-50', icon: '⏳' },
+                { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit', count: shippedOrders.length, value: shippedValue, color: 'text-blue-600', bg: 'bg-blue-50', icon: '🚚' },
+              ].map(k => (
+                <div key={k.label} className={`${k.bg} rounded-2xl p-4`}>
+                  <p className="text-xl mb-1">{k.icon}</p>
+                  <p className={`text-2xl font-black ${k.color}`}>₺{(k.value/1000).toFixed(0)}K</p>
+                  <p className="text-xs text-gray-600 font-medium mt-1">{k.label}</p>
+                  <p className="text-[10px] text-gray-400">{k.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</p>
+                </div>
+              ))}
+            </div>
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex">
+              <div className="h-full bg-amber-400" style={{ width: `${totalPipeline > 0 ? Math.round((backlogValue / totalPipeline) * 100) : 0}%` }} />
+              <div className="h-full bg-blue-400" style={{ width: `${totalPipeline > 0 ? Math.round((shippedValue / totalPipeline) * 100) : 0}%` }} />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-2">{currentLanguage === 'tr' ? 'İşlenmemiş ve kargodaki siparişlerin toplam değeri' : 'Total value of unprocessed and in-transit orders'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 223: Training & Certification Tracker ── */}
+      {reportsTab === 'ik' && employees.length > 0 && (() => {
+        // Use employee records to find certification/training fields
+        type EmpRec = Record<string, unknown>;
+        const withCerts = employees.filter(e => {
+          const m = e as unknown as EmpRec;
+          return !!(m.certifications || m.training || m.skills);
+        });
+        const deptDist: Record<string, { trained: number; total: number }> = {};
+        for (const e of employees) {
+          if (e.status !== 'Aktif') continue;
+          const dept = e.department || (currentLanguage === 'tr' ? 'Genel' : 'General');
+          if (!deptDist[dept]) deptDist[dept] = { trained: 0, total: 0 };
+          deptDist[dept].total++;
+          const m = e as unknown as EmpRec;
+          if (m.certifications || m.training || m.skills) deptDist[dept].trained++;
+        }
+        const activeCount = employees.filter(e => e.status === 'Aktif').length;
+        const trainedCount = withCerts.filter(e => e.status === 'Aktif').length;
+        const coveragePct = activeCount > 0 ? Math.round((trainedCount / activeCount) * 100) : 0;
+        const deptList = Object.entries(deptDist).filter(([,d]) => d.total > 0).sort(([,a],[,b]) => b.total - a.total).slice(0, 5);
+        if (deptList.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🎓 Eğitim & Sertifika Takibi' : '🎓 Training & Certification Tracker'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${coveragePct >= 70 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                %{coveragePct} {currentLanguage === 'tr' ? 'kapsam' : 'coverage'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Aktif Çalışan' : 'Active Employees', value: activeCount, color: 'text-gray-700' },
+                { label: currentLanguage === 'tr' ? 'Sertifikalı' : 'Certified/Trained', value: trainedCount, color: 'text-emerald-600' },
+                { label: currentLanguage === 'tr' ? 'Eksik Kayıt' : 'Missing Records', value: activeCount - trainedCount, color: 'text-amber-600' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2">
+              {deptList.map(([dept, d]) => {
+                const pct = d.total > 0 ? Math.round((d.trained / d.total) * 100) : 0;
+                return (
+                  <div key={dept}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-medium text-gray-700">{dept}</span>
+                      <span className="text-xs text-gray-400 shrink-0 ml-2">{d.trained}/{d.total} · %{pct}</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${pct >= 70 ? 'bg-emerald-400' : pct >= 40 ? 'bg-amber-400' : 'bg-red-300'}`} style={{ width: `${Math.max(4, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 224: Shipping Cost Analysis ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const shippingOrders = orders.filter(o => {
+          const m = o as unknown as Record<string,unknown>;
+          return (m.shippingCost as number) > 0 || (m.deliveryCost as number) > 0;
+        });
+        if (shippingOrders.length < 3) return null;
+        const totalShipping = shippingOrders.reduce((s, o) => {
+          const m = o as unknown as Record<string,unknown>;
+          return s + (((m.shippingCost as number) || 0) + ((m.deliveryCost as number) || 0));
+        }, 0);
+        const totalRevShip = shippingOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const shippingRatio = totalRevShip > 0 ? Math.round((totalShipping / totalRevShip) * 100) : 0;
+        const avgShippingPerOrder = Math.round(totalShipping / shippingOrders.length);
+        // By status
+        const byStatus: Record<string, number> = {};
+        for (const o of shippingOrders) {
+          const m = o as unknown as Record<string,unknown>;
+          const cost = ((m.shippingCost as number) || 0) + ((m.deliveryCost as number) || 0);
+          byStatus[o.status] = (byStatus[o.status] ?? 0) + cost;
+        }
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🚛 Nakliye Maliyeti Analizi' : '🚛 Shipping Cost Analysis'}</h3>
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">%{shippingRatio} {currentLanguage === 'tr' ? 'ciro oranı' : 'of revenue'}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Toplam Nakliye' : 'Total Shipping', value: `₺${(totalShipping/1000).toFixed(0)}K`, color: 'text-blue-600' },
+                { label: currentLanguage === 'tr' ? 'Sipariş Başı' : 'Per Order', value: `₺${avgShippingPerOrder.toLocaleString()}`, color: 'text-gray-700' },
+                { label: currentLanguage === 'tr' ? 'Sipariş Sayısı' : 'Orders Tracked', value: String(shippingOrders.length), color: 'text-gray-500' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.min(shippingRatio * 3, 100)}%` }} />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Benchmark: %3-7 (e-ticaret sektörü)' : 'Benchmark: 3-7% (e-commerce industry)'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 225: Monthly Goal Progress Dashboard ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && (() => {
+        const now225 = new Date();
+        const monthStart225 = new Date(now225.getFullYear(), now225.getMonth(), 1);
+        const daysInMonth = new Date(now225.getFullYear(), now225.getMonth() + 1, 0).getDate();
+        const dayOfMonth = now225.getDate();
+        const monthProgress = Math.round((dayOfMonth / daysInMonth) * 100);
+        const mRevenue225 = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= monthStart225;
+          } catch { return false; }
+        }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const mOrders225 = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= monthStart225;
+          } catch { return false; }
+        }).length;
+        const mNewCustomers225 = new Set(orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= monthStart225;
+          } catch { return false; }
+        }).map(o => o.customerName || '—')).size;
+        // Pace = what we'd expect at current run rate by end of month
+        const pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0;
+        const goals = [
+          { label: currentLanguage === 'tr' ? 'Aylık Ciro' : 'Monthly Revenue', current: mRevenue225, pace: pace225, icon: '💰', format: (v: number) => `₺${(v/1000).toFixed(0)}K` },
+          { label: currentLanguage === 'tr' ? 'Sipariş Adedi' : 'Order Count', current: mOrders225, pace: dayOfMonth > 0 ? Math.round((mOrders225 / dayOfMonth) * daysInMonth) : 0, icon: '📦', format: (v: number) => String(v) },
+          { label: currentLanguage === 'tr' ? 'Aktif Müşteri' : 'Active Customers', current: mNewCustomers225, pace: dayOfMonth > 0 ? Math.round((mNewCustomers225 / dayOfMonth) * daysInMonth) : 0, icon: '👥', format: (v: number) => String(v) },
+        ];
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🎯 Aylık İlerleme Göstergesi' : '🎯 Monthly Goal Progress'}</h3>
+              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                {currentLanguage === 'tr' ? `Ay: %${monthProgress} tamamlandı (${dayOfMonth}/${daysInMonth} gün)` : `Month: ${monthProgress}% complete (day ${dayOfMonth}/${daysInMonth})`}
+              </span>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-4">
+              <div className="h-full bg-blue-400 rounded-full" style={{ width: `${monthProgress}%` }} />
+            </div>
+            <div className="space-y-4">
+              {goals.map(g => {
+                const paceVsMonth = monthProgress > 0 ? Math.round((g.current / (g.pace || 1)) * 100) : 0;
+                const isAhead = paceVsMonth >= 100;
+                return (
+                  <div key={g.label}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span>{g.icon}</span>
+                        <span className="text-xs font-medium text-gray-700">{g.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-xs text-gray-700 font-bold">{g.format(g.current)}</span>
+                        <span className="text-[10px] text-gray-400">→ {g.format(g.pace)} {currentLanguage === 'tr' ? 'tahmini' : 'projected'}</span>
+                        <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${isAhead ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {isAhead ? '▲' : '▼'} %{Math.abs(paceVsMonth - 100)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${isAhead ? 'bg-emerald-400' : 'bg-amber-400'}`} style={{ width: `${Math.min(paceVsMonth, 100)}%` }} />
+                      <div className="absolute top-0 h-full w-px bg-blue-400 opacity-60" style={{ left: `${monthProgress}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Mavi çizgi = ayın şu anki günü. Yeşil = hedefin önünde, Sarı = hedefin gerisinde.' : 'Blue line = current day in month. Green = ahead of pace, Amber = behind pace.'}</p>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
