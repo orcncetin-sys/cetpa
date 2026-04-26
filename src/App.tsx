@@ -8495,6 +8495,419 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 261: Revenue Quartile Cohort Analysis (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 20 && (() => {
+        const sorted = [...orders].sort((a,b) => a.totalPrice - b.totalPrice);
+        const n = sorted.length;
+        const q = Math.floor(n / 4);
+        const quartiles = [
+          { label: 'Q1 (Bottom 25%)', orders: sorted.slice(0, q) },
+          { label: 'Q2 (25–50%)', orders: sorted.slice(q, q*2) },
+          { label: 'Q3 (50–75%)', orders: sorted.slice(q*2, q*3) },
+          { label: 'Q4 (Top 25%)', orders: sorted.slice(q*3) },
+        ];
+        const data = quartiles.map(qt => ({
+          label: qt.label,
+          count: qt.orders.length,
+          revenue: qt.orders.reduce((s, o) => s + o.totalPrice, 0),
+          avgOrder: qt.orders.length ? qt.orders.reduce((s, o) => s + o.totalPrice, 0) / qt.orders.length : 0,
+        }));
+        const maxRev = Math.max(...data.map(d => d.revenue));
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Revenue Quartile Analysis</h3>
+            <p className="text-xs text-gray-500 mb-4">Orders split into 4 equal quartiles by order value</p>
+            <div className="space-y-3">
+              {data.map((d, i) => (
+                <div key={i}>
+                  <div className="flex justify-between text-xs text-gray-600 mb-1">
+                    <span className="font-medium">{d.label}</span>
+                    <span>{d.count} orders · avg ₺{d.avgOrder.toLocaleString('tr-TR', {maximumFractionDigits:0})} · total ₺{d.revenue.toLocaleString('tr-TR', {maximumFractionDigits:0})}</span>
+                  </div>
+                  <div className="h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${maxRev > 0 ? (d.revenue/maxRev*100) : 0}%`, background: ['#dbeafe','#93c5fd','#3b82f6','#1d4ed8'][i] }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-3">Top quartile drives {maxRev > 0 ? ((data[3].revenue / data.reduce((s,d)=>s+d.revenue,0))*100).toFixed(0) : 0}% of total revenue</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 262: Customer Acquisition Month Distribution (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const firstOrderByCustomer: Record<string, Date> = {};
+        [...orders].sort((a,b) => {
+          const da = (a.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(a.createdAt as string);
+          const db = (b.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(b.createdAt as string);
+          return da.getTime() - db.getTime();
+        }).forEach(o => {
+          if (!firstOrderByCustomer[o.customerName]) {
+            firstOrderByCustomer[o.customerName] = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          }
+        });
+        const monthCounts: Record<string, number> = {};
+        Object.values(firstOrderByCustomer).forEach(d => {
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          monthCounts[key] = (monthCounts[key] || 0) + 1;
+        });
+        const months = Object.keys(monthCounts).sort().slice(-12);
+        if (months.length < 2) return null;
+        const maxC = Math.max(...months.map(m => monthCounts[m]));
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Customer Acquisition by Month</h3>
+            <p className="text-xs text-gray-500 mb-4">New customers (first order) per month — last 12 months</p>
+            <div className="flex items-end gap-1 h-28">
+              {months.map(m => (
+                <div key={m} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-600 font-bold">{monthCounts[m]}</span>
+                  <div className="w-full rounded-t" style={{ height: `${maxC > 0 ? (monthCounts[m]/maxC*80) : 4}px`, background: '#10b981', minHeight: '4px' }} />
+                  <span className="text-[8px] text-gray-400 rotate-45 origin-left whitespace-nowrap">{m.slice(5)}/{m.slice(2,4)}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-4">Total new customers tracked: {Object.keys(firstOrderByCustomer).length}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 263: Inventory Write-Down Risk (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
+        const now = new Date();
+        const risky = inventory.filter(item => {
+          if (!item.expiryDate) return false;
+          const exp = new Date(item.expiryDate);
+          const daysLeft = Math.floor((exp.getTime() - now.getTime()) / 86400000);
+          return daysLeft <= 180 && daysLeft > 0 && item.stockLevel > 0;
+        }).map(item => {
+          const exp = new Date(item.expiryDate!);
+          const daysLeft = Math.floor((exp.getTime() - now.getTime()) / 86400000);
+          const writeDownValue = item.stockLevel * (item.costPrice || 0);
+          return { name: item.name, sku: item.sku, daysLeft, stock: item.stockLevel, value: writeDownValue };
+        }).sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 8);
+        if (risky.length === 0) {
+          return (
+            <div className="apple-card p-6">
+              <h3 className="font-bold text-gray-800 mb-1">Inventory Write-Down Risk</h3>
+              <p className="text-xs text-gray-500 mt-2 text-center py-4">✅ No inventory expiring within 180 days</p>
+            </div>
+          );
+        }
+        const totalRisk = risky.reduce((s,r)=>s+r.value,0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Inventory Write-Down Risk</h3>
+            <p className="text-xs text-gray-500 mb-3">Items expiring within 180 days — potential write-down: ₺{totalRisk.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <div className="space-y-2">
+              {risky.map((r,i) => (
+                <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg" style={{ background: r.daysLeft <= 30 ? '#fef2f2' : r.daysLeft <= 90 ? '#fffbeb' : '#f0fdf4' }}>
+                  <span className="font-medium text-gray-800">{r.name} <span className="text-gray-400">({r.sku})</span></span>
+                  <span className="font-bold" style={{ color: r.daysLeft <= 30 ? '#ef4444' : r.daysLeft <= 90 ? '#f59e0b' : '#10b981' }}>{r.daysLeft}d left</span>
+                  <span className="text-gray-600">Qty: {r.stock}</span>
+                  <span className="text-gray-700 font-semibold">₺{r.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 264: Sales Velocity by Day of Week (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dayCounts = Array(7).fill(0);
+        const dayRevenue = Array(7).fill(0);
+        orders.forEach(o => {
+          const d = ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)).getDay();
+          dayCounts[d]++;
+          dayRevenue[d] += o.totalPrice;
+        });
+        const maxRev = Math.max(...dayRevenue);
+        if (maxRev === 0) return null;
+        const bestDay = dayRevenue.indexOf(maxRev);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Sales Velocity by Day of Week</h3>
+            <p className="text-xs text-gray-500 mb-4">Revenue and order count per weekday — best day: <span className="font-bold text-green-600">{dayLabels[bestDay]}</span></p>
+            <div className="flex items-end gap-2 h-28">
+              {dayLabels.map((label, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-600">{dayCounts[i]}</span>
+                  <div className="w-full rounded-t transition-all" style={{ height: `${maxRev > 0 ? (dayRevenue[i]/maxRev*80) : 4}px`, background: i === bestDay ? '#f97316' : '#6366f1', minHeight: '4px' }} />
+                  <span className="text-[9px] text-gray-500 font-medium">{label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1 mt-2">
+              {dayRevenue.map((r,i) => (
+                <div key={i} className="text-center text-[8px] text-gray-400">₺{r >= 1000 ? `${(r/1000).toFixed(0)}k` : r.toFixed(0)}</div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 265: Supplier Lead Time Estimation (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
+        const supplierMap: Record<string, {items: number; avgCost: number; totalValue: number}> = {};
+        inventory.forEach(item => {
+          const sup = item.supplier || 'Unknown';
+          if (!supplierMap[sup]) supplierMap[sup] = { items: 0, avgCost: 0, totalValue: 0 };
+          supplierMap[sup].items++;
+          supplierMap[sup].totalValue += (item.costPrice || 0) * item.stockLevel;
+          supplierMap[sup].avgCost += item.costPrice || 0;
+        });
+        const suppliers = Object.entries(supplierMap)
+          .map(([name, d]) => ({ name, items: d.items, avgCost: d.items > 0 ? d.avgCost / d.items : 0, totalValue: d.totalValue }))
+          .sort((a,b) => b.totalValue - a.totalValue)
+          .slice(0, 8);
+        if (suppliers.length === 0) return null;
+        const totalVal = suppliers.reduce((s,s2) => s + s2.totalValue, 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Supplier Inventory Exposure</h3>
+            <p className="text-xs text-gray-500 mb-3">Stock value at cost by supplier — top {suppliers.length}</p>
+            <div className="space-y-2">
+              {suppliers.map((s, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-700 w-32 truncate font-medium">{s.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-purple-500" style={{ width: `${totalVal > 0 ? (s.totalValue/totalVal*100) : 0}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-600 w-28 text-right">₺{s.totalValue.toLocaleString('tr-TR',{maximumFractionDigits:0})} · {s.items} SKUs</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-3">Total supplier exposure: ₺{totalVal.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 266: Order Density Calendar Heatmap (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const dayCounts: Record<string, number> = {};
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const diff = Math.floor((now.getTime() - d.getTime()) / 86400000);
+          if (diff <= 90) {
+            const key = d.toISOString().slice(0,10);
+            dayCounts[key] = (dayCounts[key] || 0) + 1;
+          }
+        });
+        const days = Array.from({length: 90}, (_, i) => {
+          const d = new Date(now);
+          d.setDate(d.getDate() - (89 - i));
+          return d.toISOString().slice(0,10);
+        });
+        const maxCount = Math.max(...days.map(d => dayCounts[d] || 0), 1);
+        const totalDaysWithOrders = days.filter(d => dayCounts[d] > 0).length;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Order Density — Last 90 Days</h3>
+            <p className="text-xs text-gray-500 mb-4">{totalDaysWithOrders} active days out of 90</p>
+            <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(30, 1fr)' }}>
+              {days.map(day => {
+                const count = dayCounts[day] || 0;
+                const intensity = count / maxCount;
+                return (
+                  <div
+                    key={day}
+                    title={`${day}: ${count} orders`}
+                    className="rounded-sm cursor-default"
+                    style={{ height: '12px', background: count === 0 ? '#f3f4f6' : `rgba(239,68,68,${0.2 + intensity*0.8})` }}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <span className="text-[9px] text-gray-400">Less</span>
+              {[0.1, 0.3, 0.5, 0.7, 1.0].map((v,i) => (
+                <div key={i} className="w-3 h-3 rounded-sm" style={{ background: `rgba(239,68,68,${0.2+v*0.8})` }} />
+              ))}
+              <span className="text-[9px] text-gray-400">More</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 267: Customer Tier Revenue Matrix (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const tiers: Record<string, {revenue: number; orders: number; customers: Set<string>}> = {};
+        orders.forEach(o => {
+          const tier = o.customerType || 'Unknown';
+          if (!tiers[tier]) tiers[tier] = { revenue: 0, orders: 0, customers: new Set() };
+          tiers[tier].revenue += o.totalPrice;
+          tiers[tier].orders++;
+          tiers[tier].customers.add(o.customerName);
+        });
+        const tierData = Object.entries(tiers).map(([tier, d]) => ({
+          tier,
+          revenue: d.revenue,
+          orders: d.orders,
+          customers: d.customers.size,
+          avgOrder: d.orders > 0 ? d.revenue / d.orders : 0,
+          revenuePerCustomer: d.customers.size > 0 ? d.revenue / d.customers.size : 0,
+        })).sort((a,b) => b.revenue - a.revenue);
+        if (tierData.length === 0) return null;
+        const totalRevenue = tierData.reduce((s,t) => s+t.revenue, 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Customer Tier Revenue Matrix</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500 border-b border-gray-100">
+                    <th className="text-left pb-2">Tier</th>
+                    <th className="text-right pb-2">Revenue</th>
+                    <th className="text-right pb-2">Share</th>
+                    <th className="text-right pb-2">Orders</th>
+                    <th className="text-right pb-2">Customers</th>
+                    <th className="text-right pb-2">Avg Order</th>
+                    <th className="text-right pb-2">Rev/Customer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tierData.map((t,i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      <td className="py-2 font-medium text-gray-800">{t.tier}</td>
+                      <td className="py-2 text-right">₺{t.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                      <td className="py-2 text-right font-bold" style={{ color: i===0?'#10b981':'#6b7280' }}>{totalRevenue > 0 ? ((t.revenue/totalRevenue)*100).toFixed(1) : 0}%</td>
+                      <td className="py-2 text-right">{t.orders}</td>
+                      <td className="py-2 text-right">{t.customers}</td>
+                      <td className="py-2 text-right">₺{t.avgOrder.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                      <td className="py-2 text-right">₺{t.revenuePerCustomer.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 268: Payroll Growth vs Revenue Growth (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 10 && (() => {
+        const now = new Date();
+        const months = Array.from({length:6}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (5-i), 1);
+          return { label: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth() };
+        });
+        const totalPayroll = employees.reduce((s,e) => s + (e.salary || 0), 0);
+        const data = months.map(m => {
+          const rev = orders.filter(o => {
+            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            return d.getFullYear() === m.year && d.getMonth() === m.month;
+          }).reduce((s,o) => s+o.totalPrice, 0);
+          return { label: m.label, revenue: rev, payroll: totalPayroll, ratio: rev > 0 ? (totalPayroll/rev*100) : 0 };
+        });
+        const hasData = data.some(d => d.revenue > 0);
+        if (!hasData) return null;
+        const maxRev = Math.max(...data.map(d=>d.revenue),1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Payroll-to-Revenue Ratio Trend</h3>
+            <p className="text-xs text-gray-500 mb-4">Monthly payroll burden as % of revenue — target: below 30%</p>
+            <div className="space-y-2">
+              {data.map((d,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500 w-12">{d.label}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden relative">
+                    <div className="h-full rounded-full bg-blue-400" style={{ width: `${d.revenue/maxRev*100}%` }} />
+                  </div>
+                  <span className="text-xs font-bold w-14 text-right" style={{ color: d.ratio > 50 ? '#ef4444' : d.ratio > 30 ? '#f59e0b' : '#10b981' }}>
+                    {d.revenue > 0 ? `${d.ratio.toFixed(0)}%` : 'N/A'}
+                  </span>
+                  <span className="text-xs text-gray-400 w-24 text-right">₺{d.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Monthly payroll base: ₺{totalPayroll.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 269: Top Loss-Making Orders (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const withMargin = orders.filter(o => o.lineItems && o.lineItems.length > 0).map(o => {
+          const cost = (o.lineItems || []).reduce((s, li) => {
+            const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+          }, 0);
+          const margin = o.totalPrice - cost;
+          return { id: o.id, customer: o.customerName, revenue: o.totalPrice, cost, margin, marginPct: o.totalPrice > 0 ? (margin/o.totalPrice*100) : 0 };
+        }).filter(o => o.margin < 0).sort((a,b) => a.margin - b.margin).slice(0,6);
+        if (withMargin.length === 0) return null;
+        const totalLoss = withMargin.reduce((s,o) => s + Math.abs(o.margin), 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Loss-Making Orders Alert</h3>
+            <p className="text-xs text-gray-500 mb-3">Orders where cost {'>'}  revenue — total exposure: ₺{totalLoss.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <div className="space-y-2">
+              {withMargin.map((o,i) => (
+                <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-red-50">
+                  <span className="font-medium text-gray-800 truncate w-32">{o.customer}</span>
+                  <span className="text-gray-500">Revenue: ₺{o.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-red-600 font-bold">Loss: ₺{Math.abs(o.margin).toLocaleString('tr-TR',{maximumFractionDigits:0})} ({o.marginPct.toFixed(1)}%)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 270: Logistics Performance Score Card (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const total = orders.length;
+        const delivered = orders.filter(o => o.status === 'Delivered').length;
+        const cancelled = orders.filter(o => o.status === 'Cancelled').length;
+        const pending = orders.filter(o => o.status === 'Pending').length;
+        const inTransit = orders.filter(o => o.status === 'Shipped' || o.status === 'Processing').length;
+        const deliveryRate = total > 0 ? (delivered / total * 100) : 0;
+        const cancellationRate = total > 0 ? (cancelled / total * 100) : 0;
+        const utilizationRate = total > 0 ? ((total - pending) / total * 100) : 0;
+        const now = new Date();
+        const avgAge = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').map(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return (now.getTime() - d.getTime()) / 86400000;
+        });
+        const avgOpenAge = avgAge.length > 0 ? avgAge.reduce((s,a)=>s+a,0) / avgAge.length : 0;
+        const score = Math.round(deliveryRate * 0.4 + utilizationRate * 0.3 + Math.max(0, 100 - cancellationRate * 5) * 0.2 + Math.max(0, 100 - avgOpenAge * 2) * 0.1);
+        const scoreColor = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444';
+        const metrics = [
+          { label: 'Delivery Rate', value: `${deliveryRate.toFixed(1)}%`, color: deliveryRate >= 80 ? '#10b981' : '#f59e0b' },
+          { label: 'Cancellation Rate', value: `${cancellationRate.toFixed(1)}%`, color: cancellationRate <= 5 ? '#10b981' : '#ef4444' },
+          { label: 'In Transit', value: inTransit.toString(), color: '#3b82f6' },
+          { label: 'Pending', value: pending.toString(), color: pending > 10 ? '#ef4444' : '#6b7280' },
+          { label: 'Avg Open Age', value: `${avgOpenAge.toFixed(1)}d`, color: avgOpenAge <= 3 ? '#10b981' : '#f59e0b' },
+          { label: 'Fulfillment Rate', value: `${utilizationRate.toFixed(1)}%`, color: utilizationRate >= 90 ? '#10b981' : '#f59e0b' },
+        ];
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-gray-800">Logistics Performance Score</h3>
+                <p className="text-xs text-gray-500">Composite score from delivery, cancellation & fulfillment KPIs</p>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-black" style={{ color: scoreColor }}>{score}</div>
+                <div className="text-xs text-gray-400">/ 100</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {metrics.map((m,i) => (
+                <div key={i} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <div className="text-lg font-bold" style={{ color: m.color }}>{m.value}</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">{m.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
