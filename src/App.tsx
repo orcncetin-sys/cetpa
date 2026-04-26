@@ -2103,7 +2103,7 @@ const ReadOnlyBanner = ({ currentLanguage }: { currentLanguage: string }) => (
   </div>
 );
 
-const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [] }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[] }) => {
+const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [], recurringOrders = [] }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[], recurringOrders?: Array<{ id: string; templateName: string; customerName: string; totalPrice: number; frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean }> }) => {
   const [timeRange, setTimeRange] = useState('30');
   const [revenueCurrency, setRevenueCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [reportsTab, setReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'>('genel');
@@ -2384,7 +2384,88 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
           </div>
 
-          {/* ── Phase 147: Revenue by Day of Week ── */}
+          {/* ── Phase 181: Monthly Recurring Revenue (MRR) ── */}
+      {reportsTab === 'genel' && recurringOrders.filter(r => r.active).length > 0 && (() => {
+        const activeRO = recurringOrders.filter(r => r.active);
+        const mrr = activeRO.reduce((s, r) => {
+          const monthly = r.frequency === 'weekly' ? r.totalPrice * 4 : r.frequency === 'quarterly' ? r.totalPrice / 3 : r.totalPrice;
+          return s + monthly;
+        }, 0);
+        const arr = mrr * 12;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔁 Aylık Tekrarlayan Gelir (MRR)' : '🔁 Monthly Recurring Revenue (MRR)'}</h3>
+              <span className="text-xs text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">{activeRO.length} {currentLanguage==='tr'?'aktif şablon':'active templates'}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="bg-emerald-50 rounded-2xl p-4">
+                <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide">MRR</p>
+                <p className="text-3xl font-black text-emerald-700 mt-1">₺{(mrr/1000).toFixed(1)}K</p>
+                <p className="text-[10px] text-emerald-600 mt-0.5">{currentLanguage==='tr'?'Aylık tekrarlayan':'Monthly recurring'}</p>
+              </div>
+              <div className="bg-blue-50 rounded-2xl p-4">
+                <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide">ARR</p>
+                <p className="text-3xl font-black text-blue-700 mt-1">₺{(arr/1000).toFixed(0)}K</p>
+                <p className="text-[10px] text-blue-600 mt-0.5">{currentLanguage==='tr'?'Yıllık projeksiyon':'Annual projection'}</p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {activeRO.slice(0, 4).map(r => {
+                const monthly = r.frequency === 'weekly' ? r.totalPrice * 4 : r.frequency === 'quarterly' ? r.totalPrice / 3 : r.totalPrice;
+                return (
+                  <div key={r.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
+                    <span className="text-gray-700 truncate">{r.templateName} · {r.customerName}</span>
+                    <span className="font-bold text-emerald-600 shrink-0 ml-2">₺{Math.round(monthly).toLocaleString()}/m</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 189: Order Value Distribution ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const buckets189 = [
+          { label: '<₺1K', min: 0, max: 1000, count: 0, total: 0 },
+          { label: '₺1-5K', min: 1000, max: 5000, count: 0, total: 0 },
+          { label: '₺5-20K', min: 5000, max: 20000, count: 0, total: 0 },
+          { label: '₺20-100K', min: 20000, max: 100000, count: 0, total: 0 },
+          { label: '₺100K+', min: 100000, max: Infinity, count: 0, total: 0 },
+        ];
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const v = o.totalPrice || 0;
+          const b = buckets189.find(b => v >= b.min && v < b.max);
+          if (b) { b.count++; b.total += v; }
+        }
+        const maxCount = Math.max(...buckets189.map(b => b.count), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📊 Sipariş Değeri Dağılımı' : '📊 Order Value Distribution'}</h3>
+            <div className="flex items-end gap-3 h-28 mb-3">
+              {buckets189.map((b, i) => {
+                const h = Math.round((b.count / maxCount) * 100);
+                const colors = ['bg-blue-300', 'bg-blue-400', 'bg-brand/70', 'bg-brand', 'bg-purple-500'];
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
+                    <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
+                      <div className={`w-full rounded-t-lg ${colors[i]}`} style={{ height: `${Math.max(h, 3)}%` }}
+                        title={`${b.count} ${currentLanguage==='tr'?'sipariş':'orders'} · ₺${b.total.toLocaleString()}`} />
+                    </div>
+                    <span className="text-[8px] text-gray-400 text-center leading-tight">{b.label}</span>
+                    <span className="text-[9px] font-bold text-gray-600">{b.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400">{currentLanguage==='tr'?'Sayı, sipariş başına sipariş değerine göre':'Order count by order value range'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 147: Revenue by Day of Week ── */}
           {orders.length >= 5 && (() => {
             const dayNames = currentLanguage === 'tr'
               ? ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt']
@@ -8812,7 +8893,7 @@ function AppContent() {
                     </button>
                   </div>
 
-                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} />
+                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} recurringOrders={recurringOrders} />
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <DemandForecastPanel currentLanguage={currentLanguage} />
