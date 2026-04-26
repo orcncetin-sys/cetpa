@@ -2103,7 +2103,7 @@ const ReadOnlyBanner = ({ currentLanguage }: { currentLanguage: string }) => (
   </div>
 );
 
-const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [] }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[] }) => {
+const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [] }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[] }) => {
   const [timeRange, setTimeRange] = useState('30');
   const [revenueCurrency, setRevenueCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [reportsTab, setReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'>('genel');
@@ -3474,6 +3474,112 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <span className="text-xs font-medium text-gray-800 truncate">{p.nameA}</span>
                     <span className="text-gray-300 shrink-0">+</span>
                     <span className="text-xs font-medium text-gray-800 truncate">{p.nameB}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 161: Order Cancellation Analysis ── */}
+      {reportsTab === 'crm' && orders.filter(o => o.status === 'Cancelled').length > 0 && (() => {
+        const cancelled = orders.filter(o => o.status === 'Cancelled');
+        const total = orders.length;
+        const cancelRate = Math.round((cancelled.length / total) * 100);
+        const cancelledRevLost = cancelled.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        // Cancellations by customer
+        const custCancelMap: Record<string, number> = {};
+        for (const o of cancelled) {
+          const name = o.customerName || '—';
+          custCancelMap[name] = (custCancelMap[name] ?? 0) + 1;
+        }
+        const topCancellers = Object.entries(custCancelMap).sort(([,a],[,b]) => b - a).slice(0, 5);
+        // Cancellations by month
+        const now161 = new Date();
+        const cancelByMonth: Record<string, number> = {};
+        for (const o of cancelled) {
+          try {
+            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            cancelByMonth[key] = (cancelByMonth[key] ?? 0) + 1;
+          } catch { /* skip */ }
+        }
+        void now161;
+        return (
+          <div className="apple-card p-6 border border-red-50">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '❌ İptal Analizi' : '❌ Cancellation Analysis'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${cancelRate >= 15 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                %{cancelRate} {currentLanguage==='tr'?'iptal oranı':'cancel rate'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage==='tr'?'İptal Edilen':'Cancelled', value: cancelled.length, color: 'text-red-600' },
+                { label: currentLanguage==='tr'?'İptal Oranı':'Cancel Rate', value: `%${cancelRate}`, color: cancelRate >= 15 ? 'text-red-600' : 'text-amber-600' },
+                { label: currentLanguage==='tr'?'Kayıp Ciro':'Revenue Lost', value: `₺${(cancelledRevLost/1000).toFixed(1)}K`, color: 'text-red-500' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400">{k.label}</p>
+                </div>
+              ))}
+            </div>
+            {topCancellers.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2">{currentLanguage==='tr'?'En Çok İptal Eden Müşteriler':'Top Cancelling Customers'}</p>
+                <div className="space-y-1.5">
+                  {topCancellers.map(([name, count]) => (
+                    <div key={name} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-700 truncate">{name}</span>
+                      <span className="text-red-500 font-bold ml-2">{count}×</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 162: Inventory Shrinkage Report ── */}
+      {reportsTab === 'envanter' && inventoryMovements.length > 0 && (() => {
+        // Find items with negative adjustments (shrinkage/write-offs)
+        type ShrinkItem = { name: string; qty: number; value: number };
+        const shrinkMap: Record<string, ShrinkItem> = {};
+        for (const mov of inventoryMovements) {
+          const m = mov as unknown as Record<string, unknown>;
+          const type = (m.type as string) || '';
+          const qty = (m.quantity as number) || 0;
+          const isNeg = type === 'adjustment' && qty < 0;
+          const isWriteOff = type === 'write-off' || type === 'damage' || type === 'loss';
+          if (!isNeg && !isWriteOff) continue;
+          const pid = (m.productId as string) || (m.inventoryId as string) || '';
+          const inv = inventory.find(i => i.id === pid || i.name === (m.productName as string));
+          const name = inv?.name || (m.productName as string) || pid || '—';
+          if (!shrinkMap[name]) shrinkMap[name] = { name, qty: 0, value: 0 };
+          shrinkMap[name].qty += Math.abs(qty);
+          shrinkMap[name].value += Math.abs(qty) * (inv?.costPrice ?? inv?.cost ?? 0);
+        }
+        const shrinkItems = Object.values(shrinkMap).sort((a, b) => b.value - a.value).slice(0, 8);
+        if (shrinkItems.length === 0) return null;
+        const totalShrinkVal = shrinkItems.reduce((s, i) => s + i.value, 0);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📉 Fire & Kayıp Raporu' : '📉 Inventory Shrinkage Report'}</h3>
+              <span className="text-xs text-red-600 font-semibold bg-red-50 px-2 py-0.5 rounded-full">
+                ₺{totalShrinkVal.toLocaleString(undefined,{maximumFractionDigits:0})} {currentLanguage==='tr'?'toplam kayıp':'total loss'}
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {shrinkItems.map(item => (
+                <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <span className="text-xs font-medium text-gray-800 truncate">{item.name}</span>
+                  <div className="flex items-center gap-3 shrink-0 ml-2">
+                    <span className="text-xs text-gray-500">{item.qty} {currentLanguage==='tr'?'adet':'units'}</span>
+                    <span className="text-xs font-bold text-red-500">-₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
                   </div>
                 </div>
               ))}
@@ -7052,6 +7158,118 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 159: Sales Velocity (Revenue per Working Day) ── */}
+              {orders.length > 0 && (() => {
+                const now159 = new Date();
+                // Last 30 days revenue vs prior 30 days
+                const d30ago = new Date(now159); d30ago.setDate(d30ago.getDate() - 30);
+                const d60ago = new Date(now159); d60ago.setDate(d60ago.getDate() - 60);
+                const getOD159 = (o: Order): Date => {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return new Date(0);
+                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                };
+                const last30 = orders.filter(o => { const d = getOD159(o); return d >= d30ago && o.status !== 'Cancelled'; });
+                const prev30 = orders.filter(o => { const d = getOD159(o); return d >= d60ago && d < d30ago && o.status !== 'Cancelled'; });
+                const rev30 = last30.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const revPrev = prev30.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const dailyRev = rev30 / 30;
+                const dailyPrev = revPrev / 30;
+                const velocityChange = dailyPrev > 0 ? Math.round(((dailyRev - dailyPrev) / dailyPrev) * 100) : null;
+                // Weekly sparkline (last 8 weeks)
+                const weeks: number[] = Array(8).fill(0);
+                for (const o of orders) {
+                  if (o.status === 'Cancelled') continue;
+                  const d = getOD159(o);
+                  const daysAgo = Math.floor((now159.getTime() - d.getTime()) / 86400000);
+                  const weekIdx = 7 - Math.floor(daysAgo / 7);
+                  if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
+                }
+                const maxWeek = Math.max(...weeks, 1);
+                const r159 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const s159 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const f159 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r159).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                return (
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? '⚡ Satış Hızı' : '⚡ Sales Velocity'}</h3>
+                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Günlük ortalama ciro (son 30 gün)' : 'Avg. daily revenue (last 30 days)'}</p>
+                      </div>
+                      {velocityChange !== null && (
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${velocityChange >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                          {velocityChange >= 0 ? '↑' : '↓'}{Math.abs(velocityChange)}% vs {currentLanguage==='tr'?'önceki 30g':'prev 30d'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-3xl font-black text-brand mb-3">{s159}{f159(dailyRev)}<span className="text-sm font-normal text-gray-400">/{currentLanguage==='tr'?'gün':'day'}</span></p>
+                    <div className="flex items-end gap-0.5 h-10">
+                      {weeks.map((w, i) => (
+                        <div key={i} className="flex-1 flex flex-col justify-end">
+                          <div className={`w-full rounded-sm transition-all ${i === 7 ? 'bg-brand' : 'bg-brand/25'}`}
+                            style={{ height: `${Math.max(Math.round((w / maxWeek) * 100), 4)}%` }} />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-gray-400 mt-1 text-right">{currentLanguage==='tr'?'Son 8 hafta':'Last 8 weeks'}</p>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 160: Customer Payment Behavior ── */}
+              {orders.filter(o => o.paid).length >= 3 && (() => {
+                // For paid orders, estimate days to payment (createdAt → updatedAt/paidAt if available, else skip)
+                const custPay: Record<string, { name: string; totalPaid: number; totalOrders: number; lateCount: number }> = {};
+                for (const o of orders) {
+                  if (!o.paid || o.status === 'Cancelled') continue;
+                  const name = o.customerName || '—';
+                  if (!custPay[name]) custPay[name] = { name, totalPaid: 0, totalOrders: 0, lateCount: 0 };
+                  custPay[name].totalPaid += o.totalPrice || 0;
+                  custPay[name].totalOrders++;
+                  // Simplified late check: if order was old when marked paid (no paidAt field, just heuristic)
+                }
+                // Also track unpaid customers
+                const custUnpaid: Record<string, number> = {};
+                for (const o of orders) {
+                  if (o.paid || o.status === 'Cancelled') continue;
+                  const name = o.customerName || '—';
+                  custUnpaid[name] = (custUnpaid[name] ?? 0) + (o.totalPrice || 0);
+                }
+                const topPayers = Object.values(custPay).sort((a, b) => b.totalPaid - a.totalPaid).slice(0, 5);
+                const topDebtors = Object.entries(custUnpaid).sort(([,a],[,b]) => b - a).slice(0, 5);
+                const r160 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const s160 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                const f160 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r160).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
+                      <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-3">✓ {currentLanguage==='tr'?'En Çok Ödeme Yapanlar':'Top Payers'}</h4>
+                      <div className="space-y-2">
+                        {topPayers.map((c, i) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <span className="text-xs text-gray-700 truncate">{c.name}</span>
+                            <span className="text-xs font-bold text-emerald-600 shrink-0 ml-2">{s160}{f160(c.totalPaid)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="bg-white border border-amber-100 rounded-2xl shadow-sm p-4">
+                      <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-3">⚠ {currentLanguage==='tr'?'Ödenmemiş Alacak':'Outstanding Receivables'}</h4>
+                      <div className="space-y-2">
+                        {topDebtors.length === 0 ? (
+                          <p className="text-xs text-gray-400 text-center py-2">{currentLanguage==='tr'?'Bekleyen alacak yok':'No outstanding receivables'}</p>
+                        ) : topDebtors.map(([name, amt], i) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <span className="text-xs text-gray-700 truncate">{name}</span>
+                            <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{s160}{f160(amt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 103: 6-Month Revenue Bar Chart ── */}
               {orders.length > 0 && (() => {
                 const now103 = new Date();
@@ -8100,7 +8318,7 @@ function AppContent() {
                     </button>
                   </div>
 
-                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} />
+                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} />
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <DemandForecastPanel currentLanguage={currentLanguage} />
