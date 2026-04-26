@@ -5959,6 +5959,268 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 216: Working Capital Analysis ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && inventory.length > 0 && (() => {
+        // Working Capital = Current Assets - Current Liabilities (estimated)
+        const inventoryVal216 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const arBalance216 = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered').reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const currentAssets = inventoryVal216 + arBalance216;
+        // Estimated AP: orders received in last 30 days (proxy for payables)
+        const now216 = new Date();
+        const cut216 = new Date(now216); cut216.setDate(cut216.getDate() - 30);
+        const recentPurchases = orders.filter(o => {
+          const m = o as unknown as Record<string,unknown>;
+          if (!m.isPurchase && !m.purchaseOrder) return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= cut216;
+          } catch { return false; }
+        }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const estimatedPayroll = inventory.length; // fallback
+        void estimatedPayroll;
+        const currentLiabilities = recentPurchases; // proxy
+        const workingCapital = currentAssets - currentLiabilities;
+        const currentRatio = currentLiabilities > 0 ? (currentAssets / currentLiabilities).toFixed(1) : '∞';
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🏦 İşletme Sermayesi Analizi' : '🏦 Working Capital Analysis'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${workingCapital >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                {workingCapital >= 0 ? (currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy') : (currentLanguage === 'tr' ? 'Risk' : 'Risk')}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Dönen Varlıklar' : 'Current Assets', value: `₺${(currentAssets/1000).toFixed(0)}K`, color: 'text-emerald-600', sub: currentLanguage === 'tr' ? 'Stok + Alacak' : 'Inventory + AR' },
+                { label: currentLanguage === 'tr' ? 'Kısa Vade Borç' : 'Current Liabilities', value: `₺${(currentLiabilities/1000).toFixed(0)}K`, color: 'text-red-500', sub: currentLanguage === 'tr' ? 'Borç tahmini' : 'AP estimate' },
+                { label: currentLanguage === 'tr' ? 'Net Sermaye' : 'Net Working Capital', value: `₺${(workingCapital/1000).toFixed(0)}K`, color: workingCapital >= 0 ? 'text-emerald-600' : 'text-red-500', sub: currentLanguage === 'tr' ? 'Cari Oran: ' + currentRatio : 'Current Ratio: ' + currentRatio },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-xl font-black ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-600 font-medium mt-0.5">{k.label}</p>
+                  <p className="text-[9px] text-gray-400">{k.sub}</p>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <div>
+                <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
+                  <span>{currentLanguage === 'tr' ? 'Stok Değeri' : 'Inventory Value'}</span>
+                  <span>₺{(inventoryVal216/1000).toFixed(0)}K</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-300 rounded-full" style={{ width: `${currentAssets > 0 ? Math.round((inventoryVal216/currentAssets)*100) : 0}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
+                  <span>{currentLanguage === 'tr' ? 'Tahsil Edilecek Alacaklar' : 'Accounts Receivable'}</span>
+                  <span>₺{(arBalance216/1000).toFixed(0)}K</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-300 rounded-full" style={{ width: `${currentAssets > 0 ? Math.round((arBalance216/currentAssets)*100) : 0}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 217: Product Mix Analysis ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && (() => {
+        // Top products by revenue contribution
+        const prodRev217: Record<string, { name: string; rev: number; qty: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          for (const li of (o.lineItems ?? [])) {
+            const key = li.inventoryId || li.name || '';
+            if (!key) continue;
+            if (!prodRev217[key]) prodRev217[key] = { name: li.name || key, rev: 0, qty: 0 };
+            prodRev217[key].rev += li.price * li.quantity;
+            prodRev217[key].qty += li.quantity;
+          }
+        }
+        const sorted217 = Object.values(prodRev217).sort((a, b) => b.rev - a.rev).slice(0, 6);
+        if (sorted217.length < 2) return null;
+        const total217 = sorted217.reduce((s, p) => s + p.rev, 0);
+        const COLORS_217 = ['#ff4000', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#6b7280'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🧩 Ürün Karma Analizi (Top 6)' : '🧩 Product Mix Analysis (Top 6)'}</h3>
+            <div className="flex gap-2 mb-4">
+              {sorted217.map((p, i) => {
+                const pct = total217 > 0 ? Math.round((p.rev / total217) * 100) : 0;
+                return (
+                  <div key={p.name} className="flex-1" style={{ minWidth: 0 }}>
+                    <div className="h-16 rounded-xl flex items-end justify-center pb-2" style={{ backgroundColor: COLORS_217[i] + '20' }}>
+                      <span className="text-[10px] font-bold" style={{ color: COLORS_217[i] }}>{pct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full mt-1" style={{ backgroundColor: COLORS_217[i] }} />
+                    <p className="text-[9px] text-gray-600 text-center mt-1 truncate">{p.name}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="space-y-1.5">
+              {sorted217.map((p, i) => {
+                const pct = total217 > 0 ? Math.round((p.rev / total217) * 100) : 0;
+                return (
+                  <div key={p.name} className="flex items-center gap-2 text-xs">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS_217[i] }} />
+                    <span className="text-gray-700 truncate flex-1">{p.name}</span>
+                    <span className="text-gray-400 shrink-0">{p.qty} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                    <span className="font-bold text-gray-700 shrink-0">%{pct}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 218: Customer Concentration Risk ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const custRev218: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          custRev218[name] = (custRev218[name] ?? 0) + (o.totalPrice || 0);
+        }
+        const custList218 = Object.entries(custRev218).sort(([,a],[,b]) => b - a);
+        if (custList218.length < 3) return null;
+        const totalRev218 = custList218.reduce((s,[,v]) => s + v, 0);
+        const top1Pct218 = totalRev218 > 0 ? Math.round((custList218[0][1] / totalRev218) * 100) : 0;
+        const top3Pct218 = totalRev218 > 0 ? Math.round((custList218.slice(0,3).reduce((s,[,v]) => s+v, 0) / totalRev218) * 100) : 0;
+        const riskLevel218 = top1Pct218 >= 50 ? 'high' : top1Pct218 >= 30 ? 'medium' : 'low';
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⚠️ Müşteri Konsantrasyon Riski' : '⚠️ Customer Concentration Risk'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${riskLevel218 === 'high' ? 'bg-red-100 text-red-700' : riskLevel218 === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {riskLevel218 === 'high' ? (currentLanguage === 'tr' ? 'Yüksek' : 'High') : riskLevel218 === 'medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Med') : (currentLanguage === 'tr' ? 'Düşük' : 'Low')}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-gray-50 rounded-xl p-3 text-center">
+                <p className={`text-2xl font-black ${top1Pct218 >= 50 ? 'text-red-500' : 'text-amber-500'}`}>%{top1Pct218}</p>
+                <p className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'En büyük müşteri' : 'Largest customer'}</p>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 text-center">
+                <p className={`text-2xl font-black ${top3Pct218 >= 80 ? 'text-red-500' : 'text-blue-600'}`}>%{top3Pct218}</p>
+                <p className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'İlk 3 müşteri' : 'Top 3 customers'}</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {custList218.slice(0, 5).map(([name, rev]) => {
+                const pct = totalRev218 > 0 ? Math.round((rev / totalRev218) * 100) : 0;
+                return (
+                  <div key={name}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-medium text-gray-700 truncate">{name}</span>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-[10px] text-gray-400">%{pct}</span>
+                        <span className="text-xs font-bold text-gray-700">₺{(rev/1000).toFixed(0)}K</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${pct >= 30 ? 'bg-red-400' : pct >= 15 ? 'bg-amber-400' : 'bg-blue-300'}`} style={{ width: `${Math.max(4, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 219: Stock Expiry Tracker ── */}
+      {reportsTab === 'envanter' && inventory.length > 0 && (() => {
+        const now219 = new Date();
+        const warn30 = new Date(now219); warn30.setDate(warn30.getDate() + 30);
+        const warn90 = new Date(now219); warn90.setDate(warn90.getDate() + 90);
+        const expiryItems = inventory
+          .filter(i => i.expiryDate)
+          .map(i => {
+            const exp = new Date(i.expiryDate!);
+            const daysLeft = Math.round((exp.getTime() - now219.getTime()) / 86400000);
+            return { name: i.name, daysLeft, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0) };
+          })
+          .filter(i => i.daysLeft <= 90)
+          .sort((a, b) => a.daysLeft - b.daysLeft)
+          .slice(0, 8);
+        if (expiryItems.length === 0) return null;
+        return (
+          <div className="apple-card p-6 border border-orange-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏰ Son Kullanma Tarihi Takibi' : '⏰ Expiry Date Tracker'}</h3>
+              <span className="text-xs font-bold text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full">{expiryItems.length} {currentLanguage === 'tr' ? 'ürün dikkat' : 'items at risk'}</span>
+            </div>
+            <div className="space-y-2">
+              {expiryItems.map(item => (
+                <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div>
+                    <p className="text-xs font-medium text-gray-800">{item.name}</p>
+                    <p className="text-[10px] text-gray-400">{item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'} · ₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${item.daysLeft <= 0 ? 'bg-red-200 text-red-800' : item.daysLeft <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {item.daysLeft <= 0 ? (currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired') : `${item.daysLeft}d`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 220: Revenue Concentration Index (HHI) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const custRev220: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          custRev220[name] = (custRev220[name] ?? 0) + (o.totalPrice || 0);
+        }
+        const total220 = Object.values(custRev220).reduce((s, v) => s + v, 0);
+        if (total220 === 0) return null;
+        // HHI = sum of (market share %)^2 — normalized 0-10000
+        const hhi = Object.values(custRev220).reduce((s, v) => s + Math.pow((v / total220) * 100, 2), 0);
+        const hhiRounded = Math.round(hhi);
+        const hhiLevel = hhiRounded > 2500 ? 'high' : hhiRounded > 1500 ? 'medium' : 'low';
+        const custCount = Object.keys(custRev220).length;
+        const avgRevPerCust = Math.round(total220 / custCount);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📐 Gelir Konsantrasyon Endeksi (HHI)' : '📐 Revenue Concentration Index (HHI)'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${hhiLevel === 'high' ? 'bg-red-100 text-red-700' : hhiLevel === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {hhiLevel === 'high' ? (currentLanguage === 'tr' ? 'Yüksek Risk' : 'High Risk') : hhiLevel === 'medium' ? (currentLanguage === 'tr' ? 'Orta Risk' : 'Med Risk') : (currentLanguage === 'tr' ? 'Düşük Risk' : 'Diversified')}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: 'HHI', value: hhiRounded.toLocaleString(), color: hhiLevel === 'high' ? 'text-red-500' : hhiLevel === 'medium' ? 'text-amber-500' : 'text-emerald-600', desc: currentLanguage === 'tr' ? 'Herfindahl Endeksi' : 'Herfindahl Index' },
+                { label: currentLanguage === 'tr' ? 'Müşteri Sayısı' : 'Customers', value: String(custCount), color: 'text-blue-600', desc: currentLanguage === 'tr' ? 'Toplam aktif' : 'Total active' },
+                { label: currentLanguage === 'tr' ? 'Müşteri Başı' : 'Avg per Customer', value: `₺${(avgRevPerCust/1000).toFixed(0)}K`, color: 'text-gray-700', desc: currentLanguage === 'tr' ? 'Ort. gelir' : 'Avg revenue' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-600 font-medium mt-0.5">{k.label}</p>
+                  <p className="text-[9px] text-gray-400">{k.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 bg-blue-50 rounded-xl p-3">
+              <span className="text-blue-500">💡</span>
+              <p className="text-[11px] text-blue-700">
+                {currentLanguage === 'tr'
+                  ? `HHI > 2500 yüksek, 1500-2500 orta, < 1500 düşük konsantrasyon. Şu an: ${hhiRounded} — ${hhiLevel === 'low' ? 'müşteri tabanı sağlıklı dağılmış.' : hhiLevel === 'medium' ? 'birkaç müşteriye bağımlılık var.' : 'kritik müşteri bağımlılığı!'}`
+                  : `HHI > 2500 concentrated, 1500-2500 moderate, < 1500 diversified. Currently: ${hhiRounded} — ${hhiLevel === 'low' ? 'healthy diversification.' : hhiLevel === 'medium' ? 'moderate concentration.' : 'critical dependency!'}`}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
