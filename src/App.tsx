@@ -7708,6 +7708,242 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 246: Revenue per SKU Analysis ── */}
+      {reportsTab === 'envanter' && orders.length >= 3 && inventory.length > 0 && (() => {
+        const skuRev: Record<string, { name: string; sku: string; rev: number; qty: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          for (const li of (o.lineItems ?? [])) {
+            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+            const sku = inv?.sku || li.sku || li.inventoryId || li.name || '?';
+            const name = inv?.name || li.name || sku;
+            if (!skuRev[sku]) skuRev[sku] = { name, sku, rev: 0, qty: 0 };
+            skuRev[sku].rev += li.price * li.quantity;
+            skuRev[sku].qty += li.quantity;
+          }
+        }
+        const skuList = Object.values(skuRev).sort((a, b) => b.rev - a.rev).slice(0, 8);
+        if (skuList.length < 2) return null;
+        const totalSkuRev = skuList.reduce((s, s2) => s + s2.rev, 0);
+        const maxSkuRev = skuList[0].rev;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📦 SKU Bazlı Ciro Analizi (Top 8)' : '📦 Revenue per SKU (Top 8)'}</h3>
+            <div className="space-y-2.5">
+              {skuList.map((s, i) => {
+                const pct = totalSkuRev > 0 ? Math.round((s.rev / totalSkuRev) * 100) : 0;
+                return (
+                  <div key={s.sku}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-medium text-gray-800 truncate block">{s.name}</span>
+                        <span className="text-[10px] text-gray-400">{s.sku} · {s.qty} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-[10px] text-gray-400">%{pct}</span>
+                        <span className="text-xs font-bold text-gray-700">₺{(s.rev/1000).toFixed(0)}K</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${i === 0 ? 'bg-brand' : i <= 2 ? 'bg-blue-400' : 'bg-gray-300'}`} style={{ width: `${Math.max(4, Math.round((s.rev / maxSkuRev) * 100))}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 247: Quotation Aging Analysis ── */}
+      {reportsTab === 'crm' && quotations.length >= 3 && (() => {
+        const now247 = new Date();
+        const openQuotes247 = quotations.filter(q => {
+          const m = q as unknown as Record<string,unknown>;
+          const status = (m.status as string) || '';
+          return status !== 'Converted to Order' && status !== 'rejected' && status !== 'expired';
+        });
+        if (openQuotes247.length === 0) return null;
+        const ageBuckets247 = [
+          { label: currentLanguage === 'tr' ? '0-7 Gün' : '0-7 Days', min: 0, max: 7, count: 0, value: 0 },
+          { label: currentLanguage === 'tr' ? '8-14 Gün' : '8-14 Days', min: 8, max: 14, count: 0, value: 0 },
+          { label: currentLanguage === 'tr' ? '15-30 Gün' : '15-30 Days', min: 15, max: 30, count: 0, value: 0 },
+          { label: currentLanguage === 'tr' ? '30+ Gün' : '30+ Days', min: 31, max: Infinity, count: 0, value: 0 },
+        ];
+        for (const q of openQuotes247) {
+          const m = q as unknown as Record<string,unknown>;
+          const val = (m.totalAmount as number) || (m.total as number) || 0;
+          try {
+            const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
+            const age = Math.round((now247.getTime() - created.getTime()) / 86400000);
+            const b = ageBuckets247.find(b => age >= b.min && age <= b.max);
+            if (b) { b.count++; b.value += val; }
+          } catch { /* skip */ }
+        }
+        const staleQuotes = ageBuckets247.slice(2).reduce((s, b) => s + b.value, 0);
+        const totalQVal = ageBuckets247.reduce((s, b) => s + b.value, 0);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏰ Teklif Yaşlandırma Analizi' : '⏰ Quotation Aging Analysis'}</h3>
+              {staleQuotes > 0 && (
+                <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                  ₺{(staleQuotes/1000).toFixed(0)}K {currentLanguage === 'tr' ? 'eski teklif' : 'stale quotes'}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {ageBuckets247.map(b => (
+                <div key={b.label} className={`rounded-xl p-3 ${b.min >= 15 && b.count > 0 ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50'}`}>
+                  <p className={`text-xl font-bold ${b.min >= 15 && b.count > 0 ? 'text-amber-600' : 'text-gray-700'}`}>{b.count}</p>
+                  <p className="text-[10px] text-gray-600 font-medium">{b.label}</p>
+                  {b.value > 0 && <p className="text-[9px] text-gray-400">₺{(b.value/1000).toFixed(0)}K</p>}
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? `${openQuotes247.length} açık teklif · Toplam: ₺${(totalQVal/1000).toFixed(0)}K` : `${openQuotes247.length} open quotes · Total: ₺${(totalQVal/1000).toFixed(0)}K`}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 248: Employee Overtime & Absence Rate ── */}
+      {reportsTab === 'ik' && employees.length > 0 && (() => {
+        type EmpWithHR = { overtimeHours?: number; absenceDays?: number; leaveDays?: number; status?: string; name?: string; department?: string };
+        const active248 = employees.filter(e => e.status === 'Aktif') as unknown as EmpWithHR[];
+        const withOvertime = active248.filter(e => (e.overtimeHours ?? 0) > 0);
+        const withAbsence = active248.filter(e => ((e.absenceDays ?? 0) + (e.leaveDays ?? 0)) > 0);
+        const avgOvertime = active248.length > 0
+          ? Math.round(active248.reduce((s, e) => s + (e.overtimeHours ?? 0), 0) / active248.length * 10) / 10
+          : 0;
+        const avgAbsence = active248.length > 0
+          ? Math.round(active248.reduce((s, e) => s + (e.absenceDays ?? 0) + (e.leaveDays ?? 0), 0) / active248.length * 10) / 10
+          : 0;
+        if (avgOvertime === 0 && avgAbsence === 0) return null;
+        const topOT = [...active248].sort((a, b) => (b.overtimeHours ?? 0) - (a.overtimeHours ?? 0)).slice(0, 4);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '⏰ Fazla Mesai & Devamsızlık Oranı' : '⏰ Overtime & Absence Rate'}</h3>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Ort. Fazla Mesai' : 'Avg Overtime', value: `${avgOvertime}h`, count: withOvertime.length, color: 'text-amber-600' },
+                { label: currentLanguage === 'tr' ? 'Ort. Devamsızlık' : 'Avg Absence', value: `${avgAbsence}d`, count: withAbsence.length, color: 'text-red-500' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-4">
+                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-600 font-medium mt-0.5">{k.label}</p>
+                  <p className="text-[9px] text-gray-400">{k.count} {currentLanguage === 'tr' ? 'çalışan' : 'employees'}</p>
+                </div>
+              ))}
+            </div>
+            {topOT.some(e => (e.overtimeHours ?? 0) > 0) && (
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2">{currentLanguage === 'tr' ? 'En Çok Fazla Mesai:' : 'Top Overtime Workers:'}</p>
+                <div className="space-y-1.5">
+                  {topOT.filter(e => (e.overtimeHours ?? 0) > 0).map((e, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-700 truncate">{e.name ?? '—'}</span>
+                      <span className="font-bold text-amber-600 shrink-0 ml-2">{e.overtimeHours}h</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 249: Payment Method Distribution ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const methodMap: Record<string, { count: number; rev: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const m = o as unknown as Record<string,unknown>;
+          const method = (m.paymentMethod as string) || (m.payment as string) || (currentLanguage === 'tr' ? 'Belirtilmemiş' : 'Not specified');
+          if (!methodMap[method]) methodMap[method] = { count: 0, rev: 0 };
+          methodMap[method].count++;
+          methodMap[method].rev += o.totalPrice || 0;
+        }
+        const methodList = Object.entries(methodMap).sort(([,a],[,b]) => b.rev - a.rev);
+        if (methodList.length < 2) return null;
+        const totalRev249 = methodList.reduce((s,[,v]) => s + v.rev, 0);
+        const COLORS249 = ['bg-brand', 'bg-blue-400', 'bg-emerald-400', 'bg-amber-400', 'bg-purple-400'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💳 Ödeme Yöntemi Dağılımı' : '💳 Payment Method Distribution'}</h3>
+            <div className="space-y-2.5">
+              {methodList.slice(0, 5).map(([method, d], i) => {
+                const pct = totalRev249 > 0 ? Math.round((d.rev / totalRev249) * 100) : 0;
+                return (
+                  <div key={method}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-medium text-gray-700 capitalize">{method}</span>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-[10px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                        <span className="text-[10px] font-bold text-gray-500">%{pct}</span>
+                        <span className="text-xs font-bold text-gray-700">₺{(d.rev/1000).toFixed(0)}K</span>
+                      </div>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${COLORS249[i] ?? 'bg-gray-400'}`} style={{ width: `${Math.max(4, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 250: 360° Business Intelligence Summary ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && employees.length > 0 && (() => {
+        const now250 = new Date();
+        const m3Start = new Date(now250.getFullYear(), now250.getMonth() - 3, 1);
+        const recentOrds = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= m3Start;
+          } catch { return false; }
+        });
+        const rev250 = recentOrds.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const activeEmp250 = employees.filter(e => e.status === 'Aktif').length;
+        const lowStockCount = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? i.minStock ?? 5)).length;
+        const inventoryVal250 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const totalOrds250 = recentOrds.length;
+        const uniqueCusts250 = new Set(recentOrds.map(o => o.customerName || '—')).size;
+        const openOrds = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').length;
+        const insights = [
+          rev250 > 0 && `💰 ${currentLanguage === 'tr' ? `Son 3 ayda ₺${(rev250/1000).toFixed(0)}K ciro` : `₺${(rev250/1000).toFixed(0)}K revenue in last 3 months`}`,
+          `📦 ${currentLanguage === 'tr' ? `${totalOrds250} sipariş, ${uniqueCusts250} benzersiz müşteri` : `${totalOrds250} orders from ${uniqueCusts250} unique customers`}`,
+          `👥 ${currentLanguage === 'tr' ? `${activeEmp250} aktif çalışan` : `${activeEmp250} active employees`}`,
+          `🏭 ${currentLanguage === 'tr' ? `₺${(inventoryVal250/1000).toFixed(0)}K stok değeri` : `₺${(inventoryVal250/1000).toFixed(0)}K inventory value`}`,
+          lowStockCount > 0 && `⚠️ ${currentLanguage === 'tr' ? `${lowStockCount} ürün kritik stok seviyesinde` : `${lowStockCount} items at critical stock level`}`,
+          openOrds > 0 && `⏳ ${currentLanguage === 'tr' ? `${openOrds} sipariş işleme bekliyor` : `${openOrds} orders awaiting processing`}`,
+        ].filter(Boolean) as string[];
+        return (
+          <div className="apple-card p-6 bg-gradient-to-br from-gray-50 to-white border border-gray-100">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">🔭</span>
+              <div>
+                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '360° İş Zekası Özeti' : '360° Business Intelligence Summary'}</h3>
+                <p className="text-[10px] text-gray-400">{now250.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              {insights.map((insight, i) => (
+                <div key={i} className="flex items-start gap-2.5 p-3 bg-white rounded-xl shadow-sm border border-gray-50">
+                  <p className="text-xs text-gray-700 leading-relaxed">{insight}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 p-3 bg-brand/5 rounded-xl border border-brand/10">
+              <p className="text-[11px] text-brand font-semibold">{currentLanguage === 'tr' ? '🚀 Cetpa ERP Analytics · 250 Faz tamamlandı' : '🚀 Cetpa ERP Analytics · 250 Phases Complete'}</p>
+              <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Finansal, satış, lojistik, envanter ve İK analizleri entegre edildi.' : 'Financial, sales, logistics, inventory, and HR analytics fully integrated.'}</p>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
