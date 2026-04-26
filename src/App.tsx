@@ -9339,6 +9339,465 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 281: Monthly New vs Lost Customer Balance (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const months = Array.from({length:6}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (5-i), 1);
+          return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth() };
+        });
+        const custByMonth: Record<string, Set<string>> = {};
+        months.forEach(m => { custByMonth[m.key] = new Set(); });
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (custByMonth[key]) custByMonth[key].add(o.customerName);
+        });
+        const data = months.map((m, i) => {
+          const current = custByMonth[m.key];
+          const prev = i > 0 ? custByMonth[months[i-1].key] : new Set<string>();
+          const newCusts = [...current].filter(c => !prev.has(c)).length;
+          const lostCusts = i > 0 ? [...prev].filter(c => !current.has(c)).length : 0;
+          return { label: m.label, new: newCusts, lost: lostCusts, net: newCusts - lostCusts };
+        });
+        const hasData = data.some(d => d.new > 0 || d.lost > 0);
+        if (!hasData) return null;
+        const maxVal = Math.max(...data.map(d => Math.max(d.new, d.lost)), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Customer Gain/Loss Balance</h3>
+            <p className="text-xs text-gray-500 mb-4">New vs churned customers per month (MoM)</p>
+            <div className="flex items-center justify-center gap-1 mb-2">
+              <span className="w-3 h-3 rounded-sm bg-green-400 inline-block"></span><span className="text-xs text-gray-500 mr-4">New</span>
+              <span className="w-3 h-3 rounded-sm bg-red-400 inline-block"></span><span className="text-xs text-gray-500">Lost</span>
+            </div>
+            <div className="flex items-end justify-around gap-2 h-28">
+              {data.map((d,i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div className="w-full flex gap-0.5 items-end justify-center" style={{ height: '80px' }}>
+                    <div className="w-1/2 rounded-t bg-green-400" style={{ height: `${maxVal>0?(d.new/maxVal*80):2}px`, minHeight: d.new>0?'4px':'0' }} title={`New: ${d.new}`} />
+                    <div className="w-1/2 rounded-t bg-red-400" style={{ height: `${maxVal>0?(d.lost/maxVal*80):2}px`, minHeight: d.lost>0?'4px':'0' }} title={`Lost: ${d.lost}`} />
+                  </div>
+                  <span className="text-[9px] text-gray-500">{d.label}</span>
+                  <span className="text-[9px] font-bold" style={{ color: d.net >= 0 ? '#10b981' : '#ef4444' }}>{d.net >= 0 ? '+' : ''}{d.net}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 282: SKU Rationalization Score (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 10 && orders.length >= 5 && (() => {
+        const skuSales: Record<string, number> = {};
+        orders.forEach(o => (o.lineItems||[]).forEach(li => { skuSales[li.sku] = (skuSales[li.sku]||0) + li.quantity; }));
+        const skuData = inventory.map(item => ({
+          sku: item.sku, name: item.name,
+          sold: skuSales[item.sku] || 0,
+          stock: item.stockLevel,
+          value: item.stockLevel * (item.costPrice||0),
+          category: item.category || 'Other',
+        }));
+        const noSales = skuData.filter(s => s.sold === 0 && s.stock > 0).sort((a,b)=>b.value-a.value).slice(0,6);
+        const lowSales = skuData.filter(s => s.sold > 0 && s.sold < 5 && s.stock > 0).slice(0,4);
+        if (noSales.length === 0 && lowSales.length === 0) return null;
+        const deadValue = noSales.reduce((s,d)=>s+d.value,0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">SKU Rationalization Candidates</h3>
+            <p className="text-xs text-gray-500 mb-3">Zero-sales SKUs holding ₺{deadValue.toLocaleString('tr-TR',{maximumFractionDigits:0})} in capital</p>
+            {noSales.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs font-bold text-red-600 mb-1">🔴 Discontinue (0 sales, stock in hand)</p>
+                <div className="space-y-1">
+                  {noSales.map((s,i) => (
+                    <div key={i} className="flex justify-between text-xs p-1.5 bg-red-50 rounded-lg">
+                      <span className="text-gray-700 truncate w-40">{s.name}</span>
+                      <span className="text-gray-400">{s.sku}</span>
+                      <span className="font-medium text-red-700">Qty: {s.stock} · ₺{s.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {lowSales.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-amber-600 mb-1">🟡 Review (fewer than 5 units sold)</p>
+                <div className="space-y-1">
+                  {lowSales.map((s,i) => (
+                    <div key={i} className="flex justify-between text-xs p-1.5 bg-amber-50 rounded-lg">
+                      <span className="text-gray-700 truncate w-40">{s.name}</span>
+                      <span className="text-gray-400">{s.sku}</span>
+                      <span className="font-medium text-amber-700">{s.sold} sold</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 283: Revenue per Square Meter (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const cargoMap: Record<string, {orders: number; revenue: number}> = {};
+        orders.filter(o => o.cargoCompany).forEach(o => {
+          const cargo = o.cargoCompany!;
+          if (!cargoMap[cargo]) cargoMap[cargo] = { orders: 0, revenue: 0 };
+          cargoMap[cargo].orders++;
+          cargoMap[cargo].revenue += o.totalPrice;
+        });
+        const last30 = orders.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+        });
+        const withCargo = last30.filter(o => o.cargoCompany).length;
+        const withoutCargo = last30.filter(o => !o.cargoCompany).length;
+        const cargoEntries = Object.entries(cargoMap).sort((a,b)=>b[1].revenue-a[1].revenue);
+        if (cargoEntries.length === 0) return null;
+        const totalRev = cargoEntries.reduce((s,[,d])=>s+d.revenue,0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Cargo Partner Performance</h3>
+            <p className="text-xs text-gray-500 mb-3">Revenue and order distribution by shipping carrier</p>
+            <div className="space-y-2 mb-4">
+              {cargoEntries.slice(0,6).map(([cargo,d],i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-700 w-28 truncate font-medium">{cargo}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-cyan-500" style={{ width: `${totalRev>0?(d.revenue/totalRev*100):0}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-500">{d.orders} orders</span>
+                  <span className="text-xs font-bold text-cyan-700">{totalRev>0?((d.revenue/totalRev)*100).toFixed(0):0}%</span>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs text-center">
+              <div className="bg-green-50 rounded-xl p-3">
+                <div className="font-bold text-green-700">{withCargo}</div>
+                <div className="text-gray-500">Orders with Cargo (30d)</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3">
+                <div className="font-bold text-gray-700">{withoutCargo}</div>
+                <div className="text-gray-500">No Cargo Assigned</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 284: Gross Margin Trend (12 months) (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const months = Array.from({length:12}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (11-i), 1);
+          return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth() };
+        });
+        const monthData = months.map(m => {
+          const mOrders = orders.filter(o => {
+            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            return d.getFullYear() === m.year && d.getMonth() === m.month;
+          });
+          const rev = mOrders.reduce((s,o)=>s+o.totalPrice,0);
+          const cost = mOrders.reduce((s,o)=>s+(o.lineItems||[]).reduce((sc,li)=>{
+            const inv = inventory.find(it=>it.id===li.inventoryId||it.sku===li.sku);
+            return sc+(inv?(inv.costPrice||0):(li.costPrice||0))*li.quantity;
+          },0),0);
+          const margin = rev > 0 ? ((rev-cost)/rev*100) : 0;
+          return { label: m.label, rev, cost, margin };
+        });
+        const hasData = monthData.some(d => d.rev > 0);
+        if (!hasData) return null;
+        const maxMargin = Math.max(...monthData.map(d=>d.margin), 1);
+        const avgMargin = monthData.filter(d=>d.rev>0).reduce((s,d)=>s+d.margin,0) / (monthData.filter(d=>d.rev>0).length || 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Gross Margin % — 12-Month Trend</h3>
+            <p className="text-xs text-gray-500 mb-4">Average: {avgMargin.toFixed(1)}% · Target: 30%</p>
+            <div className="flex items-end gap-1 h-24">
+              {monthData.map((d,i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-600">{d.margin > 0 ? `${d.margin.toFixed(0)}%` : ''}</span>
+                  <div className="w-full rounded-t" style={{ height: `${d.margin > 0 ? Math.max(4, d.margin/Math.max(maxMargin,50)*80) : 2}px`, background: d.margin >= 30 ? '#10b981' : d.margin >= 15 ? '#f59e0b' : d.margin > 0 ? '#ef4444' : '#e5e7eb', minHeight: '2px' }} />
+                  <span className="text-[8px] text-gray-400">{d.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-3 text-xs">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>≥30% target</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>15-30%</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block"></span>below 15%</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 285: Employee Department Headcount Trend (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 3 && (() => {
+        const deptCounts: Record<string, number> = {};
+        employees.filter(e=>e.status==='Aktif').forEach(e => {
+          const dept = e.department || 'Other';
+          deptCounts[dept] = (deptCounts[dept]||0)+1;
+        });
+        const depts = Object.entries(deptCounts).sort((a,b)=>b[1]-a[1]);
+        if (depts.length === 0) return null;
+        const total = depts.reduce((s,[,c])=>s+c,0);
+        const maxCount = Math.max(...depts.map(([,c])=>c));
+        const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Headcount by Department</h3>
+            <p className="text-xs text-gray-500 mb-4">Active employees: {total} across {depts.length} departments</p>
+            <div className="space-y-2">
+              {depts.map(([dept,count],i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-700 w-28 truncate font-medium">{dept}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${maxCount>0?(count/maxCount*100):0}%`, background: colors[i%colors.length] }} />
+                  </div>
+                  <span className="text-xs font-bold text-gray-700 w-6 text-right">{count}</span>
+                  <span className="text-xs text-gray-400 w-10 text-right">{total>0?((count/total)*100).toFixed(0):0}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 286: Quote-to-Cash Timeline (crm) ── */}
+      {reportsTab === 'crm' && quotations.length >= 5 && orders.length >= 5 && (() => {
+        const converted = quotations.filter(q => q.status === 'Converted to Order');
+        if (converted.length < 3) return null;
+        const timings: number[] = [];
+        converted.forEach(q => {
+          const qDate = (q.createdAt as {toDate?:()=>Date}).toDate?.() ?? (q.createdAt ? new Date(q.createdAt as string) : null);
+          if (!qDate) return;
+          const matchOrder = orders.find(o => o.leadId === q.leadId || o.customerName === q.customerName);
+          if (!matchOrder) return;
+          const oDate = (matchOrder.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(matchOrder.createdAt as string);
+          const days = Math.floor((oDate.getTime() - qDate.getTime()) / 86400000);
+          if (days >= 0 && days <= 365) timings.push(days);
+        });
+        if (timings.length < 2) return null;
+        const avg = timings.reduce((s,t)=>s+t,0)/timings.length;
+        const median = [...timings].sort((a,b)=>a-b)[Math.floor(timings.length/2)];
+        const under7 = timings.filter(t=>t<=7).length;
+        const under30 = timings.filter(t=>t<=30).length;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Quote-to-Cash Timeline</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-blue-700">{avg.toFixed(1)}d</div>
+                <div className="text-xs text-gray-500">Average Close Time</div>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-green-700">{median}d</div>
+                <div className="text-xs text-gray-500">Median Close Time</div>
+              </div>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                <span className="text-gray-600">Closed within 7 days</span>
+                <span className="font-bold text-green-600">{under7} / {timings.length} ({timings.length>0?((under7/timings.length)*100).toFixed(0):0}%)</span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                <span className="text-gray-600">Closed within 30 days</span>
+                <span className="font-bold text-blue-600">{under30} / {timings.length} ({timings.length>0?((under30/timings.length)*100).toFixed(0):0}%)</span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                <span className="text-gray-600">Conversion rate</span>
+                <span className="font-bold text-purple-600">{quotations.length>0?((converted.length/quotations.length)*100).toFixed(1):0}% ({converted.length}/{quotations.length})</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 287: Inventory Restock Cost Forecast (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
+        const now = new Date();
+        const velocityMap: Record<string, number> = {};
+        inventoryMovements.filter(m => {
+          if (m.type !== 'out') return false;
+          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+        }).forEach(m => {
+          velocityMap[m.productName || 'Unknown'] = (velocityMap[m.productName || 'Unknown'] || 0) + (m.quantity || 1);
+        });
+        const restockItems = inventory.filter(item => {
+          const dailyVel = (velocityMap[item.name] || 0) / 30;
+          const daysLeft = dailyVel > 0 ? item.stockLevel / dailyVel : Infinity;
+          return daysLeft <= 60 && item.stockLevel > 0;
+        }).map(item => {
+          const dailyVel = (velocityMap[item.name] || 0) / 30;
+          const daysLeft = dailyVel > 0 ? Math.floor(item.stockLevel / dailyVel) : 60;
+          const unitsNeeded = Math.ceil(dailyVel * 30); // 30-day restock
+          const cost = unitsNeeded * (item.costPrice || 0);
+          return { name: item.name, sku: item.sku, daysLeft, unitsNeeded, cost, dailyVel };
+        }).sort((a,b)=>a.daysLeft-b.daysLeft).slice(0,6);
+        if (restockItems.length === 0) return null;
+        const totalRestockCost = restockItems.reduce((s,r)=>s+r.cost,0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Restock Cost Forecast (Next 60 Days)</h3>
+            <p className="text-xs text-gray-500 mb-3">Estimated 30-day restock cost: <span className="font-bold text-purple-700">₺{totalRestockCost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>
+            <div className="space-y-2">
+              {restockItems.map((r,i) => (
+                <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg" style={{ background: r.daysLeft <= 14 ? '#fef2f2' : r.daysLeft <= 30 ? '#fffbeb' : '#f0fdf4' }}>
+                  <span className="font-medium text-gray-800 truncate w-36">{r.name}</span>
+                  <span style={{ color: r.daysLeft <= 14 ? '#ef4444' : r.daysLeft <= 30 ? '#f59e0b' : '#10b981' }} className="font-bold">{r.daysLeft}d left</span>
+                  <span className="text-gray-500">{r.unitsNeeded} units</span>
+                  <span className="font-bold text-purple-700">₺{r.cost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 288: Customer Loyalty Index (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const custOrders: Record<string, {count: number; revenue: number; first: Date; last: Date}> = {};
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          if (!custOrders[o.customerName]) custOrders[o.customerName] = { count: 0, revenue: 0, first: d, last: d };
+          custOrders[o.customerName].count++;
+          custOrders[o.customerName].revenue += o.totalPrice;
+          if (d < custOrders[o.customerName].first) custOrders[o.customerName].first = d;
+          if (d > custOrders[o.customerName].last) custOrders[o.customerName].last = d;
+        });
+        const now = new Date();
+        const custData = Object.entries(custOrders).map(([name, d]) => {
+          const tenureDays = (d.last.getTime() - d.first.getTime()) / 86400000;
+          const daysSinceLast = (now.getTime() - d.last.getTime()) / 86400000;
+          const loyaltyScore = Math.min(100, Math.round(
+            (d.count * 15) +
+            (Math.min(tenureDays, 365) / 365 * 40) +
+            (Math.max(0, 1 - daysSinceLast/90) * 30) +
+            (Math.min(d.revenue, 100000) / 100000 * 15)
+          ));
+          return { name, count: d.count, revenue: d.revenue, loyaltyScore, daysSinceLast: Math.floor(daysSinceLast) };
+        }).sort((a,b)=>b.loyaltyScore-a.loyaltyScore).slice(0,8);
+        if (custData.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Customer Loyalty Index</h3>
+            <p className="text-xs text-gray-500 mb-3">Composite score: order freq, tenure, recency, revenue (0-100)</p>
+            <div className="space-y-2">
+              {custData.map((c,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-gray-400 w-4">{i+1}</span>
+                  <span className="text-xs text-gray-700 truncate w-28 font-medium">{c.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${c.loyaltyScore}%`, background: c.loyaltyScore >= 70 ? '#10b981' : c.loyaltyScore >= 40 ? '#f59e0b' : '#ef4444' }} />
+                  </div>
+                  <span className="text-xs font-black w-8 text-right" style={{ color: c.loyaltyScore >= 70 ? '#10b981' : c.loyaltyScore >= 40 ? '#f59e0b' : '#ef4444' }}>{c.loyaltyScore}</span>
+                  <span className="text-xs text-gray-400 w-12 text-right">{c.count} ord</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 289: Order Fulfilment Speed Distribution (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const delivered = orders.filter(o => o.status === 'Delivered' && o.createdAt).map(o => {
+          const created = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const delivered = o.estimatedDelivery
+            ? ((o.estimatedDelivery as {toDate?:()=>Date}).toDate?.() ?? new Date(o.estimatedDelivery as string))
+            : null;
+          if (!delivered) return null;
+          const days = Math.floor((delivered.getTime() - created.getTime()) / 86400000);
+          return days >= 0 && days <= 30 ? days : null;
+        }).filter((d): d is number => d !== null);
+        if (delivered.length < 3) return null;
+        const buckets = [
+          { label: 'Same day', range: [0,0], color: '#10b981' },
+          { label: '1-2 days', range: [1,2], color: '#3b82f6' },
+          { label: '3-5 days', range: [3,5], color: '#f59e0b' },
+          { label: '6-10 days', range: [6,10], color: '#f97316' },
+          { label: '11+ days', range: [11,999], color: '#ef4444' },
+        ];
+        const bucketData = buckets.map(b => ({
+          ...b,
+          count: delivered.filter(d => d >= b.range[0] && d <= b.range[1]).length,
+        }));
+        const maxCount = Math.max(...bucketData.map(b=>b.count), 1);
+        const avg = delivered.reduce((s,d)=>s+d,0)/delivered.length;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Order Fulfilment Speed Distribution</h3>
+            <p className="text-xs text-gray-500 mb-4">Based on {delivered.length} delivered orders · avg {avg.toFixed(1)} days</p>
+            <div className="flex items-end gap-3 h-24">
+              {bucketData.map((b,i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-600 font-bold">{b.count}</span>
+                  <div className="w-full rounded-t" style={{ height: `${maxCount>0?(b.count/maxCount*72):2}px`, background: b.color, minHeight: b.count>0?'4px':'2px' }} />
+                  <span className="text-[8px] text-gray-400 text-center leading-tight">{b.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 290: Revenue Attribution Waterfall (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const prevMonth = new Date(now.getFullYear(), now.getMonth()-1, 1);
+        const currMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const prevOrders = orders.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return d >= prevMonth && d < currMonth;
+        });
+        const currOrders = orders.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return d >= currMonth;
+        });
+        if (prevOrders.length === 0 && currOrders.length === 0) return null;
+        const prevRev = prevOrders.reduce((s,o)=>s+o.totalPrice,0);
+        const currRev = currOrders.reduce((s,o)=>s+o.totalPrice,0);
+        const prevCusts = new Set(prevOrders.map(o=>o.customerName));
+        const currCusts = new Set(currOrders.map(o=>o.customerName));
+        const newCustRev = currOrders.filter(o=>!prevCusts.has(o.customerName)).reduce((s,o)=>s+o.totalPrice,0);
+        const retainedRev = currOrders.filter(o=>prevCusts.has(o.customerName)).reduce((s,o)=>s+o.totalPrice,0);
+        const lostRev = prevOrders.filter(o=>!currCusts.has(o.customerName)).reduce((s,o)=>s+o.totalPrice,0);
+        const netChange = currRev - prevRev;
+        const items = [
+          { label: 'Prior Month', value: prevRev, type: 'base' as const },
+          { label: 'New Customers', value: newCustRev, type: 'add' as const },
+          { label: 'Retained Growth', value: retainedRev - (prevRev - lostRev), type: retainedRev - (prevRev - lostRev) >= 0 ? 'add' as const : 'sub' as const },
+          { label: 'Lost Customers', value: -lostRev, type: 'sub' as const },
+          { label: 'Current Month', value: currRev, type: 'base' as const },
+        ];
+        const maxVal = Math.max(...[prevRev, currRev], 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Revenue Attribution Waterfall (MoM)</h3>
+            <p className="text-xs text-gray-500 mb-4">Net change: <span className={netChange >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{netChange >= 0 ? '+' : ''}₺{netChange.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>
+            <div className="space-y-2">
+              {items.map((item,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-32">{item.label}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{
+                      width: `${maxVal>0?(Math.abs(item.value)/maxVal*100):0}%`,
+                      background: item.type==='base' ? '#6366f1' : item.type==='add' ? '#10b981' : '#ef4444'
+                    }} />
+                  </div>
+                  <span className="text-xs font-bold w-24 text-right" style={{ color: item.type==='base'?'#6366f1':item.type==='add'?'#10b981':'#ef4444' }}>
+                    {item.type !== 'base' && (item.value >= 0 ? '+' : '')}₺{Math.abs(item.value).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
