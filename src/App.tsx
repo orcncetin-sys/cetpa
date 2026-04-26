@@ -5095,6 +5095,339 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 199: Dead Stock Alert ── */}
+      {reportsTab === 'envanter' && inventory.length > 0 && orders.length > 0 && (() => {
+        const now199 = new Date();
+        const cutoff199 = new Date(now199); cutoff199.setDate(cutoff199.getDate() - 60);
+        // Products sold in last 60 days
+        const soldRecently = new Set<string>();
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od < cutoff199) continue;
+            for (const li of (o.lineItems ?? [])) {
+              soldRecently.add(li.inventoryId || li.name || li.sku || '');
+            }
+          } catch { /* skip */ }
+        }
+        const deadStock = inventory.filter(i =>
+          (i.stockLevel ?? 0) > 0 &&
+          !soldRecently.has(i.id) &&
+          !soldRecently.has(i.name) &&
+          !soldRecently.has(i.sku || '')
+        ).map(i => ({
+          name: i.name,
+          stock: i.stockLevel ?? 0,
+          value: (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0),
+          category: i.category ?? '—',
+        })).sort((a, b) => b.value - a.value).slice(0, 8);
+        if (deadStock.length === 0) return null;
+        const totalDeadVal = deadStock.reduce((s, i) => s + i.value, 0);
+        return (
+          <div className="apple-card p-6 border border-orange-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '💤 Ölü Stok Alarmı (60 Gün Satışsız)' : '💤 Dead Stock Alert (60 Days No Sales)'}</h3>
+              <span className="text-xs font-bold text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full">
+                ₺{(totalDeadVal/1000).toFixed(0)}K {currentLanguage === 'tr' ? 'hareketsiz' : 'idle'}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {deadStock.map(item => (
+                <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div>
+                    <p className="text-xs font-medium text-gray-800">{item.name}</p>
+                    <p className="text-[10px] text-gray-400">{item.category} · {item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                  </div>
+                  <span className="text-xs font-bold text-orange-600 shrink-0 ml-2">₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Son 60 günde satış hareketi olmayan ve stoku bulunan ürünler.' : 'Items with stock but no sales movement in last 60 days.'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 200: Monthly New vs Repeat Customer Revenue ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const now200 = new Date();
+        const months200 = Array.from({ length: 6 }, (_, i) => {
+          const d = new Date(now200.getFullYear(), now200.getMonth() - (5 - i), 1);
+          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const year = d.getFullYear(); const month = d.getMonth();
+          return { label, year, month, newRev: 0, repeatRev: 0 };
+        });
+        // Track first order month per customer
+        const firstOrderMonth: Record<string, { year: number; month: number }> = {};
+        const sortedOrders = [...orders].sort((a, b) => {
+          try {
+            const da = (a.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(a.createdAt as string);
+            const db2 = (b.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(b.createdAt as string);
+            return da.getTime() - db2.getTime();
+          } catch { return 0; }
+        });
+        for (const o of sortedOrders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (!firstOrderMonth[name]) firstOrderMonth[name] = { year: od.getFullYear(), month: od.getMonth() };
+            const m = months200.find(m => m.year === od.getFullYear() && m.month === od.getMonth());
+            if (!m) continue;
+            const isNew = firstOrderMonth[name].year === od.getFullYear() && firstOrderMonth[name].month === od.getMonth();
+            if (isNew) m.newRev += o.totalPrice || 0;
+            else m.repeatRev += o.totalPrice || 0;
+          } catch { /* skip */ }
+        }
+        const hasData = months200.some(m => m.newRev > 0 || m.repeatRev > 0);
+        if (!hasData) return null;
+        const maxTotal = Math.max(...months200.map(m => m.newRev + m.repeatRev), 1);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🆕 Yeni vs Tekrar Müşteri Cirosu' : '🆕 New vs Repeat Customer Revenue'}</h3>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-brand" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Yeni' : 'New'}</span></div>
+                <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-blue-300" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Tekrar' : 'Repeat'}</span></div>
+              </div>
+            </div>
+            <div className="flex items-end gap-3 h-28 mb-2">
+              {months200.map((m, i) => {
+                const total = m.newRev + m.repeatRev;
+                const totalH = Math.round((total / maxTotal) * 80);
+                const newH = total > 0 ? Math.round((m.newRev / total) * totalH) : 0;
+                const repH = totalH - newH;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex flex-col items-center justify-end" style={{ height: '80px' }}>
+                      <div className="w-full bg-brand rounded-t-sm" style={{ height: `${Math.max(newH > 0 ? 2 : 0, newH)}px` }} />
+                      <div className="w-full bg-blue-300" style={{ height: `${Math.max(repH > 0 ? 2 : 0, repH)}px` }} />
+                    </div>
+                    <span className="text-[9px] text-gray-400 leading-none">{m.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 201: Inventory Reorder Point Calculator ── */}
+      {reportsTab === 'envanter' && inventory.length > 0 && orders.length >= 5 && (() => {
+        const now201 = new Date();
+        const days201 = 30;
+        const cutoff201 = new Date(now201); cutoff201.setDate(cutoff201.getDate() - days201);
+        const LEAD_TIME_DAYS = 7;
+        // Daily demand per product
+        const dailyDemand: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od < cutoff201) continue;
+            for (const li of (o.lineItems ?? [])) {
+              const key = li.inventoryId || li.name || '';
+              if (!key) continue;
+              dailyDemand[key] = (dailyDemand[key] ?? 0) + li.quantity / days201;
+            }
+          } catch { /* skip */ }
+        }
+        const reorderItems = inventory
+          .map(i => {
+            const demand = dailyDemand[i.id] ?? dailyDemand[i.name] ?? dailyDemand[i.sku || ''] ?? 0;
+            if (demand <= 0) return null;
+            const reorderPoint = Math.ceil(demand * LEAD_TIME_DAYS * 1.5); // 1.5x safety stock
+            const needsReorder = (i.stockLevel ?? 0) <= reorderPoint;
+            return { name: i.name, stock: i.stockLevel ?? 0, reorderPoint, demand: Math.round(demand * 10) / 10, needsReorder };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null)
+          .sort((a, b) => (b.needsReorder ? 1 : 0) - (a.needsReorder ? 1 : 0) || b.demand - a.demand)
+          .slice(0, 8);
+        if (reorderItems.length === 0) return null;
+        const needsReorderCount = reorderItems.filter(i => i.needsReorder).length;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📦 Yeniden Sipariş Noktası Hesaplayıcı' : '📦 Reorder Point Calculator'}</h3>
+              {needsReorderCount > 0 && (
+                <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                  {needsReorderCount} {currentLanguage === 'tr' ? 'ürün sipariş gerekiyor' : 'items need reorder'}
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-400 text-[10px]">
+                    <th className="text-left pb-2">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Stok' : 'Stock'}</th>
+                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Yeni. Noktası' : 'Reorder Pt'}</th>
+                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Günlük Talep' : 'Daily Demand'}</th>
+                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reorderItems.map(item => (
+                    <tr key={item.name} className="border-t border-gray-50">
+                      <td className="py-1.5 text-gray-800 font-medium truncate max-w-[100px]">{item.name}</td>
+                      <td className="py-1.5 text-center text-gray-700">{item.stock}</td>
+                      <td className="py-1.5 text-center text-gray-700">{item.reorderPoint}</td>
+                      <td className="py-1.5 text-center text-gray-600">{item.demand}/d</td>
+                      <td className="py-1.5 text-center">
+                        {item.needsReorder
+                          ? <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">🔴 {currentLanguage === 'tr' ? 'Sipariş Ver' : 'Order Now'}</span>
+                          : <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">✅ OK</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? `Yeniden sipariş noktası = Günlük ortalama talep × ${LEAD_TIME_DAYS} gün tedarik süresi × 1.5 emniyet stoku` : `Reorder point = Avg daily demand × ${LEAD_TIME_DAYS}-day lead time × 1.5 safety stock`}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 202: Top Revenue Days (Last 90 Days) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const now202 = new Date();
+        const cutoff202 = new Date(now202); cutoff202.setDate(cutoff202.getDate() - 90);
+        const dayRevMap: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od < cutoff202) continue;
+            const key = od.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: '2-digit', month: 'short' });
+            dayRevMap[key] = (dayRevMap[key] ?? 0) + (o.totalPrice || 0);
+          } catch { /* skip */ }
+        }
+        const topDays = Object.entries(dayRevMap).sort(([,a],[,b]) => b - a).slice(0, 6);
+        if (topDays.length < 3) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🏅 En Yüksek Ciro Günleri (Son 90 Gün)' : '🏅 Top Revenue Days (Last 90 Days)'}</h3>
+            <div className="space-y-2">
+              {topDays.map(([day, rev], i) => {
+                const maxRev = topDays[0][1];
+                return (
+                  <div key={day} className="flex items-center gap-3">
+                    <span className="text-sm">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`}</span>
+                    <span className="text-xs font-medium text-gray-700 w-16 shrink-0">{day}</span>
+                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-brand rounded-full" style={{ width: `${Math.round((rev / maxRev) * 100)}%` }} />
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 w-16 text-right shrink-0">₺{(rev/1000).toFixed(1)}K</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 203: Gross Margin by Order Size Tier ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && (() => {
+        const tiers203 = [
+          { label: '<₺5K', min: 0, max: 5000, rev: 0, cogs: 0, count: 0 },
+          { label: '₺5-20K', min: 5000, max: 20000, rev: 0, cogs: 0, count: 0 },
+          { label: '₺20-50K', min: 20000, max: 50000, rev: 0, cogs: 0, count: 0 },
+          { label: '₺50K+', min: 50000, max: Infinity, rev: 0, cogs: 0, count: 0 },
+        ];
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const tier = tiers203.find(t => (o.totalPrice || 0) >= t.min && (o.totalPrice || 0) < t.max);
+          if (!tier) continue;
+          tier.rev += o.totalPrice || 0;
+          tier.count++;
+          for (const li of (o.lineItems ?? [])) {
+            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+            tier.cogs += (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+          }
+        }
+        const activeTiers = tiers203.filter(t => t.count > 0);
+        if (activeTiers.length < 2) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🎯 Sipariş Büyüklüğüne Göre Brüt Marj' : '🎯 Gross Margin by Order Size'}</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {activeTiers.map(t => {
+                const margin = t.rev > 0 ? Math.round(((t.rev - t.cogs) / t.rev) * 100) : 0;
+                return (
+                  <div key={t.label} className={`rounded-2xl p-4 ${margin >= 30 ? 'bg-emerald-50' : margin >= 15 ? 'bg-amber-50' : 'bg-red-50'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-1">{t.label}</p>
+                    <p className={`text-3xl font-black ${margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{margin}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{t.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · ₺{(t.rev/1000).toFixed(0)}K</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 204: Inventory Velocity (Fast vs Slow Movers) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 3 && orders.length >= 5 && (() => {
+        const now204 = new Date();
+        const days204 = 30;
+        const cutoff204 = new Date(now204); cutoff204.setDate(cutoff204.getDate() - days204);
+        const unitsSold: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od < cutoff204) continue;
+            for (const li of (o.lineItems ?? [])) {
+              const key = li.inventoryId || li.name || '';
+              if (!key) continue;
+              unitsSold[key] = (unitsSold[key] ?? 0) + li.quantity;
+            }
+          } catch { /* skip */ }
+        }
+        const velocityList = inventory
+          .map(i => {
+            const sold = unitsSold[i.id] ?? unitsSold[i.name] ?? unitsSold[i.sku || ''] ?? 0;
+            const stock = i.stockLevel ?? 0;
+            const turnover = stock > 0 ? Math.round((sold / stock) * 100) / 100 : sold > 0 ? Infinity : 0;
+            return { name: i.name, sold, stock, turnover };
+          })
+          .filter(i => i.sold > 0 || i.stock > 0)
+          .sort((a, b) => b.turnover - a.turnover)
+          .slice(0, 10);
+        if (velocityList.length < 3) return null;
+        const maxTurnover = Math.min(Math.max(...velocityList.map(i => i.turnover === Infinity ? 0 : i.turnover), 1), 5);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⚡ Stok Devir Hızı (Son 30 Gün)' : '⚡ Inventory Velocity (Last 30 Days)'}</h3>
+              <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Satılan/Stok Oranı' : 'Units Sold/Stock Ratio'}</span>
+            </div>
+            <div className="space-y-2">
+              {velocityList.map(item => {
+                const pct = item.turnover === Infinity ? 100 : Math.min(100, Math.round((item.turnover / maxTurnover) * 100));
+                const isfast = item.turnover >= 0.5;
+                return (
+                  <div key={item.name}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs text-gray-700 truncate">{item.name}</span>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-[10px] text-gray-400">{item.sold} {currentLanguage === 'tr' ? 'satılan' : 'sold'}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isfast ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {isfast ? (currentLanguage === 'tr' ? '⚡ Hızlı' : '⚡ Fast') : (currentLanguage === 'tr' ? '🐢 Yavaş' : '🐢 Slow')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${isfast ? 'bg-emerald-400' : 'bg-gray-300'}`} style={{ width: `${Math.max(4, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
