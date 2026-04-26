@@ -3099,6 +3099,68 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </div>
             );
           })()}
+
+          {/* ── Phase 170: Order Lead Time Analysis ── */}
+          {orders.filter(o => o.status === 'Delivered').length >= 3 && (() => {
+            const delivered = orders.filter(o => o.status === 'Delivered' && o.createdAt);
+            const leadTimes: number[] = [];
+            for (const o of delivered) {
+              try {
+                const created = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                // Approximate delivery date as updatedAt or +7 days heuristic
+                const raw2 = (o as unknown as Record<string,unknown>).updatedAt;
+                const delivered_date = raw2
+                  ? ((raw2 as { toDate?: () => Date }).toDate?.() ?? new Date(raw2 as string))
+                  : null;
+                if (delivered_date) {
+                  const days = Math.round((delivered_date.getTime() - created.getTime()) / 86400000);
+                  if (days >= 0 && days <= 90) leadTimes.push(days);
+                }
+              } catch { /* skip */ }
+            }
+            if (leadTimes.length < 2) return null;
+            const avgLT = Math.round(leadTimes.reduce((s, d) => s + d, 0) / leadTimes.length);
+            const minLT = Math.min(...leadTimes);
+            const maxLT = Math.max(...leadTimes);
+            // Histogram buckets
+            const buckets = [
+              { label: '0-3', min: 0, max: 3, count: 0 },
+              { label: '4-7', min: 4, max: 7, count: 0 },
+              { label: '8-14', min: 8, max: 14, count: 0 },
+              { label: '15+', min: 15, max: Infinity, count: 0 },
+            ];
+            for (const d of leadTimes) { const b = buckets.find(b => d >= b.min && d <= b.max); if (b) b.count++; }
+            const maxBucketCount = Math.max(...buckets.map(b => b.count), 1);
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📦 Sipariş Teslim Süresi' : '📦 Order Lead Time'}</h3>
+                <div className="grid grid-cols-3 gap-3 mb-5">
+                  {[
+                    { label: currentLanguage==='tr'?'Ortalama':'Average', value: `${avgLT}g`, color: avgLT <= 7 ? 'text-emerald-600' : avgLT <= 14 ? 'text-amber-600' : 'text-red-500' },
+                    { label: currentLanguage==='tr'?'En Hızlı':'Fastest', value: `${minLT}g`, color: 'text-emerald-600' },
+                    { label: currentLanguage==='tr'?'En Yavaş':'Slowest', value: `${maxLT}g`, color: 'text-red-500' },
+                  ].map(k => (
+                    <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                      <p className="text-[10px] text-gray-400">{k.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-end gap-3 h-20">
+                  {buckets.map(b => (
+                    <div key={b.label} className="flex-1 flex flex-col items-center gap-1">
+                      <div className="w-full flex flex-col justify-end" style={{ height: '64px' }}>
+                        <div className={`w-full rounded-t-lg ${b.label === '0-3' ? 'bg-emerald-400' : b.label === '4-7' ? 'bg-blue-400' : b.label === '8-14' ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ height: `${Math.max(Math.round((b.count / maxBucketCount) * 100), 4)}%` }} />
+                      </div>
+                      <span className="text-[9px] text-gray-400">{b.label}{currentLanguage==='tr'?'g':'d'}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-2">{currentLanguage==='tr'?`${leadTimes.length} teslim üzerinden hesaplandı`:`Calculated from ${leadTimes.length} deliveries`}</p>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3262,8 +3324,105 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               {currentLanguage==='tr'?'İnsan Kaynakları Sekmesine Git →':'Go to Human Resources →'}
             </button>
           </div>
+
+          {/* ── Phase 169: Revenue per Employee ── */}
+          {employees.length > 0 && orders.length > 0 && (() => {
+            const activeEmps = employees.filter(e => e.status === 'Aktif').length || 1;
+            const totalRev169 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+            const revPerEmp = Math.round(totalRev169 / activeEmps);
+            const totalPayroll = employees.filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
+            const revenueMultiplier = totalPayroll > 0 ? (totalRev169 / totalPayroll).toFixed(1) : '—';
+            // Revenue per dept
+            const deptRevMap: Record<string, number> = {};
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              const rep = (o.assignedTo as string | undefined) || '';
+              const emp = employees.find(e => e.name === rep || e.email === rep);
+              if (emp?.department) {
+                deptRevMap[emp.department] = (deptRevMap[emp.department] ?? 0) + (o.totalPrice || 0);
+              }
+            }
+            const deptList169 = Object.entries(deptRevMap).sort(([,a],[,b]) => b - a).slice(0, 5);
+            return (
+              <div className="apple-card p-6">
+                <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'📊 Çalışan Başı Üretkenlik':'📊 Revenue per Employee'}</h4>
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {[
+                    { label: currentLanguage==='tr'?'Çalışan Başı Ciro':'Rev / Employee', value: `₺${(revPerEmp/1000).toFixed(1)}K`, color: 'text-blue-600' },
+                    { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenueMultiplier}x`, color: 'text-emerald-600' },
+                    { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Staff', value: String(activeEmps), color: 'text-gray-700' },
+                  ].map(k => (
+                    <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
+                      <p className="text-[10px] text-gray-400 leading-tight mt-0.5">{k.label}</p>
+                    </div>
+                  ))}
+                </div>
+                {deptList169.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">{currentLanguage==='tr'?'Departman Bazlı Ciro':'Revenue by Department'}</p>
+                    {deptList169.map(([dept, rev]) => (
+                      <div key={dept} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-700 truncate">{dept}</span>
+                        <span className="font-bold text-gray-800 ml-2">₺{(rev/1000).toFixed(1)}K</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
+
+      {/* ── Phase 172: Top New Customers This Month ── */}
+      {reportsTab === 'crm' && orders.length >= 3 && (() => {
+        const now172 = new Date();
+        const thisMonth172 = `${now172.getFullYear()}-${String(now172.getMonth()+1).padStart(2,'0')}`;
+        // Find first-order-ever date per customer
+        const firstOrderDate: Record<string, string> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const mkey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            const name = o.customerName || '—';
+            if (!firstOrderDate[name] || mkey < firstOrderDate[name]) firstOrderDate[name] = mkey;
+          } catch { /* skip */ }
+        }
+        // New customers this month (first order is this month)
+        const newThisMonth = Object.entries(firstOrderDate)
+          .filter(([, m]) => m === thisMonth172)
+          .map(([name]) => {
+            const custOrders = orders.filter(o => o.customerName === name && o.status !== 'Cancelled');
+            const revenue = custOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+            return { name, revenue, orders: custOrders.length };
+          })
+          .sort((a, b) => b.revenue - a.revenue);
+        if (newThisMonth.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🌟 Bu Ayin Yeni Müşterileri' : '🌟 New Customers This Month'}</h3>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{newThisMonth.length} {currentLanguage==='tr'?'yeni':'new'}</span>
+            </div>
+            <div className="space-y-2">
+              {newThisMonth.slice(0, 6).map((c, i) => (
+                <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[9px] font-bold text-emerald-700 shrink-0">{i+1}</span>
+                    <span className="text-xs font-medium text-gray-800 truncate">{c.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage==='tr'?'sip.':'ord.'}</span>
+                    <span className="text-xs font-bold text-emerald-600">₺{c.revenue.toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Phase 139: Customer Retention Analysis ── */}
       {reportsTab === 'crm' && orders.length > 3 && (() => {
