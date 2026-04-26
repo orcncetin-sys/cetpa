@@ -7120,6 +7120,304 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 236: Demand Forecast Accuracy ── */}
+      {reportsTab === 'envanter' && orders.length >= 10 && inventory.length > 0 && (() => {
+        const now236 = new Date();
+        // Compare projected (last month run rate) vs actual this month per category
+        const prevMonthStart236 = new Date(now236.getFullYear(), now236.getMonth() - 1, 1);
+        const prevMonthEnd236 = new Date(now236.getFullYear(), now236.getMonth(), 0, 23, 59, 59);
+        const currMonthStart236 = new Date(now236.getFullYear(), now236.getMonth(), 1);
+        const getCatQty = (start: Date, end: Date) => {
+          const catQty: Record<string, number> = {};
+          for (const o of orders) {
+            if (o.status === 'Cancelled') continue;
+            try {
+              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              if (od < start || od > end) continue;
+              for (const li of (o.lineItems ?? [])) {
+                const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+                const cat = inv?.category || 'Other';
+                catQty[cat] = (catQty[cat] ?? 0) + li.quantity;
+              }
+            } catch { /* skip */ }
+          }
+          return catQty;
+        };
+        const prevQty = getCatQty(prevMonthStart236, prevMonthEnd236);
+        const currQty = getCatQty(currMonthStart236, new Date());
+        const daysElapsed = now236.getDate();
+        const daysInMonth236 = new Date(now236.getFullYear(), now236.getMonth() + 1, 0).getDate();
+        const cats236 = Object.keys(prevQty);
+        if (cats236.length < 2) return null;
+        const accuracyList = cats236.map(cat => {
+          const projected = Math.round((prevQty[cat] ?? 0) * (daysElapsed / daysInMonth236));
+          const actual = currQty[cat] ?? 0;
+          const accuracy = projected > 0 ? Math.round((Math.min(actual, projected) / Math.max(actual, projected)) * 100) : null;
+          return { cat, projected, actual, accuracy };
+        }).filter(c => c.projected > 0 || c.actual > 0).sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0)).slice(0, 6);
+        const avgAccuracy = accuracyList.filter(c => c.accuracy !== null).reduce((s, c) => s + (c.accuracy ?? 0), 0) / Math.max(accuracyList.filter(c => c.accuracy !== null).length, 1);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🎯 Talep Tahmin Doğruluğu' : '🎯 Demand Forecast Accuracy'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${avgAccuracy >= 80 ? 'bg-emerald-100 text-emerald-700' : avgAccuracy >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                Ø %{Math.round(avgAccuracy)} {currentLanguage === 'tr' ? 'doğruluk' : 'accuracy'}
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {accuracyList.map(c => (
+                <div key={c.cat}>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-xs font-medium text-gray-700 truncate">{c.cat}</span>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className="text-[10px] text-gray-400">{c.actual} / {c.projected} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                      {c.accuracy !== null && <span className={`text-xs font-bold ${c.accuracy >= 80 ? 'text-emerald-600' : c.accuracy >= 60 ? 'text-amber-600' : 'text-red-500'}`}>%{c.accuracy}</span>}
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${(c.accuracy ?? 0) >= 80 ? 'bg-emerald-400' : (c.accuracy ?? 0) >= 60 ? 'bg-amber-400' : 'bg-red-300'}`} style={{ width: `${Math.max(4, c.accuracy ?? 0)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Tahmin: geçen ay çıkış hızı × bu ayın geçen gün sayısı' : 'Forecast: prior month run rate × days elapsed this month'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 237: Customer Purchase Frequency Distribution ── */}
+      {reportsTab === 'crm' && orders.length >= 6 && (() => {
+        const freqMap: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          freqMap[name] = (freqMap[name] ?? 0) + 1;
+        }
+        const buckets237 = [
+          { label: '1', min: 1, max: 1, count: 0 },
+          { label: '2-3', min: 2, max: 3, count: 0 },
+          { label: '4-6', min: 4, max: 6, count: 0 },
+          { label: '7-12', min: 7, max: 12, count: 0 },
+          { label: '13+', min: 13, max: Infinity, count: 0 },
+        ];
+        for (const freq of Object.values(freqMap)) {
+          const b = buckets237.find(b => freq >= b.min && freq <= b.max);
+          if (b) b.count++;
+        }
+        const maxBkt237 = Math.max(...buckets237.map(b => b.count), 1);
+        const totalCusts237 = Object.keys(freqMap).length;
+        const repeatCusts = Object.values(freqMap).filter(f => f >= 2).length;
+        const repeatPct = totalCusts237 > 0 ? Math.round((repeatCusts / totalCusts237) * 100) : 0;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📊 Müşteri Satın Alma Sıklığı' : '📊 Customer Purchase Frequency'}</h3>
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">%{repeatPct} {currentLanguage === 'tr' ? 'tekrarlı müşteri' : 'repeat customers'}</span>
+            </div>
+            <div className="flex items-end gap-3 h-24 mb-3">
+              {buckets237.map(b => (
+                <div key={b.label} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="w-full flex flex-col items-center" style={{ height: '72px' }}>
+                    {b.count > 0 && <span className="text-[9px] font-bold text-gray-500 mb-0.5">{b.count}</span>}
+                    <div className="w-full flex items-end mt-auto" style={{ height: '56px' }}>
+                      <div className="w-full bg-indigo-300 rounded-t-md" style={{ height: `${Math.max(4, Math.round((b.count / maxBkt237) * 56))}px` }} />
+                    </div>
+                  </div>
+                  <span className="text-[9px] text-gray-400 leading-none">{b.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {[
+                { label: currentLanguage === 'tr' ? 'Toplam Müşteri' : 'Total Customers', value: totalCusts237, color: 'text-gray-700' },
+                { label: currentLanguage === 'tr' ? 'Tekrarlı Alım' : 'Repeat Buyers', value: repeatCusts, color: 'text-emerald-600' },
+                { label: currentLanguage === 'tr' ? 'Tek Alım' : 'One-time', value: totalCusts237 - repeatCusts, color: 'text-amber-600' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-2">
+                  <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[9px] text-gray-400">{k.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 238: Inventory Health Score ── */}
+      {reportsTab === 'envanter' && inventory.length > 0 && (() => {
+        const now238 = new Date();
+        const scores238 = inventory.map(i => {
+          let score = 100;
+          // Low stock penalty
+          if ((i.stockLevel ?? 0) <= (i.lowStockThreshold ?? i.minStock ?? 5)) score -= 30;
+          // No cost price penalty
+          if (!i.costPrice && !i.cost) score -= 20;
+          // No category penalty
+          if (!i.category) score -= 10;
+          // Expiry penalty
+          if (i.expiryDate) {
+            const daysLeft = Math.round((new Date(i.expiryDate).getTime() - now238.getTime()) / 86400000);
+            if (daysLeft < 0) score -= 40;
+            else if (daysLeft < 30) score -= 25;
+            else if (daysLeft < 90) score -= 10;
+          }
+          return { name: i.name, score: Math.max(0, score), category: i.category ?? '—', stock: i.stockLevel ?? 0 };
+        });
+        const avgScore = Math.round(scores238.reduce((s, i) => s + i.score, 0) / Math.max(scores238.length, 1));
+        const excellent = scores238.filter(i => i.score >= 80).length;
+        const warning = scores238.filter(i => i.score >= 50 && i.score < 80).length;
+        const critical = scores238.filter(i => i.score < 50).length;
+        const worstItems = scores238.filter(i => i.score < 70).sort((a, b) => a.score - b.score).slice(0, 5);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🏥 Stok Sağlık Skoru' : '🏥 Inventory Health Score'}</h3>
+              <span className={`text-2xl font-black ${avgScore >= 80 ? 'text-emerald-600' : avgScore >= 60 ? 'text-amber-500' : 'text-red-500'}`}>{avgScore}/100</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy', value: excellent, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                { label: currentLanguage === 'tr' ? 'Dikkat' : 'Warning', value: warning, color: 'text-amber-600', bg: 'bg-amber-50' },
+                { label: currentLanguage === 'tr' ? 'Kritik' : 'Critical', value: critical, color: 'text-red-600', bg: 'bg-red-50' },
+              ].map(k => (
+                <div key={k.label} className={`${k.bg} rounded-xl p-3 text-center`}>
+                  <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{k.label}</p>
+                </div>
+              ))}
+            </div>
+            {worstItems.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2">{currentLanguage === 'tr' ? 'İyileştirme Gereken Ürünler:' : 'Items Needing Attention:'}</p>
+                <div className="space-y-1.5">
+                  {worstItems.map(item => (
+                    <div key={item.name} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-700 truncate">{item.name}</span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${item.score < 50 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{item.score}/100</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 239: Financial Health Dashboard ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && (() => {
+        const now239 = new Date();
+        const months3Start = new Date(now239.getFullYear(), now239.getMonth() - 3, 1);
+        const recentOrders = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= months3Start;
+          } catch { return false; }
+        });
+        const revenue239 = recentOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const cogs239 = recentOrders.reduce((s, o) =>
+          s + (o.lineItems ?? []).reduce((ls, li) => {
+            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+            return ls + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+          }, 0), 0);
+        const grossProfit = revenue239 - cogs239;
+        const grossMargin = revenue239 > 0 ? Math.round((grossProfit / revenue239) * 100) : 0;
+        const inventoryVal239 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const arVal = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered').reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const monthlyRevRate = revenue239 / 3;
+        const kpis239 = [
+          { label: 'Gross Margin', value: `%${grossMargin}`, score: grossMargin >= 30 ? 'A' : grossMargin >= 20 ? 'B' : grossMargin >= 10 ? 'C' : 'D', desc: currentLanguage === 'tr' ? 'Brüt marj' : 'Gross margin' },
+          { label: 'Revenue Trend', value: revenue239 > 0 ? '▲' : '—', score: revenue239 > monthlyRevRate * 2.5 ? 'A' : revenue239 > monthlyRevRate ? 'B' : 'C', desc: currentLanguage === 'tr' ? '3 aylık ciro' : '3-month revenue' },
+          { label: 'AR Health', value: arVal > 0 ? `₺${(arVal/1000).toFixed(0)}K` : '✓', score: arVal <= monthlyRevRate * 0.5 ? 'A' : arVal <= monthlyRevRate ? 'B' : 'C', desc: currentLanguage === 'tr' ? 'Tahsilat bekleyen' : 'Outstanding AR' },
+          { label: 'Inventory', value: `₺${(inventoryVal239/1000).toFixed(0)}K`, score: inventoryVal239 <= cogs239 * 1.5 ? 'A' : inventoryVal239 <= cogs239 * 2.5 ? 'B' : 'C', desc: currentLanguage === 'tr' ? 'Stok değeri' : 'Stock value' },
+        ];
+        const gradeColor: Record<string, string> = { A: 'text-emerald-600 bg-emerald-100', B: 'text-blue-600 bg-blue-100', C: 'text-amber-600 bg-amber-100', D: 'text-red-600 bg-red-100' };
+        const overallScore = Math.round(['A','B','C','D'].map((g, i) => kpis239.filter(k => k.score === g).length * (4 - i)).reduce((s, v) => s + v, 0) / kpis239.length);
+        const overallGrade = overallScore >= 3.5 ? 'A' : overallScore >= 2.5 ? 'B' : overallScore >= 1.5 ? 'C' : 'D';
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🏦 Finansal Sağlık Göstergesi' : '🏦 Financial Health Dashboard'}</h3>
+              <span className={`text-2xl font-black px-3 py-1 rounded-xl ${gradeColor[overallGrade]}`}>{overallGrade}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {kpis239.map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{k.label}</p>
+                    <span className={`text-xs font-black px-1.5 py-0.5 rounded ${gradeColor[k.score]}`}>{k.score}</span>
+                  </div>
+                  <p className="text-xl font-black text-gray-700">{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 240: Order Repeat Rate Analysis ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const now240 = new Date();
+        // Rolling 6-month window: what % of customers re-ordered within 90 days?
+        const months240 = Array.from({ length: 6 }, (_, i) => {
+          const d = new Date(now240.getFullYear(), now240.getMonth() - (5 - i), 1);
+          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const monthOrders = orders.filter(o => {
+            if (o.status === 'Cancelled') return false;
+            try {
+              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
+            } catch { return false; }
+          });
+          const uniqueCusts = new Set(monthOrders.map(o => o.customerName || '—')).size;
+          const repeaters = monthOrders.filter(o => {
+            const name = o.customerName || '—';
+            // Count if this customer also had an order in previous months
+            const prevOrder = orders.find(po => {
+              if (po === o || po.status === 'Cancelled') return false;
+              try {
+                const pod = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
+                const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                return po.customerName === name && pod < od;
+              } catch { return false; }
+            });
+            return !!prevOrder;
+          });
+          const repeatPct240 = uniqueCusts > 0 ? Math.round((new Set(repeaters.map(o => o.customerName || '—')).size / uniqueCusts) * 100) : 0;
+          return { label, repeatPct: repeatPct240, uniqueCusts };
+        });
+        const hasData = months240.some(m => m.uniqueCusts > 0);
+        if (!hasData) return null;
+        const maxPct = Math.max(...months240.map(m => m.repeatPct), 1);
+        const latestRepeat = months240[months240.length - 1].repeatPct;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔁 Tekrar Sipariş Oranı (6 Ay)' : '🔁 Order Repeat Rate (6 Months)'}</h3>
+              <span className={`text-xl font-black ${latestRepeat >= 50 ? 'text-emerald-600' : latestRepeat >= 30 ? 'text-amber-500' : 'text-red-500'}`}>%{latestRepeat}</span>
+            </div>
+            <div className="flex items-end gap-3 h-24 mb-2">
+              {months240.map((m, i) => {
+                const isLatest = i === months240.length - 1;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex flex-col items-center" style={{ height: '68px' }}>
+                      {m.repeatPct > 0 && <span className="text-[8px] font-bold text-gray-500 mb-0.5">%{m.repeatPct}</span>}
+                      <div className="w-full flex items-end mt-auto" style={{ height: '52px' }}>
+                        <div className={`w-full rounded-t-md ${isLatest ? 'bg-indigo-500' : 'bg-indigo-200'}`} style={{ height: `${Math.max(4, Math.round((m.repeatPct / maxPct) * 52))}px` }} />
+                      </div>
+                    </div>
+                    <span className={`text-[9px] leading-none ${isLatest ? 'font-bold text-indigo-600' : 'text-gray-400'}`}>{m.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Benchmark: %40+ sağlıklı tekrar müşteri oranı (B2B)' : 'Benchmark: 40%+ healthy repeat customer rate (B2B)'}</p>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
