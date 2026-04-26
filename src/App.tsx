@@ -3482,6 +3482,58 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 164: Customer LTV Tier Segmentation ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        // Compute LTV per customer
+        const ltvMap: Record<string, { name: string; ltv: number; orders: number; avgOrder: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          if (!ltvMap[name]) ltvMap[name] = { name, ltv: 0, orders: 0, avgOrder: 0 };
+          ltvMap[name].ltv += o.totalPrice || 0;
+          ltvMap[name].orders++;
+        }
+        const customers = Object.values(ltvMap).map(c => ({ ...c, avgOrder: c.orders > 0 ? c.ltv / c.orders : 0 })).sort((a, b) => b.ltv - a.ltv);
+        if (customers.length === 0) return null;
+        // Tier by top 20% / mid 60% / bottom 20%
+        const n = customers.length;
+        const top20 = customers.slice(0, Math.ceil(n * 0.2));
+        const mid60 = customers.slice(Math.ceil(n * 0.2), Math.ceil(n * 0.8));
+        const bot20 = customers.slice(Math.ceil(n * 0.8));
+        const tiers = [
+          { label: currentLanguage==='tr'?'Platin (Top %20)':'Platinum (Top 20%)', customers: top20, color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200' },
+          { label: currentLanguage==='tr'?'Altın (Orta %60)':'Gold (Mid 60%)', customers: mid60, color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
+          { label: currentLanguage==='tr'?'Gümüş (Alt %20)':'Silver (Bottom 20%)', customers: bot20, color: 'text-gray-600', bg: 'bg-gray-50', border: 'border-gray-200' },
+        ];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💎 Müşteri LTV Segmentasyonu' : '💎 Customer LTV Segmentation'}</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {tiers.map(tier => {
+                const tierLTV = tier.customers.reduce((s, c) => s + c.ltv, 0);
+                return (
+                  <div key={tier.label} className={`rounded-2xl border p-4 ${tier.bg} ${tier.border}`}>
+                    <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${tier.color}`}>{tier.label}</p>
+                    <p className={`text-2xl font-black ${tier.color}`}>{tier.customers.length}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage==='tr'?'müşteri':'customers'}</p>
+                    <p className={`text-sm font-bold mt-2 ${tier.color}`}>₺{(tierLTV/1000).toFixed(1)}K</p>
+                    <p className="text-[10px] text-gray-500">{currentLanguage==='tr'?'toplam ciro':'total revenue'}</p>
+                    {tier.customers.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-white/60 space-y-0.5">
+                        {tier.customers.slice(0, 3).map(c => (
+                          <p key={c.name} className="text-[10px] text-gray-600 truncate">{c.name}</p>
+                        ))}
+                        {tier.customers.length > 3 && <p className="text-[10px] text-gray-400">+{tier.customers.length - 3} {currentLanguage==='tr'?'daha':'more'}</p>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 161: Order Cancellation Analysis ── */}
       {reportsTab === 'crm' && orders.filter(o => o.status === 'Cancelled').length > 0 && (() => {
         const cancelled = orders.filter(o => o.status === 'Cancelled');
@@ -3583,6 +3635,67 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 166: Monthly Gross Margin Trend ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && inventory.length > 0 && (() => {
+        const now166 = new Date();
+        const months166 = Array.from({ length: 6 }, (_, i) => {
+          const d = new Date(now166.getFullYear(), now166.getMonth() - (5 - i), 1);
+          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const mOrders = orders.filter(o => {
+            if (o.status === 'Cancelled') return false;
+            try {
+              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
+            } catch { return false; }
+          });
+          const rev = mOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const cogs = mOrders.reduce((s, o) =>
+            s + (o.lineItems ?? []).reduce((ls, li) => {
+              const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+              return ls + ((inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity);
+            }, 0), 0);
+          const margin = rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0;
+          return { label, rev, cogs, margin };
+        });
+        const avgMargin = months166.filter(m => m.rev > 0).length > 0
+          ? Math.round(months166.filter(m => m.rev > 0).reduce((s, m) => s + m.margin, 0) / months166.filter(m => m.rev > 0).length)
+          : 0;
+        const maxRev166 = Math.max(...months166.map(m => m.rev), 1);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📈 Aylık Brüt Marj Trendi' : '📈 Monthly Gross Margin Trend'}</h3>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${avgMargin >= 30 ? 'bg-emerald-100 text-emerald-700' : avgMargin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                Ø %{avgMargin}
+              </span>
+            </div>
+            <div className="flex items-end gap-3 h-28 mb-3">
+              {months166.map((m, i) => {
+                const revH = Math.round((m.rev / maxRev166) * 100);
+                const cogsH = m.rev > 0 ? Math.round((m.cogs / m.rev) * revH) : 0;
+                const gpH = Math.max(revH - cogsH, 0);
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-default">
+                    <div className="w-full flex flex-col justify-end overflow-hidden rounded-t-md" style={{ height: '88px' }}>
+                      <div className="w-full" style={{ height: `${revH}%` }}>
+                        <div className="w-full bg-blue-100 rounded-t-md" style={{ height: `${cogsH > 0 ? (cogsH/revH)*100 : 0}%` }} />
+                        <div className="w-full bg-emerald-400" style={{ height: `${gpH > 0 ? (gpH/revH)*100 : 0}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-[9px] text-gray-400">{m.label}</span>
+                    <span className={`text-[9px] font-bold ${m.margin >= 30 ? 'text-emerald-600' : m.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{m.margin}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{currentLanguage==='tr'?'Brüt Kâr':'Gross Profit'}</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-2 bg-blue-100 rounded-sm inline-block" />{currentLanguage==='tr'?'Maliyet':'COGS'}</span>
             </div>
           </div>
         );
@@ -9681,6 +9794,86 @@ function AppContent() {
                           })}
                         </div>
                         <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Ortalama teslim günü (Oluşturma → Beklenen Tarih)' : 'Avg. lead days (Created → Expected Date)'}</p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 163: Purchase Spend Trend by Supplier ── */}
+                  {purchasingSubTab === 'suppliers' && apPurchaseOrders.length > 0 && (() => {
+                    const supMap: Record<string, number> = {};
+                    for (const po of apPurchaseOrders) {
+                      if (!po.supplier) continue;
+                      supMap[po.supplier] = (supMap[po.supplier] ?? 0) + (po.totalAmount || 0);
+                    }
+                    const supList = Object.entries(supMap).sort(([,a],[,b]) => b - a).slice(0, 8);
+                    if (supList.length === 0) return null;
+                    const maxSpend = Math.max(...supList.map(([,v]) => v), 1);
+                    const totalSpend = supList.reduce((s, [,v]) => s + v, 0);
+                    return (
+                      <div className="apple-card p-6 mt-4">
+                        <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '💳 Tedarikçiye Göre Harcama' : '💳 Spend by Supplier'}</h3>
+                        <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? `Toplam: ₺${totalSpend.toLocaleString()}` : `Total: ₺${totalSpend.toLocaleString()}`}</p>
+                        <div className="space-y-2.5">
+                          {supList.map(([sup, spend]) => {
+                            const pct = Math.round((spend / totalSpend) * 100);
+                            const w = Math.round((spend / maxSpend) * 100);
+                            return (
+                              <div key={sup}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs font-medium text-gray-800 truncate">{sup}</span>
+                                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                                    <span className="text-[10px] text-gray-400">%{pct}</span>
+                                    <span className="text-xs font-bold text-gray-700 tabular-nums">₺{(spend/1000).toFixed(1)}K</span>
+                                  </div>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${w}%` }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 165: Open Order Aging ── */}
+                  {purchasingSubTab === 'pos' && apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status)).length > 0 && (() => {
+                    const now165 = new Date();
+                    const openPOs = apPurchaseOrders
+                      .filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status) && po.createdAt)
+                      .map(po => {
+                        let daysOpen = 0;
+                        try {
+                          const created = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
+                          daysOpen = Math.floor((now165.getTime() - created.getTime()) / 86400000);
+                        } catch { /* skip */ }
+                        return { ...po, daysOpen };
+                      })
+                      .sort((a, b) => b.daysOpen - a.daysOpen)
+                      .slice(0, 8);
+                    if (openPOs.length === 0) return null;
+                    const stale = openPOs.filter(p => p.daysOpen > 14).length;
+                    return (
+                      <div className={`apple-card p-5 ${stale > 0 ? 'border border-amber-100' : ''}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-semibold text-gray-800 text-sm">{currentLanguage === 'tr' ? '⏳ Açık Sipariş Yaşlandırması' : '⏳ Open PO Aging'}</h3>
+                          {stale > 0 && <span className="text-xs text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full">{stale} {currentLanguage==='tr'?'gecikmiş':'>14 days old'}</span>}
+                        </div>
+                        <div className="space-y-2">
+                          {openPOs.map(po => (
+                            <div key={po.id} className="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-gray-800 truncate">{po.supplier} · #{po.orderNumber}</p>
+                                <p className="text-[10px] text-gray-400">{po.status}</p>
+                              </div>
+                              <span className={`text-xs font-bold shrink-0 ${po.daysOpen > 30 ? 'text-red-600' : po.daysOpen > 14 ? 'text-amber-600' : 'text-gray-600'}`}>
+                                {po.daysOpen}g
+                              </span>
+                              <span className="text-xs text-gray-600 tabular-nums shrink-0">₺{(po.totalAmount||0).toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     );
                   })()}
