@@ -2889,6 +2889,55 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </div>
             );
           })()}
+
+          {/* ── Phase 151: SKU Velocity Ranking ── */}
+          {(() => {
+            // Count units sold per SKU across all non-cancelled orders
+            const skuMap: Record<string, { name: string; sku: string; unitsSold: number; revenue: number; category: string }> = {};
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              for (const li of (o.lineItems || [])) {
+                const key = li.sku || li.name;
+                if (!skuMap[key]) {
+                  const inv = inventory.find(i => i.sku === li.sku || i.name === li.name);
+                  skuMap[key] = { name: li.name, sku: li.sku || key, unitsSold: 0, revenue: 0, category: inv?.category || '—' };
+                }
+                skuMap[key].unitsSold += li.quantity;
+                skuMap[key].revenue += li.price * li.quantity;
+              }
+            }
+            const skus = Object.values(skuMap).sort((a, b) => b.unitsSold - a.unitsSold).slice(0, 12);
+            if (skus.length === 0) return null;
+            const maxUnits = Math.max(...skus.map(s => s.unitsSold), 1);
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '🚀 SKU Hız Sıralaması' : '🚀 SKU Velocity Ranking'}</h3>
+                <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'En çok satılan ürünler (adet bazında)' : 'Top products by units sold'}</p>
+                <div className="space-y-2">
+                  {skus.map((s, i) => {
+                    const w = Math.round((s.unitsSold / maxUnits) * 100);
+                    const tier = i < 3 ? 'A' : i < 7 ? 'B' : 'C';
+                    const tierCls = tier === 'A' ? 'bg-emerald-100 text-emerald-700' : tier === 'B' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600';
+                    return (
+                      <div key={s.sku} className="flex items-center gap-3">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${tierCls} shrink-0 w-6 text-center`}>{tier}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs font-medium text-gray-800 truncate">{s.name}</span>
+                            <span className="text-xs text-gray-500 ml-2 shrink-0 tabular-nums">{s.unitsSold} {currentLanguage==='tr'?'adet':'units'}</span>
+                          </div>
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${tier === 'A' ? 'bg-emerald-400' : tier === 'B' ? 'bg-blue-400' : 'bg-gray-300'}`} style={{ width: `${w}%` }} />
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-500 shrink-0 tabular-nums w-20 text-right">₺{s.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           </div>
         </div>
       )}
@@ -3009,6 +3058,47 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </div>
             );
           })()}
+
+          {/* ── Phase 152: Order Fulfillment Rate by City ── */}
+          {orders.some(o => o.shippingAddress) && (() => {
+            type CityFulfill = { city: string; total: number; delivered: number; rate: number };
+            const cityMap: Record<string, CityFulfill> = {};
+            for (const o of orders) {
+              if (!o.shippingAddress) continue;
+              // Extract city from address (last meaningful token or full address if short)
+              const parts = o.shippingAddress.split(/[,\/\n]/);
+              const city = (parts[parts.length - 1] || parts[0] || '—').trim().slice(0, 20) || '—';
+              if (!cityMap[city]) cityMap[city] = { city, total: 0, delivered: 0, rate: 0 };
+              cityMap[city].total++;
+              if (o.status === 'Delivered') cityMap[city].delivered++;
+            }
+            const cities = Object.values(cityMap)
+              .map(c => ({ ...c, rate: c.total > 0 ? Math.round((c.delivered / c.total) * 100) : 0 }))
+              .filter(c => c.total >= 2)
+              .sort((a, b) => b.total - a.total)
+              .slice(0, 10);
+            if (cities.length === 0) return null;
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🗺️ Şehir Bazında Teslimat Oranı' : '🗺️ Fulfillment Rate by City'}</h3>
+                <div className="space-y-2.5">
+                  {cities.map(c => (
+                    <div key={c.city} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-600 font-medium w-28 shrink-0 truncate">{c.city}</span>
+                      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${c.rate >= 80 ? 'bg-emerald-400' : c.rate >= 60 ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ width: `${c.rate}%` }} />
+                      </div>
+                      <span className={`text-xs font-bold w-12 text-right shrink-0 tabular-nums ${c.rate >= 80 ? 'text-emerald-600' : c.rate >= 60 ? 'text-amber-600' : 'text-red-500'}`}>
+                        %{c.rate}
+                      </span>
+                      <span className="text-[10px] text-gray-400 shrink-0">{c.total}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3076,6 +3166,91 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </div>
             </div>
           </div>
+
+          {/* ── Phase 154: HR Turnover & Tenure Analytics ── */}
+          {employees.length > 0 && (() => {
+            const now154 = new Date();
+            const active = employees.filter(e => e.status === 'Aktif');
+            const left = employees.filter(e => e.status === 'Ayrıldı');
+            const turnoverRate = employees.length > 0 ? Math.round((left.length / employees.length) * 100) : 0;
+            // Tenure buckets for active employees
+            const tenureBuckets = [
+              { label: currentLanguage==='tr'?'<1 Yıl':'<1 Year', min: 0, max: 12, count: 0 },
+              { label: currentLanguage==='tr'?'1-3 Yıl':'1-3 Yrs', min: 12, max: 36, count: 0 },
+              { label: currentLanguage==='tr'?'3-5 Yıl':'3-5 Yrs', min: 36, max: 60, count: 0 },
+              { label: currentLanguage==='tr'?'5+ Yıl':'5+ Yrs', min: 60, max: Infinity, count: 0 },
+            ];
+            for (const e of active) {
+              if (!e.startDate) continue;
+              const months = Math.round((now154.getTime() - new Date(e.startDate).getTime()) / (30 * 86400000));
+              const b = tenureBuckets.find(b => months >= b.min && months < b.max);
+              if (b) b.count++;
+            }
+            const maxBucket = Math.max(...tenureBuckets.map(b => b.count), 1);
+            // Avg tenure
+            const avgTenureMonths = active.filter(e => e.startDate).length > 0
+              ? Math.round(active.filter(e => e.startDate).reduce((s, e) => s + Math.round((now154.getTime() - new Date(e.startDate!).getTime()) / (30 * 86400000)), 0) / active.filter(e => e.startDate).length)
+              : 0;
+            // Salary by dept
+            const deptSalary: Record<string, number> = {};
+            for (const e of active) {
+              if (!e.department || !e.salary) continue;
+              deptSalary[e.department] = (deptSalary[e.department] ?? 0) + (e.salary || 0);
+            }
+            const deptList = Object.entries(deptSalary).sort(([,a],[,b]) => b - a).slice(0, 5);
+            const maxDeptSal = Math.max(...deptList.map(([,v]) => v), 1);
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="apple-card p-6">
+                  <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'👥 Kıdem Dağılımı':'👥 Tenure Distribution'}</h4>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    {[
+                      { label: currentLanguage==='tr'?'Aktif':'Active', value: active.length, color: 'text-emerald-600' },
+                      { label: currentLanguage==='tr'?'Ortalama Kıdem':'Avg Tenure', value: `${Math.floor(avgTenureMonths/12)}y ${avgTenureMonths%12}m`, color: 'text-blue-600' },
+                      { label: currentLanguage==='tr'?'Ayrılan':'Left', value: left.length, color: 'text-red-500' },
+                      { label: currentLanguage==='tr'?'Devir Oranı':'Turnover', value: `%${turnoverRate}`, color: turnoverRate <= 15 ? 'text-emerald-600' : 'text-red-500' },
+                    ].map(k => (
+                      <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                        <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                        <p className="text-[10px] text-gray-400">{k.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    {tenureBuckets.map(b => (
+                      <div key={b.label} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-600 w-16 shrink-0">{b.label}</span>
+                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.round((b.count / maxBucket) * 100)}%` }} />
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 w-6 text-right">{b.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="apple-card p-6">
+                  <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'💰 Departman Maaş Kütlesi':'💰 Payroll by Department'}</h4>
+                  {deptList.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-8">{currentLanguage==='tr'?'Veri yok':'No data'}</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {deptList.map(([dept, total]) => (
+                        <div key={dept}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-medium text-gray-800 truncate">{dept}</span>
+                            <span className="text-xs font-bold text-gray-700 tabular-nums ml-2 shrink-0">₺{total.toLocaleString()}</span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-400 rounded-full" style={{ width: `${Math.round((total / maxDeptSal) * 100)}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="apple-card p-6 text-center">
             <div className="w-16 h-16 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -3214,6 +3389,148 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       </div>
                     </div>
                     <span className="text-[9px] text-gray-400">{m.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 155: Customer Discount Analysis ── */}
+      {reportsTab === 'crm' && orders.length > 0 && inventory.length > 0 && (() => {
+        // For each order, compare actualPrice vs list price to compute discount
+        type DiscStat = { customer: string; orders: number; totalList: number; totalActual: number; discPct: number };
+        const custMap: Record<string, DiscStat> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          if (!custMap[name]) custMap[name] = { customer: name, orders: 0, totalList: 0, totalActual: 0, discPct: 0 };
+          custMap[name].orders++;
+          custMap[name].totalActual += o.totalPrice || 0;
+          // Estimate list price from inventory retail prices × quantities
+          const listPrice = (o.lineItems || []).reduce((s, li) => {
+            const inv = inventory.find(i => i.id === li.inventoryId || i.name === li.name || i.sku === li.sku);
+            return s + ((inv?.prices?.['Retail'] ?? inv?.price ?? li.price) * li.quantity);
+          }, 0);
+          custMap[name].totalList += listPrice || o.totalPrice || 0;
+        }
+        const discs = Object.values(custMap).map(c => ({
+          ...c,
+          discPct: c.totalList > 0 ? Math.round(((c.totalList - c.totalActual) / c.totalList) * 100) : 0,
+        })).filter(c => c.orders >= 1).sort((a, b) => b.discPct - a.discPct).slice(0, 8);
+        if (discs.length === 0 || discs.every(d => d.discPct === 0)) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '🏷️ Müşteri İndirim Analizi' : '🏷️ Customer Discount Analysis'}</h3>
+            <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Liste fiyatına göre uygulanan ortalama indirim' : 'Average discount vs retail list price'}</p>
+            <div className="space-y-2.5">
+              {discs.map(c => (
+                <div key={c.customer} className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-800 w-36 truncate shrink-0">{c.customer}</span>
+                  <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${c.discPct >= 20 ? 'bg-red-400' : c.discPct >= 10 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                      style={{ width: `${Math.min(c.discPct * 3, 100)}%` }} />
+                  </div>
+                  <span className={`text-xs font-bold tabular-nums shrink-0 w-10 text-right ${c.discPct >= 20 ? 'text-red-600' : c.discPct >= 10 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    %{c.discPct}
+                  </span>
+                  <span className="text-[10px] text-gray-400 shrink-0">{c.orders} {currentLanguage==='tr'?'sip.':'ord.'}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage==='tr'?'* İndirim = (Liste Fiyatı - Gerçekleşen) / Liste Fiyatı':'* Discount = (List Price - Actual) / List Price'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 158: Top Product Co-Purchase Pairs ── */}
+      {reportsTab === 'envanter' && orders.length >= 3 && (() => {
+        // Find most common item pairs within the same order
+        const pairMap: Record<string, { nameA: string; nameB: string; count: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const items = (o.lineItems || []).map(li => li.name).filter(Boolean);
+          if (items.length < 2) continue;
+          for (let i = 0; i < items.length; i++) {
+            for (let j = i + 1; j < items.length; j++) {
+              const key = [items[i], items[j]].sort().join('|||');
+              if (!pairMap[key]) pairMap[key] = { nameA: items[i], nameB: items[j], count: 0 };
+              pairMap[key].count++;
+            }
+          }
+        }
+        const pairs = Object.values(pairMap).filter(p => p.count >= 2).sort((a, b) => b.count - a.count).slice(0, 8);
+        if (pairs.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '🛒 Birlikte Sık Satın Alınan Ürünler' : '🛒 Frequently Bought Together'}</h3>
+            <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Aynı siparişte en çok birlikte geçen ürün çiftleri' : 'Most common product pairs in the same order'}</p>
+            <div className="space-y-2.5">
+              {pairs.map((p, i) => (
+                <div key={i} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded-md shrink-0">×{p.count}</span>
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-800 truncate">{p.nameA}</span>
+                    <span className="text-gray-300 shrink-0">+</span>
+                    <span className="text-xs font-medium text-gray-800 truncate">{p.nameB}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 156: Quarter-over-Quarter Revenue Comparison ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now156 = new Date();
+        const getQuarter = (d: Date) => Math.floor(d.getMonth() / 3);
+        const getQLabel = (year: number, q: number) => `Q${q + 1} ${year}`;
+        // Last 4 quarters
+        const quarters: { label: string; year: number; q: number; revenue: number; orders: number }[] = [];
+        for (let i = 3; i >= 0; i--) {
+          const qDate = new Date(now156.getFullYear(), now156.getMonth() - i * 3, 1);
+          const year = qDate.getFullYear();
+          const q = getQuarter(qDate);
+          quarters.push({ label: getQLabel(year, q), year, q, revenue: 0, orders: 0 });
+        }
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const oq = getQuarter(d);
+            const entry = quarters.find(qt => qt.year === d.getFullYear() && qt.q === oq);
+            if (entry) { entry.revenue += o.totalPrice || 0; entry.orders++; }
+          } catch { /* skip */ }
+        }
+        const maxQ = Math.max(...quarters.map(q => q.revenue), 1);
+        const currQ = quarters[quarters.length - 1];
+        const prevQ = quarters[quarters.length - 2];
+        const growth = prevQ.revenue > 0 ? Math.round(((currQ.revenue - prevQ.revenue) / prevQ.revenue) * 100) : null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📊 Çeyrek Bazlı Karşılaştırma' : '📊 Quarter-over-Quarter Revenue'}</h3>
+              {growth !== null && (
+                <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${growth >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                  {growth >= 0 ? '↑' : '↓'} %{Math.abs(growth)} QoQ
+                </span>
+              )}
+            </div>
+            <div className="flex items-end gap-4 h-36 mb-3">
+              {quarters.map((q, i) => {
+                const h = Math.round((q.revenue / maxQ) * 100);
+                const isLatest = i === quarters.length - 1;
+                return (
+                  <div key={q.label} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-[10px] font-semibold text-gray-600 tabular-nums">₺{(q.revenue/1000).toFixed(0)}K</span>
+                    <div className="w-full flex flex-col justify-end" style={{ height: '96px' }}>
+                      <div className={`w-full rounded-t-xl transition-all duration-700 ${isLatest ? 'bg-brand' : 'bg-brand/30'}`}
+                        style={{ height: `${Math.max(h, 3)}%` }} />
+                    </div>
+                    <span className={`text-[10px] font-bold ${isLatest ? 'text-brand' : 'text-gray-400'}`}>{q.label}</span>
+                    <span className="text-[9px] text-gray-400">{q.orders} {currentLanguage==='tr'?'sip':'ord'}</span>
                   </div>
                 );
               })}
@@ -8600,6 +8917,65 @@ function AppContent() {
                       </motion.div>
                     );
                   })()}
+
+                  {/* ── Phase 150: Break-Even Calculator ── */}
+                  {muhasebeTab === 'pnl' && (() => {
+                    const totalRevBE = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                    const totalCOGSBE = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) =>
+                      s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
+                    const grossMarginBE = totalRevBE > 0 ? (totalRevBE - totalCOGSBE) / totalRevBE : 0;
+                    const estFixedCosts = totalRevBE * 0.12; // 12% SG&A estimate
+                    const breakEvenRev = grossMarginBE > 0 ? estFixedCosts / grossMarginBE : 0;
+                    const breakEvenUnits = inventory.length > 0
+                      ? Math.round(breakEvenRev / Math.max(
+                          inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0), 0) / Math.max(inventory.length, 1),
+                          1
+                        ))
+                      : null;
+                    const safetyMargin = totalRevBE > 0 ? Math.round(((totalRevBE - breakEvenRev) / totalRevBE) * 100) : 0;
+                    return (
+                      <div className="apple-card p-6 mt-4">
+                        <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '📐 Başabaş Noktası Analizi' : '📐 Break-Even Analysis'}</h3>
+                        <p className="text-xs text-gray-400 mb-5">{currentLanguage === 'tr' ? 'Sabit maliyet tahmini %12 SG&A üzerinden' : 'Fixed cost estimated at 12% SG&A of revenue'}</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                          {[
+                            { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${(grossMarginBE*100).toFixed(1)}`, color: 'text-blue-600' },
+                            { label: currentLanguage==='tr'?'Tahmini Sabit Gider':'Est. Fixed Costs', value: `₺${estFixedCosts.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-red-500' },
+                            { label: currentLanguage==='tr'?'Başabaş Cirosu':'Break-Even Revenue', value: `₺${breakEvenRev.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-amber-600' },
+                            { label: currentLanguage==='tr'?'Güvenlik Marjı':'Safety Margin', value: `%${safetyMargin}`, color: safetyMargin >= 20 ? 'text-emerald-600' : 'text-red-500' },
+                          ].map(k => (
+                            <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                              <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{k.label}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mb-3">
+                          <div className="flex items-center justify-between text-xs mb-1.5">
+                            <span className="text-gray-600">{currentLanguage==='tr'?'Gerçekleşen / Başabaş':'Actual vs Break-Even'}</span>
+                            <span className={`font-semibold ${totalRevBE >= breakEvenRev ? 'text-emerald-600' : 'text-red-500'}`}>
+                              {totalRevBE >= breakEvenRev ? (currentLanguage==='tr'?'✓ Kâr Bölgesinde':'✓ Profitable') : (currentLanguage==='tr'?'✗ Zarar Bölgesinde':'✗ Below Break-Even')}
+                            </span>
+                          </div>
+                          <div className="h-4 bg-gray-100 rounded-full overflow-hidden relative">
+                            <div className="h-full bg-emerald-400 rounded-full transition-all" style={{ width: `${Math.min((totalRevBE / Math.max(breakEvenRev * 1.5, totalRevBE)) * 100, 100)}%` }} />
+                            {breakEvenRev > 0 && (
+                              <div className="absolute top-0 bottom-0 w-0.5 bg-red-500"
+                                style={{ left: `${Math.min((breakEvenRev / Math.max(breakEvenRev * 1.5, totalRevBE)) * 100, 100)}%` }} />
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-gray-400 mt-1">
+                            <span>₺0</span>
+                            <span className="text-red-500">▲ {currentLanguage==='tr'?'Başabaş':'B/E'} ₺{(breakEvenRev/1000).toFixed(0)}K</span>
+                            <span>₺{(Math.max(breakEvenRev * 1.5, totalRevBE)/1000).toFixed(0)}K</span>
+                          </div>
+                        </div>
+                        {breakEvenUnits !== null && (
+                          <p className="text-xs text-gray-500 mt-2">{currentLanguage==='tr'?'Tahmini başabaş sipariş adedi:':'Estimated break-even order count:'} <span className="font-bold text-gray-800">{breakEvenUnits.toLocaleString()}</span></p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -9034,6 +9410,59 @@ function AppContent() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    );
+                  })()}
+                  {/* ── Phase 153: Supplier Lead Time Analysis ── */}
+                  {purchasingSubTab === 'scorecard' && apPurchaseOrders.length > 0 && (() => {
+                    // Group POs by supplier and estimate lead time from createdAt → expectedDate
+                    type LTStat = { supplier: string; avgDays: number; count: number; onTime: number };
+                    const ltMap: Record<string, { days: number[]; onTime: number }> = {};
+                    for (const po of apPurchaseOrders) {
+                      if (!po.createdAt || !po.expectedDate) continue;
+                      try {
+                        const created = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
+                        const expected = new Date(po.expectedDate as string);
+                        const days = Math.round((expected.getTime() - created.getTime()) / 86400000);
+                        if (days <= 0 || days > 365) continue;
+                        if (!ltMap[po.supplier]) ltMap[po.supplier] = { days: [], onTime: 0 };
+                        ltMap[po.supplier].days.push(days);
+                        if (po.status === 'Teslim Alındı') ltMap[po.supplier].onTime++;
+                      } catch { /* skip */ }
+                    }
+                    const stats: LTStat[] = Object.entries(ltMap).map(([sup, v]) => ({
+                      supplier: sup,
+                      avgDays: Math.round(v.days.reduce((s, d) => s + d, 0) / v.days.length),
+                      count: v.days.length,
+                      onTime: v.onTime,
+                    })).sort((a, b) => a.avgDays - b.avgDays).slice(0, 8);
+                    if (stats.length === 0) return null;
+                    const maxDays = Math.max(...stats.map(s => s.avgDays), 1);
+                    return (
+                      <div className="apple-card p-6 mt-4">
+                        <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '⏱️ Tedarikçi Teslim Süresi Analizi' : '⏱️ Supplier Lead Time Analysis'}</h3>
+                        <div className="space-y-3">
+                          {stats.map(s => {
+                            const w = Math.round((s.avgDays / maxDays) * 100);
+                            const cls = s.avgDays <= 7 ? 'bg-emerald-400' : s.avgDays <= 14 ? 'bg-amber-400' : 'bg-red-400';
+                            const textCls = s.avgDays <= 7 ? 'text-emerald-600' : s.avgDays <= 14 ? 'text-amber-600' : 'text-red-500';
+                            return (
+                              <div key={s.supplier}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs font-medium text-gray-800 truncate">{s.supplier}</span>
+                                  <div className="flex items-center gap-3 shrink-0 ml-2">
+                                    <span className="text-[10px] text-gray-400">{s.count} PO</span>
+                                    <span className={`text-xs font-bold tabular-nums ${textCls}`}>{s.avgDays}g</span>
+                                  </div>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${cls}`} style={{ width: `${w}%` }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Ortalama teslim günü (Oluşturma → Beklenen Tarih)' : 'Avg. lead days (Created → Expected Date)'}</p>
                       </div>
                     );
                   })()}
@@ -11260,6 +11689,64 @@ function AppContent() {
                       {currentLanguage === 'tr'
                         ? `${classified.length} ürün analiz edildi · Değer = Stok × Satış Fiyatı`
                         : `${classified.length} products · Value = Stock × Retail Price`}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 157: Product Margin Alert Panel ── */}
+              {inventory.filter(i => i.costPrice > 0).length > 0 && (() => {
+                const threshold157 = 15; // warn below 15% margin
+                const lowMarginItems = inventory
+                  .filter(i => {
+                    const price = i.prices?.['Retail'] ?? i.price ?? 0;
+                    const cost = i.costPrice ?? i.cost ?? 0;
+                    if (price <= 0 || cost <= 0) return false;
+                    const margin = ((price - cost) / price) * 100;
+                    return margin < threshold157;
+                  })
+                  .map(i => {
+                    const price = i.prices?.['Retail'] ?? i.price ?? 0;
+                    const cost = i.costPrice ?? i.cost ?? 0;
+                    return { ...i, margin: Math.round(((price - cost) / price) * 100), price, cost };
+                  })
+                  .sort((a, b) => a.margin - b.margin)
+                  .slice(0, 10);
+                if (lowMarginItems.length === 0) return null;
+                return (
+                  <div className="apple-card p-6 border border-amber-100">
+                    <div className="flex items-center gap-2 mb-4">
+                      <AlertCircle className="w-4 h-4 text-amber-500" />
+                      <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Düşük Marjlı Ürünler' : 'Low Margin Products'}</h3>
+                      <span className="ml-auto text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">
+                        {lowMarginItems.length} {currentLanguage==='tr'?'ürün %'+threshold157+' altında':'products below '+threshold157+'%'}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Ürün':'Product'}</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Maliyet':'Cost'}</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Satış':'Price'}</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Marj':'Margin'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {lowMarginItems.map(item => (
+                            <tr key={item.id} className={item.margin < 0 ? 'bg-red-50/40' : ''}>
+                              <td className="py-2 px-2 font-medium text-gray-800 text-xs truncate max-w-[180px]">{item.name}</td>
+                              <td className="py-2 px-2 text-right text-xs text-gray-500 tabular-nums">₺{item.cost.toLocaleString()}</td>
+                              <td className="py-2 px-2 text-right text-xs text-gray-700 tabular-nums">₺{item.price.toLocaleString()}</td>
+                              <td className="py-2 px-2 text-right">
+                                <span className={`text-xs font-bold tabular-nums ${item.margin < 0 ? 'text-red-600' : item.margin < 10 ? 'text-orange-600' : 'text-amber-600'}`}>
+                                  %{item.margin}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 );
