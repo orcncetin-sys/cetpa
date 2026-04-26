@@ -2938,6 +2938,96 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </div>
             );
           })()}
+
+          {/* ── Phase 176: Inventory Turnover by Category ── */}
+          {inventory.length > 0 && orders.length > 0 && (() => {
+            const catMap: Record<string, { totalCOGS: number; avgStock: number; turnover: number }> = {};
+            for (const i of inventory) {
+              const cat = i.category || currentLanguage === 'tr' ? 'Diğer' : 'Other';
+              if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
+              catMap[cat].avgStock += (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0);
+            }
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              for (const li of (o.lineItems || [])) {
+                const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+                const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
+                catMap[cat].totalCOGS += (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+              }
+            }
+            const cats = Object.entries(catMap)
+              .map(([cat, v]) => ({
+                cat,
+                turnover: v.avgStock > 0 ? parseFloat((v.totalCOGS / v.avgStock).toFixed(2)) : 0,
+                avgStock: v.avgStock,
+              }))
+              .filter(c => c.avgStock > 0)
+              .sort((a, b) => b.turnover - a.turnover)
+              .slice(0, 8);
+            if (cats.length === 0) return null;
+            const maxTurnover = Math.max(...cats.map(c => c.turnover), 1);
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '🔄 Kategori Bazlı Stok Devir Hızı' : '🔄 Inventory Turnover by Category'}</h3>
+                <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'COGS / Ortalama stok değeri' : 'COGS / Average stock value'}</p>
+                <div className="space-y-2.5">
+                  {cats.map(c => {
+                    const w = Math.round((c.turnover / maxTurnover) * 100);
+                    return (
+                      <div key={c.cat} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-700 w-28 shrink-0 truncate">{c.cat}</span>
+                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${c.turnover >= 6 ? 'bg-emerald-400' : c.turnover >= 3 ? 'bg-blue-400' : 'bg-amber-400'}`} style={{ width: `${w}%` }} />
+                        </div>
+                        <span className={`text-xs font-bold tabular-nums shrink-0 w-10 text-right ${c.turnover >= 6 ? 'text-emerald-600' : c.turnover >= 3 ? 'text-blue-600' : 'text-amber-600'}`}>{c.turnover}x</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Phase 177: Price Tier Revenue Distribution ── */}
+          {orders.length > 0 && (() => {
+            const tierMap: Record<string, { revenue: number; orders: number }> = {};
+            for (const o of orders) {
+              if (o.status === 'Cancelled') continue;
+              const tier = (o as unknown as Record<string,unknown>).customerType as string || o.customerType || 'Retail';
+              if (!tierMap[tier]) tierMap[tier] = { revenue: 0, orders: 0 };
+              tierMap[tier].revenue += o.totalPrice || 0;
+              tierMap[tier].orders++;
+            }
+            const tiers = Object.entries(tierMap).sort(([,a],[,b]) => b.revenue - a.revenue);
+            if (tiers.length < 2) return null;
+            const total177 = tiers.reduce((s, [,v]) => s + v.revenue, 0);
+            const tierColors: Record<string, string> = { 'B2B': '#3b82f6', 'Retail': '#10b981', 'Dealer': '#f59e0b', 'B2B Premium': '#8b5cf6', 'B2B Standard': '#06b6d4' };
+            return (
+              <div className="apple-card p-6">
+                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💰 Fiyat Kademesi Gelir Dağılımı' : '💰 Price Tier Revenue Mix'}</h3>
+                <div className="flex rounded-xl overflow-hidden h-6 mb-4 gap-0.5">
+                  {tiers.map(([tier, v]) => (
+                    <div key={tier} className="transition-all" style={{ width: `${Math.round((v.revenue / total177) * 100)}%`, backgroundColor: tierColors[tier] || '#6b7280' }} title={`${tier}: ₺${v.revenue.toLocaleString()}`} />
+                  ))}
+                </div>
+                <div className="space-y-1.5">
+                  {tiers.map(([tier, v]) => (
+                    <div key={tier} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: tierColors[tier] || '#6b7280' }} />
+                        <span className="text-gray-700">{tier}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-400">{Math.round((v.revenue / total177) * 100)}%</span>
+                        <span className="font-bold text-gray-800 tabular-nums">₺{(v.revenue/1000).toFixed(1)}K</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           </div>
         </div>
       )}
@@ -3229,7 +3319,48 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
           </div>
 
-          {/* ── Phase 154: HR Turnover & Tenure Analytics ── */}
+          {/* ── Phase 180: HR Cost Ratio ── */}
+      {reportsTab === 'ik' && employees.length > 0 && orders.length > 0 && (() => {
+        const totalRevHR = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const totalPayrollHR = employees.filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
+        const hrCostRatio = totalRevHR > 0 ? Math.round((totalPayrollHR / totalRevHR) * 100) : 0;
+        const revenuePerPayroll = totalPayrollHR > 0 ? (totalRevHR / totalPayrollHR).toFixed(1) : '—';
+        const totalOrders180 = orders.filter(o => o.status !== 'Cancelled').length;
+        const avgOrdersPerEmp = employees.filter(e => e.status === 'Aktif').length > 0
+          ? Math.round(totalOrders180 / employees.filter(e => e.status === 'Aktif').length)
+          : 0;
+        return (
+          <div className="apple-card p-6">
+            <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'💼 İK Maliyet Analizi':'💼 HR Cost Analysis'}</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: currentLanguage==='tr'?'İK / Ciro Oranı':'HR Cost Ratio', value: `%${hrCostRatio}`, color: hrCostRatio <= 20 ? 'text-emerald-600' : hrCostRatio <= 40 ? 'text-amber-600' : 'text-red-500', desc: currentLanguage==='tr'?'Maaş/Toplam Ciro':'Payroll/Revenue' },
+                { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenuePerPayroll}x`, color: 'text-blue-600', desc: currentLanguage==='tr'?'Ciro/Maaş Kütlesi':'Revenue/Payroll' },
+                { label: currentLanguage==='tr'?'Toplam Maaş':'Total Payroll', value: `₺${(totalPayrollHR/1000).toFixed(0)}K`, color: 'text-gray-700', desc: currentLanguage==='tr'?'Aylık':'Monthly' },
+                { label: currentLanguage==='tr'?'Çalışan Başı Sipariş':'Orders/Employee', value: String(avgOrdersPerEmp), color: 'text-purple-600', desc: currentLanguage==='tr'?'Toplam sipariş/aktif':'Total orders/active' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-4 text-center">
+                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-600 font-medium mt-0.5">{k.label}</p>
+                  <p className="text-[9px] text-gray-400">{k.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-600">{currentLanguage==='tr'?'İK Maliyeti / Toplam Ciro':'HR Cost / Revenue'}</span>
+                <span className={`text-xs font-bold ${hrCostRatio <= 20 ? 'text-emerald-600' : hrCostRatio <= 40 ? 'text-amber-600' : 'text-red-500'}`}>%{hrCostRatio}</span>
+              </div>
+              <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full ${hrCostRatio <= 20 ? 'bg-emerald-400' : hrCostRatio <= 40 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${Math.min(hrCostRatio, 100)}%` }} />
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">{currentLanguage==='tr'?'Benchmark: %20-35 (B2B SaaS sektörü)':'Benchmark: 20-35% (B2B sector)'}</p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 154: HR Turnover & Tenure Analytics ── */}
           {employees.length > 0 && (() => {
             const now154 = new Date();
             const active = employees.filter(e => e.status === 'Aktif');
@@ -3637,6 +3768,54 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 </div>
               ))}
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 175: Customer Win-Back Candidates ── */}
+      {reportsTab === 'crm' && orders.length >= 3 && (() => {
+        const now175 = new Date();
+        const cutoff175 = new Date(now175); cutoff175.setDate(cutoff175.getDate() - 90);
+        // Find customers whose last order was >90 days ago
+        const lastOrderDate: Record<string, Date> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (!lastOrderDate[o.customerName] || d > lastOrderDate[o.customerName]) {
+              lastOrderDate[o.customerName] = d;
+            }
+          } catch { /* skip */ }
+        }
+        const winBack = Object.entries(lastOrderDate)
+          .filter(([, d]) => d < cutoff175)
+          .map(([name, lastDate]) => {
+            const daysDormant = Math.floor((now175.getTime() - lastDate.getTime()) / 86400000);
+            const custOrders = orders.filter(o => o.customerName === name && o.status !== 'Cancelled');
+            const ltv = custOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+            return { name, daysDormant, ltv, orders: custOrders.length };
+          })
+          .sort((a, b) => b.ltv - a.ltv)
+          .slice(0, 6);
+        if (winBack.length === 0) return null;
+        return (
+          <div className="apple-card p-6 border border-amber-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔄 Geri Kazanım Listesi' : '🔄 Win-Back Candidates'}</h3>
+              <span className="text-xs text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full">{winBack.length} {currentLanguage==='tr'?'hareketsiz müşteri':'dormant customers'}</span>
+            </div>
+            <div className="space-y-2.5">
+              {winBack.map((c, i) => (
+                <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 truncate">{c.name}</p>
+                    <p className="text-[10px] text-gray-400">{c.daysDormant} {currentLanguage==='tr'?'gündür sipariş yok':'days since last order'} · {c.orders} {currentLanguage==='tr'?'önceki sip.':'prev orders'}</p>
+                  </div>
+                  <span className="text-xs font-bold text-amber-600 shrink-0 ml-3">₺{(c.ltv/1000).toFixed(1)}K LTV</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage==='tr'?'90+ gündür sipariş vermeyen yüksek değerli müşteriler':'High-value customers who haven\'t ordered in 90+ days'}</p>
           </div>
         );
       })()}
@@ -7259,6 +7438,49 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 174: Sales vs Budget – Last 3 Months ── */}
+              {monthlyTarget > 0 && orders.length > 0 && (() => {
+                const now174 = new Date();
+                const months174 = Array.from({ length: 3 }, (_, i) => {
+                  const d = new Date(now174.getFullYear(), now174.getMonth() - (2 - i), 1);
+                  const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+                  const mOrders = orders.filter(o => {
+                    if (o.status === 'Cancelled') return false;
+                    try {
+                      const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                      return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
+                    } catch { return false; }
+                  });
+                  const actual = mOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                  const pct = monthlyTarget > 0 ? Math.round((actual / monthlyTarget) * 100) : 0;
+                  return { label, actual, pct };
+                });
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-3", darkMode ? "text-white/50" : "text-gray-400")}>
+                      {currentLanguage === 'tr' ? 'Satış / Bütçe (3 Ay)' : 'Sales vs Budget (3M)'}
+                    </h3>
+                    <div className="flex items-end gap-4 h-20">
+                      {months174.map((m, i) => {
+                        const h = Math.min(m.pct, 120);
+                        const barCls = m.pct >= 100 ? 'bg-emerald-400' : m.pct >= 70 ? 'bg-amber-400' : 'bg-red-400';
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                            <div className="w-full flex flex-col justify-end relative" style={{ height: '60px' }}>
+                              <div className={`w-full rounded-t-lg transition-all ${barCls}`} style={{ height: `${Math.max(h * 0.5, 4)}%` }} />
+                              <div className="absolute bottom-0 w-full border-t-2 border-dashed border-gray-300" style={{ bottom: '50%' }} />
+                            </div>
+                            <span className="text-[9px] text-gray-400">{m.label}</span>
+                            <span className={`text-[9px] font-bold ${m.pct >= 100 ? 'text-emerald-600' : m.pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}>%{m.pct}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1 text-center">{currentLanguage==='tr'?'Kesikli çizgi = hedef':'Dashed = target'}</p>
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 42: Financial KPI mini-strip ── */}
               {(() => {
                 const aov = filteredOrders.length > 0
@@ -9221,6 +9443,49 @@ function AppContent() {
                       })()}
                     </motion.div>
                   )}
+
+                  {/* ── Phase 178: Overdue Invoice Escalation ── */}
+                  {muhasebeTab === 'ar-aging' && orders.filter(o => !o.paid && o.status !== 'Cancelled').length > 0 && (() => {
+                    const now178 = new Date();
+                    const overdueOrders = orders
+                      .filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt)
+                      .map(o => {
+                        let daysOld = 0;
+                        try {
+                          const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                          daysOld = Math.floor((now178.getTime() - d.getTime()) / 86400000);
+                        } catch { /* skip */ }
+                        return { ...o, daysOld };
+                      })
+                      .filter(o => o.daysOld > 30)
+                      .sort((a, b) => b.daysOld - a.daysOld)
+                      .slice(0, 8);
+                    if (overdueOrders.length === 0) return null;
+                    return (
+                      <div className="apple-card p-5 border border-red-100 mt-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <AlertCircle className="w-4 h-4 text-red-500" />
+                          <h3 className="font-bold text-gray-800 text-sm">{currentLanguage === 'tr' ? 'Eskalasyon Gerektiren Faturalar' : 'Overdue Invoice Escalation'}</h3>
+                          <span className="ml-auto text-[10px] text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full">{overdueOrders.length} {currentLanguage==='tr'?'>30g gecikmiş':'>30d overdue'}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {overdueOrders.map(o => {
+                            const escLevel = o.daysOld > 90 ? { label: 'L3', cls: 'bg-red-100 text-red-800' } : o.daysOld > 60 ? { label: 'L2', cls: 'bg-orange-100 text-orange-800' } : { label: 'L1', cls: 'bg-amber-100 text-amber-700' };
+                            return (
+                              <div key={o.id} className="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0">
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${escLevel.cls}`}>{escLevel.label}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-gray-800 truncate">{o.customerName}</p>
+                                  <p className="text-[10px] text-gray-400">{o.daysOld}g {currentLanguage==='tr'?'gecikmiş':'overdue'}</p>
+                                </div>
+                                <span className="text-xs font-bold text-red-600 shrink-0">₺{(o.totalPrice||0).toLocaleString()}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Phase 132: Financial Ratios ── */}
                   {muhasebeTab === 'finansal-oranlar' && (
