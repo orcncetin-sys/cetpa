@@ -6818,6 +6818,308 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 231: Price Sensitivity Analysis ── */}
+      {reportsTab === 'envanter' && orders.length >= 5 && inventory.length > 0 && (() => {
+        // Compare avg selling price vs list price per product to gauge price sensitivity
+        const prodPricing: Record<string, { listPrice: number; totalRev: number; totalQty: number; name: string }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          for (const li of (o.lineItems ?? [])) {
+            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+            if (!inv) continue;
+            const key = inv.id;
+            const listP = inv.prices?.['Retail'] ?? inv.price ?? li.price;
+            if (!prodPricing[key]) prodPricing[key] = { listPrice: listP, totalRev: 0, totalQty: 0, name: inv.name };
+            prodPricing[key].totalRev += li.price * li.quantity;
+            prodPricing[key].totalQty += li.quantity;
+          }
+        }
+        const pricingList = Object.values(prodPricing)
+          .filter(p => p.totalQty > 0 && p.listPrice > 0)
+          .map(p => {
+            const avgSellPrice = p.totalRev / p.totalQty;
+            const discount = Math.round(((p.listPrice - avgSellPrice) / p.listPrice) * 100);
+            return { name: p.name, listPrice: p.listPrice, avgSellPrice: Math.round(avgSellPrice), discount };
+          })
+          .filter(p => Math.abs(p.discount) > 0)
+          .sort((a, b) => b.discount - a.discount)
+          .slice(0, 7);
+        if (pricingList.length < 2) return null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '💲 Fiyat Hassasiyet Analizi' : '💲 Price Sensitivity Analysis'}</h3>
+              <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Liste fiyatı vs ortalama satış fiyatı' : 'List price vs avg selling price'}</span>
+            </div>
+            <div className="space-y-2.5">
+              {pricingList.map(p => (
+                <div key={p.name} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-700 truncate flex-1">{p.name}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-gray-400">₺{p.avgSellPrice.toLocaleString()}</span>
+                    <span className={`text-xs font-bold ${p.discount > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                      {p.discount > 0 ? `-${p.discount}%` : `+${Math.abs(p.discount)}%`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Eksi % = liste altı satış (iskonto). Artı % = liste üstü satış.' : 'Negative % = sold below list (discounted). Positive % = sold above list.'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 232: Customer Risk Score ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        // Risk factors: high cancellations, long AR days, declining order freq
+        const now232 = new Date();
+        const custMap232: Record<string, { orders: number; cancelled: number; lastOrderDays: number; rev: number }> = {};
+        for (const o of orders) {
+          const name = o.customerName || '—';
+          if (!custMap232[name]) custMap232[name] = { orders: 0, cancelled: 0, lastOrderDays: 999, rev: 0 };
+          custMap232[name].orders++;
+          if (o.status === 'Cancelled') { custMap232[name].cancelled++; continue; }
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const days = Math.round((now232.getTime() - od.getTime()) / 86400000);
+            if (days < custMap232[name].lastOrderDays) custMap232[name].lastOrderDays = days;
+          } catch { /* skip */ }
+          custMap232[name].rev += o.totalPrice || 0;
+        }
+        const riskList = Object.entries(custMap232)
+          .filter(([, d]) => d.orders >= 2)
+          .map(([name, d]) => {
+            // Risk = cancel rate * 40 + recency score * 30 + low volume * 30
+            const cancelRate = d.orders > 0 ? (d.cancelled / d.orders) * 100 : 0;
+            const recencyScore = d.lastOrderDays > 90 ? 30 : d.lastOrderDays > 45 ? 20 : d.lastOrderDays > 30 ? 10 : 0;
+            const riskScore = Math.min(100, Math.round(cancelRate * 0.4 + recencyScore));
+            return { name, riskScore, cancelRate: Math.round(cancelRate), lastOrderDays: d.lastOrderDays, rev: d.rev };
+          })
+          .sort((a, b) => b.riskScore - a.riskScore)
+          .slice(0, 6);
+        if (riskList.length === 0) return null;
+        const highRisk = riskList.filter(c => c.riskScore >= 50).length;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🚨 Müşteri Risk Skoru' : '🚨 Customer Risk Score'}</h3>
+              {highRisk > 0 && (
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full">
+                  {highRisk} {currentLanguage === 'tr' ? 'yüksek riskli' : 'high risk'}
+                </span>
+              )}
+            </div>
+            <div className="space-y-2.5">
+              {riskList.map(c => (
+                <div key={c.name}>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-xs font-medium text-gray-700 truncate">{c.name}</span>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className="text-[10px] text-gray-400">{c.lastOrderDays}d {currentLanguage === 'tr' ? 'önce' : 'ago'}</span>
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${c.riskScore >= 50 ? 'bg-red-100 text-red-700' : c.riskScore >= 25 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {c.riskScore}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${c.riskScore >= 50 ? 'bg-red-400' : c.riskScore >= 25 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${Math.max(4, c.riskScore)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Risk skoru: iptal oranı + hareketsizlik + düşük hacim (0-100)' : 'Risk score: cancel rate + recency + low volume (0-100 scale)'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 233: Payroll Efficiency Score ── */}
+      {reportsTab === 'ik' && employees.length > 0 && orders.length >= 3 && (() => {
+        const now233 = new Date();
+        const months233 = 3;
+        const cutoff233 = new Date(now233.getFullYear(), now233.getMonth() - months233, 1);
+        const recentRev = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= cutoff233;
+          } catch { return false; }
+        }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const activeEmps233 = employees.filter(e => e.status === 'Aktif');
+        const totalPayroll233 = activeEmps233.reduce((s, e) => s + (e.salary || 0), 0) * months233;
+        const efficiency = totalPayroll233 > 0 ? Math.round((recentRev / totalPayroll233) * 100) / 100 : 0;
+        // By department
+        const deptEff: Record<string, { rev: number; payroll: number }> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const rep = (o.assignedTo as string | undefined) || '';
+          if (!rep) continue;
+          const emp = activeEmps233.find(e => e.name === rep || e.email === rep);
+          if (!emp?.department) continue;
+          const dept = emp.department;
+          if (!deptEff[dept]) deptEff[dept] = { rev: 0, payroll: 0 };
+          deptEff[dept].rev += o.totalPrice || 0;
+        }
+        for (const e of activeEmps233) {
+          if (!e.department) continue;
+          if (!deptEff[e.department]) deptEff[e.department] = { rev: 0, payroll: 0 };
+          deptEff[e.department].payroll += (e.salary || 0) * months233;
+        }
+        const deptList233 = Object.entries(deptEff)
+          .filter(([,d]) => d.payroll > 0)
+          .map(([dept, d]) => ({ dept, eff: d.payroll > 0 ? Math.round((d.rev / d.payroll) * 100) / 100 : 0, rev: d.rev, payroll: d.payroll }))
+          .sort((a, b) => b.eff - a.eff)
+          .slice(0, 5);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⚡ Personel Verimlilik Skoru' : '⚡ Payroll Efficiency Score'}</h3>
+              <span className={`text-2xl font-black ${efficiency >= 3 ? 'text-emerald-600' : efficiency >= 1.5 ? 'text-amber-500' : 'text-red-500'}`}>{efficiency}×</span>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-4">{currentLanguage === 'tr' ? `Son ${months233} ayda ₺${(recentRev/1000).toFixed(0)}K ciro / ₺${(totalPayroll233/1000).toFixed(0)}K maaş kütlesi` : `Last ${months233} months: ₺${(recentRev/1000).toFixed(0)}K revenue / ₺${(totalPayroll233/1000).toFixed(0)}K payroll`}</p>
+            {deptList233.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre:' : 'By Department:'}</p>
+                {deptList233.map(d => (
+                  <div key={d.dept} className="flex items-center justify-between text-xs">
+                    <span className="text-gray-700 truncate">{d.dept}</span>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${d.eff >= 3 ? 'bg-emerald-400' : d.eff >= 1.5 ? 'bg-amber-400' : 'bg-red-300'}`} style={{ width: `${Math.min(100, Math.round(d.eff * 20))}%` }} />
+                      </div>
+                      <span className={`font-bold w-10 text-right ${d.eff >= 3 ? 'text-emerald-600' : d.eff >= 1.5 ? 'text-amber-600' : 'text-red-500'}`}>{d.eff}×</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Benchmark: 3x+ mükemmel, 2-3x iyi, 1.5-2x orta, <1.5x geliştirme gerekiyor' : 'Benchmark: 3x+ excellent, 2-3x good, 1.5-2x fair, <1.5x needs improvement'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 234: Weekly Revenue Run Rate ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now234 = new Date();
+        // Last 8 weeks
+        const weeks234 = Array.from({ length: 8 }, (_, i) => {
+          const weekStart = new Date(now234);
+          weekStart.setDate(weekStart.getDate() - (7 - i) * 7 - weekStart.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6); weekEnd.setHours(23, 59, 59, 999);
+          const label = `W${weekStart.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' })}`;
+          const rev = orders.filter(o => {
+            if (o.status === 'Cancelled') return false;
+            try {
+              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              return od >= weekStart && od <= weekEnd;
+            } catch { return false; }
+          }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+          return { label, rev, weekStart };
+        });
+        const hasData = weeks234.some(w => w.rev > 0);
+        if (!hasData) return null;
+        const maxWeekRev = Math.max(...weeks234.map(w => w.rev), 1);
+        const lastWeek = weeks234[weeks234.length - 1].rev;
+        const prevWeek = weeks234[weeks234.length - 2].rev;
+        const weekGrowth = prevWeek > 0 ? Math.round(((lastWeek - prevWeek) / prevWeek) * 100) : null;
+        const annualRunRate = lastWeek * 52;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📅 Haftalık Ciro & Yıllık Projeksiyon' : '📅 Weekly Revenue & Annual Run Rate'}</h3>
+              {weekGrowth !== null && (
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${weekGrowth >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                  {weekGrowth >= 0 ? '↑' : '↓'} %{Math.abs(weekGrowth)} WoW
+                </span>
+              )}
+            </div>
+            <div className="flex items-end gap-1.5 h-24 mb-3">
+              {weeks234.map((w, i) => {
+                const isLatest = i === weeks234.length - 1;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex items-end" style={{ height: '68px' }}>
+                      <div className={`w-full rounded-t-md ${isLatest ? 'bg-brand' : 'bg-gray-200'}`} style={{ height: `${Math.max(4, Math.round((w.rev / maxWeekRev) * 68))}px` }} />
+                    </div>
+                    <span className={`text-[8px] leading-none ${isLatest ? 'font-bold text-brand' : 'text-gray-400'}`}>{w.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-black text-gray-700">₺{(lastWeek/1000).toFixed(0)}K</p>
+                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
+              </div>
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-black text-blue-600">₺{(annualRunRate/1000).toFixed(0)}K</p>
+                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Yıllık projeksiyon' : 'Annual run rate'}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 235: Margin Bridge Analysis ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && (() => {
+        const now235 = new Date();
+        const prevMonthStart235 = new Date(now235.getFullYear(), now235.getMonth() - 1, 1);
+        const prevMonthEnd235 = new Date(now235.getFullYear(), now235.getMonth(), 0, 23, 59, 59);
+        const currMonthStart235 = new Date(now235.getFullYear(), now235.getMonth(), 1);
+        const calcMargin = (ordersList: Order[]) => {
+          const rev = ordersList.reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const cogs = ordersList.reduce((s, o) =>
+            s + (o.lineItems ?? []).reduce((ls, li) => {
+              const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+              return ls + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            }, 0), 0);
+          return { rev, cogs, margin: rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0, gross: rev - cogs };
+        };
+        const filterOrders = (start: Date, end: Date) => orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            return od >= start && od <= end;
+          } catch { return false; }
+        });
+        const prev235 = calcMargin(filterOrders(prevMonthStart235, prevMonthEnd235));
+        const curr235 = calcMargin(filterOrders(currMonthStart235, new Date()));
+        if (prev235.rev === 0 && curr235.rev === 0) return null;
+        const revChange = curr235.rev - prev235.rev;
+        const grossChange = curr235.gross - prev235.gross;
+        const marginChange = curr235.margin - prev235.margin;
+        const bridges = [
+          { label: currentLanguage === 'tr' ? 'Önceki Ay Brüt Kâr' : 'Prior Month Gross Profit', value: prev235.gross, neutral: true },
+          { label: currentLanguage === 'tr' ? 'Ciro Değişimi Etkisi' : 'Revenue Volume Effect', value: revChange * (prev235.margin / 100), neutral: false },
+          { label: currentLanguage === 'tr' ? 'Marj Değişimi Etkisi' : 'Margin Mix Effect', value: grossChange - revChange * (prev235.margin / 100), neutral: false },
+          { label: currentLanguage === 'tr' ? 'Bu Ay Brüt Kâr' : 'Current Month Gross Profit', value: curr235.gross, neutral: true, total: true },
+        ];
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🌉 Marj Köprü Analizi (MoM)' : '🌉 Margin Bridge Analysis (MoM)'}</h3>
+              <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${marginChange >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                {marginChange >= 0 ? '+' : ''}{marginChange}pp {currentLanguage === 'tr' ? 'marj' : 'margin'}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {bridges.map((b, i) => (
+                <div key={i} className={`flex items-center justify-between p-2.5 rounded-xl ${b.total ? 'bg-blue-50' : b.neutral ? 'bg-gray-50' : b.value >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                  <span className={`text-xs font-medium ${b.total ? 'text-blue-800 font-bold' : 'text-gray-700'}`}>{b.label}</span>
+                  <span className={`text-sm font-bold shrink-0 ml-2 ${b.total ? 'text-blue-700' : b.neutral ? 'text-gray-700' : b.value >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {!b.neutral && b.value >= 0 ? '+' : ''}{b.neutral ? '' : b.value >= 0 ? '' : ''}₺{Math.round(Math.abs(b.value)/1000)}K{!b.neutral && b.value < 0 ? ' ▼' : !b.neutral ? ' ▲' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+              <span>{currentLanguage === 'tr' ? 'Önceki: ' : 'Prior: '}₺{(prev235.rev/1000).toFixed(0)}K · %{prev235.margin}</span>
+              <span>{currentLanguage === 'tr' ? 'Bu ay: ' : 'Current: '}₺{(curr235.rev/1000).toFixed(0)}K · %{curr235.margin}</span>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
