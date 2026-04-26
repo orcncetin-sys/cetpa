@@ -6514,6 +6514,310 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 226: Sales Conversion Timeline ── */}
+      {reportsTab === 'crm' && quotations.length >= 3 && (() => {
+        // Days from quotation creation to conversion
+        const conversionTimes: number[] = [];
+        for (const q of quotations) {
+          const m = q as unknown as Record<string,unknown>;
+          const status = (m.status as string) || '';
+          if (status !== 'Converted to Order' && status !== 'accepted') continue;
+          try {
+            const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
+            const converted = m.convertedAt
+              ? ((m.convertedAt as { toDate?: () => Date }).toDate?.() ?? new Date(m.convertedAt as string))
+              : new Date();
+            const days = Math.round((converted.getTime() - created.getTime()) / 86400000);
+            if (days >= 0 && days < 180) conversionTimes.push(days);
+          } catch { /* skip */ }
+        }
+        if (conversionTimes.length < 2) return null;
+        const avgDays = Math.round(conversionTimes.reduce((s, d) => s + d, 0) / conversionTimes.length);
+        const minDays = Math.min(...conversionTimes);
+        const maxDays = Math.max(...conversionTimes);
+        const buckets226 = [
+          { label: currentLanguage === 'tr' ? 'Aynı gün' : 'Same day', max: 0, count: 0 },
+          { label: '1-3d', max: 3, count: 0 },
+          { label: '4-7d', max: 7, count: 0 },
+          { label: '8-30d', max: 30, count: 0 },
+          { label: '30d+', max: Infinity, count: 0 },
+        ];
+        for (const d of conversionTimes) {
+          const b = buckets226.find(b => d <= b.max);
+          if (b) b.count++;
+        }
+        const maxBkt226 = Math.max(...buckets226.map(b => b.count), 1);
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏱️ Teklif → Sipariş Dönüşüm Süresi' : '⏱️ Quote → Order Conversion Time'}</h3>
+              <span className="text-xl font-black text-blue-600">{avgDays} {currentLanguage === 'tr' ? 'gün ort.' : 'd avg'}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-bold text-emerald-600">{minDays} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
+                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'En hızlı' : 'Fastest'}</p>
+              </div>
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-bold text-amber-600">{maxDays} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
+                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'En yavaş' : 'Slowest'}</p>
+              </div>
+            </div>
+            <div className="flex items-end gap-2 h-16">
+              {buckets226.map(b => (
+                <div key={b.label} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="w-full flex items-end" style={{ height: '44px' }}>
+                    <div className="w-full bg-blue-300 rounded-t-md" style={{ height: `${Math.max(4, Math.round((b.count / maxBkt226) * 44))}px` }} />
+                  </div>
+                  <span className="text-[9px] text-gray-400 leading-none text-center">{b.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 227: Inventory Turnover by Category ── */}
+      {reportsTab === 'envanter' && inventory.length > 0 && orders.length >= 3 && (() => {
+        const now227 = new Date();
+        const days227 = 90;
+        const cutoff227 = new Date(now227); cutoff227.setDate(cutoff227.getDate() - days227);
+        const catSales: Record<string, number> = {};
+        const catCost: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od < cutoff227) continue;
+            for (const li of (o.lineItems ?? [])) {
+              const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+              const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+              catSales[cat] = (catSales[cat] ?? 0) + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            }
+          } catch { /* skip */ }
+        }
+        for (const i of inventory) {
+          const cat = i.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+          catCost[cat] = (catCost[cat] ?? 0) + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0);
+        }
+        const cats227 = Object.keys({ ...catSales, ...catCost });
+        const turnoverList = cats227
+          .map(cat => {
+            const cogs = catSales[cat] ?? 0;
+            const avgInv = catCost[cat] ?? 0;
+            const annualCOGS = avgInv > 0 ? (cogs / days227) * 365 : 0;
+            const turnover = avgInv > 0 ? Math.round((annualCOGS / avgInv) * 10) / 10 : 0;
+            return { cat, turnover, cogs, avgInv };
+          })
+          .filter(c => c.turnover > 0 || c.avgInv > 0)
+          .sort((a, b) => b.turnover - a.turnover)
+          .slice(0, 7);
+        if (turnoverList.length < 2) return null;
+        const maxTurnover227 = Math.max(...turnoverList.map(c => c.turnover), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🔄 Kategoriye Göre Stok Devir Hızı (Yıllık)' : '🔄 Inventory Turnover by Category (Annual)'}</h3>
+            <div className="space-y-2.5">
+              {turnoverList.map(c => (
+                <div key={c.cat}>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-xs font-medium text-gray-700 truncate">{c.cat}</span>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className="text-[10px] text-gray-400">₺{(c.avgInv/1000).toFixed(0)}K stok</span>
+                      <span className={`text-sm font-black ${c.turnover >= 6 ? 'text-emerald-600' : c.turnover >= 3 ? 'text-amber-600' : 'text-red-500'}`}>{c.turnover}×</span>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${c.turnover >= 6 ? 'bg-emerald-400' : c.turnover >= 3 ? 'bg-amber-400' : 'bg-red-300'}`} style={{ width: `${Math.max(4, Math.round((c.turnover / maxTurnover227) * 100))}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Benchmark: ≥6× iyi, 3-6× orta, <3× yavaş stok devri (B2B)' : 'Benchmark: ≥6× good, 3-6× average, <3× slow (B2B)'}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 228: Sales Trend by Customer Tier ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        // Tier customers by total LTV: Platinum top 20%, Gold mid 60%, Silver bottom 20%
+        const custLTV228: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          custLTV228[name] = (custLTV228[name] ?? 0) + (o.totalPrice || 0);
+        }
+        const sorted228 = Object.entries(custLTV228).sort(([,a],[,b]) => b - a);
+        const n228 = sorted228.length;
+        if (n228 < 3) return null;
+        const topN = Math.ceil(n228 * 0.2);
+        const botN = Math.ceil(n228 * 0.2);
+        const platinum = new Set(sorted228.slice(0, topN).map(([n]) => n));
+        const silver = new Set(sorted228.slice(n228 - botN).map(([n]) => n));
+        // Revenue this month by tier
+        const now228 = new Date();
+        const monthStart228 = new Date(now228.getFullYear(), now228.getMonth(), 1);
+        const prevMonthStart228 = new Date(now228.getFullYear(), now228.getMonth() - 1, 1);
+        const prevMonthEnd228 = new Date(now228.getFullYear(), now228.getMonth(), 0, 23, 59, 59);
+        const tierRevCurr: Record<string, number> = { Platinum: 0, Gold: 0, Silver: 0 };
+        const tierRevPrev: Record<string, number> = { Platinum: 0, Gold: 0, Silver: 0 };
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          const tier = platinum.has(name) ? 'Platinum' : silver.has(name) ? 'Silver' : 'Gold';
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od >= monthStart228) tierRevCurr[tier] += o.totalPrice || 0;
+            else if (od >= prevMonthStart228 && od <= prevMonthEnd228) tierRevPrev[tier] += o.totalPrice || 0;
+          } catch { /* skip */ }
+        }
+        const tierColors: Record<string, { bg: string; text: string; bar: string }> = {
+          Platinum: { bg: 'bg-purple-50', text: 'text-purple-700', bar: 'bg-purple-400' },
+          Gold: { bg: 'bg-amber-50', text: 'text-amber-700', bar: 'bg-amber-400' },
+          Silver: { bg: 'bg-gray-100', text: 'text-gray-600', bar: 'bg-gray-400' },
+        };
+        const maxTierRev = Math.max(...Object.values(tierRevCurr), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '👑 Müşteri Kademesine Göre Satış Trendi' : '👑 Sales Trend by Customer Tier'}</h3>
+            <div className="space-y-3">
+              {(['Platinum', 'Gold', 'Silver'] as const).map(tier => {
+                const curr = tierRevCurr[tier];
+                const prev = tierRevPrev[tier];
+                const growth = prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
+                const cls = tierColors[tier];
+                return (
+                  <div key={tier} className={`${cls.bg} rounded-xl p-4`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className={`text-xs font-bold ${cls.text}`}>{tier === 'Platinum' ? '💎' : tier === 'Gold' ? '⭐' : '🥈'} {tier}</p>
+                        <p className="text-[10px] text-gray-400">{tier === 'Platinum' ? `Top ${topN}` : tier === 'Silver' ? `Bottom ${botN}` : `Mid ${n228 - topN - botN}`} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-lg font-black ${cls.text}`}>₺{(curr/1000).toFixed(0)}K</p>
+                        {growth !== null && <p className={`text-[10px] font-bold ${growth >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{growth >= 0 ? '↑' : '↓'} %{Math.abs(growth)} MoM</p>}
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${cls.bar}`} style={{ width: `${Math.max(4, Math.round((curr / maxTierRev) * 100))}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 229: Order Lead Time by Status ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const now229 = new Date();
+        // Avg days from Pending → each subsequent status
+        const openOrders = orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
+        const ageBuckets: Record<string, { total: number; count: number }> = {
+          Pending: { total: 0, count: 0 },
+          Processing: { total: 0, count: 0 },
+          Shipped: { total: 0, count: 0 },
+        };
+        for (const o of openOrders) {
+          if (!ageBuckets[o.status]) continue;
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const days = Math.round((now229.getTime() - od.getTime()) / 86400000);
+            ageBuckets[o.status].total += days;
+            ageBuckets[o.status].count++;
+          } catch { /* skip */ }
+        }
+        const statusInfo: Record<string, { label: string; color: string; warn: number }> = {
+          Pending: { label: currentLanguage === 'tr' ? 'Beklemede' : 'Pending', color: 'bg-gray-400', warn: 3 },
+          Processing: { label: currentLanguage === 'tr' ? 'İşleniyor' : 'Processing', color: 'bg-blue-400', warn: 5 },
+          Shipped: { label: currentLanguage === 'tr' ? 'Kargoda' : 'Shipped', color: 'bg-amber-400', warn: 7 },
+        };
+        const hasData = Object.values(ageBuckets).some(b => b.count > 0);
+        if (!hasData) return null;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📊 Statüye Göre Bekleyen Sipariş Yaşı' : '📊 Open Order Age by Status'}</h3>
+              <span className="text-xs text-gray-400">{openOrders.length} {currentLanguage === 'tr' ? 'açık sipariş' : 'open orders'}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {Object.entries(ageBuckets).map(([status, d]) => {
+                const avg = d.count > 0 ? Math.round(d.total / d.count) : 0;
+                const info = statusInfo[status];
+                const isWarn = avg > info.warn;
+                return (
+                  <div key={status} className={`rounded-xl p-4 ${isWarn ? 'bg-red-50 border border-red-100' : 'bg-gray-50'}`}>
+                    <div className={`w-2 h-2 rounded-full ${info.color} mb-2`} />
+                    <p className={`text-2xl font-black ${isWarn ? 'text-red-600' : 'text-gray-700'}`}>{d.count > 0 ? avg : '—'}{d.count > 0 ? (currentLanguage === 'tr' ? 'g' : 'd') : ''}</p>
+                    <p className="text-[10px] text-gray-600 font-medium mt-0.5">{info.label}</p>
+                    <p className="text-[9px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</p>
+                    {isWarn && <p className="text-[9px] text-red-500 font-bold mt-1">{'⚠ >'}{info.warn}{currentLanguage === 'tr' ? 'g' : 'd'}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 230: Net Revenue Retention (NRR) ── */}
+      {reportsTab === 'crm' && orders.length >= 8 && (() => {
+        const now230 = new Date();
+        const prevStart = new Date(now230.getFullYear(), now230.getMonth() - 6, 1);
+        const prevEnd = new Date(now230.getFullYear(), now230.getMonth() - 3, 0, 23, 59, 59);
+        const currStart = new Date(now230.getFullYear(), now230.getMonth() - 3, 1);
+        // Customers in period 1 (prev 3 months)
+        const prevCustRev: Record<string, number> = {};
+        const currCustRev: Record<string, number> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          const name = o.customerName || '—';
+          try {
+            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            if (od >= prevStart && od <= prevEnd) prevCustRev[name] = (prevCustRev[name] ?? 0) + (o.totalPrice || 0);
+            if (od >= currStart) currCustRev[name] = (currCustRev[name] ?? 0) + (o.totalPrice || 0);
+          } catch { /* skip */ }
+        }
+        const existingCusts = Object.keys(prevCustRev);
+        if (existingCusts.length < 3) return null;
+        // NRR = revenue from existing customers in curr / their revenue in prev
+        const prevRevExisting = existingCusts.reduce((s, n) => s + prevCustRev[n], 0);
+        const currRevExisting = existingCusts.reduce((s, n) => s + (currCustRev[n] ?? 0), 0);
+        const nrr = prevRevExisting > 0 ? Math.round((currRevExisting / prevRevExisting) * 100) : null;
+        if (nrr === null) return null;
+        const expansion = existingCusts.filter(n => (currCustRev[n] ?? 0) > prevCustRev[n]).length;
+        const churned230 = existingCusts.filter(n => !(currCustRev[n])).length;
+        return (
+          <div className="apple-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📈 Net Gelir Tutma Oranı (NRR)' : '📈 Net Revenue Retention (NRR)'}</h3>
+              <span className={`text-2xl font-black ${nrr >= 100 ? 'text-emerald-600' : nrr >= 80 ? 'text-amber-500' : 'text-red-500'}`}>%{nrr}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: currentLanguage === 'tr' ? 'Önceki Dönem' : 'Prior Period', value: `₺${(prevRevExisting/1000).toFixed(0)}K`, color: 'text-gray-600' },
+                { label: currentLanguage === 'tr' ? 'Mevcut Dönem' : 'Current Period', value: `₺${(currRevExisting/1000).toFixed(0)}K`, color: nrr >= 100 ? 'text-emerald-600' : 'text-amber-600' },
+                { label: currentLanguage === 'tr' ? 'Müşteri Kaybı' : 'Churned', value: String(churned230), color: 'text-red-500' },
+              ].map(k => (
+                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 p-3 rounded-xl bg-blue-50">
+              <span>💡</span>
+              <p className="text-[11px] text-blue-700">
+                {currentLanguage === 'tr'
+                  ? `${expansion} müşteri harcamasını artırdı, ${churned230} kayboldu. NRR >100% büyüme gösterir.`
+                  : `${expansion} customers expanded, ${churned230} churned. NRR >100% means expansion exceeds churn.`}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
