@@ -8908,6 +8908,437 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 271: Revenue by Product Category Trend (envanter) ── */}
+      {reportsTab === 'envanter' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const months = Array.from({length:6}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (5-i), 1);
+          return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth() };
+        });
+        const catRevenue: Record<string, Record<string, number>> = {};
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const mkey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          (o.lineItems || []).forEach(li => {
+            const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+            const cat = inv?.category || 'Uncategorized';
+            if (!catRevenue[cat]) catRevenue[cat] = {};
+            catRevenue[cat][mkey] = (catRevenue[cat][mkey] || 0) + li.price * li.quantity;
+          });
+        });
+        const topCats = Object.entries(catRevenue)
+          .map(([cat, mdata]) => ({ cat, total: Object.values(mdata).reduce((s,v)=>s+v,0) }))
+          .sort((a,b) => b.total - a.total).slice(0,4).map(c => c.cat);
+        if (topCats.length === 0) return null;
+        const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Revenue by Category — 6-Month Trend</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-400 border-b border-gray-100">
+                    <th className="text-left pb-2">Category</th>
+                    {months.map(m => <th key={m.key} className="text-right pb-2">{m.label}</th>)}
+                    <th className="text-right pb-2">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCats.map((cat, ci) => (
+                    <tr key={cat} className="border-b border-gray-50">
+                      <td className="py-1.5 font-medium" style={{ color: colors[ci] }}>{cat}</td>
+                      {months.map(m => (
+                        <td key={m.key} className="py-1.5 text-right text-gray-600">
+                          {catRevenue[cat][m.key] ? `₺${(catRevenue[cat][m.key]/1000).toFixed(0)}k` : '-'}
+                        </td>
+                      ))}
+                      <td className="py-1.5 text-right font-bold text-gray-800">
+                        ₺{(Object.values(catRevenue[cat]).reduce((s,v)=>s+v,0)/1000).toFixed(0)}k
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 272: Order Return on Investment per Sales Rep (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const repData: Record<string, {revenue: number; cost: number; count: number}> = {};
+        orders.forEach(o => {
+          const rep = (o.assignedTo as string) || 'Unassigned';
+          if (!repData[rep]) repData[rep] = { revenue: 0, cost: 0, count: 0 };
+          repData[rep].revenue += o.totalPrice;
+          repData[rep].count++;
+          repData[rep].cost += (o.lineItems || []).reduce((s, li) => {
+            const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+          }, 0);
+        });
+        const reps = Object.entries(repData)
+          .map(([rep, d]) => ({ rep, revenue: d.revenue, cost: d.cost, count: d.count, margin: d.revenue - d.cost, marginPct: d.revenue > 0 ? ((d.revenue - d.cost)/d.revenue*100) : 0 }))
+          .sort((a,b) => b.margin - a.margin).slice(0,8);
+        if (reps.length === 0) return null;
+        const maxMargin = Math.max(...reps.map(r => r.margin));
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Gross Margin by Sales Rep</h3>
+            <div className="space-y-2">
+              {reps.map((r,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-700 w-28 truncate font-medium">{r.rep}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${maxMargin > 0 ? Math.max(2, r.margin/maxMargin*100) : 2}%`, background: r.marginPct >= 30 ? '#10b981' : r.marginPct >= 15 ? '#f59e0b' : '#ef4444' }} />
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right" style={{ color: r.marginPct >= 30 ? '#10b981' : r.marginPct >= 15 ? '#f59e0b' : '#ef4444' }}>{r.marginPct.toFixed(0)}%</span>
+                  <span className="text-xs text-gray-400 w-20 text-right">₺{r.margin.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 273: Multi-Currency Revenue Breakdown (genel) ── */}
+      {reportsTab === 'genel' && exchangeRates && orders.length >= 5 && (() => {
+        const usdRate = exchangeRates['USD'] || 32;
+        const eurRate = exchangeRates['EUR'] || 35;
+        const now = new Date();
+        const last30 = orders.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+        });
+        const totalTRY = last30.reduce((s,o) => s+o.totalPrice, 0);
+        if (totalTRY === 0) return null;
+        const totalUSD = totalTRY / usdRate;
+        const totalEUR = totalTRY / eurRate;
+        const avgOrderTRY = last30.length > 0 ? totalTRY / last30.length : 0;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Multi-Currency Revenue (Last 30 Days)</h3>
+            <p className="text-xs text-gray-500 mb-4">Based on live exchange rates: 1 USD = ₺{usdRate.toFixed(2)} · 1 EUR = ₺{eurRate.toFixed(2)}</p>
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { currency: '₺ TRY', value: totalTRY, sub: `${last30.length} orders` },
+                { currency: '$ USD', value: totalUSD, sub: `avg $${(avgOrderTRY/usdRate).toFixed(0)}/order` },
+                { currency: '€ EUR', value: totalEUR, sub: `avg €${(avgOrderTRY/eurRate).toFixed(0)}/order` },
+              ].map((c,i) => (
+                <div key={i} className="bg-gray-50 rounded-xl p-4 text-center">
+                  <div className="text-xs text-gray-400 mb-1">{c.currency}</div>
+                  <div className="text-xl font-black text-gray-800">{i===0 ? '₺' : i===1 ? '$' : '€'}{c.value.toLocaleString('en', {maximumFractionDigits:0})}</div>
+                  <div className="text-[10px] text-gray-400 mt-1">{c.sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 274: Inventory Stockout Frequency (envanter) ── */}
+      {reportsTab === 'envanter' && inventoryMovements.length >= 5 && inventory.length >= 3 && (() => {
+        const stockoutMap: Record<string, number> = {};
+        inventoryMovements.filter(m => m.type === 'out').forEach(m => {
+          const key = m.productName || 'Unknown';
+          stockoutMap[key] = (stockoutMap[key] || 0) + 1;
+        });
+        const lowStockItems = inventory.filter(item => item.stockLevel <= item.lowStockThreshold && item.stockLevel >= 0)
+          .map(item => ({ name: item.name, stock: item.stockLevel, threshold: item.lowStockThreshold, outFreq: stockoutMap[item.name] || 0 }))
+          .sort((a,b) => b.outFreq - a.outFreq).slice(0,8);
+        if (lowStockItems.length === 0) {
+          return (
+            <div className="apple-card p-6">
+              <h3 className="font-bold text-gray-800 mb-1">Stockout Frequency Monitor</h3>
+              <p className="text-xs text-green-600 text-center py-4">✅ No items currently at or below reorder threshold</p>
+            </div>
+          );
+        }
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Stockout Frequency Monitor</h3>
+            <p className="text-xs text-gray-500 mb-3">Items at/below threshold sorted by movement frequency</p>
+            <div className="space-y-2">
+              {lowStockItems.map((item,i) => (
+                <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-amber-50">
+                  <span className="font-medium text-gray-800 truncate w-36">{item.name}</span>
+                  <span className="text-amber-700">Stock: {item.stock} / Min: {item.threshold}</span>
+                  <span className="text-gray-500">{item.outFreq} outflows</span>
+                  <span className={`font-bold ${item.stock === 0 ? 'text-red-600' : 'text-amber-600'}`}>{item.stock === 0 ? '🔴 OUT' : '🟡 LOW'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 275: Customer Segment Profitability (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const segments: Record<string, {revenue: number; cost: number; orders: number; customers: Set<string>}> = {};
+        orders.forEach(o => {
+          const seg = o.customerType || 'Unknown';
+          if (!segments[seg]) segments[seg] = { revenue: 0, cost: 0, orders: 0, customers: new Set() };
+          segments[seg].revenue += o.totalPrice;
+          segments[seg].orders++;
+          segments[seg].customers.add(o.customerName);
+          segments[seg].cost += (o.lineItems || []).reduce((s, li) => {
+            const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+          }, 0);
+        });
+        const data = Object.entries(segments).map(([seg, d]) => ({
+          seg, revenue: d.revenue, cost: d.cost, orders: d.orders, customers: d.customers.size,
+          margin: d.revenue - d.cost,
+          marginPct: d.revenue > 0 ? ((d.revenue - d.cost)/d.revenue*100) : 0,
+          ltv: d.customers.size > 0 ? d.revenue / d.customers.size : 0,
+        })).sort((a,b) => b.margin - a.margin);
+        if (data.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Customer Segment Profitability</h3>
+            <div className="space-y-4">
+              {data.map((d,i) => (
+                <div key={i} className="border border-gray-100 rounded-xl p-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-gray-800">{d.seg}</span>
+                    <span className="text-sm font-black" style={{ color: d.marginPct >= 25 ? '#10b981' : d.marginPct >= 10 ? '#f59e0b' : '#ef4444' }}>{d.marginPct.toFixed(1)}% margin</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-xs text-center">
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.revenue/1000).toFixed(0)}k</div><div className="text-gray-400">Revenue</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.margin/1000).toFixed(0)}k</div><div className="text-gray-400">Margin</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{d.customers}</div><div className="text-gray-400">Customers</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.ltv/1000).toFixed(0)}k</div><div className="text-gray-400">LTV</div></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 276: Order Priority Distribution (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const aged = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').map(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const age = Math.floor((now.getTime() - d.getTime()) / 86400000);
+          return { ...o, age };
+        });
+        const critical = aged.filter(o => o.age >= 7);
+        const urgent = aged.filter(o => o.age >= 3 && o.age < 7);
+        const normal = aged.filter(o => o.age < 3);
+        const buckets = [
+          { label: 'Critical (7+ days)', count: critical.length, revenue: critical.reduce((s,o)=>s+o.totalPrice,0), color: '#ef4444', bg: '#fef2f2' },
+          { label: 'Urgent (3-6 days)', count: urgent.length, revenue: urgent.reduce((s,o)=>s+o.totalPrice,0), color: '#f59e0b', bg: '#fffbeb' },
+          { label: 'Normal (0-2 days)', count: normal.length, revenue: normal.reduce((s,o)=>s+o.totalPrice,0), color: '#10b981', bg: '#f0fdf4' },
+        ];
+        if (aged.length === 0) {
+          return (
+            <div className="apple-card p-6">
+              <h3 className="font-bold text-gray-800 mb-1">Open Order Priority Queue</h3>
+              <p className="text-xs text-green-600 text-center py-4">✅ No open orders pending fulfillment</p>
+            </div>
+          );
+        }
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Open Order Priority Queue</h3>
+            <p className="text-xs text-gray-500 mb-4">Age-based prioritization of {aged.length} open orders</p>
+            <div className="space-y-3">
+              {buckets.map((b,i) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-xl" style={{ background: b.bg }}>
+                  <div>
+                    <span className="text-sm font-bold" style={{ color: b.color }}>{b.label}</span>
+                    <span className="text-xs text-gray-500 ml-2">{b.count} orders</span>
+                  </div>
+                  <div className="text-sm font-bold text-gray-700">₺{b.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 277: Employee Efficiency Ratio (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 5 && (() => {
+        const now = new Date();
+        const last90Rev = orders.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return (now.getTime() - d.getTime()) / 86400000 <= 90;
+        }).reduce((s,o) => s+o.totalPrice, 0);
+        const activeEmps = employees.filter(e => e.status === 'Aktif');
+        const totalPayroll = activeEmps.reduce((s,e) => s + (e.salary || 0), 0);
+        const annualPayroll = totalPayroll * 12;
+        const annualRevEst = last90Rev * (365 / 90);
+        const revenuePerEmp = activeEmps.length > 0 ? annualRevEst / activeEmps.length : 0;
+        const payrollRatio = annualRevEst > 0 ? (annualPayroll / annualRevEst * 100) : 0;
+        const deptData: Record<string, {count:number; payroll:number}> = {};
+        activeEmps.forEach(e => {
+          const dept = e.department || 'Other';
+          if (!deptData[dept]) deptData[dept] = { count: 0, payroll: 0 };
+          deptData[dept].count++;
+          deptData[dept].payroll += e.salary || 0;
+        });
+        const depts = Object.entries(deptData).sort((a,b)=>b[1].payroll-a[1].payroll).slice(0,5);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">Employee Efficiency Ratios</h3>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <div className="text-lg font-black text-blue-700">₺{(revenuePerEmp/1000).toFixed(0)}k</div>
+                <div className="text-[10px] text-gray-500 mt-0.5">Revenue/Employee (Annual)</div>
+              </div>
+              <div className="rounded-xl p-3 text-center" style={{ background: payrollRatio <= 25 ? '#f0fdf4' : payrollRatio <= 40 ? '#fffbeb' : '#fef2f2' }}>
+                <div className="text-lg font-black" style={{ color: payrollRatio <= 25 ? '#10b981' : payrollRatio <= 40 ? '#f59e0b' : '#ef4444' }}>{payrollRatio.toFixed(1)}%</div>
+                <div className="text-[10px] text-gray-500 mt-0.5">Payroll/Revenue Ratio</div>
+              </div>
+              <div className="bg-purple-50 rounded-xl p-3 text-center">
+                <div className="text-lg font-black text-purple-700">{activeEmps.length}</div>
+                <div className="text-[10px] text-gray-500 mt-0.5">Active Employees</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {depts.map(([dept, d], i) => (
+                <div key={i} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600 w-32 truncate">{dept}</span>
+                  <span className="text-gray-400">{d.count} staff</span>
+                  <span className="font-medium text-gray-800">₺{d.payroll.toLocaleString('tr-TR',{maximumFractionDigits:0})}/mo</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 278: Top Products by Velocity (envanter) ── */}
+      {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
+        const now = new Date();
+        const velocityMap: Record<string, {units: number; value: number}> = {};
+        inventoryMovements.filter(m => {
+          if (m.type !== 'out') return false;
+          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+        }).forEach(m => {
+          const key = m.productName || 'Unknown';
+          if (!velocityMap[key]) velocityMap[key] = { units: 0, value: 0 };
+          velocityMap[key].units += m.quantity || 1;
+          const inv = inventory.find(it => it.name === key);
+          velocityMap[key].value += (m.quantity || 1) * (inv?.costPrice || 0);
+        });
+        const top = Object.entries(velocityMap)
+          .map(([name, d]) => ({ name, units: d.units, value: d.value, dailyVelocity: d.units / 30 }))
+          .sort((a,b) => b.units - a.units).slice(0,8);
+        if (top.length === 0) return null;
+        const maxUnits = Math.max(...top.map(t=>t.units));
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Top Products by Sales Velocity (Last 30 Days)</h3>
+            <p className="text-xs text-gray-500 mb-4">Units shipped from inventory movements</p>
+            <div className="space-y-2">
+              {top.map((t,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-gray-400 w-4">{i+1}</span>
+                  <span className="text-xs text-gray-700 truncate w-36 font-medium">{t.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-green-500" style={{ width: `${maxUnits>0?(t.units/maxUnits*100):0}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-600 w-16 text-right">{t.units} units</span>
+                  <span className="text-xs text-gray-400 w-14 text-right">{t.dailyVelocity.toFixed(1)}/day</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 279: Revenue Concentration by Geography (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const geoRevenue: Record<string, {revenue: number; orders: number}> = {};
+        orders.forEach(o => {
+          const addr = (o.shippingAddress || '').toLowerCase();
+          let region = 'Unknown';
+          if (addr.includes('istanbul') || addr.includes('İstanbul')) region = 'İstanbul';
+          else if (addr.includes('ankara')) region = 'Ankara';
+          else if (addr.includes('izmir') || addr.includes('İzmir')) region = 'İzmir';
+          else if (addr.includes('bursa')) region = 'Bursa';
+          else if (addr.includes('antalya')) region = 'Antalya';
+          else if (addr.includes('adana')) region = 'Adana';
+          else if (addr.match(/\b(tr|turkey|türkiye)\b/)) region = 'Other TR';
+          else if (addr.length > 3) region = 'Other';
+          if (!geoRevenue[region]) geoRevenue[region] = { revenue: 0, orders: 0 };
+          geoRevenue[region].revenue += o.totalPrice;
+          geoRevenue[region].orders++;
+        });
+        const regions = Object.entries(geoRevenue)
+          .map(([region, d]) => ({ region, ...d }))
+          .sort((a,b) => b.revenue - a.revenue).slice(0,7);
+        if (regions.length === 0 || (regions.length === 1 && regions[0].region === 'Unknown')) return null;
+        const totalRev = regions.reduce((s,r)=>s+r.revenue,0);
+        const maxRev = Math.max(...regions.map(r=>r.revenue));
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Revenue Concentration by Region</h3>
+            <div className="space-y-2">
+              {regions.map((r,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-700 w-24 font-medium">{r.region}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-indigo-500" style={{ width: `${maxRev>0?(r.revenue/maxRev*100):0}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-500 w-10 text-right">{r.orders} ord</span>
+                  <span className="text-xs font-bold text-indigo-700 w-10 text-right">{totalRev>0?((r.revenue/totalRev)*100).toFixed(0):0}%</span>
+                  <span className="text-xs text-gray-600 w-20 text-right">₺{r.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 280: Comprehensive Financial Ratios (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const now = new Date();
+        const totalRevenue = orders.reduce((s,o) => s+o.totalPrice, 0);
+        const totalCost = orders.reduce((s,o) => s + (o.lineItems||[]).reduce((sc, li) => {
+          const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+          return sc + (inv ? (inv.costPrice||0) : (li.costPrice||0)) * li.quantity;
+        }, 0), 0);
+        const grossProfit = totalRevenue - totalCost;
+        const grossMarginPct = totalRevenue > 0 ? (grossProfit/totalRevenue*100) : 0;
+        const inventoryValue = inventory.reduce((s,i) => s + i.stockLevel * (i.costPrice||0), 0);
+        const monthlyRevArr = Array.from({length:12}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
+          return orders.filter(o => {
+            const od = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            return od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
+          }).reduce((s,o)=>s+o.totalPrice,0);
+        });
+        const avgMonthlyRev = monthlyRevArr.reduce((s,v)=>s+v,0) / 12;
+        const inventoryTurnover = inventoryValue > 0 ? (totalCost / inventoryValue) : 0;
+        const dso = avgMonthlyRev > 0 ? (inventoryValue / avgMonthlyRev * 30) : 0;
+        const ratios = [
+          { label: 'Gross Margin', value: `${grossMarginPct.toFixed(1)}%`, good: grossMarginPct >= 30, neutral: grossMarginPct >= 15 },
+          { label: 'Inventory Turnover', value: `${inventoryTurnover.toFixed(1)}x`, good: inventoryTurnover >= 4, neutral: inventoryTurnover >= 2 },
+          { label: 'Avg Monthly Revenue', value: `₺${(avgMonthlyRev/1000).toFixed(0)}k`, good: true, neutral: true },
+          { label: 'Gross Profit', value: `₺${(grossProfit/1000).toFixed(0)}k`, good: grossProfit > 0, neutral: grossProfit >= 0 },
+          { label: 'Inventory Value', value: `₺${(inventoryValue/1000).toFixed(0)}k`, good: true, neutral: true },
+          { label: 'Est. DSO', value: `${dso.toFixed(0)} days`, good: dso <= 30, neutral: dso <= 60 },
+        ];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Comprehensive Financial Ratios</h3>
+            <div className="grid grid-cols-3 gap-3">
+              {ratios.map((r,i) => (
+                <div key={i} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <div className="text-lg font-black" style={{ color: r.good ? '#10b981' : r.neutral ? '#f59e0b' : '#ef4444' }}>{r.value}</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">{r.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
