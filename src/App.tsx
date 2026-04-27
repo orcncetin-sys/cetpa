@@ -10652,6 +10652,486 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 311: Rolling 7-Day Revenue Trend (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 7 && (() => {
+        const now = new Date();
+        const days = Array.from({length: 28}, (_, i) => {
+          const d = new Date(now);
+          d.setDate(d.getDate() - (27 - i));
+          return d.toISOString().slice(0, 10);
+        });
+        const dayRev: Record<string, number> = {};
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const key = d.toISOString().slice(0, 10);
+          dayRev[key] = (dayRev[key] || 0) + o.totalPrice;
+        });
+        const rolling7: number[] = [];
+        for (let i = 6; i < days.length; i++) {
+          const sum = days.slice(i - 6, i + 1).reduce((s, d) => s + (dayRev[d] || 0), 0);
+          rolling7.push(sum / 7);
+        }
+        const hasData = rolling7.some(v => v > 0);
+        if (!hasData) return null;
+        const maxVal = Math.max(...rolling7, 1);
+        const trend = rolling7.length >= 2 ? rolling7[rolling7.length - 1] - rolling7[0] : 0;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Rolling 7-Day Avg Revenue — Last 28 Days</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Trend: <span className={trend >= 0 ? 'text-green-600 font-bold' : 'text-red-500 font-bold'}>{trend >= 0 ? '↑' : '↓'} ₺{Math.abs(trend).toLocaleString('tr-TR', {maximumFractionDigits: 0})}/day avg</span>
+            </p>
+            <div className="flex items-end gap-0.5 h-20">
+              {rolling7.map((v, i) => (
+                <div key={i} className="flex-1 rounded-t transition-all" style={{
+                  height: `${maxVal > 0 ? Math.max(2, v / maxVal * 72) : 2}px`,
+                  background: i === rolling7.length - 1 ? '#f97316' : '#6366f1',
+                  opacity: 0.6 + i / rolling7.length * 0.4
+                }} title={`₺${v.toLocaleString('tr-TR', {maximumFractionDigits: 0})}`} />
+              ))}
+            </div>
+            <div className="flex justify-between text-[9px] text-gray-400 mt-1">
+              <span>28d ago</span><span>Today</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 312: Inventory Reorder Alert Dashboard (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 3 && (() => {
+        const critical = inventory.filter(i => i.stockLevel === 0);
+        const low = inventory.filter(i => i.stockLevel > 0 && i.stockLevel <= i.lowStockThreshold);
+        const healthy = inventory.filter(i => i.stockLevel > i.lowStockThreshold);
+        const totalValue = inventory.reduce((s, i) => s + i.stockLevel * (i.costPrice || 0), 0);
+        const criticalValue = critical.reduce((s, i) => s + i.lowStockThreshold * (i.costPrice || 0), 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">Inventory Reorder Alert Dashboard</h3>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-red-50 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-red-600">{critical.length}</div>
+                <div className="text-[10px] text-gray-500">Out of Stock</div>
+                <div className="text-[9px] text-red-400 mt-0.5">₺{criticalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})} to restock</div>
+              </div>
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-amber-600">{low.length}</div>
+                <div className="text-[10px] text-gray-500">Low Stock</div>
+                <div className="text-[9px] text-amber-400 mt-0.5">at or below threshold</div>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-green-600">{healthy.length}</div>
+                <div className="text-[10px] text-gray-500">Healthy Stock</div>
+                <div className="text-[9px] text-green-400 mt-0.5">above threshold</div>
+              </div>
+            </div>
+            {critical.slice(0, 4).length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-red-600 mb-1">🔴 Immediate Reorder Required</p>
+                {critical.slice(0, 4).map((item, i) => (
+                  <div key={i} className="flex justify-between text-xs p-1.5 bg-red-50 rounded-lg">
+                    <span className="text-gray-800 font-medium truncate w-44">{item.name}</span>
+                    <span className="text-gray-400">{item.sku}</span>
+                    <span className="text-red-600 font-bold">0 in stock</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-gray-400 mt-3 text-center">Total inventory value: ₺{totalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 313: Sales Rep Activity Heatmap (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const repMonthly: Record<string, Record<string, number>> = {};
+        const now = new Date();
+        const months = Array.from({length: 6}, (_, i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+          return {key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth()};
+        });
+        orders.forEach(o => {
+          const rep = (o.assignedTo as string) || 'Unassigned';
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const mkey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          if (!repMonthly[rep]) repMonthly[rep] = {};
+          repMonthly[rep][mkey] = (repMonthly[rep][mkey] || 0) + o.totalPrice;
+        });
+        const reps = Object.entries(repMonthly)
+          .map(([rep, mdata]) => ({rep, total: Object.values(mdata).reduce((s, v) => s + v, 0), months: mdata}))
+          .sort((a, b) => b.total - a.total).slice(0, 5);
+        if (reps.length === 0) return null;
+        const allVals = reps.flatMap(r => months.map(m => r.months[m.key] || 0));
+        const maxVal = Math.max(...allVals, 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Sales Rep Activity Heatmap — 6 Months</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-400">
+                    <th className="text-left pb-2 w-24">Rep</th>
+                    {months.map(m => <th key={m.key} className="text-center pb-2 w-10">{m.label}</th>)}
+                    <th className="text-right pb-2">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reps.map((r, i) => (
+                    <tr key={i}>
+                      <td className="py-1 text-gray-700 font-medium truncate max-w-[6rem]">{r.rep}</td>
+                      {months.map(m => {
+                        const v = r.months[m.key] || 0;
+                        const intensity = maxVal > 0 ? v / maxVal : 0;
+                        return (
+                          <td key={m.key} className="py-1 px-0.5">
+                            <div className="rounded h-6 flex items-center justify-center text-[8px] font-bold" style={{
+                              background: v === 0 ? '#f3f4f6' : `rgba(99,102,241,${0.15 + intensity * 0.85})`,
+                              color: intensity > 0.5 ? 'white' : '#4b5563'
+                            }} title={`₺${v.toLocaleString('tr-TR', {maximumFractionDigits: 0})}`}>
+                              {v > 0 ? `${(v / 1000).toFixed(0)}k` : '-'}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="py-1 text-right font-bold text-gray-800">₺{(r.total / 1000).toFixed(0)}k</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 314: Average Transaction Value by Day Part (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const parts = [
+          {label: 'Morning', subLabel: '6–12', hours: [6,7,8,9,10,11], color: '#f59e0b'},
+          {label: 'Afternoon', subLabel: '12–17', hours: [12,13,14,15,16], color: '#3b82f6'},
+          {label: 'Evening', subLabel: '17–22', hours: [17,18,19,20,21], color: '#8b5cf6'},
+          {label: 'Night', subLabel: '22–6', hours: [22,23,0,1,2,3,4,5], color: '#94a3b8'},
+        ];
+        const partData = parts.map(p => {
+          const partOrders = orders.filter(o => {
+            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            return p.hours.includes(d.getHours());
+          });
+          return {
+            ...p,
+            count: partOrders.length,
+            revenue: partOrders.reduce((s, o) => s + o.totalPrice, 0),
+            aov: partOrders.length > 0 ? partOrders.reduce((s, o) => s + o.totalPrice, 0) / partOrders.length : 0,
+          };
+        });
+        const hasData = partData.some(p => p.count > 0);
+        if (!hasData) return null;
+        const maxAov = Math.max(...partData.map(p => p.aov), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">AOV by Time of Day</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {partData.map((p, i) => (
+                <div key={i} className="rounded-xl p-4" style={{background: `${p.color}15`}}>
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <div className="text-xs font-bold text-gray-700">{p.label}</div>
+                      <div className="text-[10px] text-gray-400">{p.subLabel}h</div>
+                    </div>
+                    <span className="text-[10px] text-gray-400">{p.count} orders</span>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-2">
+                    <div className="h-full rounded-full" style={{width: `${maxAov > 0 ? p.aov / maxAov * 100 : 0}%`, background: p.color}} />
+                  </div>
+                  <div className="text-base font-black" style={{color: p.color}}>
+                    ₺{p.aov.toLocaleString('tr-TR', {maximumFractionDigits: 0})}
+                  </div>
+                  <div className="text-[9px] text-gray-400">avg order value</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 315: Invoice Payment Status Tracker (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const invoiced = orders.filter(o => o.hasInvoice || o.faturali);
+        if (invoiced.length === 0) return null;
+        const paid = invoiced.filter(o => o.paid || (o as unknown as Record<string,unknown>).paidAt);
+        const unpaid = invoiced.filter(o => !o.paid && !(o as unknown as Record<string,unknown>).paidAt);
+        const paidRev = paid.reduce((s, o) => s + o.totalPrice, 0);
+        const unpaidRev = unpaid.reduce((s, o) => s + o.totalPrice, 0);
+        const now = new Date();
+        const overdue = unpaid.filter(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return (now.getTime() - d.getTime()) / 86400000 > 30;
+        });
+        const overdueRev = overdue.reduce((s, o) => s + o.totalPrice, 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-4">Invoice Payment Status</h3>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-black text-green-600">{paid.length}</div>
+                <div className="text-[10px] text-gray-500">Paid</div>
+                <div className="text-[9px] text-green-500">₺{(paidRev / 1000).toFixed(0)}k</div>
+              </div>
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-black text-amber-600">{unpaid.length}</div>
+                <div className="text-[10px] text-gray-500">Awaiting</div>
+                <div className="text-[9px] text-amber-500">₺{(unpaidRev / 1000).toFixed(0)}k</div>
+              </div>
+              <div className="bg-red-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-black text-red-600">{overdue.length}</div>
+                <div className="text-[10px] text-gray-500">Overdue 30d+</div>
+                <div className="text-[9px] text-red-500">₺{(overdueRev / 1000).toFixed(0)}k</div>
+              </div>
+            </div>
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex gap-0.5">
+              {paidRev > 0 && <div className="h-full bg-green-400 rounded-l-full" style={{width: `${(paidRev / (paidRev + unpaidRev)) * 100}%`}} />}
+              {overdueRev > 0 && <div className="h-full bg-red-400" style={{width: `${(overdueRev / (paidRev + unpaidRev)) * 100}%`}} />}
+              {(unpaidRev - overdueRev) > 0 && <div className="h-full bg-amber-300 rounded-r-full" style={{width: `${((unpaidRev - overdueRev) / (paidRev + unpaidRev)) * 100}%`}} />}
+            </div>
+            <div className="flex gap-3 mt-2 text-[10px] text-gray-400">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400 inline-block" />Paid</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Overdue</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-300 inline-block" />Awaiting</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 316: Product Margin Ranking (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && orders.length >= 5 && (() => {
+        const productRev: Record<string, {revenue: number; cost: number; qty: number}> = {};
+        orders.forEach(o => (o.lineItems || []).forEach(li => {
+          const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
+          const cost = inv ? (inv.costPrice || 0) : (li.costPrice || 0);
+          const key = li.name || li.sku;
+          if (!productRev[key]) productRev[key] = {revenue: 0, cost: 0, qty: 0};
+          productRev[key].revenue += li.price * li.quantity;
+          productRev[key].cost += cost * li.quantity;
+          productRev[key].qty += li.quantity;
+        }));
+        const ranked = Object.entries(productRev)
+          .map(([name, d]) => ({name, ...d, margin: d.revenue - d.cost, marginPct: d.revenue > 0 ? ((d.revenue - d.cost) / d.revenue * 100) : 0}))
+          .filter(p => p.revenue > 0)
+          .sort((a, b) => b.marginPct - a.marginPct)
+          .slice(0, 8);
+        if (ranked.length === 0) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-3">Product Margin Ranking (Top 8 by %)</h3>
+            <div className="space-y-2">
+              {ranked.map((p, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-gray-400 w-4">#{i + 1}</span>
+                  <span className="text-xs text-gray-700 truncate w-32 font-medium">{p.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{
+                      width: `${Math.max(2, p.marginPct)}%`,
+                      background: p.marginPct >= 40 ? '#10b981' : p.marginPct >= 20 ? '#3b82f6' : p.marginPct >= 0 ? '#f59e0b' : '#ef4444'
+                    }} />
+                  </div>
+                  <span className="text-xs font-bold w-10 text-right" style={{color: p.marginPct >= 40 ? '#10b981' : p.marginPct >= 20 ? '#3b82f6' : '#f59e0b'}}>{p.marginPct.toFixed(0)}%</span>
+                  <span className="text-xs text-gray-400 w-16 text-right">₺{p.margin.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 317: On-Hold Order Value (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const pending = orders.filter(o => o.status === 'Pending' || o.status === 'Processing');
+        if (pending.length === 0) return null;
+        const totalHeld = pending.reduce((s, o) => s + o.totalPrice, 0);
+        const byStatus = {
+          Pending: pending.filter(o => o.status === 'Pending'),
+          Processing: pending.filter(o => o.status === 'Processing'),
+        };
+        const oldest = pending.reduce((oldest, o) => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          return d < oldest ? d : oldest;
+        }, now);
+        const oldestDays = Math.floor((now.getTime() - oldest.getTime()) / 86400000);
+        const aging = [
+          {label: '0-1 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); return (now.getTime()-d.getTime())/86400000 <= 1; })},
+          {label: '2-3 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); const age=(now.getTime()-d.getTime())/86400000; return age>1&&age<=3; })},
+          {label: '4-7 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); const age=(now.getTime()-d.getTime())/86400000; return age>3&&age<=7; })},
+          {label: '7+ days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); return (now.getTime()-d.getTime())/86400000>7; })},
+        ];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">On-Hold Order Value</h3>
+            <p className="text-xs text-gray-500 mb-4">{pending.length} orders holding ₺{totalHeld.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · oldest: {oldestDays}d</p>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-black text-amber-600">{byStatus.Pending.length}</div>
+                <div className="text-[10px] text-gray-500">Pending</div>
+                <div className="text-[9px] text-amber-400">₺{byStatus.Pending.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+              </div>
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-black text-blue-600">{byStatus.Processing.length}</div>
+                <div className="text-[10px] text-gray-500">Processing</div>
+                <div className="text-[9px] text-blue-400">₺{byStatus.Processing.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+              </div>
+            </div>
+            <div className="space-y-1">
+              {aging.map((a, i) => (
+                <div key={i} className="flex justify-between text-xs p-2 rounded-lg" style={{background: i >= 2 ? '#fef2f2' : '#f8fafc'}}>
+                  <span className="text-gray-600 font-medium">{a.label}</span>
+                  <span className="font-bold" style={{color: i >= 2 ? '#ef4444' : '#6b7280'}}>{a.orders.length} orders · ₺{a.orders.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 318: Salary Band Distribution (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 3 && (() => {
+        const active = employees.filter(e => e.status === 'Aktif' && e.salary > 0);
+        if (active.length === 0) return null;
+        const salaries = active.map(e => e.salary).sort((a, b) => a - b);
+        const min = salaries[0];
+        const max = salaries[salaries.length - 1];
+        const avg = salaries.reduce((s, v) => s + v, 0) / salaries.length;
+        const median = salaries[Math.floor(salaries.length / 2)];
+        const range = max - min || 1;
+        const bucketSize = range / 5;
+        const buckets = Array.from({length: 5}, (_, i) => {
+          const lo = min + i * bucketSize;
+          const hi = min + (i + 1) * bucketSize;
+          const count = salaries.filter(s => s >= lo && (i === 4 ? s <= hi : s < hi)).length;
+          return {label: `₺${(lo / 1000).toFixed(0)}k–${(hi / 1000).toFixed(0)}k`, count};
+        });
+        const maxCount = Math.max(...buckets.map(b => b.count), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Salary Band Distribution</h3>
+            <p className="text-xs text-gray-500 mb-4">Active employees · avg: ₺{avg.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · median: ₺{median.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <div className="flex items-end gap-2 h-20 mb-3">
+              {buckets.map((b, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-500">{b.count}</span>
+                  <div className="w-full rounded-t bg-violet-500" style={{height: `${maxCount > 0 ? Math.max(4, b.count / maxCount * 60) : 4}px`}} />
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-center">
+              {buckets.map((b, i) => (
+                <div key={i} className="text-[8px] text-gray-400">{b.label}</div>
+              ))}
+            </div>
+            <div className="flex gap-4 mt-3 text-xs text-gray-500">
+              <span>Min: ₺{min.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+              <span>Max: ₺{max.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 319: Customer Order Gap Analysis (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 10 && (() => {
+        const custDates: Record<string, Date[]> = {};
+        orders.forEach(o => {
+          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          if (!custDates[o.customerName]) custDates[o.customerName] = [];
+          custDates[o.customerName].push(d);
+        });
+        const gaps: number[] = [];
+        Object.values(custDates).forEach(dates => {
+          const sorted = dates.sort((a, b) => a.getTime() - b.getTime());
+          for (let i = 1; i < sorted.length; i++) {
+            const gap = Math.floor((sorted[i].getTime() - sorted[i - 1].getTime()) / 86400000);
+            if (gap > 0 && gap <= 365) gaps.push(gap);
+          }
+        });
+        if (gaps.length < 3) return null;
+        const avg = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+        const buckets = [
+          {label: '≤7d', max: 7, color: '#10b981'},
+          {label: '8–14d', max: 14, color: '#3b82f6'},
+          {label: '15–30d', max: 30, color: '#f59e0b'},
+          {label: '31–90d', max: 90, color: '#f97316'},
+          {label: '91d+', max: 999, color: '#ef4444'},
+        ];
+        const bucketCounts = buckets.map((b, i) => ({
+          ...b,
+          count: gaps.filter(g => g <= b.max && (i === 0 || g > buckets[i - 1].max)).length,
+        }));
+        const maxCount = Math.max(...bucketCounts.map(b => b.count), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Customer Re-Order Gap Distribution</h3>
+            <p className="text-xs text-gray-500 mb-4">Days between consecutive orders per customer · avg: {avg.toFixed(0)} days</p>
+            <div className="flex items-end gap-3 h-20">
+              {bucketCounts.map((b, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-600 font-bold">{b.count}</span>
+                  <div className="w-full rounded-t" style={{height: `${maxCount > 0 ? Math.max(4, b.count / maxCount * 60) : 4}px`, background: b.color}} />
+                  <span className="text-[9px] text-gray-400">{b.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
+        const now = new Date();
+        const lastSaleByProduct: Record<string, Date> = {};
+        inventoryMovements.filter(m => m.type === 'out').forEach(m => {
+          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          const key = m.productName || 'Unknown';
+          if (!lastSaleByProduct[key] || d > lastSaleByProduct[key]) lastSaleByProduct[key] = d;
+        });
+        const tiers = [
+          {label: 'Fresh (≤30d)', min: 0, max: 30, color: '#10b981'},
+          {label: 'Active (31–90d)', min: 30, max: 90, color: '#3b82f6'},
+          {label: 'Slow (91–180d)', min: 90, max: 180, color: '#f59e0b'},
+          {label: 'Ageing (181–365d)', min: 180, max: 365, color: '#f97316'},
+          {label: 'Dead (365d+)', min: 365, max: Infinity, color: '#ef4444'},
+        ];
+        const tierData = tiers.map(t => {
+          const items = inventory.filter(item => {
+            if (item.stockLevel <= 0) return false;
+            const lastSale = lastSaleByProduct[item.name];
+            const daysSince = lastSale ? Math.floor((now.getTime() - lastSale.getTime()) / 86400000) : 999;
+            return daysSince >= t.min && daysSince < t.max;
+          });
+          return {
+            ...t,
+            count: items.length,
+            value: items.reduce((s, i) => s + i.stockLevel * (i.costPrice || 0), 0),
+          };
+        });
+        const totalValue = tierData.reduce((s, t) => s + t.value, 0);
+        if (totalValue === 0) return null;
+        const maxValue = Math.max(...tierData.map(t => t.value), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Inventory Ageing Pyramid</h3>
+            <p className="text-xs text-gray-500 mb-4">Stock value by days since last sale — total: ₺{totalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <div className="space-y-2">
+              {tierData.map((t, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-32">{t.label}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{width: `${maxValue > 0 ? t.value / maxValue * 100 : 0}%`, background: t.color}} />
+                  </div>
+                  <span className="text-xs text-gray-500 w-8">{t.count} SKU</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: t.color}}>₺{t.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
