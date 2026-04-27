@@ -39,7 +39,7 @@ service cloud.firestore {
       return data.keys().hasAll(['name', 'email', 'role']) &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
              isValidEmail(data.email) &&
-             data.role in ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate'] &&
+             data.role in ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'] &&
              (!('suspended' in data) || data.suspended is bool);
     }
 
@@ -93,55 +93,55 @@ service cloud.firestore {
 
     match /qcRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /complaints/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /auditItems/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /fmeaRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /pfmeaRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /ctpatRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /kaizenRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /fiveSRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Quality']);
       allow delete: if isAdmin();
     }
 
     match /eightDRecords/{id} {
       allow read: if isAuthenticated();
-      allow create, update: if hasRole(['Admin', 'Manager']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Quality']);
       allow delete: if isAdmin();
     }
 
@@ -459,8 +459,8 @@ service cloud.firestore {
 
     // ── Production ─────────────────────────────────────────────────
     match /productionOrders/{id} {
-      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting']);
-      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting', 'Quality']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics', 'Quality']);
       allow delete: if isAdmin();
     }
 
@@ -531,6 +531,59 @@ service cloud.firestore {
     match /invites/{token} {
       allow read: if true;  // public read by token — safe (random 36-char token)
       allow write: if false; // server-side only
+    }
+
+    // ── Support Tickets (Customer Support module) ─────────────────
+    // Sales creates tickets; Manager/Admin/Accounting read & update; Logistics reads.
+    match /supportTickets/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting']);
+      allow create: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics']);
+      allow update: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Recurring Orders (B2B / Subscription sales) ───────────────
+    // Sales & B2B users create/manage; Manager/Admin/Accounting read.
+    match /recurringOrders/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting', 'Logistics']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'B2B']);
+      allow delete: if hasRole(['Admin', 'Manager']);
+    }
+
+    // ── Price Overrides (Sales / B2B discount requests) ───────────
+    // Sales submits; Manager/Admin approves; Accounting reads for margin audit.
+    match /priceOverrides/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'B2B', 'Accounting']);
+      allow create: if hasRole(['Admin', 'Manager', 'Sales', 'B2B']);
+      allow update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Campaigns (Email/Marketing campaign log) ───────────────────
+    // Sales creates; Manager/Admin reads; Accounting reads for cost tracking.
+    match /campaigns/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Accounting']);
+      allow create: if hasRole(['Admin', 'Manager', 'Sales']);
+      allow update: if hasRole(['Admin', 'Manager']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Returns (Order return requests) ───────────────────────────
+    // Sales/Logistics creates returns; Manager/Admin/Accounting reads & resolves.
+    match /returns/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing']);
+      allow create: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics']);
+      allow update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Approval Requests (ApprovalQueue component) ───────────────
+    // Any authenticated user can submit a request; Managers/Admins review.
+    match /approvalRequests/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'HR', 'Accounting', 'Sales', 'Logistics', 'Purchasing']);
+      allow create: if isAuthenticated();
+      allow update: if hasRole(['Admin', 'Manager', 'HR', 'Accounting']);
+      allow delete: if isAdmin();
     }
 
     // Default deny
