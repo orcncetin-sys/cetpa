@@ -32,6 +32,7 @@ interface HRModuleProps {
   isAuthenticated: boolean;
   userRole: string | null;
   employees?: Employee[];
+  exchangeRates?: Record<string, number> | null;
 }
 
 const HR_TABS = {
@@ -75,8 +76,9 @@ const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key:
   );
 };
 
-export default function HRModule({ currentLanguage, isAuthenticated, userRole, employees: employeesProp }: HRModuleProps) {
+export default function HRModule({ currentLanguage, isAuthenticated, userRole, employees: employeesProp, exchangeRates }: HRModuleProps) {
   const [activeTab, setActiveTab] = useState('employees');
+  const [salaryCurrency, setSalaryCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
     isOpen: false,
     title: '',
@@ -585,13 +587,38 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 </div>
                 <p className="text-3xl font-bold text-gray-900">{employees.length}</p>
               </button>
-              <button className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all text-left group" onClick={() => setActiveTab('employees')}>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-green-50 rounded-xl text-green-600 group-hover:bg-green-100 transition-colors"><DollarSign size={20} /></div>
-                  <h3 className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Aylık Toplam Maaş' : 'Monthly Total Salary'}</h3>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-left">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-50 rounded-xl text-green-600"><DollarSign size={20} /></div>
+                    <h3 className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Aylık Toplam Maaş' : 'Monthly Total Salary'}</h3>
+                  </div>
+                  {exchangeRates && (
+                    <div className="flex gap-1">
+                      {(['TRY','USD','EUR'] as const).map(c => (
+                        <button key={c} onClick={() => setSalaryCurrency(c)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${salaryCurrency === c ? 'bg-[#ff4000] text-white' : 'text-gray-400 hover:bg-gray-100'}`}>
+                          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <p className="text-3xl font-bold text-gray-900">₺{employees.reduce((s, e) => s + (e.salary || 0), 0).toLocaleString()}</p>
-              </button>
+                {(() => {
+                  const totalTRY = employees.reduce((s, e) => s + (e.salary || 0), 0);
+                  const rate = salaryCurrency === 'USD' ? (exchangeRates?.USD || 1) : salaryCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                  const sym = salaryCurrency === 'TRY' ? '₺' : salaryCurrency === 'USD' ? '$' : '€';
+                  const converted = salaryCurrency === 'TRY' ? totalTRY : totalTRY / rate;
+                  return (
+                    <>
+                      <p className="text-3xl font-bold text-gray-900">{sym}{converted.toLocaleString('tr-TR', { maximumFractionDigits: salaryCurrency === 'TRY' ? 0 : 0 })}</p>
+                      {salaryCurrency !== 'TRY' && (
+                        <p className="text-xs text-gray-400 mt-0.5">₺{totalTRY.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · 1 {salaryCurrency} = ₺{rate.toFixed(2)}</p>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
               <button className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all text-left group" onClick={() => setActiveTab('payroll')}>
                 <div className="flex items-center gap-3 mb-2">
                   <div className="p-2 bg-purple-50 rounded-xl text-purple-600 group-hover:bg-purple-100 transition-colors"><CreditCard size={20} /></div>

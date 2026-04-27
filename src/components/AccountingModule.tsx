@@ -1691,7 +1691,6 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     { key: 'tahsilat', label: t.tahsilat, icon: Wallet },
     { key: 'maliyet_merkezi', label: t.maliyet_merkezi, icon: Layers },
     { key: 'sabit_kiymet', label: t.sabit_kiymet, icon: Landmark },
-    { key: 'gelir_tablosu', label: currentLanguage === 'tr' ? 'Gelir Tablosu' : 'Income Statement', icon: BarChart3 },
   ] as const;
 
   const visibleTabs = allowedTabs ? tabs.filter(t => allowedTabs.includes(t.key)) : tabs;

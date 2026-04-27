@@ -12029,6 +12029,7 @@ function AppContent() {
     id: string; orderNumber: string; supplier: string; totalAmount: number;
     status: string; expectedDate?: unknown; createdAt?: unknown;
   }>>([]);
+  const [apCurrency, setApCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   // ── Phase 111: Support Tickets ────────────────────────────────────────────
   const [supportTickets, setSupportTickets] = useState<Array<{
     id: string; title: string; customerName: string; orderId?: string;
@@ -12108,6 +12109,7 @@ function AppContent() {
   const [budgetMonth, setBudgetMonth] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [butceCurrency, setButceCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   // Merge Firestore category master list with any category strings on existing inventory items
   const inventoryCategories = [...new Set([
     ...firestoreCategories,
@@ -15921,7 +15923,23 @@ function AppContent() {
                   {/* ── Genel Muhasebe ── */}
                   {muhasebeTab === 'genel' && (
                     <motion.div key="muhasebe-genel" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-                      <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('muhasebe')} userRole={userRole} exchangeRates={exchangeRates} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                      <AccountingModule
+                        orders={orders}
+                        currentLanguage={currentLanguage}
+                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                        userRole={userRole}
+                        exchangeRates={exchangeRates}
+                        createNotification={createNotification}
+                        warehouses={warehouses}
+                        employees={employees}
+                        allowedTabs={[
+                          'faturalar','e-fatura','evrak_tasarimi','banka','yevmiye','mizan',
+                          'gelir','kdv','luca','mikro','banka_hareketleri','satislar',
+                          'musteriler','tedarikciler','urunler','depo','warehouses',
+                          'transfer','cekler','calisanlar','giden_irsaliye','gelen_irsaliye',
+                          'isletme_sermayesi'
+                        ]}
+                      />
                       {/* ── Vade Analizi (AR Aging) ── */}
                       <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
@@ -16036,6 +16054,9 @@ function AppContent() {
                         });
                         const maxAmt110 = Math.max(...apBuckets.map(b => b.orders.reduce((s, po) => s + po.totalAmount, 0)), 1);
 
+                        const apRate = apCurrency === 'USD' ? (exchangeRates?.USD || 1) : apCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const apSym = apCurrency === 'TRY' ? '₺' : apCurrency === 'USD' ? '$' : '€';
+                        const fmtAP = (n: number) => apCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${apSym}${(n / apRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                         return (
                           <>
                             {/* Summary KPIs */}
@@ -16046,9 +16067,21 @@ function AppContent() {
                                 { label: currentLanguage === 'tr' ? 'Gecikmiş' : 'Overdue', value: apBuckets[2].orders.reduce((s, po) => s + po.totalAmount, 0), color: 'text-red-700', bg: 'bg-red-100' },
                               ].map((k, i) => (
                                 <div key={i} className={`apple-card p-5 ${k.bg}`}>
-                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{k.label}</p>
+                                    {!((k as { isCount?: boolean }).isCount) && exchangeRates && (
+                                      <div className="flex gap-0.5">
+                                        {(['TRY','USD','EUR'] as const).map(c => (
+                                          <button key={c} onClick={() => setApCurrency(c)}
+                                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-all ${apCurrency === c ? 'bg-[#ff4000] text-white' : 'text-gray-400 hover:bg-gray-100'}`}>
+                                            {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                   <p className={`text-2xl font-black ${k.color}`}>
-                                    {(k as { isCount?: boolean }).isCount ? k.value : `₺${(k.value as number).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                    {(k as { isCount?: boolean }).isCount ? k.value : fmtAP(k.value as number)}
                                   </p>
                                 </div>
                               ))}
@@ -16082,7 +16115,7 @@ function AppContent() {
                                             <div className={`h-2 rounded-full transition-all duration-700 ${b.dot}`} style={{ width: `${barW}%` }} />
                                           </div>
                                           <span className={`text-xs font-bold flex-shrink-0 w-24 text-right ${b.color}`}>
-                                            ₺{amt.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                            {fmtAP(amt)}
                                           </span>
                                         </div>
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${b.bg} ${b.color}`}>
@@ -16117,7 +16150,7 @@ function AppContent() {
                                           'bg-gray-100 text-gray-600'
                                         }`}>{po.status}</span>
                                         <span className={`text-sm font-bold flex-shrink-0 ${late ? 'text-red-600' : 'text-gray-700'}`}>
-                                          ₺{po.totalAmount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                          {fmtAP(po.totalAmount)}
                                         </span>
                                       </div>
                                     );
@@ -16174,6 +16207,9 @@ function AppContent() {
                           localStorage.setItem('cetpa-budgets', JSON.stringify(newBudgets));
                         };
 
+                        const butceRate = butceCurrency === 'USD' ? (exchangeRates?.USD || 1) : butceCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const butceSym = butceCurrency === 'TRY' ? '₺' : butceCurrency === 'USD' ? '$' : '€';
+                        const fmtButce = (n: number) => butceCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${butceSym}${(n / butceRate).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
                         return (
                           <>
                             {/* Month picker + summary */}
@@ -16187,15 +16223,25 @@ function AppContent() {
                                   className="apple-input text-sm px-3 py-1.5"
                                 />
                               </div>
+                              {exchangeRates && (
+                                <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                                  {(['TRY','USD','EUR'] as const).map(c => (
+                                    <button key={c} onClick={() => setButceCurrency(c)}
+                                      className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${butceCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               <div className="flex items-center gap-6 ml-auto">
                                 <div className="text-right">
                                   <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam Bütçe' : 'Total Budget'}</p>
-                                  <p className="text-sm font-black text-gray-800">₺{totalBudget.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                  <p className="text-sm font-black text-gray-800">{fmtButce(totalBudget)}</p>
                                 </div>
                                 <div className="text-right">
                                   <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}</p>
                                   <p className={`text-sm font-black ${totalActual > totalBudget ? 'text-red-600' : 'text-emerald-600'}`}>
-                                    ₺{totalActual.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                    {fmtButce(totalActual)}
                                   </p>
                                 </div>
                               </div>
@@ -16246,11 +16292,11 @@ function AppContent() {
                                       </div>
                                       <div className="flex justify-between mt-1">
                                         <span className="text-[10px] text-gray-400">
-                                          {currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}: ₺{actual.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                          {currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}: {fmtButce(actual)}
                                         </span>
                                         {over && (
                                           <span className="text-[10px] font-bold text-red-600">
-                                            +₺{(actual - budget).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'aşım' : 'over'}
+                                            +{fmtButce(actual - budget)} {currentLanguage === 'tr' ? 'aşım' : 'over'}
                                           </span>
                                         )}
                                       </div>
@@ -17777,7 +17823,7 @@ function AppContent() {
                     );
                   })()}
 
-                  <HRModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ik')} userRole={userRole} employees={employees} />
+                  <HRModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ik')} userRole={userRole} employees={employees} exchangeRates={exchangeRates} />
                 </>
               )}
             </motion.div>
