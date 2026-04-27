@@ -11757,10 +11757,28 @@ function AppContent() {
   }, [userRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Try local Express server first (dev), then fall back to Frankfurter public API
+    const setRatesFromFrankfurter = () =>
+      fetch('https://api.frankfurter.app/latest?from=USD&to=TRY,EUR')
+        .then(r => r.json())
+        .then(data => {
+          const tryPerUsd: number = data.rates?.TRY ?? 38;
+          const eurPerUsd: number = data.rates?.EUR ?? 0.92;
+          const tryPerEur = tryPerUsd / eurPerUsd;
+          setExchangeRates({ USD: tryPerUsd, EUR: tryPerEur });
+        })
+        .catch(err => console.error('Frankfurter API failed:', err));
+
     fetch('/api/settings/exchange-rates')
-      .then(res => res.json())
-      .then(data => setExchangeRates(data.rates))
-      .catch(err => console.error("Failed to fetch exchange rates:", err));
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        if (data?.rates?.USD) setExchangeRates(data.rates);
+        else setRatesFromFrankfurter();
+      })
+      .catch(() => setRatesFromFrankfurter());
   }, []);
 
   useEffect(() => {
