@@ -11080,6 +11080,368 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 321: Revenue per Employee (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 5 && (() => {
+        const totalRevenue321 = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const revPerEmp = employees.length > 0 ? totalRevenue321 / employees.length : 0;
+        const depts321 = [...new Set(employees.map(e => e.department).filter(Boolean))];
+        const deptRevPerEmp = depts321.map(dept => {
+          const cnt = employees.filter(e => e.department === dept).length;
+          const estRev = cnt > 0 ? (totalRevenue321 / employees.length) * cnt : 0;
+          return { dept, cnt, estRev, perHead: cnt > 0 ? estRev / cnt : 0 };
+        }).sort((a, b) => b.perHead - a.perHead);
+        const maxPH = Math.max(...deptRevPerEmp.map(d => d.perHead), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Revenue per Employee</h3>
+            <p className="text-xs text-gray-500 mb-4">Estimated revenue contribution per headcount by department · Overall: ₺{revPerEmp.toLocaleString('tr-TR', {maximumFractionDigits: 0})}/emp</p>
+            <div className="space-y-2">
+              {deptRevPerEmp.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-28 truncate">{d.dept}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-indigo-400 transition-all" style={{width: `${(d.perHead / maxPH) * 100}%`}} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{d.cnt} emp</span>
+                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">₺{d.perHead.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 322: Quotation Conversion Funnel (crm) ── */}
+      {reportsTab === 'crm' && quotations.length >= 3 && (() => {
+        const total322 = quotations.length;
+        const sent322 = quotations.filter(q => ['sent','accepted','rejected','converted'].includes((q.status||'').toLowerCase())).length;
+        const accepted322 = quotations.filter(q => ['accepted','converted'].includes((q.status||'').toLowerCase())).length;
+        const converted322 = quotations.filter(q => (q.status||'').toLowerCase() === 'converted').length;
+        const stages = [
+          { label: 'Created', count: total322, color: '#6366f1' },
+          { label: 'Sent',    count: sent322,  color: '#3b82f6' },
+          { label: 'Accepted',count: accepted322, color: '#10b981' },
+          { label: 'Converted',count: converted322, color: '#f59e0b' },
+        ];
+        const convRate = total322 > 0 ? ((converted322 / total322) * 100).toFixed(1) : '0';
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Quotation Conversion Funnel</h3>
+            <p className="text-xs text-gray-500 mb-4">End-to-end pipeline from quote creation to order · Overall conversion: {convRate}%</p>
+            <div className="flex items-end gap-2 h-28">
+              {stages.map((s, i) => {
+                const h = total322 > 0 ? Math.max((s.count / total322) * 100, 4) : 4;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-xs font-bold" style={{color: s.color}}>{s.count}</span>
+                    <div className="w-full rounded-t-lg transition-all" style={{height: `${h}%`, background: s.color}} />
+                    <span className="text-[10px] text-gray-500 text-center">{s.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 323: Stock Turnover Rate (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 5 && (() => {
+        const outMoves = inventoryMovements.filter(m => m.type === 'out');
+        const soldByProduct: Record<string, number> = {};
+        outMoves.forEach(m => { soldByProduct[m.productName || 'Unknown'] = (soldByProduct[m.productName || 'Unknown'] || 0) + (m.quantity || 0); });
+        const turnoverData = inventory
+          .filter(item => item.stockLevel > 0 || soldByProduct[item.name])
+          .map(item => {
+            const sold = soldByProduct[item.name] || 0;
+            const avgStock = (item.stockLevel + (item.stockLevel + sold)) / 2;
+            const turnover = avgStock > 0 ? sold / avgStock : 0;
+            return { name: item.name, turnover, sold, stock: item.stockLevel };
+          })
+          .filter(d => d.turnover > 0)
+          .sort((a, b) => b.turnover - a.turnover)
+          .slice(0, 8);
+        if (turnoverData.length < 2) return null;
+        const maxT = Math.max(...turnoverData.map(d => d.turnover), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Stock Turnover Rate</h3>
+            <p className="text-xs text-gray-500 mb-4">Units sold ÷ average stock level · higher = faster-moving inventory</p>
+            <div className="space-y-2">
+              {turnoverData.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-32 truncate">{d.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{width: `${(d.turnover / maxT) * 100}%`, background: d.turnover >= 2 ? '#10b981' : d.turnover >= 1 ? '#f59e0b' : '#ef4444'}} />
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right" style={{color: d.turnover >= 2 ? '#10b981' : d.turnover >= 1 ? '#f59e0b' : '#ef4444'}}>{d.turnover.toFixed(2)}×</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 324: Late Delivery Rate (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const delivered324 = orders.filter(o => o.status === 'Delivered');
+        if (delivered324.length < 3) return null;
+        const toTs324 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        const lateOrders = delivered324.filter(o => {
+          const created = toTs324(o.createdAt);
+          const updated = toTs324((o as unknown as Record<string,unknown>).updatedAt);
+          return updated > 0 && created > 0 && (updated - created) > 3 * 86400000;
+        });
+        const onTime = delivered324.length - lateOrders.length;
+        const lateRate = (lateOrders.length / delivered324.length * 100).toFixed(1);
+        const months324: Record<string, {late: number; total: number}> = {};
+        delivered324.forEach(o => {
+          const d = new Date(toTs324(o.createdAt));
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (!months324[key]) months324[key] = {late: 0, total: 0};
+          months324[key].total++;
+          const created = toTs324(o.createdAt);
+          const updated = toTs324((o as unknown as Record<string,unknown>).updatedAt);
+          if (updated > 0 && created > 0 && (updated - created) > 3 * 86400000) months324[key].late++;
+        });
+        const monthKeys = Object.keys(months324).sort().slice(-6);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Late Delivery Rate</h3>
+            <p className="text-xs text-gray-500 mb-4">Orders taking {'>'}3 days to deliver · Overall late rate: <span className="font-bold text-red-500">{lateRate}%</span></p>
+            <div className="flex items-center gap-6 mb-4">
+              {[{label: 'On-Time', val: onTime, color: '#10b981'}, {label: 'Late (>3d)', val: lateOrders.length, color: '#ef4444'}].map((s, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{background: s.color}} />
+                  <span className="text-sm font-bold text-gray-700">{s.val}</span>
+                  <span className="text-xs text-gray-400">{s.label}</span>
+                </div>
+              ))}
+            </div>
+            {monthKeys.length >= 2 && (
+              <div className="flex items-end gap-1 h-20">
+                {monthKeys.map(k => {
+                  const m = months324[k];
+                  const rate = m.total > 0 ? m.late / m.total : 0;
+                  return (
+                    <div key={k} className="flex-1 flex flex-col items-center gap-0.5">
+                      <div className="w-full rounded-t" style={{height: `${Math.max(rate * 80, 2)}px`, background: rate > 0.3 ? '#ef4444' : rate > 0.15 ? '#f59e0b' : '#10b981'}} />
+                      <span className="text-[9px] text-gray-400">{k.slice(5)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 325: Top Cities by Order Volume (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const cityMap: Record<string, {count: number; revenue: number}> = {};
+        orders.forEach(o => {
+          const city = (o as unknown as Record<string,unknown>).city as string || (o as unknown as Record<string,unknown>).shippingCity as string || '';
+          if (!city) return;
+          if (!cityMap[city]) cityMap[city] = {count: 0, revenue: 0};
+          cityMap[city].count++;
+          cityMap[city].revenue += o.totalPrice || 0;
+        });
+        const cities325 = Object.entries(cityMap).map(([city, d]) => ({city, ...d})).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+        if (cities325.length < 2) return null;
+        const maxRev = Math.max(...cities325.map(c => c.revenue), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Top Cities by Order Volume</h3>
+            <p className="text-xs text-gray-500 mb-4">Revenue and order count by shipping destination</p>
+            <div className="space-y-2">
+              {cities325.map((c, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-gray-700 w-24 truncate">{c.city}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-blue-400 transition-all" style={{width: `${(c.revenue / maxRev) * 100}%`}} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{c.count} ord</span>
+                  <span className="text-xs font-bold text-blue-600 w-24 text-right">₺{c.revenue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 326: Customer Lifetime Value Distribution (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const ltvMap: Record<string, number> = {};
+        orders.forEach(o => {
+          const cust = o.customerName || 'Unknown';
+          ltvMap[cust] = (ltvMap[cust] || 0) + (o.totalPrice || 0);
+        });
+        const ltvValues = Object.values(ltvMap);
+        if (ltvValues.length < 3) return null;
+        const buckets = [
+          {label: '< ₺10K',   min: 0,      max: 10000,   color: '#94a3b8', count: 0, total: 0},
+          {label: '₺10–50K',  min: 10000,  max: 50000,   color: '#6366f1', count: 0, total: 0},
+          {label: '₺50–200K', min: 50000,  max: 200000,  color: '#3b82f6', count: 0, total: 0},
+          {label: '₺200K+',   min: 200000, max: Infinity, color: '#10b981', count: 0, total: 0},
+        ];
+        ltvValues.forEach(v => {
+          const b = buckets.find(b => v >= b.min && v < b.max);
+          if (b) { b.count++; b.total += v; }
+        });
+        const maxCount = Math.max(...buckets.map(b => b.count), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Customer LTV Distribution</h3>
+            <p className="text-xs text-gray-500 mb-4">Lifetime value buckets across {ltvValues.length} customers</p>
+            <div className="flex items-end gap-3 h-24">
+              {buckets.map((b, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-xs font-bold" style={{color: b.color}}>{b.count}</span>
+                  <div className="w-full rounded-t-lg" style={{height: `${Math.max((b.count / maxCount) * 72, 4)}px`, background: b.color}} />
+                  <span className="text-[9px] text-gray-500 text-center">{b.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 327: Inventory Stockout Risk (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 3 && (() => {
+        const atRisk = inventory
+          .filter(item => { const rp = (item.reorderPoint as number | undefined) ?? item.lowStockThreshold ?? 5; return item.stockLevel > 0 && item.stockLevel <= rp; })
+          .sort((a, b) => a.stockLevel - b.stockLevel)
+          .slice(0, 8);
+        if (atRisk.length < 2) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Stockout Risk Alert</h3>
+            <p className="text-xs text-gray-500 mb-4">{atRisk.length} SKU{atRisk.length !== 1 ? 's' : ''} at or below reorder point — action needed</p>
+            <div className="space-y-2">
+              {atRisk.map((item, i) => {
+                const reorder: number = (item.reorderPoint as number | undefined) ?? item.lowStockThreshold ?? 5;
+                const riskPct = reorder > 0 ? Math.min((item.stockLevel / reorder) * 100, 100) : 100;
+                const color = riskPct <= 30 ? '#ef4444' : riskPct <= 60 ? '#f59e0b' : '#10b981';
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-600 w-32 truncate">{item.name}</span>
+                    <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{width: `${riskPct}%`, background: color}} />
+                    </div>
+                    <span className="text-xs font-bold w-20 text-right" style={{color}}>{item.stockLevel} / {reorder} units</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 328: Payment Method Mix (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const pmMap: Record<string, {count: number; revenue: number}> = {};
+        orders.forEach(o => {
+          const pm = (o as unknown as Record<string,unknown>).paymentMethod as string || (o as unknown as Record<string,unknown>).payment_method as string || 'Other';
+          if (!pmMap[pm]) pmMap[pm] = {count: 0, revenue: 0};
+          pmMap[pm].count++;
+          pmMap[pm].revenue += o.totalPrice || 0;
+        });
+        const methods = Object.entries(pmMap).map(([method, d]) => ({method, ...d})).sort((a, b) => b.revenue - a.revenue);
+        if (methods.length < 2) return null;
+        const totalRev328 = methods.reduce((s, m) => s + m.revenue, 0);
+        const colors328 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#ef4444','#8b5cf6'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Payment Method Mix</h3>
+            <p className="text-xs text-gray-500 mb-4">Revenue share by payment type across {orders.length} orders</p>
+            <div className="space-y-2">
+              {methods.map((m, i) => {
+                const pct = totalRev328 > 0 ? (m.revenue / totalRev328) * 100 : 0;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background: colors328[i % colors328.length]}} />
+                    <span className="text-xs text-gray-600 flex-1 truncate">{m.method}</span>
+                    <div className="w-32 h-3 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{width: `${pct}%`, background: colors328[i % colors328.length]}} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-8 text-right">{pct.toFixed(0)}%</span>
+                    <span className="text-xs font-bold w-24 text-right" style={{color: colors328[i % colors328.length]}}>₺{m.revenue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 329: Employee Department Cost (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && (() => {
+        const deptCost: Record<string, {headcount: number; cost: number}> = {};
+        employees.forEach(e => {
+          const dept = e.department || 'Unknown';
+          if (!deptCost[dept]) deptCost[dept] = {headcount: 0, cost: 0};
+          deptCost[dept].headcount++;
+          deptCost[dept].cost += (e.salary || 0);
+        });
+        const deptRows = Object.entries(deptCost).map(([dept, d]) => ({dept, ...d, avgCost: d.headcount > 0 ? d.cost / d.headcount : 0})).sort((a, b) => b.cost - a.cost);
+        if (deptRows.length < 2) return null;
+        const totalCost329 = deptRows.reduce((s, d) => s + d.cost, 0);
+        const maxCost329 = Math.max(...deptRows.map(d => d.cost), 1);
+        const colors329 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#8b5cf6'];
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Department Salary Cost</h3>
+            <p className="text-xs text-gray-500 mb-4">Monthly payroll by department · Total: ₺{totalCost329.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <div className="space-y-2">
+              {deptRows.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-28 truncate">{d.dept}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{width: `${(d.cost / maxCost329) * 100}%`, background: colors329[i % colors329.length]}} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{d.headcount} emp</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors329[i % colors329.length]}}>₺{d.cost.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 330: Order Cancellation Analysis (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.filter(o => o.status === 'Cancelled').length >= 2 && (() => {
+        const cancelled330 = orders.filter(o => o.status === 'Cancelled');
+        const cancelRate = orders.length > 0 ? (cancelled330.length / orders.length * 100).toFixed(1) : '0';
+        const reasonMap: Record<string, number> = {};
+        cancelled330.forEach(o => {
+          const reason = (o as unknown as Record<string,unknown>).cancellationReason as string || (o as unknown as Record<string,unknown>).cancelReason as string || 'Not specified';
+          reasonMap[reason] = (reasonMap[reason] || 0) + 1;
+        });
+        const reasons = Object.entries(reasonMap).map(([reason, count]) => ({reason, count})).sort((a, b) => b.count - a.count);
+        const maxCount330 = Math.max(...reasons.map(r => r.count), 1);
+        const cancelRevLost = cancelled330.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Order Cancellation Analysis</h3>
+            <p className="text-xs text-gray-500 mb-4">{cancelled330.length} cancelled orders · {cancelRate}% rate · ₺{cancelRevLost.toLocaleString('tr-TR', {maximumFractionDigits: 0})} revenue lost</p>
+            <div className="space-y-2">
+              {reasons.map((r, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 flex-1 truncate">{r.reason}</span>
+                  <div className="w-32 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-red-400 transition-all" style={{width: `${(r.count / maxCount330) * 100}%`}} />
+                  </div>
+                  <span className="text-xs font-bold text-red-500 w-8 text-right">{r.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
         const now = new Date();
