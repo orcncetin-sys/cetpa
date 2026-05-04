@@ -15764,6 +15764,391 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 441: Cumulative Revenue Trajectory (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const sorted = [...orders].sort((a,b) => {
+          const da = a.createdAt ? ((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)) : new Date(0);
+          const db = b.createdAt ? ((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)) : new Date(0);
+          return da.getTime()-db.getTime();
+        });
+        let cumulative = 0;
+        const points = sorted.map(o => {
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
+          cumulative += total;
+          return cumulative;
+        }).filter((_,i)=>i%Math.max(1,Math.floor(sorted.length/40))===0);
+        if (points.length < 3) return null;
+        const maxV = points[points.length-1];
+        const w=240; const h=60; const pad=8;
+        const pts = points.map((v,i)=>`${pad+(i/(points.length-1))*(w-2*pad)},${h-pad-(v/maxV)*(h-2*pad)}`).join(' ');
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold text-sm">Cumulative Revenue Trajectory</h3>
+              <span className="text-xs font-bold text-brand">₺{(maxV/1000).toFixed(0)}k total</span>
+            </div>
+            <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
+              <defs>
+                <linearGradient id="cumGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ff4000" stopOpacity="0.3"/>
+                  <stop offset="100%" stopColor="#ff4000" stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+              <polygon points={`${pad},${h-pad} ${pts} ${pad+(points.length-1)/(points.length-1)*(w-2*pad)},${h-pad}`} fill="url(#cumGrad)" />
+              <polyline points={pts} fill="none" stroke="#ff4000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <p className="text-[10px] text-gray-400 text-center mt-1">{sorted.length} orders total</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 442: Active Quotations Summary (crm) ── */}
+      {reportsTab === 'crm' && quotations.length >= 1 && (() => {
+        const active = quotations.filter(q => {
+          const s = ((q as unknown as Record<string,unknown>).status as string|undefined) ?? '';
+          return !['Rejected','Expired','Converted','Cancelled'].includes(s);
+        });
+        const totalValue = active.reduce((s, q) => {
+          const qR = q as unknown as Record<string,unknown>;
+          const val = (qR.totalAmount as number|undefined) ?? (qR.total as number|undefined) ?? 0;
+          return s + val;
+        }, 0);
+        const byStatus: Record<string,number> = {};
+        quotations.forEach(q => {
+          const s = ((q as unknown as Record<string,unknown>).status as string|undefined) ?? 'Draft';
+          byStatus[s] = (byStatus[s]??0)+1;
+        });
+        const statusRows = Object.entries(byStatus).sort((a,b)=>b[1]-a[1]);
+        const statusColors: Record<string,string> = {'Draft':'#94a3b8','Sent':'#3b82f6','Pending':'#f59e0b','Approved':'#22c55e','Rejected':'#ef4444','Converted':'#8b5cf6','Expired':'#6b7280'};
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Quotation Pipeline</h3>
+              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{active.length} active • ₺{(totalValue/1000).toFixed(0)}k</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {statusRows.map(([s,n]) => (
+                <div key={s} className="flex items-center gap-1.5 text-xs">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background:statusColors[s]??'#6b7280'}} />
+                  <span className="text-gray-600 truncate">{s}</span>
+                  <span className="ml-auto font-bold">{n}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 443: Revenue from Recurring Orders (lojistik) ── */}
+      {reportsTab === 'lojistik' && (() => {
+        const recurringCount = (recurringOrders ?? []).length;
+        if (recurringCount === 0) return null;
+        const byFreq: Record<string,number> = {};
+        (recurringOrders ?? []).forEach(ro => {
+          const roR = ro as unknown as Record<string,unknown>;
+          const freq = (roR.frequency as string|undefined) ?? (roR.interval as string|undefined) ?? 'Other';
+          byFreq[freq] = (byFreq[freq]??0)+1;
+        });
+        const totalValue = (recurringOrders ?? []).reduce((s,ro) => {
+          const roR = ro as unknown as Record<string,unknown>;
+          return s + ((roR.totalAmount as number|undefined) ?? (roR.total as number|undefined) ?? 0);
+        }, 0);
+        const rows = Object.entries(byFreq).sort((a,b)=>b[1]-a[1]);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Recurring Orders</h3>
+              <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{recurringCount} active</span>
+            </div>
+            <div className="flex items-center gap-4 mb-2">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-green-500">{recurringCount}</p>
+                <p className="text-[10px] text-gray-500">subscriptions</p>
+              </div>
+              {totalValue > 0 && <div className="text-center">
+                <p className="text-2xl font-bold text-brand">₺{(totalValue/1000).toFixed(1)}k</p>
+                <p className="text-[10px] text-gray-500">period value</p>
+              </div>}
+            </div>
+            {rows.length > 0 && <div className="flex flex-wrap gap-1">
+              {rows.map(([freq,n])=>(
+                <span key={freq} className="text-[10px] bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{freq}: {n}</span>
+              ))}
+            </div>}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 444: Products by Revenue Category (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && orders.length >= 3 && (() => {
+        const productRevenue: Record<string, number> = {};
+        orders.forEach(o => {
+          (o.lineItems??[]).forEach(li => {
+            const lr = li as unknown as Record<string,unknown>;
+            const pid = (lr.productId as string|undefined) ?? (lr.id as string|undefined) ?? '';
+            const name = (lr.productName as string|undefined) ?? (lr.name as string|undefined) ?? '';
+            const qty = (lr.quantity as number|undefined)??0;
+            const price = (lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0;
+            const key = pid || name;
+            if (key) productRevenue[key] = (productRevenue[key]??0)+qty*price;
+          });
+        });
+        const invRevenue = inventory.map(item => ({
+          cat: item.category ?? 'Other',
+          rev: productRevenue[item.id] ?? productRevenue[item.name] ?? 0,
+        }));
+        const catRev: Record<string,number> = {};
+        invRevenue.forEach(({cat,rev}) => { catRev[cat]=(catRev[cat]??0)+rev; });
+        const rows = Object.entries(catRev).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        if (rows.length < 2) return null;
+        const totalRev = rows.reduce((s,[,v])=>s+v,0);
+        const palette=['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6'];
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Category Revenue from Orders</h3>
+            <div className="flex h-4 rounded-full overflow-hidden mb-3">
+              {rows.map(([cat,rev],i)=><div key={cat} style={{width:`${(rev/totalRev)*100}%`,background:palette[i]}} title={cat} />)}
+            </div>
+            <div className="space-y-1.5">
+              {rows.map(([cat,rev],i)=>(
+                <div key={cat} className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:palette[i]}} />
+                  <span className="text-xs truncate flex-1 text-gray-700">{cat}</span>
+                  <span className="text-xs font-bold">₺{(rev/1000).toFixed(1)}k</span>
+                  <span className="text-[9px] text-gray-400 w-8 text-right">{Math.round((rev/totalRev)*100)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 445: Monthly Payroll Estimate (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && (() => {
+        const salaries = employees.map(e => {
+          const eR = e as unknown as Record<string,unknown>;
+          return (eR.salary as number|undefined)??(eR.baseSalary as number|undefined)??(eR.monthlySalary as number|undefined)??0;
+        });
+        const hasSalaryData = salaries.some(s=>s>0);
+        if (!hasSalaryData) return null;
+        const totalPayroll = salaries.reduce((a,b)=>a+b,0);
+        const avgSalary = salaries.filter(s=>s>0).reduce((a,b)=>a+b,0) / (salaries.filter(s=>s>0).length||1);
+        const minSal = Math.min(...salaries.filter(s=>s>0));
+        const maxSal = Math.max(...salaries.filter(s=>s>0));
+        const percentiles = salaries.filter(s=>s>0).sort((a,b)=>a-b);
+        const median = percentiles.length > 0 ? percentiles[Math.floor(percentiles.length/2)] : 0;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Monthly Payroll Estimate</h3>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="rounded-xl p-3 bg-indigo-50">
+                <p className="text-xl font-bold text-indigo-600">₺{(totalPayroll/1000).toFixed(0)}k</p>
+                <p className="text-[10px] text-gray-500">Total monthly</p>
+              </div>
+              <div className="rounded-xl p-3 bg-purple-50">
+                <p className="text-xl font-bold text-purple-600">₺{(median/1000).toFixed(1)}k</p>
+                <p className="text-[10px] text-gray-500">Median salary</p>
+              </div>
+            </div>
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Min: ₺{(minSal/1000).toFixed(1)}k</span>
+              <span>Avg: ₺{(avgSalary/1000).toFixed(1)}k</span>
+              <span>Max: ₺{(maxSal/1000).toFixed(1)}k</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 446: All-Time Records (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && (() => {
+        const custRevenue: Record<string,number> = {};
+        const dayRevenue: Record<string,number> = {};
+        let maxOrderValue = 0;
+        let maxOrderCustomer = '';
+        orders.forEach(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const cid = (o as unknown as Record<string,unknown>).customerName as string|undefined || (o as unknown as Record<string,unknown>).customerId as string|undefined || 'Unknown';
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
+          custRevenue[cid]=(custRevenue[cid]??0)+total;
+          if (d) { const dk=d.toISOString().slice(0,10); dayRevenue[dk]=(dayRevenue[dk]??0)+total; }
+          if (total > maxOrderValue) { maxOrderValue=total; maxOrderCustomer=cid; }
+        });
+        const topCustomer = Object.entries(custRevenue).sort((a,b)=>b[1]-a[1])[0];
+        const bestDay = Object.entries(dayRevenue).sort((a,b)=>b[1]-a[1])[0];
+        const records = [
+          {label:'Largest Order', val:`₺${(maxOrderValue/1000).toFixed(1)}k`, sub: maxOrderCustomer, icon:'💎'},
+          {label:'Best Day', val:`₺${bestDay?((bestDay[1]/1000).toFixed(1))+'k':'—'}`, sub: bestDay?.[0]??'—', icon:'📅'},
+          {label:'Top Customer', val:`₺${topCustomer?((topCustomer[1]/1000).toFixed(1))+'k':'—'}`, sub: topCustomer?.[0]??'—', icon:'👑'},
+          {label:'Total Orders', val:String(orders.length), sub:'all time', icon:'📦'},
+        ];
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">All-Time Records</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {records.map(r=>(
+                <div key={r.label} className="rounded-xl p-3 bg-gray-50">
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <span className="text-sm">{r.icon}</span>
+                    <span className="text-[10px] text-gray-400">{r.label}</span>
+                  </div>
+                  <p className="text-base font-bold text-gray-800">{r.val}</p>
+                  <p className="text-[9px] text-gray-400 truncate">{r.sub}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 447: Inventory Movement Balance (envanter) ── */}
+      {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
+        const byMonth: Record<string,{in:number;out:number}> = {};
+        inventoryMovements.forEach(m => {
+          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)) : null;
+          if (!d) return;
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (!byMonth[key]) byMonth[key]={in:0,out:0};
+          if (m.type==='in') byMonth[key].in+=(m.quantity??0);
+          else byMonth[key].out+=(m.quantity??0);
+        });
+        const months = Object.keys(byMonth).sort().slice(-6);
+        if (months.length < 2) return null;
+        const maxVal = Math.max(...months.flatMap(m=>[byMonth[m].in,byMonth[m].out]),1);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Inventory In vs Out by Month</h3>
+            <div className="flex items-end gap-2 h-24 mb-1">
+              {months.map(m=>(
+                <div key={m} className="flex-1 flex items-end gap-0.5">
+                  <div className="flex-1 rounded-sm" style={{height:`${(byMonth[m].in/maxVal)*72}px`,background:'#22c55e',minHeight:byMonth[m].in>0?2:0}} />
+                  <div className="flex-1 rounded-sm" style={{height:`${(byMonth[m].out/maxVal)*72}px`,background:'#ef4444',minHeight:byMonth[m].out>0?2:0}} />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-1 mb-2">
+              {months.map(m=><span key={m} className="flex-1 text-center text-[9px] text-gray-400">{m.slice(5)}</span>)}
+            </div>
+            <div className="flex gap-3 justify-center text-[10px]">
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"/><span className="text-gray-500">In</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"/><span className="text-gray-500">Out</span></div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 448: Order Lead Time Segments (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        // Segment by days since order creation
+        const now = new Date();
+        const segments = [{label:'≤1d',min:0,max:1,color:'#22c55e'},{label:'2-3d',min:1,max:3,color:'#84cc16'},
+          {label:'4-7d',min:3,max:7,color:'#f59e0b'},{label:'8-14d',min:7,max:14,color:'#ef4444'},{label:'14d+',min:14,max:9999,color:'#7c3aed'}];
+        const counts = segments.map(s=>({...s,count:0}));
+        orders.filter(o=>o.status==='Delivered').forEach(o=>{
+          const created = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const deliv = (o as unknown as Record<string,unknown>).deliveredAt ?? (o as unknown as Record<string,unknown>).completedAt;
+          if (!created) return;
+          const end = deliv ? ((deliv as {toDate?:()=>Date}).toDate?.()??new Date(deliv as string)) : now;
+          const days = (end.getTime()-created.getTime())/86400000;
+          const seg = counts.find(s=>days>=s.min&&days<s.max);
+          if (seg) seg.count++;
+        });
+        const totalDelivered = counts.reduce((s,c)=>s+c.count,0);
+        if (totalDelivered < 2) return null;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Delivered Order Lead Times</h3>
+            <div className="flex h-3 rounded-full overflow-hidden mb-3">
+              {counts.map(s=>s.count>0&&<div key={s.label} style={{width:`${(s.count/totalDelivered)*100}%`,background:s.color}} />)}
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-center">
+              {counts.map(s=>(
+                <div key={s.label}>
+                  <p className="text-sm font-bold" style={{color:s.color}}>{s.count}</p>
+                  <p className="text-[9px] text-gray-400">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 449: Quotation Value Trend (crm) ── */}
+      {reportsTab === 'crm' && quotations.length >= 3 && (() => {
+        const byMonth: Record<string,{count:number;value:number}> = {};
+        quotations.forEach(q => {
+          const d = q.createdAt ? ((q.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(q.createdAt as string)) : null;
+          if (!d) return;
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (!byMonth[key]) byMonth[key]={count:0,value:0};
+          byMonth[key].count++;
+          const qR = q as unknown as Record<string,unknown>;
+          byMonth[key].value += (qR.totalAmount as number|undefined)??(qR.total as number|undefined)??0;
+        });
+        const months = Object.keys(byMonth).sort().slice(-6);
+        if (months.length < 2) return null;
+        const maxVal = Math.max(...months.map(m=>byMonth[m].value),1);
+        const maxCount = Math.max(...months.map(m=>byMonth[m].count),1);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Quotation Volume & Value by Month</h3>
+            <div className="flex items-end gap-2 h-20 mb-1">
+              {months.map(m=>(
+                <div key={m} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div className="w-full rounded-sm" style={{height:`${(byMonth[m].value/maxVal)*56}px`,background:'#3b82f6',minHeight:byMonth[m].value>0?2:0}} />
+                  <span className="text-[9px] text-gray-400">{m.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>Total: {quotations.length} quotes</span>
+              <span>Avg: {quotations.length>0?(quotations.length/months.length).toFixed(0):0}/mo</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 450: Growth Rate Summary Card (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const periods = [7,30,90];
+        const results = periods.map(days => {
+          const curr = new Date(now.getTime()-days*86400000);
+          const prev = new Date(now.getTime()-2*days*86400000);
+          let currRev=0, prevRev=0;
+          orders.forEach(o => {
+            const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+            if (!d) return;
+            const oR = o as unknown as Record<string,unknown>;
+            const total = typeof oR.total==='number' ? oR.total as number
+              : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
+            if (d>=curr) currRev+=total;
+            else if (d>=prev) prevRev+=total;
+          });
+          const pct = prevRev>0 ? ((currRev-prevRev)/prevRev)*100 : 0;
+          return {label:`${days}d`, pct, currRev};
+        });
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Revenue Growth Rates</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {results.map(r=>(
+                <div key={r.label} className="rounded-xl p-3 text-center" style={{background:r.pct>=0?'#22c55e12':'#ef444412'}}>
+                  <p className="text-lg font-bold" style={{color:r.pct>=0?'#22c55e':'#ef4444'}}>
+                    {r.pct>=0?'+':''}{r.pct.toFixed(0)}%
+                  </p>
+                  <p className="text-[10px] text-gray-500">{r.label}</p>
+                  <p className="text-[9px] text-gray-400">₺{(r.currRev/1000).toFixed(0)}k</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
         const now = new Date();
