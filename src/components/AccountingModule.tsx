@@ -2320,7 +2320,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {/* Toplam Borç */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center">
                   <TrendingDown size={15} className="text-red-600" />
@@ -2336,9 +2336,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-red-600">{formatConv(mizanTotals.borc)}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalDebit}</p>
-            </button>
+            </div>
             {/* Toplam Alacak */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
                   <TrendingUp size={15} className="text-green-600" />
@@ -2354,9 +2354,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-green-600">{formatConv(mizanTotals.alacak)}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalCredit}</p>
-            </button>
+            </div>
             {/* Borç Bakiyesi */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center">
                   <ArrowUpDown size={15} className="text-red-500" />
@@ -2372,9 +2372,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-red-500">{formatConv(mizanTotals.borcBakiye)}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.debitBalance}</p>
-            </button>
+            </div>
             {/* Alacak Bakiyesi */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center">
                   <Wallet size={15} className="text-green-500" />
@@ -2390,7 +2390,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-green-500">{formatConv(mizanTotals.alacakBakiye)}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.creditBalance}</p>
-            </button>
+            </div>
           </div>
           <div className="apple-card p-4">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -3691,7 +3691,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Sipariş</p>
             </button>
             {/* Toplam Ciro */}
-            <button onClick={() => { const byCustomer: Record<string, number> = {}; orders.forEach((o: { customerName?: string, totalPrice?: number }) => { const k = o.customerName || '—'; byCustomer[k] = (byCustomer[k] || 0) + (o.totalPrice || 0); }); setDrillDown({ title: currentLanguage === 'tr' ? 'Müşteri Bazlı Ciro' : 'Revenue by Customer', rows: Object.entries(byCustomer).sort(([,a],[,b]) => b - a).map(([name, total]) => ({ label: name, value: formatConv(total) })), total: formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => { const byCustomer: Record<string, number> = {}; orders.forEach((o: { customerName?: string, totalPrice?: number }) => { const k = o.customerName || '—'; byCustomer[k] = (byCustomer[k] || 0) + (o.totalPrice || 0); }); setDrillDown({ title: currentLanguage === 'tr' ? 'Müşteri Bazlı Ciro' : 'Revenue by Customer', rows: Object.entries(byCustomer).sort(([,a],[,b]) => b - a).map(([name, total]) => ({ label: name, value: formatConv(total) })), total: formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) }); }} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
                   <TrendingUp size={15} className="text-green-600" />
@@ -3707,7 +3707,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-green-600">{formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro</p>
-            </button>
+            </div>
             {/* Faturalı / Faturasız — count, no currency toggle */}
             <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: orders.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number }) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
@@ -3732,7 +3732,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
           {/* KPI Cards Row 2 */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {/* Faturalı Ciro */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Ciro Detayı' : 'Invoiced Revenue Detail', rows: orders.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Ciro Detayı' : 'Invoiced Revenue Detail', rows: orders.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
                   <CheckCircle size={15} className="text-green-600" />
@@ -3748,9 +3748,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-green-600">{formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro</p>
-            </button>
+            </div>
             {/* Faturasız Ciro */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturasız Ciro Detayı' : 'Non-Invoiced Revenue Detail', rows: orders.filter((o: { faturali?: boolean }) => !o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturasız Ciro Detayı' : 'Non-Invoiced Revenue Detail', rows: orders.filter((o: { faturali?: boolean }) => !o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center">
                   <FileText size={15} className="text-gray-500" />
@@ -3766,9 +3766,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-gray-600">{formatConv(orders.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturasız Ciro</p>
-            </button>
+            </div>
             {/* Ortalama Sipariş */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Ortalama Sipariş Analizi' : 'Avg Order Analysis', rows: orders.map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.length > 0 ? orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) / orders.length : 0) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Ortalama Sipariş Analizi' : 'Avg Order Analysis', rows: orders.map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.length > 0 ? orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) / orders.length : 0) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
                   <BarChart3 size={15} className="text-brand" />
@@ -3784,7 +3784,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               </div>
               <p className="text-xl font-bold text-[#ff4000]">{formatConv(orders.length > 0 ? orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) / orders.length : 0)}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Ortalama Sipariş</p>
-            </button>
+            </div>
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">

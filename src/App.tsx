@@ -15263,9 +15263,11 @@ function AppContent() {
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {/* ── 7-Day Revenue card — with currency toggle ── */}
-                    <button
+                    <div
                       onClick={() => setActiveTab('reports')}
-                      className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
+                      role="button" tabIndex={0}
+                      onKeyDown={e => e.key === 'Enter' && setActiveTab('reports')}
+                      className="apple-card p-4 cursor-pointer hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
@@ -15286,7 +15288,7 @@ function AppContent() {
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
                       <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
-                    </button>
+                    </div>
 
                     {/* ── Remaining plain cards ── */}
                     {[
@@ -15664,8 +15666,10 @@ function AppContent() {
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* ── AOV card — with currency toggle ── */}
-                    <button onClick={() => setActiveTab('reports')}
-                      className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group">
+                    <div onClick={() => setActiveTab('reports')}
+                      role="button" tabIndex={0}
+                      onKeyDown={e => e.key === 'Enter' && setActiveTab('reports')}
+                      className="apple-card p-4 cursor-pointer hover:shadow-md hover:scale-[1.02] transition-all duration-150 group">
                       <div className="flex items-center justify-between mb-2">
                         <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
                           <DollarSign className="w-4 h-4 text-emerald-600" />
@@ -15684,7 +15688,7 @@ function AppContent() {
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Ort. Sipariş Değeri' : 'Avg. Order Value'}</p>
                       <p className="text-[10px] text-gray-400">AOV</p>
-                    </button>
+                    </div>
 
                     {/* ── Remaining plain KPI cards ── */}
                     {[
