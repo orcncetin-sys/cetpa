@@ -14172,6 +14172,390 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 401: YTD Revenue Breakdown by Quarter (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const quarters: Record<string, number> = {Q1: 0, Q2: 0, Q3: 0, Q4: 0};
+        orders.forEach(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d || d.getFullYear() !== year) return;
+          const q = `Q${Math.ceil((d.getMonth()+1)/3)}`;
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
+          quarters[q] += total;
+        });
+        const ytdTotal = Object.values(quarters).reduce((a,b) => a+b, 0);
+        if (ytdTotal === 0) return null;
+        const maxQ = Math.max(...Object.values(quarters), 1);
+        const qColors = {Q1:'#3b82f6',Q2:'#f59e0b',Q3:'#22c55e',Q4:'#ff4000'};
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">YTD Revenue by Quarter ({year})</h3>
+              <span className="text-xs font-bold text-brand">₺{(ytdTotal/1000).toFixed(0)}k</span>
+            </div>
+            <div className="flex items-end gap-3 h-24 mb-1">
+              {Object.entries(quarters).map(([q, rev]) => (
+                <div key={q} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[9px] text-gray-500">{rev > 0 ? `₺${(rev/1000).toFixed(0)}k` : ''}</span>
+                  <div className="w-full rounded-sm transition-all" style={{height: `${(rev / maxQ) * 72}px`, background: (qColors as Record<string,string>)[q], minHeight: rev > 0 ? 3 : 0}} />
+                  <span className="text-xs font-medium" style={{color: (qColors as Record<string,string>)[q]}}>{q}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 402: Lost Revenue from Cancellations (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const byMonth: Record<string, {lost: number; count: number}> = {};
+        orders.forEach(o => {
+          if (o.status !== 'Cancelled' && (o.status as string) !== 'İptal') return;
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d) return;
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
+          if (!byMonth[key]) byMonth[key] = {lost: 0, count: 0};
+          byMonth[key].lost += total;
+          byMonth[key].count++;
+        });
+        const months = Object.keys(byMonth).sort().slice(-6);
+        if (months.length === 0) return (
+          <div className="apple-card p-4 mb-4 flex items-center gap-2">
+            <span className="text-green-500">✓</span>
+            <span className="text-sm font-medium text-green-700">No cancelled orders — 0 lost revenue</span>
+          </div>
+        );
+        const maxLost = Math.max(...months.map(m => byMonth[m].lost), 1);
+        const totalLost = months.reduce((s, m) => s + byMonth[m].lost, 0);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Lost Revenue (Cancellations)</h3>
+              <span className="text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5">₺{(totalLost/1000).toFixed(1)}k total</span>
+            </div>
+            <div className="flex items-end gap-2 h-20 mb-1">
+              {months.map(m => (
+                <div key={m} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] text-gray-500">{byMonth[m].count}</span>
+                  <div className="w-full rounded-sm" style={{height: `${(byMonth[m].lost / maxLost) * 56}px`, background: '#ef4444', minHeight: byMonth[m].lost > 0 ? 2 : 0}} />
+                  <span className="text-[9px] text-gray-400">{m.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 403: Stock Turnover Ratio by Category (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 5 && (() => {
+        const outByCategory: Record<string, number> = {};
+        const stockByCategory: Record<string, number> = {};
+        inventoryMovements.filter(m => m.type === 'out').forEach(m => {
+          const item = inventory.find(i => i.id === (m.productId as string));
+          if (!item) return;
+          const cat = item.category ?? 'Other';
+          outByCategory[cat] = (outByCategory[cat] ?? 0) + (m.quantity ?? 0);
+        });
+        inventory.forEach(item => {
+          const cat = item.category ?? 'Other';
+          stockByCategory[cat] = (stockByCategory[cat] ?? 0) + ((item.stock as number | undefined) ?? 0);
+        });
+        const rows = Object.keys(outByCategory)
+          .map(cat => ({ cat, turnover: stockByCategory[cat] > 0 ? outByCategory[cat] / stockByCategory[cat] : 0 }))
+          .filter(r => r.turnover > 0)
+          .sort((a, b) => b.turnover - a.turnover)
+          .slice(0, 6);
+        if (rows.length < 2) return null;
+        const maxT = Math.max(...rows.map(r => r.turnover), 1);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Stock Turnover by Category</h3>
+            <div className="space-y-2">
+              {rows.map(r => (
+                <div key={r.cat} className="flex items-center gap-2">
+                  <span className="text-xs truncate w-24 text-gray-700">{r.cat}</span>
+                  <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                    <div className="h-full rounded-full flex items-center pl-2" style={{width: `${(r.turnover / maxT) * 100}%`, background: r.turnover >= 2 ? '#22c55e' : r.turnover >= 1 ? '#f59e0b' : '#ef4444'}}>
+                      <span className="text-white text-[9px] font-bold">{r.turnover.toFixed(1)}×</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 404: Stuck Orders (Processing >7 Days) (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 3 && (() => {
+        const now = new Date();
+        const stuck = orders.filter(o => {
+          if (o.status !== 'Processing' && o.status !== 'Pending') return false;
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d) return false;
+          return (now.getTime() - d.getTime()) / 86400000 > 7;
+        }).map(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : new Date();
+          const days = Math.floor((now.getTime() - d.getTime()) / 86400000);
+          const cid = (o as unknown as Record<string,unknown>).customerName as string | undefined
+            || (o as unknown as Record<string,unknown>).customerId as string | undefined
+            || 'Unknown';
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
+          return {id: o.id, status: o.status, days, customer: cid, total};
+        }).sort((a, b) => b.days - a.days).slice(0, 6);
+        if (stuck.length === 0) return (
+          <div className="apple-card p-4 mb-4 flex items-center gap-2">
+            <span className="text-green-500">✓</span>
+            <span className="text-sm font-medium text-green-700">No stuck orders — all moving normally</span>
+          </div>
+        );
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+              <span>⏳ Stuck Orders (&gt;7 days)</span>
+              <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{stuck.length}</span>
+            </h3>
+            <div className="space-y-2">
+              {stuck.map((o, i) => (
+                <div key={i} className="flex items-center justify-between text-xs">
+                  <div className="flex-1">
+                    <span className="text-gray-700 font-medium">{o.customer}</span>
+                    <span className="ml-2 text-gray-400">{o.status}</span>
+                  </div>
+                  <span className="font-bold ml-2" style={{color: o.days > 14 ? '#ef4444' : '#f59e0b'}}>{o.days}d</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 405: Employee Tenure Distribution (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 3 && (() => {
+        const now = new Date();
+        const tenures = employees.map(e => {
+          const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
+          if (!d || isNaN(d.getTime())) return null;
+          return (now.getTime() - d.getTime()) / (365.25 * 86400000);
+        }).filter((t): t is number => t !== null && t >= 0);
+        if (tenures.length < 2) return null;
+        const buckets = [[0,0.5,'<6mo'],[0.5,1,'6-12mo'],[1,2,'1-2yr'],[2,5,'2-5yr'],[5,10,'5-10yr'],[10,100,'10yr+']];
+        const counts = buckets.map(([lo,hi,lbl]) => ({
+          label: lbl as string,
+          count: tenures.filter(t => t >= (lo as number) && t < (hi as number)).length,
+        }));
+        const maxC = Math.max(...counts.map(c => c.count), 1);
+        const avgTenure = tenures.reduce((a,b) => a+b, 0) / tenures.length;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Employee Tenure Distribution</h3>
+              <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg {avgTenure.toFixed(1)}yr</span>
+            </div>
+            <div className="flex items-end gap-2 h-20 mb-1">
+              {counts.map(c => (
+                <div key={c.label} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] text-gray-500">{c.count > 0 ? c.count : ''}</span>
+                  <div className="w-full rounded-sm" style={{height: `${(c.count / maxC) * 56}px`, background: '#6366f1', minHeight: c.count > 0 ? 2 : 0}} />
+                  <span className="text-[9px] text-gray-400">{c.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 406: Avg Order Value by Day of Week (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 7 && (() => {
+        const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        const dayTotals: {sum: number; count: number}[] = Array.from({length: 7}, () => ({sum: 0, count: 0}));
+        orders.forEach(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d) return;
+          const dow = (d.getDay() + 6) % 7;
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
+          dayTotals[dow].sum += total;
+          dayTotals[dow].count++;
+        });
+        const avgs = dayTotals.map(d => d.count > 0 ? d.sum / d.count : 0);
+        const maxAvg = Math.max(...avgs, 1);
+        const bestDay = avgs.indexOf(Math.max(...avgs));
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Avg Order Value by Day</h3>
+              <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">Best: {days[bestDay]}</span>
+            </div>
+            <div className="flex items-end gap-1.5 h-20 mb-1">
+              {avgs.map((avg, i) => (
+                <div key={days[i]} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div className="w-full rounded-sm transition-all" style={{height: `${(avg / maxAvg) * 56}px`, background: i === bestDay ? '#ff4000' : '#3b82f6', minHeight: avg > 0 ? 2 : 0}} />
+                  <span className="text-[9px] text-gray-400">{days[i].slice(0,2)}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 text-center">average order value (₺)</p>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 407: Top Products by Unique Customer Reach (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const productCustomers: Record<string, Set<string>> = {};
+        orders.forEach(o => {
+          const cid = (o as unknown as Record<string,unknown>).customerId as string | undefined
+            || (o as unknown as Record<string,unknown>).customerName as string | undefined
+            || 'Unknown';
+          (o.lineItems ?? []).forEach(li => {
+            const liR = li as unknown as Record<string,unknown>;
+            const name = (liR.productName as string | undefined) ?? (liR.name as string | undefined) ?? 'Unknown';
+            if (!productCustomers[name]) productCustomers[name] = new Set();
+            productCustomers[name].add(cid);
+          });
+        });
+        const top = Object.entries(productCustomers)
+          .sort((a, b) => b[1].size - a[1].size)
+          .slice(0, 6);
+        if (top.length === 0) return null;
+        const maxSize = top[0][1].size;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Products by Customer Reach</h3>
+            <div className="space-y-2">
+              {top.map(([name, custSet]) => (
+                <div key={name} className="flex items-center gap-2">
+                  <span className="text-xs truncate flex-1 text-gray-700">{name}</span>
+                  <div className="w-20 bg-gray-100 rounded-full h-3 overflow-hidden">
+                    <div className="h-full rounded-full" style={{width: `${(custSet.size / maxSize) * 100}%`, background: '#8b5cf6'}} />
+                  </div>
+                  <span className="text-xs font-bold w-8 text-right text-purple-600">{custSet.size}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 408: Inventory Value by Category (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
+        const catValue: Record<string, number> = {};
+        inventory.forEach(item => {
+          const cat = item.category ?? 'Other';
+          const retail = (item.prices?.['Retail'] as number | undefined) ?? 0;
+          const stk = (item.stock as number | undefined) ?? 0;
+          catValue[cat] = (catValue[cat] ?? 0) + retail * stk;
+        });
+        const total = Object.values(catValue).reduce((a,b) => a+b, 0);
+        if (total === 0) return null;
+        const rows = Object.entries(catValue).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const others = total - rows.reduce((s, [,v]) => s + v, 0);
+        if (others > 0) rows.push(['Other', others]);
+        const palette = ['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#6b7280'];
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Inventory Value by Category</h3>
+            <div className="flex h-4 rounded-full overflow-hidden mb-3">
+              {rows.map(([cat, val], i) => (
+                <div key={cat} style={{width: `${(val/total)*100}%`, background: palette[i]}} title={cat} />
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {rows.map(([cat, val], i) => (
+                <div key={cat} className="flex items-center gap-1.5 text-xs">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background: palette[i]}} />
+                  <span className="text-gray-600 truncate">{cat}</span>
+                  <span className="ml-auto font-medium text-gray-800">{Math.round((val/total)*100)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 409: Revenue per Employee (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 1 && orders.length >= 1 && (() => {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+        const ytdStart = new Date(now.getFullYear(), 0, 1);
+        let rev30 = 0, revYTD = 0;
+        orders.forEach(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d) return;
+          const oR = o as unknown as Record<string,unknown>;
+          const total = typeof oR.total === 'number' ? oR.total as number
+            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
+          if (d >= thirtyDaysAgo) rev30 += total;
+          if (d >= ytdStart) revYTD += total;
+        });
+        const activeCount = employees.filter(e => (e as unknown as Record<string,unknown>).status !== 'Inactive').length || employees.length;
+        const rpe30 = activeCount > 0 ? rev30 / activeCount : 0;
+        const rpeYTD = activeCount > 0 ? revYTD / activeCount : 0;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Revenue per Employee</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[{label:'Last 30 Days', val: rpe30, color: '#3b82f6'}, {label:'YTD', val: rpeYTD, color: '#ff4000'}].map(r => (
+                <div key={r.label} className="rounded-xl p-3 text-center" style={{background: `${r.color}12`}}>
+                  <p className="text-lg font-bold" style={{color: r.color}}>₺{(r.val/1000).toFixed(1)}k</p>
+                  <p className="text-[10px] text-gray-500">{r.label}</p>
+                  <p className="text-[9px] text-gray-400">{activeCount} employees</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 410: Weekly Orders Trend (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const weeks: Record<string, number> = {};
+        orders.forEach(o => {
+          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          if (!d) return;
+          const weekStart = new Date(d);
+          weekStart.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+          const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth()+1).padStart(2,'0')}-${String(weekStart.getDate()).padStart(2,'0')}`;
+          weeks[key] = (weeks[key] ?? 0) + 1;
+        });
+        const weekKeys = Object.keys(weeks).sort().slice(-8);
+        if (weekKeys.length < 3) return null;
+        const vals = weekKeys.map(k => weeks[k]);
+        const maxV = Math.max(...vals, 1);
+        const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
+        // Simple line chart using SVG polyline
+        const w = 240; const h = 60; const pad = 8;
+        const pts = vals.map((v, i) => `${pad + (i / (vals.length-1)) * (w-2*pad)},${h - pad - ((v / maxV) * (h-2*pad))}`).join(' ');
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold text-sm">Weekly Orders Trend</h3>
+              <span className="text-xs text-gray-500">avg {avg.toFixed(0)}/wk</span>
+            </div>
+            <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height: 60}}>
+              <polyline points={pts} fill="none" stroke="#ff4000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              {vals.map((v, i) => (
+                <circle key={i} cx={pad + (i / (vals.length-1)) * (w-2*pad)} cy={h - pad - ((v / maxV) * (h-2*pad))} r="3" fill="#ff4000" />
+              ))}
+            </svg>
+            <div className="flex justify-between text-[9px] text-gray-400 mt-1">
+              <span>{weekKeys[0]?.slice(5)}</span>
+              <span>{weekKeys[weekKeys.length-1]?.slice(5)}</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
         const now = new Date();
