@@ -12184,6 +12184,407 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 351: Weekly Revenue Heatmap (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 10 && (() => {
+        const toTs351 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        // Build week × day grid for last 8 weeks
+        const now351 = Date.now();
+        const grid: Record<string, number> = {};
+        orders.forEach(o => {
+          const ts = toTs351(o.createdAt);
+          if (!ts) return;
+          const d = new Date(ts);
+          const weekAgo = Math.floor((now351 - ts) / (7 * 86400000));
+          if (weekAgo > 7) return;
+          const key = `${weekAgo}-${d.getDay()}`;
+          grid[key] = (grid[key] || 0) + (o.totalPrice || 0);
+        });
+        const days351 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+        const weeks351 = [0,1,2,3,4,5,6,7];
+        const maxCell = Math.max(...Object.values(grid), 1);
+        const totalCells = Object.values(grid).filter(v => v > 0).length;
+        if (totalCells < 3) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Weekly Revenue Heatmap</h3>
+            <p className="text-xs text-gray-500 mb-3">Last 8 weeks · darker = more revenue</p>
+            <div className="overflow-x-auto">
+              <div className="flex gap-1 min-w-[300px]">
+                <div className="flex flex-col gap-1 mr-1">
+                  {days351.map(d => <span key={d} className="text-[9px] text-gray-400 h-5 flex items-center">{d}</span>)}
+                </div>
+                {weeks351.map(w => (
+                  <div key={w} className="flex flex-col gap-1 flex-1">
+                    {days351.map((_, di) => {
+                      const val = grid[`${w}-${di}`] || 0;
+                      const intensity = maxCell > 0 ? val / maxCell : 0;
+                      const bg = intensity === 0 ? '#f3f4f6'
+                        : intensity < 0.25 ? '#bbf7d0'
+                        : intensity < 0.5  ? '#4ade80'
+                        : intensity < 0.75 ? '#16a34a'
+                        : '#166534';
+                      return <div key={di} className="h-5 rounded-sm" style={{background: bg}} title={val > 0 ? `₺${val.toLocaleString('tr-TR', {maximumFractionDigits:0})}` : ''} />;
+                    })}
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between mt-1 text-[9px] text-gray-400">
+                <span>8w ago</span><span>Now</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 352: Inventory Low Margin Alert (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
+        const marginData = inventory
+          .filter(item => item.costPrice > 0 && (item.prices?.['Retail'] || item.price || 0) > 0)
+          .map(item => {
+            const sell = item.prices?.['Retail'] || item.price || 0;
+            const cost = item.costPrice;
+            const margin = sell > 0 ? ((sell - cost) / sell) * 100 : 0;
+            return { name: item.name, margin, sell, cost, stock: item.stockLevel };
+          })
+          .filter(d => d.margin < 40)
+          .sort((a, b) => a.margin - b.margin)
+          .slice(0, 8);
+        if (marginData.length < 2) return null;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Low Margin Products</h3>
+            <p className="text-xs text-gray-500 mb-4">Items with gross margin below 40% — review pricing or costs</p>
+            <div className="space-y-2">
+              {marginData.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-32 truncate">{d.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{width: `${Math.max(d.margin, 0)}%`, background: d.margin < 10 ? '#ef4444' : d.margin < 20 ? '#f97316' : '#f59e0b'}} />
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right" style={{color: d.margin < 10 ? '#ef4444' : d.margin < 20 ? '#f97316' : '#f59e0b'}}>{d.margin.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 353: Order Gap Between Customers (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 8 && (() => {
+        const toTs353 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        const custOrders: Record<string, number[]> = {};
+        orders.forEach(o => {
+          const c = o.customerName || 'Unknown';
+          const ts = toTs353(o.createdAt);
+          if (!ts) return;
+          if (!custOrders[c]) custOrders[c] = [];
+          custOrders[c].push(ts);
+        });
+        const gaps = Object.entries(custOrders)
+          .filter(([, ts]) => ts.length >= 2)
+          .map(([customer, timestamps]) => {
+            const sorted = [...timestamps].sort((a, b) => a - b);
+            const avgGap = sorted.slice(1).reduce((s, t, i) => s + (t - sorted[i]) / 86400000, 0) / (sorted.length - 1);
+            return { customer, avgGap: Math.round(avgGap), orders: sorted.length };
+          })
+          .sort((a, b) => b.orders - a.orders)
+          .slice(0, 7);
+        if (gaps.length < 2) return null;
+        const maxGap = Math.max(...gaps.map(g => g.avgGap), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Avg Days Between Orders</h3>
+            <p className="text-xs text-gray-500 mb-4">Repeat customer purchase cadence — shorter gap = higher loyalty</p>
+            <div className="space-y-2">
+              {gaps.map((g, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-28 truncate">{g.customer}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{width: `${(g.avgGap / maxGap) * 100}%`, background: g.avgGap <= 14 ? '#10b981' : g.avgGap <= 45 ? '#f59e0b' : '#ef4444'}} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{g.orders}×</span>
+                  <span className="text-xs font-bold w-14 text-right" style={{color: g.avgGap <= 14 ? '#10b981' : g.avgGap <= 45 ? '#f59e0b' : '#ef4444'}}>{g.avgGap}d</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 354: Inventory Cost vs Sell Price Scatter (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 6 && (() => {
+        const scatterData = inventory
+          .filter(i => i.costPrice > 0 && (i.prices?.['Retail'] || i.price || 0) > 0)
+          .map(i => ({
+            name: i.name,
+            cost: i.costPrice,
+            sell: i.prices?.['Retail'] || i.price || 0,
+            margin: ((( i.prices?.['Retail'] || i.price || 0) - i.costPrice) / (i.prices?.['Retail'] || i.price || 1)) * 100,
+          }))
+          .sort((a, b) => b.sell - a.sell)
+          .slice(0, 10);
+        if (scatterData.length < 3) return null;
+        const maxSell = Math.max(...scatterData.map(d => d.sell), 1);
+        const avgMargin = scatterData.reduce((s, d) => s + d.margin, 0) / scatterData.length;
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Cost vs Sell Price — Top 10 SKUs</h3>
+            <p className="text-xs text-gray-500 mb-4">Avg margin: <span className="font-bold">{avgMargin.toFixed(1)}%</span> · width = sell price, fill = margin%</p>
+            <div className="space-y-1.5">
+              {scatterData.map((d, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-500 w-28 truncate">{d.name}</span>
+                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden relative">
+                    <div className="h-full rounded-full absolute left-0" style={{width: `${(d.sell / maxSell) * 100}%`, background: '#e5e7eb'}} />
+                    <div className="h-full rounded-full absolute left-0" style={{width: `${(d.cost / maxSell) * 100}%`, background: d.margin < 20 ? '#ef4444' : d.margin < 40 ? '#f59e0b' : '#10b981'}} />
+                  </div>
+                  <span className="text-[10px] font-bold w-10 text-right" style={{color: d.margin < 20 ? '#ef4444' : d.margin < 40 ? '#f59e0b' : '#10b981'}}>{d.margin.toFixed(0)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 355: Overtime / Absence Rate (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 3 && (() => {
+        const withOT = employees.filter(e => (e as unknown as Record<string,unknown>).overtimeHours as number > 0);
+        const withAbsence = employees.filter(e => (e as unknown as Record<string,unknown>).absenceDays as number > 0);
+        const totalOT = employees.reduce((s, e) => s + (((e as unknown as Record<string,unknown>).overtimeHours as number) || 0), 0);
+        const totalAbsence = employees.reduce((s, e) => s + (((e as unknown as Record<string,unknown>).absenceDays as number) || 0), 0);
+        if (totalOT === 0 && totalAbsence === 0) return null;
+        const otRate = (withOT.length / employees.length * 100).toFixed(0);
+        const absRate = (withAbsence.length / employees.length * 100).toFixed(0);
+        const topOT = [...employees].sort((a, b) => (((b as unknown as Record<string,unknown>).overtimeHours as number)||0) - (((a as unknown as Record<string,unknown>).overtimeHours as number)||0)).slice(0, 5);
+        const maxOT = Math.max(...topOT.map(e => (((e as unknown as Record<string,unknown>).overtimeHours as number)||0)), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Overtime & Absence Overview</h3>
+            <div className="flex gap-6 mb-4">
+              <div className="text-center"><p className="text-2xl font-black text-amber-500">{otRate}%</p><p className="text-[10px] text-gray-400">with OT ({withOT.length})</p></div>
+              <div className="text-center"><p className="text-2xl font-black text-red-500">{absRate}%</p><p className="text-[10px] text-gray-400">with absences ({withAbsence.length})</p></div>
+              <div className="text-center"><p className="text-2xl font-black text-gray-700">{totalOT.toLocaleString('tr-TR')}</p><p className="text-[10px] text-gray-400">total OT hrs</p></div>
+              <div className="text-center"><p className="text-2xl font-black text-gray-700">{totalAbsence}</p><p className="text-[10px] text-gray-400">absence days</p></div>
+            </div>
+            {totalOT > 0 && (
+              <div className="space-y-1.5">
+                {topOT.filter(e => (((e as unknown as Record<string,unknown>).overtimeHours as number)||0) > 0).map((e, i) => {
+                  const ot: number = (((e as unknown as Record<string,unknown>).overtimeHours as number)||0);
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-600 w-28 truncate">{e.name}</span>
+                      <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-amber-400" style={{width: `${(ot / maxOT) * 100}%`}} />
+                      </div>
+                      <span className="text-xs font-bold text-amber-600 w-12 text-right">{ot}h OT</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 356: Shipment Weight / Volume Trend (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 6 && (() => {
+        const toTs356 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        const monthItems: Record<string, number> = {};
+        orders.forEach(o => {
+          const d = new Date(toTs356(o.createdAt));
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const qty = (o.lineItems || []).reduce((s: number, li: {quantity?: number}) => s + (li.quantity || 1), 0);
+          monthItems[key] = (monthItems[key] || 0) + qty;
+        });
+        const keys356 = Object.keys(monthItems).sort().slice(-8);
+        if (keys356.length < 3) return null;
+        const maxQty356 = Math.max(...keys356.map(k => monthItems[k]), 1);
+        const totalItems = keys356.reduce((s, k) => s + monthItems[k], 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Monthly Shipment Volume</h3>
+            <p className="text-xs text-gray-500 mb-4">Total line-item units shipped · {totalItems.toLocaleString('tr-TR')} over {keys356.length} months</p>
+            <div className="flex items-end gap-2 h-24">
+              {keys356.map(k => (
+                <div key={k} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] text-gray-500">{monthItems[k]}</span>
+                  <div className="w-full rounded-t-lg bg-sky-400 transition-all" style={{height: `${Math.max((monthItems[k] / maxQty356) * 72, 4)}px`}} />
+                  <span className="text-[9px] text-gray-400">{k.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 357: Quote Value Pipeline (crm) ── */}
+      {reportsTab === 'crm' && quotations.length >= 3 && (() => {
+        const pipeline: Record<string, number> = {};
+        quotations.forEach(q => {
+          const s = (q.status || 'draft').toLowerCase();
+          const val = (q as unknown as Record<string,unknown>).totalPrice as number || (q as unknown as Record<string,unknown>).total as number || 0;
+          pipeline[s] = (pipeline[s] || 0) + val;
+        });
+        const statusOrder = ['draft','sent','accepted','converted','rejected'];
+        const pipelineData = statusOrder.map(s => ({status: s, value: pipeline[s] || 0})).filter(d => d.value > 0);
+        if (pipelineData.length < 2) return null;
+        const totalPipeline = pipelineData.reduce((s, d) => s + d.value, 0);
+        const colors357: Record<string, string> = {draft:'#94a3b8',sent:'#6366f1',accepted:'#10b981',converted:'#f59e0b',rejected:'#ef4444'};
+        const maxVal357 = Math.max(...pipelineData.map(d => d.value), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Quote Value Pipeline</h3>
+            <p className="text-xs text-gray-500 mb-4">Total pipeline: ₺{totalPipeline.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <div className="space-y-2">
+              {pipelineData.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 w-20 capitalize">{d.status}</span>
+                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{width: `${(d.value / maxVal357) * 100}%`, background: colors357[d.status] || '#94a3b8'}} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{totalPipeline > 0 ? ((d.value / totalPipeline) * 100).toFixed(0) : 0}%</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors357[d.status] || '#94a3b8'}}>₺{d.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 358: Inventory Dead Stock (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
+        const toTs358 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        const now358 = Date.now();
+        const lastSale358: Record<string, number> = {};
+        inventoryMovements.filter(m => m.type === 'out').forEach(m => {
+          const ts = toTs358(m.timestamp);
+          const key = m.productName || '';
+          if (key && (!lastSale358[key] || ts > lastSale358[key])) lastSale358[key] = ts;
+        });
+        const deadStock = inventory
+          .filter(item => {
+            if (item.stockLevel <= 0) return false;
+            const lastTs = lastSale358[item.name];
+            const daysSince = lastTs ? Math.floor((now358 - lastTs) / 86400000) : 999;
+            return daysSince > 180;
+          })
+          .map(item => {
+            const lastTs = lastSale358[item.name];
+            const days = lastTs ? Math.floor((now358 - lastTs) / 86400000) : 999;
+            return { name: item.name, stock: item.stockLevel, value: item.stockLevel * (item.costPrice || 0), days };
+          })
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 7);
+        if (deadStock.length < 2) return null;
+        const totalDeadValue = deadStock.reduce((s, d) => s + d.value, 0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Dead Stock Report</h3>
+            <p className="text-xs text-gray-500 mb-4">No sales in 180+ days · Locked capital: ₺{totalDeadValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <div className="space-y-2">
+              {deadStock.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 flex-1 truncate">{d.name}</span>
+                  <span className="text-[10px] text-gray-400 w-16 text-right">{d.days === 999 ? 'Never sold' : `${d.days}d ago`}</span>
+                  <span className="text-[10px] text-gray-500 w-12 text-right">{d.stock} units</span>
+                  <span className="text-xs font-bold text-red-500 w-24 text-right">₺{d.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 359: Orders per Customer Histogram (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 8 && (() => {
+        const custCount: Record<string, number> = {};
+        orders.forEach(o => { const c = o.customerName || 'Unknown'; custCount[c] = (custCount[c] || 0) + 1; });
+        const counts = Object.values(custCount);
+        if (counts.length < 3) return null;
+        const buckets359 = [
+          {label: '1 order',  min: 1, max: 1,   count: 0, color: '#94a3b8'},
+          {label: '2–3',      min: 2, max: 3,   count: 0, color: '#6366f1'},
+          {label: '4–6',      min: 4, max: 6,   count: 0, color: '#3b82f6'},
+          {label: '7–10',     min: 7, max: 10,  count: 0, color: '#10b981'},
+          {label: '11+',      min: 11, max: 999, count: 0, color: '#f59e0b'},
+        ];
+        counts.forEach(c => { const b = buckets359.find(b => c >= b.min && c <= b.max); if (b) b.count++; });
+        const maxB359 = Math.max(...buckets359.map(b => b.count), 1);
+        const totalCusts = counts.length;
+        const repeatPct = ((counts.filter(c => c > 1).length / totalCusts) * 100).toFixed(0);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Orders per Customer</h3>
+            <p className="text-xs text-gray-500 mb-4">{totalCusts} unique customers · <span className="font-bold text-[#ff4000]">{repeatPct}%</span> repeat buyers</p>
+            <div className="flex items-end gap-3 h-20">
+              {buckets359.map((b, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-xs font-bold" style={{color: b.color}}>{b.count}</span>
+                  <div className="w-full rounded-t-lg" style={{height: `${Math.max((b.count / maxB359) * 60, 4)}px`, background: b.color}} />
+                  <span className="text-[9px] text-gray-500 text-center">{b.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 360: Monthly Employee Cost vs Revenue Ratio (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 3 && (() => {
+        const toTs360 = (v: unknown): number => {
+          if (!v) return 0;
+          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
+          return new Date(v as string|number).getTime();
+        };
+        const totalSalary = employees.reduce((s, e) => s + (e.salary || 0), 0);
+        const monthRevMap: Record<string, number> = {};
+        orders.forEach(o => {
+          const d = new Date(toTs360(o.createdAt));
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          monthRevMap[key] = (monthRevMap[key] || 0) + (o.totalPrice || 0);
+        });
+        const keys360 = Object.keys(monthRevMap).sort().slice(-6);
+        if (keys360.length < 2) return null;
+        const ratioData = keys360.map(k => ({
+          k,
+          rev: monthRevMap[k],
+          ratio: monthRevMap[k] > 0 ? (totalSalary / monthRevMap[k]) * 100 : 0,
+        }));
+        const avgRatio = ratioData.reduce((s, d) => s + d.ratio, 0) / ratioData.length;
+        const maxRatio = Math.max(...ratioData.map(d => d.ratio), 1);
+        return (
+          <div className="apple-card p-6">
+            <h3 className="font-bold text-gray-800 mb-1">Payroll-to-Revenue Ratio</h3>
+            <p className="text-xs text-gray-500 mb-4">Monthly salary (₺{totalSalary.toLocaleString('tr-TR',{maximumFractionDigits:0})}) as % of revenue · Avg: {avgRatio.toFixed(1)}%</p>
+            <div className="flex items-end gap-2 h-24">
+              {ratioData.map((d, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] text-gray-500">{d.ratio.toFixed(0)}%</span>
+                  <div className="w-full rounded-t-lg transition-all" style={{height: `${Math.max((d.ratio / maxRatio) * 72, 4)}px`, background: d.ratio > 40 ? '#ef4444' : d.ratio > 20 ? '#f59e0b' : '#10b981'}} />
+                  <span className="text-[9px] text-gray-400">{d.k.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
         const now = new Date();
