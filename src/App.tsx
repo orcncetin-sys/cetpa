@@ -17260,6 +17260,363 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 481: Revenue Velocity (rev per calendar day) (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 5 && (() => {
+        const now = new Date();
+        const periods = [{label:'7d',days:7},{label:'30d',days:30},{label:'90d',days:90},{label:'365d',days:365}];
+        const results = periods.map(p=>{
+          const since=new Date(now.getTime()-p.days*86400000);
+          const rev=orders.reduce((s,o)=>{
+            const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+            if(!d||d<since) return s;
+            const oR=o as unknown as Record<string,unknown>;
+            return s+(typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s2,li)=>{ const lr=li as unknown as Record<string,unknown>; return s2+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0));
+          },0);
+          return {...p,rev,velocity:rev/p.days};
+        });
+        const maxV=Math.max(...results.map(r=>r.velocity),1);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Revenue Velocity (₺/day)</h3>
+            <div className="space-y-2">
+              {results.map(r=>(
+                <div key={r.label} className="flex items-center gap-2">
+                  <span className="text-xs w-10 text-gray-600">{r.label}</span>
+                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                    <div className="h-full rounded-full flex items-center pl-2" style={{width:`${(r.velocity/maxV)*100}%`,background:'#ff4000',minWidth:r.velocity>0?24:0}}>
+                      <span className="text-white text-[9px] font-bold">₺{(r.velocity/1000).toFixed(1)}k</span>
+                    </div>
+                  </div>
+                  <span className="text-[9px] text-gray-400 w-14 text-right">₺{(r.rev/1000).toFixed(0)}k tot</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 482: Weekend vs Weekday Orders (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        let weekdayCount=0,weekendCount=0,weekdayRev=0,weekendRev=0;
+        orders.forEach(o=>{
+          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+          if(!d) return;
+          const oR=o as unknown as Record<string,unknown>;
+          const total=typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
+          const isWeekend=d.getDay()===0||d.getDay()===6;
+          if(isWeekend){weekendCount++;weekendRev+=total;}
+          else{weekdayCount++;weekdayRev+=total;}
+        });
+        const totalOrders=weekdayCount+weekendCount;
+        const totalRev=weekdayRev+weekendRev;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Weekday vs Weekend Orders</h3>
+            <div className="flex h-4 rounded-full overflow-hidden mb-3">
+              <div style={{width:`${(weekdayCount/Math.max(totalOrders,1))*100}%`,background:'#3b82f6'}}/>
+              <div style={{width:`${(weekendCount/Math.max(totalOrders,1))*100}%`,background:'#f59e0b'}}/>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {[{label:'Weekday',count:weekdayCount,rev:weekdayRev,color:'#3b82f6'},{label:'Weekend',count:weekendCount,rev:weekendRev,color:'#f59e0b'}].map(s=>(
+                <div key={s.label} className="rounded-xl p-3" style={{background:`${s.color}12`}}>
+                  <p className="text-sm font-bold" style={{color:s.color}}>{s.count} orders</p>
+                  <p className="text-[10px] text-gray-500">{s.label}</p>
+                  {s.rev>0&&<p className="text-[10px] text-gray-400">₺{(s.rev/1000).toFixed(1)}k rev</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 483: New Customer Acquisition by Month (crm) ── */}
+      {reportsTab === 'crm' && orders.length >= 5 && (() => {
+        const custFirstMonth: Record<string,string> = {};
+        [...orders].sort((a,b)=>{
+          const da=a.createdAt?((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)):new Date(0);
+          const db=b.createdAt?((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)):new Date(0);
+          return da.getTime()-db.getTime();
+        }).forEach(o=>{
+          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+          if(!d) return;
+          const cid=(o as unknown as Record<string,unknown>).customerId as string|undefined||(o as unknown as Record<string,unknown>).customerName as string|undefined||'Unknown';
+          const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if(!custFirstMonth[cid]) custFirstMonth[cid]=key;
+        });
+        const newByMonth: Record<string,number>={};
+        Object.values(custFirstMonth).forEach(m=>{ newByMonth[m]=(newByMonth[m]??0)+1; });
+        const months=Object.keys(newByMonth).sort().slice(-8);
+        if(months.length<3) return null;
+        const vals=months.map(m=>newByMonth[m]);
+        const maxV=Math.max(...vals,1);
+        const totalNew=vals.reduce((a,b)=>a+b,0);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">New Customer Acquisition</h3>
+              <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{totalNew} total</span>
+            </div>
+            <div className="flex items-end gap-2 h-20 mb-1">
+              {vals.map((v,i)=>(
+                <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] text-gray-500">{v}</span>
+                  <div className="w-full rounded-sm" style={{height:`${(v/maxV)*56}px`,background:'#22c55e',minHeight:v>0?2:0}}/>
+                  <span className="text-[9px] text-gray-400">{months[i]?.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 484: Most Active Products by Movement Events (envanter) ── */}
+      {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
+        const eventCount: Record<string,{events:number;qty:number}> = {};
+        inventoryMovements.forEach(m=>{
+          const pid=m.productId as string;
+          if(!eventCount[pid]) eventCount[pid]={events:0,qty:0};
+          eventCount[pid].events++;
+          eventCount[pid].qty+=(m.quantity??0);
+        });
+        const top=Object.entries(eventCount).sort((a,b)=>b[1].events-a[1].events).slice(0,7);
+        if(top.length<2) return null;
+        const maxEvents=top[0][1].events;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Most Active Products</h3>
+            <div className="space-y-2">
+              {top.map(([pid,d])=>{
+                const name=inventory.find(i=>i.id===pid)?.name??pid;
+                return (
+                  <div key={pid} className="flex items-center gap-2">
+                    <span className="text-xs truncate flex-1 text-gray-700">{name}</span>
+                    <div className="w-16 bg-gray-100 rounded-full h-3 overflow-hidden">
+                      <div className="h-full rounded-full" style={{width:`${(d.events/maxEvents)*100}%`,background:'#0ea5e9'}}/>
+                    </div>
+                    <span className="text-[10px] text-gray-500 w-10 text-right">{d.events} ev</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 485: Top 5 Revenue Products This Month (genel) ── */}
+      {reportsTab === 'genel' && orders.length >= 3 && (() => {
+        const now=new Date();
+        const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+        const productRev: Record<string,number>={};
+        orders.forEach(o=>{
+          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+          if(!d||d<monthStart) return;
+          (o.lineItems??[]).forEach(li=>{ const lr=li as unknown as Record<string,unknown>; const name=(lr.productName as string|undefined)??(lr.name as string|undefined)??'Unknown'; const rev=((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); productRev[name]=(productRev[name]??0)+rev; });
+        });
+        const top5=Object.entries(productRev).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        if(top5.length===0) return null;
+        const maxRev=top5[0][1];
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Top Products This Month</h3>
+            <div className="space-y-2">
+              {top5.map(([name,rev],i)=>(
+                <div key={name} className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-400 w-4">#{i+1}</span>
+                  <span className="text-xs truncate flex-1 text-gray-700">{name}</span>
+                  <div className="w-16 bg-gray-100 rounded-full h-3 overflow-hidden">
+                    <div className="h-full rounded-full" style={{width:`${(rev/maxRev)*100}%`,background:i===0?'#ff4000':'#6366f1'}}/>
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-600 w-10 text-right">₺{(rev/1000).toFixed(0)}k</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 486: Average Rating / Performance (ik) ── */}
+      {reportsTab === 'ik' && employees.length >= 2 && (() => {
+        const ratings=employees.map(e=>{
+          const eR=e as unknown as Record<string,unknown>;
+          return (eR.performanceRating as number|undefined)??(eR.rating as number|undefined)??(eR.score as number|undefined)??null;
+        }).filter((r): r is number=>r!==null&&r>0);
+        if(ratings.length<2) {
+          return (
+            <div className="apple-card p-4 mb-4">
+              <h3 className="font-semibold text-sm mb-1">Performance Ratings</h3>
+              <p className="text-sm text-gray-500">{employees.length} employees — no performance data yet</p>
+            </div>
+          );
+        }
+        const avg=ratings.reduce((a,b)=>a+b,0)/ratings.length;
+        const max5=5; // assume 5-star scale
+        const bins=[1,2,3,4,5].map(s=>({star:s,count:ratings.filter(r=>Math.round(r)===s).length}));
+        const maxBin=Math.max(...bins.map(b=>b.count),1);
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-sm">Performance Ratings</h3>
+              <span className="text-xs bg-yellow-100 text-yellow-700 rounded-full px-2 py-0.5">avg {avg.toFixed(1)}★</span>
+            </div>
+            <div className="space-y-1.5">
+              {bins.map(b=>(
+                <div key={b.star} className="flex items-center gap-2">
+                  <span className="text-xs text-yellow-500 w-6">{b.star}★</span>
+                  <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                    <div className="h-full rounded-full" style={{width:`${(b.count/maxBin)*100}%`,background:'#f59e0b'}}/>
+                  </div>
+                  <span className="text-xs text-gray-500 w-4 text-right">{b.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 487: Stock Value at Risk (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 3 && (() => {
+        const now=new Date();
+        let expiredValue=0,nearExpiryValue=0,healthyValue=0;
+        const in30=new Date(now.getTime()+30*86400000);
+        const in90=new Date(now.getTime()+90*86400000);
+        inventory.forEach(item=>{
+          const itemR=item as unknown as Record<string,unknown>;
+          const expStr=(itemR.expiryDate as string|undefined)??(itemR.expiry as string|undefined)??(itemR.bestBefore as string|undefined);
+          const retail=(item.prices?.['Retail'] as number|undefined)??0;
+          const stk=(item.stock as number|undefined)??0;
+          const val=retail*stk;
+          if(!expStr) { healthyValue+=val; return; }
+          const expDate=new Date(expStr);
+          if(expDate<now) expiredValue+=val;
+          else if(expDate<in30) nearExpiryValue+=val;
+          else healthyValue+=val;
+        });
+        const total=expiredValue+nearExpiryValue+healthyValue;
+        if(total===0) return null;
+        const hasExpiryData=expiredValue+nearExpiryValue>0;
+        if(!hasExpiryData) return null;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Stock Value at Risk (Expiry)</h3>
+            <div className="flex h-4 rounded-full overflow-hidden mb-3">
+              <div style={{width:`${(expiredValue/total)*100}%`,background:'#ef4444'}}/>
+              <div style={{width:`${(nearExpiryValue/total)*100}%`,background:'#f59e0b'}}/>
+              <div style={{width:`${(healthyValue/total)*100}%`,background:'#22c55e'}}/>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              {[{label:'Expired',val:expiredValue,color:'#ef4444'},{label:'<30d',val:nearExpiryValue,color:'#f59e0b'},{label:'Healthy',val:healthyValue,color:'#22c55e'}].map(s=>(
+                <div key={s.label} className="rounded-xl p-2" style={{background:`${s.color}10`}}>
+                  <p className="font-bold" style={{color:s.color}}>₺{(s.val/1000).toFixed(0)}k</p>
+                  <p className="text-gray-400">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 488: Order Value Trend (90-day line) (lojistik) ── */}
+      {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
+        const now=new Date();
+        const d90=new Date(now.getTime()-90*86400000);
+        const recent=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=d90; }).sort((a,b)=>{ const da=a.createdAt?((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)):new Date(0); const db=b.createdAt?((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)):new Date(0); return da.getTime()-db.getTime(); });
+        if(recent.length<5) return null;
+        const vals=recent.map(o=>{ const oR=o as unknown as Record<string,unknown>; return typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0); });
+        const step=Math.max(1,Math.floor(vals.length/30));
+        const sampled=vals.filter((_,i)=>i%step===0);
+        const maxV=Math.max(...sampled,1);
+        const w=240;const h=60;const pad=8;
+        const pts=sampled.map((v,i)=>`${pad+(i/(sampled.length-1))*(w-2*pad)},${h-pad-(v/maxV)*(h-2*pad)}`).join(' ');
+        const avgVal=vals.reduce((a,b)=>a+b,0)/vals.length;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold text-sm">Order Values (90d)</h3>
+              <span className="text-xs text-gray-500">avg ₺{(avgVal/1000).toFixed(1)}k</span>
+            </div>
+            <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
+              <line x1={pad} y1={h-pad-(avgVal/maxV)*(h-2*pad)} x2={w-pad} y2={h-pad-(avgVal/maxV)*(h-2*pad)} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="4 4"/>
+              <polyline points={pts} fill="none" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 489: Cross-Module Summary Dashboard (genel) ── */}
+      {reportsTab === 'genel' && (() => {
+        const now=new Date();
+        const d30=new Date(now.getTime()-30*86400000);
+        const orders30=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=d30; }).length;
+        const totalStock=inventory.reduce((s,i)=>s+((i.stock as number|undefined)??0),0);
+        const lowStockCount=inventory.filter(i=>{ const stk=(i.stock as number|undefined)??0; const threshold=(i.reorderPoint as number|undefined)??(i.lowStockThreshold as number|undefined)??5; return stk<=threshold&&stk>0; }).length;
+        const activeOrders=orders.filter(o=>o.status==='Processing'||o.status==='Pending'||o.status==='Shipped').length;
+        const stats=[
+          {label:'Orders (30d)',val:String(orders30),icon:'📦',color:'#3b82f6'},
+          {label:'Active Orders',val:String(activeOrders),icon:'⚙️',color:'#f59e0b'},
+          {label:'SKUs',val:String(inventory.length),icon:'🗃️',color:'#22c55e'},
+          {label:'Low Stock',val:String(lowStockCount),icon:'⚠️',color:lowStockCount>0?'#ef4444':'#22c55e'},
+          {label:'Employees',val:String(employees.length),icon:'👥',color:'#8b5cf6'},
+          {label:'Quotes',val:String(quotations.length),icon:'📋',color:'#0ea5e9'},
+        ];
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3">Cross-Module Overview</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {stats.map(s=>(
+                <div key={s.label} className="rounded-xl p-2 text-center" style={{background:`${s.color}10`}}>
+                  <p className="text-sm">{s.icon}</p>
+                  <p className="text-xl font-bold" style={{color:s.color}}>{s.val}</p>
+                  <p className="text-[9px] text-gray-400">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 490: Inventory Reorder Forecast (envanter) ── */}
+      {reportsTab === 'envanter' && inventory.length >= 3 && inventoryMovements.length >= 5 && (() => {
+        const now=new Date();
+        const outRates: Record<string,number>={};
+        const oldest=inventoryMovements.reduce((o,m)=>{ const d=m.date?((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)):null; return (d&&d<o)?d:o; },now);
+        const months=Math.max((now.getTime()-oldest.getTime())/(30*86400000),1);
+        inventoryMovements.filter(m=>m.type==='out').forEach(m=>{ outRates[m.productId as string]=(outRates[m.productId as string]??0)+(m.quantity??0)/months; });
+        const forecast=inventory
+          .map(item=>{
+            const rate=outRates[item.id]??0;
+            const stk=(item.stock as number|undefined)??0;
+            const rp=(item.reorderPoint as number|undefined)??(item.lowStockThreshold as number|undefined)??5;
+            if(rate<=0||stk>rp) return null;
+            const daysToStockout=rate>0?Math.floor(stk/rate*30):999;
+            return {name:item.name,stock:stk,rate:rate.toFixed(1),days:daysToStockout};
+          })
+          .filter((i): i is NonNullable<typeof i>=>i!==null&&i.days<90)
+          .sort((a,b)=>a.days-b.days)
+          .slice(0,6);
+        if(forecast.length===0) return null;
+        return (
+          <div className="apple-card p-4 mb-4">
+            <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+              <span>📊 Reorder Forecast</span>
+              <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{forecast.length} items</span>
+            </h3>
+            <div className="space-y-2">
+              {forecast.map((item,i)=>(
+                <div key={i} className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <span className="text-xs text-gray-700">{item.name}</span>
+                    <span className="text-[9px] text-gray-400 ml-2">×{item.stock} • {item.rate}/mo</span>
+                  </div>
+                  <span className="text-xs font-bold" style={{color:item.days<=14?'#ef4444':item.days<=30?'#f59e0b':'#6b7280'}}>
+                    {item.days}d left
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 320: Inventory Ageing Pyramid (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
         const now = new Date();
