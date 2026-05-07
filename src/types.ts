@@ -175,6 +175,8 @@ export interface Lead {
   activities?: LeadActivity[];
   customerType: CustomerType;
   taxId?: string;
+  taxOffice?: string;
+  address?: string;
   authorizedContact?: string;
   creditLimit?: number;
   paymentTerms?: string;
@@ -183,6 +185,24 @@ export interface Lead {
   voiceNotes?: VoiceNote[];
   nextFollowUpDate?: unknown;
   cariKod?: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  description: string;
+  category: 'Sözleşme' | 'Belge' | 'Hukuki' | 'Uyum' | 'Diğer';
+  urgency: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
+  status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'İncelemede';
+  requestedBy: string;
+  approvedBy?: string;
+  approvalNote?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  relatedContractId?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 }
 
 export interface Employee {
@@ -369,7 +389,7 @@ export interface Warehouse { id: string; name: string; location?: string; manage
 export interface BoardMeeting { id: string; title: string; date: string; location: string; attendees: string; decisions: string; status: 'Planlandı' | 'Tamamlandı' | 'İptal'; createdAt?: unknown; updatedAt?: unknown; }
 export interface AssemblyMeeting { id: string; title: string; date: string; type: 'Olağan' | 'Olağanüstü'; decisions: string; attendees: string; createdAt?: unknown; }
 export interface Shareholder { id: string; name: string; shareCount: number; sharePercentage: number; type: 'Gerçek Kişi' | 'Tüzel Kişi'; contact?: string; createdAt?: unknown; updatedAt?: unknown; }
-export interface LegalDoc { id: string; title: string; type: string; date: string; status: string; notes?: string; createdAt?: unknown; }
+export interface LegalDoc { id: string; title: string; type: string; date: string; status: string; notes?: string; fileUrl?: string; fileName?: string; fileSize?: number; uploadedBy?: string; createdAt?: unknown; }
 
 export interface PriceListItem {
   productId: string;

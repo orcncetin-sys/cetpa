@@ -1,21 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Scale, FileText, ShieldCheck, Plus, Search, Trash2, Edit2, 
-  AlertTriangle, CheckCircle2, Clock, Calendar, ChevronRight, Download, Folder, X, Eye, TrendingUp
+import {
+  Scale, FileText, ShieldCheck, Plus, Search, Trash2, Edit2,
+  AlertTriangle, CheckCircle2, Clock, Calendar, ChevronRight, Download, Folder, X, Eye, TrendingUp,
+  Upload, ThumbsUp, ThumbsDown, Send, Paperclip, CheckSquare
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
-import { db, auth } from '../firebase';
-import { 
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc, 
-  doc, serverTimestamp, query, orderBy 
+import { db, auth, storage } from '../firebase';
+import {
+  collection, onSnapshot, addDoc, updateDoc, deleteDoc,
+  doc, serverTimestamp, query, orderBy, where
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import { 
-  type Contract, 
-  type LegalCase, 
+import {
+  type Contract,
+  type LegalCase,
   type ComplianceItem,
-  type LegalDoc
+  type LegalDoc,
+  type ApprovalRequest
 } from '../types';
 import { cn } from '../lib/utils';
 
@@ -43,23 +46,125 @@ interface LegalModuleProps {
 }
 
 const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
-  const [activeTab, setActiveTab] = useState<'contracts' | 'cases' | 'compliance' | 'documents'>('contracts');
+  const [activeTab, setActiveTab] = useState<'contracts' | 'cases' | 'compliance' | 'documents' | 'approvals'>('contracts');
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [compliance, setCompliance] = useState<ComplianceItem[]>([]);
+  const [legalDocs, setLegalDocs] = useState<LegalDoc[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [contractsFilter, setContractsFilter] = useState<'Tümü' | 'Aktif' | 'Yenileme Bekliyor' | 'Süresi Dolan' | 'Taslak'>('Tümü');
   const [casesFilter, setCasesFilter] = useState<'Tümü' | 'Devam Ediyor' | 'Kazanılan' | 'Kaybedilen' | 'Temyiz'>('Tümü');
   const [complianceFilter, setComplianceFilter] = useState<'Tümü' | 'Uyumlu' | 'Uyumsuz' | 'İncelemede'>('Tümü');
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-  
+  const [approvalsFilter, setApprovalsFilter] = useState<'Tümü' | 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'İncelemede'>('Tümü');
+  const [docsFilter, setDocsFilter] = useState<string>('Tümü');
+  const [docUploadCategory, setDocUploadCategory] = useState<string>('Diğer');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const docUploadRef = useRef<HTMLInputElement>(null);
+  const approvalUploadRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Approval form state
+  const [showApprovalForm, setShowApprovalForm] = useState(false);
+  const [approvalForm, setApprovalForm] = useState({
+    title: '', description: '', category: 'Belge' as ApprovalRequest['category'],
+    urgency: 'Orta' as ApprovalRequest['urgency'], requestedBy: ''
+  });
+  const [approvalFile, setApprovalFile] = useState<File | null>(null);
+  const [approvalNoteMap, setApprovalNoteMap] = useState<Record<string, string>>({});
+
   // Sorting States
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      showToast(currentLanguage === 'tr' ? 'Dosya yüklendi: ' + e.target.files[0].name : 'File uploaded: ' + e.target.files[0].name);
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: string) => {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setUploading(true);
+    try {
+      const storageRef = ref(storage, `legal-docs/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      await addDoc(collection(db, 'legalDocs'), {
+        title: file.name, type: category, date: new Date().toISOString().split('T')[0],
+        status: 'Aktif', fileUrl: url, fileName: file.name, fileSize: file.size,
+        uploadedBy: auth.currentUser?.email || 'unknown', createdAt: serverTimestamp()
+      });
+      showToast(currentLanguage === 'tr' ? `"${file.name}" yüklendi` : `"${file.name}" uploaded`);
+    } catch (err) {
+      logFirestoreError(err, OperationType.CREATE, 'legalDocs', auth.currentUser?.uid);
+      showToast(currentLanguage === 'tr' ? 'Yükleme başarısız' : 'Upload failed', 'error');
+    } finally { setUploading(false); if (e.target) e.target.value = ''; }
+  };
+
+  const handleApprovalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) setApprovalFile(e.target.files[0]);
+  };
+
+  const handleSubmitApproval = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!approvalForm.title || !approvalForm.requestedBy) return;
+    setUploading(true);
+    try {
+      let fileUrl: string | undefined;
+      let fileName: string | undefined;
+      let fileSize: number | undefined;
+      if (approvalFile) {
+        const storageRef = ref(storage, `approval-docs/${Date.now()}_${approvalFile.name}`);
+        await uploadBytes(storageRef, approvalFile);
+        fileUrl = await getDownloadURL(storageRef);
+        fileName = approvalFile.name;
+        fileSize = approvalFile.size;
+      }
+      await addDoc(collection(db, 'approvalRequests'), {
+        ...approvalForm, status: 'Bekliyor',
+        fileUrl, fileName, fileSize, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+      showToast(currentLanguage === 'tr' ? 'Onay talebi oluşturuldu' : 'Approval request submitted');
+      setApprovalForm({ title: '', description: '', category: 'Belge', urgency: 'Orta', requestedBy: '' });
+      setApprovalFile(null);
+      setShowApprovalForm(false);
+    } catch (err) {
+      logFirestoreError(err, OperationType.CREATE, 'approvalRequests', auth.currentUser?.uid);
+      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+    } finally { setUploading(false); }
+  };
+
+  const handleApprovalAction = async (id: string, action: 'Onaylandı' | 'Reddedildi' | 'İncelemede') => {
+    try {
+      const note = approvalNoteMap[id] || '';
+      await updateDoc(doc(db, 'approvalRequests', id), {
+        status: action, approvedBy: auth.currentUser?.email || 'unknown',
+        approvalNote: note, updatedAt: serverTimestamp()
+      });
+      showToast(
+        action === 'Onaylandı'
+          ? (currentLanguage === 'tr' ? 'Talep onaylandı' : 'Request approved')
+          : action === 'Reddedildi'
+          ? (currentLanguage === 'tr' ? 'Talep reddedildi' : 'Request rejected')
+          : (currentLanguage === 'tr' ? 'İncelemeye alındı' : 'Under review'),
+        action === 'Onaylandı' ? 'success' : action === 'Reddedildi' ? 'error' : 'info'
+      );
+      setApprovalNoteMap(prev => { const n = { ...prev }; delete n[id]; return n; });
+    } catch (err) {
+      logFirestoreError(err, OperationType.UPDATE, `approvalRequests/${id}`, auth.currentUser?.uid);
     }
+  };
+
+  const handleDeleteDoc = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: currentLanguage === 'tr' ? 'Belgeyi Sil' : 'Delete Document',
+      message: currentLanguage === 'tr' ? 'Bu belgeyi kalıcı olarak silmek istediğinize emin misiniz?' : 'Are you sure you want to permanently delete this document?',
+      onConfirm: async () => {
+        try { await deleteDoc(doc(db, 'legalDocs', id)); showToast(currentLanguage === 'tr' ? 'Belge silindi' : 'Document deleted'); }
+        catch (err) { logFirestoreError(err, OperationType.DELETE, `legalDocs/${id}`, auth.currentUser?.uid); }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleDocUpload(e, docUploadCategory);
   };
 
   const handleSort = (key: string) => {
@@ -122,8 +227,19 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       }, (err) => logFirestoreError(err, OperationType.LIST, 'complianceItems', auth.currentUser?.uid)));
     }, 300);
 
+    const t4 = setTimeout(() => {
+      unsubs.push(onSnapshot(query(collection(db, 'legalDocs'), orderBy('createdAt', 'desc')), (snap) => {
+        setLegalDocs(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalDoc)));
+      }, (err) => logFirestoreError(err, OperationType.LIST, 'legalDocs', auth.currentUser?.uid)));
+    }, 450);
+    const t5 = setTimeout(() => {
+      unsubs.push(onSnapshot(query(collection(db, 'approvalRequests'), orderBy('createdAt', 'desc')), (snap) => {
+        setApprovals(snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest)));
+      }, (err) => logFirestoreError(err, OperationType.LIST, 'approvalRequests', auth.currentUser?.uid)));
+    }, 600);
+
     return () => {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5);
       unsubs.forEach(u => u());
     };
   }, []);
@@ -243,11 +359,12 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
           { id: 'contracts', label: t.contracts, icon: FileText, count: contracts.length },
           { id: 'cases', label: t.cases, icon: Scale, count: cases.length },
           { id: 'compliance', label: t.compliance, icon: ShieldCheck, count: compliance.length },
-          { id: 'documents', label: t.documents, icon: Folder, count: null },
+          { id: 'documents', label: t.documents, icon: Folder, count: legalDocs.length },
+          { id: 'approvals', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckSquare, count: approvals.filter(a => a.status === 'Bekliyor').length },
         ].map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as 'contracts' | 'cases' | 'compliance' | 'documents')}
+            onClick={() => setActiveTab(tab.id as 'contracts' | 'cases' | 'compliance' | 'documents' | 'approvals')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-[#ff4000] text-white shadow-md' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-50'}`}
           >
             <tab.icon className="w-4 h-4" />
@@ -561,41 +678,257 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
 
         {/* DOCUMENTS TAB */}
         {activeTab === 'documents' && (
-          <motion.div key="documents" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-white rounded-3xl p-12 border border-gray-100 shadow-sm">
-            <div className="text-center max-w-lg mx-auto mb-12">
-              <div className="w-24 h-24 bg-gray-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                <Folder className="w-12 h-12 text-gray-300" />
+          <motion.div key="documents" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+            {/* Upload Controls */}
+            <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+              <div className="flex flex-wrap gap-2">
+                {['Tümü', 'Sözleşme Şablonları', 'Hukuki Yazışmalar', 'Mahkeme Belgeleri', 'Diğer'].map(cat => (
+                  <button key={cat} onClick={() => setDocsFilter(cat)} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${docsFilter === cat ? 'bg-[#ff4000] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{cat}</button>
+                ))}
               </div>
-              <h3 className="text-2xl font-bold text-[#1D1D1F] mb-3">{currentLanguage === 'tr' ? 'Belge Yönetimi' : 'Document Management'}</h3>
-              <p className="text-[#86868B] mb-8">{currentLanguage === 'tr' ? 'Sözleşme ve hukuki belgelerinizi buradan yönetin.' : 'Manage your contracts and legal documents here.'}</p>
-              <div className="flex justify-center gap-3">
-                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                <button onClick={() => fileInputRef.current?.click()} className="apple-button-primary flex items-center gap-2 px-6 py-3">
-                  <Plus className="w-5 h-5" /> {currentLanguage === 'tr' ? 'Belge Yükle' : 'Upload Document'}
-                </button>
-                <button onClick={() => showToast(currentLanguage === 'tr' ? 'İndirme başlatıldı.' : 'Download started.')} className="apple-button-secondary flex items-center gap-2 px-6 py-3 bg-white border border-gray-200 text-gray-700">
-                  <Download className="w-5 h-5" /> {currentLanguage === 'tr' ? 'İndir' : 'Download'}
+              <div className="flex items-center gap-2 shrink-0">
+                <select value={docUploadCategory} onChange={e => setDocUploadCategory(e.target.value)} className="apple-input text-sm py-2 px-3 rounded-xl">
+                  <option value="Sözleşme Şablonları">{currentLanguage === 'tr' ? 'Sözleşme Şablonları' : 'Contract Templates'}</option>
+                  <option value="Hukuki Yazışmalar">{currentLanguage === 'tr' ? 'Hukuki Yazışmalar' : 'Legal Correspondence'}</option>
+                  <option value="Mahkeme Belgeleri">{currentLanguage === 'tr' ? 'Mahkeme Belgeleri' : 'Court Documents'}</option>
+                  <option value="Diğer">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                </select>
+                <input type="file" ref={docUploadRef} className="hidden" onChange={e => handleDocUpload(e, docUploadCategory)} />
+                <button onClick={() => docUploadRef.current?.click()} disabled={uploading} className="apple-button-primary flex items-center gap-2 px-5 py-2.5 disabled:opacity-60">
+                  <Upload className="w-4 h-4" />
+                  {uploading ? (currentLanguage === 'tr' ? 'Yükleniyor...' : 'Uploading...') : (currentLanguage === 'tr' ? 'Belge Yükle' : 'Upload')}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <button onClick={() => setModalConfig({ isOpen: true, type: 'documents', mode: 'view', data: 'Sözleşme Şablonları' })} className="bg-gray-50 rounded-3xl p-8 text-center hover:bg-gray-100 transition-colors cursor-pointer w-full">
-                <FileText className="w-8 h-8 text-gray-400 mx-auto mb-4" />
-                <h4 className="font-bold text-[#1D1D1F] mb-1">{currentLanguage === 'tr' ? 'Sözleşme Şablonları' : 'Contract Templates'}</h4>
-                <p className="text-sm text-gray-500">5 {currentLanguage === 'tr' ? 'dosya' : 'files'}</p>
-              </button>
-              <button onClick={() => setModalConfig({ isOpen: true, type: 'documents', mode: 'view', data: 'Hukuki Yazışmalar' })} className="bg-gray-50 rounded-3xl p-8 text-center hover:bg-gray-100 transition-colors cursor-pointer w-full">
-                <Eye className="w-8 h-8 text-gray-400 mx-auto mb-4" />
-                <h4 className="font-bold text-[#1D1D1F] mb-1">{currentLanguage === 'tr' ? 'Hukuki Yazışmalar' : 'Legal Correspondence'}</h4>
-                <p className="text-sm text-gray-500">12 {currentLanguage === 'tr' ? 'dosya' : 'files'}</p>
-              </button>
-              <button onClick={() => setModalConfig({ isOpen: true, type: 'documents', mode: 'view', data: 'Mahkeme Belgeleri' })} className="bg-gray-50 rounded-3xl p-8 text-center hover:bg-gray-100 transition-colors cursor-pointer w-full">
-                <Scale className="w-8 h-8 text-gray-400 mx-auto mb-4" />
-                <h4 className="font-bold text-[#1D1D1F] mb-1">{currentLanguage === 'tr' ? 'Mahkeme Belgeleri' : 'Court Documents'}</h4>
-                <p className="text-sm text-gray-500">8 {currentLanguage === 'tr' ? 'dosya' : 'files'}</p>
+            {/* Document List */}
+            {legalDocs.filter(d => docsFilter === 'Tümü' || d.type === docsFilter).length === 0 ? (
+              <div className="apple-card p-16 text-center">
+                <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mx-auto mb-5">
+                  <Folder className="w-10 h-10 text-gray-300" />
+                </div>
+                <p className="font-bold text-[#1D1D1F] mb-1">{currentLanguage === 'tr' ? 'Belge bulunamadı' : 'No documents found'}</p>
+                <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Yeni belge yüklemek için kategori seçip butona tıklayın.' : 'Select a category and click Upload to add documents.'}</p>
+              </div>
+            ) : (
+              <div className="apple-card overflow-hidden">
+                <div className="divide-y divide-gray-50">
+                  {legalDocs.filter(d => docsFilter === 'Tümü' || d.type === docsFilter).map((document) => (
+                    <div key={document.id} className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors group">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                          <FileText className="w-5 h-5 text-red-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#1D1D1F] text-sm truncate">{document.title}</p>
+                          <p className="text-[11px] text-gray-400">
+                            {document.type} · {document.date}
+                            {document.fileSize ? ` · ${(document.fileSize / 1024).toFixed(0)} KB` : ''}
+                            {document.uploadedBy ? ` · ${document.uploadedBy}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-4">
+                        {document.fileUrl && (
+                          <a href={document.fileUrl} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] hover:bg-blue-100 transition-colors">
+                            {currentLanguage === 'tr' ? 'Görüntüle' : 'View'}
+                          </a>
+                        )}
+                        {document.fileUrl && (
+                          <a href={document.fileUrl} download={document.fileName || document.title} className="px-3 py-1.5 rounded-lg bg-[#ff4000]/10 text-[#ff4000] font-bold text-[11px] hover:bg-[#ff4000]/20 transition-colors">
+                            {currentLanguage === 'tr' ? 'İndir' : 'Download'}
+                          </a>
+                        )}
+                        <button onClick={() => handleDeleteDoc(document.id)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+        {/* APPROVALS TAB */}
+        {activeTab === 'approvals' && (
+          <motion.div key="approvals" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {([
+                { label: currentLanguage === 'tr' ? 'Bekliyor' : 'Pending', count: approvals.filter(a => a.status === 'Bekliyor').length, color: 'text-orange-600', bg: 'bg-orange-50', icon: Clock },
+                { label: currentLanguage === 'tr' ? 'Onaylandı' : 'Approved', count: approvals.filter(a => a.status === 'Onaylandı').length, color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle2 },
+                { label: currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected', count: approvals.filter(a => a.status === 'Reddedildi').length, color: 'text-red-600', bg: 'bg-red-50', icon: ThumbsDown },
+                { label: currentLanguage === 'tr' ? 'İncelemede' : 'Under Review', count: approvals.filter(a => a.status === 'İncelemede').length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Eye },
+              ] as const).map(kpi => (
+                <div key={kpi.label} className="apple-card p-5">
+                  <div className="flex justify-between items-start mb-3">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{kpi.label}</p>
+                    <div className={`w-8 h-8 rounded-xl ${kpi.bg} flex items-center justify-center`}>
+                      <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                    </div>
+                  </div>
+                  <p className="text-3xl font-bold text-[#1D1D1F]">{kpi.count}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Filter + New Request */}
+            <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+              <div className="flex flex-wrap gap-2">
+                {(['Tümü', 'Bekliyor', 'İncelemede', 'Onaylandı', 'Reddedildi'] as const).map(f => (
+                  <button key={f} onClick={() => setApprovalsFilter(f)} className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${approvalsFilter === f ? 'bg-[#ff4000] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{f}</button>
+                ))}
+              </div>
+              <button onClick={() => setShowApprovalForm(v => !v)} className="apple-button-primary flex items-center gap-2 px-5 py-2.5">
+                <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}
               </button>
             </div>
+
+            {/* New Approval Form */}
+            {showApprovalForm && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="apple-card p-6">
+                <h3 className="text-base font-bold text-[#1D1D1F] mb-5 flex items-center gap-2">
+                  <Send className="w-4 h-4 text-[#ff4000]" />
+                  {currentLanguage === 'tr' ? 'Yeni Onay Talebi' : 'New Approval Request'}
+                </h3>
+                <form onSubmit={handleSubmitApproval} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlık *' : 'Title *'}</label>
+                      <input value={approvalForm.title} onChange={e => setApprovalForm(p => ({ ...p, title: e.target.value }))} required className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Talep başlığı...' : 'Request title...'} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Talep Eden *' : 'Requested By *'}</label>
+                      <input value={approvalForm.requestedBy} onChange={e => setApprovalForm(p => ({ ...p, requestedBy: e.target.value }))} required className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Ad Soyad veya Departman...' : 'Name or Department...'} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</label>
+                    <textarea value={approvalForm.description} onChange={e => setApprovalForm(p => ({ ...p, description: e.target.value }))} rows={3} className="apple-input w-full resize-none" placeholder={currentLanguage === 'tr' ? 'Detay açıklaması...' : 'Detailed description...'} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
+                      <select value={approvalForm.category} onChange={e => setApprovalForm(p => ({ ...p, category: e.target.value as ApprovalRequest['category'] }))} className="apple-input w-full">
+                        <option value="Sözleşme">{currentLanguage === 'tr' ? 'Sözleşme' : 'Contract'}</option>
+                        <option value="Belge">{currentLanguage === 'tr' ? 'Belge' : 'Document'}</option>
+                        <option value="Hukuki">{currentLanguage === 'tr' ? 'Hukuki' : 'Legal'}</option>
+                        <option value="Uyum">{currentLanguage === 'tr' ? 'Uyum' : 'Compliance'}</option>
+                        <option value="Diğer">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Aciliyet' : 'Urgency'}</label>
+                      <select value={approvalForm.urgency} onChange={e => setApprovalForm(p => ({ ...p, urgency: e.target.value as ApprovalRequest['urgency'] }))} className="apple-input w-full">
+                        <option value="Düşük">{currentLanguage === 'tr' ? 'Düşük' : 'Low'}</option>
+                        <option value="Orta">{currentLanguage === 'tr' ? 'Orta' : 'Medium'}</option>
+                        <option value="Yüksek">{currentLanguage === 'tr' ? 'Yüksek' : 'High'}</option>
+                        <option value="Kritik">{currentLanguage === 'tr' ? 'Kritik' : 'Critical'}</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Dosya Ekle (opsiyonel)' : 'Attach File (optional)'}</label>
+                    <div className="flex items-center gap-3">
+                      <input type="file" ref={approvalUploadRef} className="hidden" onChange={handleApprovalFileChange} />
+                      <button type="button" onClick={() => approvalUploadRef.current?.click()} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold transition-colors">
+                        <Paperclip className="w-4 h-4" />
+                        {approvalFile ? approvalFile.name : (currentLanguage === 'tr' ? 'Dosya Seç' : 'Select File')}
+                      </button>
+                      {approvalFile && (
+                        <button type="button" onClick={() => setApprovalFile(null)} className="text-gray-400 hover:text-red-500 transition-colors">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                    <button type="button" onClick={() => { setShowApprovalForm(false); setApprovalFile(null); }} className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
+                      {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                    </button>
+                    <button type="submit" disabled={uploading} className="apple-button-primary px-8 py-2.5 disabled:opacity-60">
+                      {uploading ? (currentLanguage === 'tr' ? 'Gönderiliyor...' : 'Sending...') : (currentLanguage === 'tr' ? 'Talep Gönder' : 'Submit Request')}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            )}
+
+            {/* Approval List */}
+            {approvals.filter(a => approvalsFilter === 'Tümü' || a.status === approvalsFilter).length === 0 ? (
+              <div className="apple-card p-16 text-center">
+                <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mx-auto mb-5">
+                  <CheckSquare className="w-10 h-10 text-gray-300" />
+                </div>
+                <p className="font-bold text-[#1D1D1F] mb-1">{currentLanguage === 'tr' ? 'Onay talebi bulunamadı' : 'No approval requests found'}</p>
+                <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? '"Yeni Talep" butonuyla onay süreci başlatın.' : 'Use "New Request" to start an approval flow.'}</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {approvals.filter(a => approvalsFilter === 'Tümü' || a.status === approvalsFilter).map(approval => (
+                  <div key={approval.id} className="apple-card p-5">
+                    <div className="flex flex-col md:flex-row gap-4 justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-[#1D1D1F] text-base">{approval.title}</p>
+                        {approval.description && <p className="text-sm text-gray-500 mt-0.5">{approval.description}</p>}
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-[11px] font-bold">{approval.category}</span>
+                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                            approval.urgency === 'Kritik' ? 'bg-red-100 text-red-700' :
+                            approval.urgency === 'Yüksek' ? 'bg-orange-100 text-orange-700' :
+                            approval.urgency === 'Orta' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>{approval.urgency}</span>
+                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                            approval.status === 'Bekliyor' ? 'bg-orange-100 text-orange-700' :
+                            approval.status === 'Onaylandı' ? 'bg-green-100 text-green-700' :
+                            approval.status === 'Reddedildi' ? 'bg-red-100 text-red-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>{approval.status}</span>
+                          <span className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'Talep Eden:' : 'By:'} {approval.requestedBy}</span>
+                          {approval.fileUrl && (
+                            <a href={approval.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-full text-[11px] font-bold hover:bg-blue-100 transition-colors">
+                              <Paperclip className="w-3 h-3" /> {approval.fileName || (currentLanguage === 'tr' ? 'Dosya' : 'File')}
+                            </a>
+                          )}
+                        </div>
+                        {approval.approvalNote && (
+                          <p className="text-xs text-gray-500 mt-2 italic bg-gray-50 px-3 py-2 rounded-xl">
+                            <span className="font-bold not-italic">{currentLanguage === 'tr' ? 'Not:' : 'Note:'}</span> {approval.approvalNote}
+                            {approval.approvedBy && <span className="ml-2 text-gray-400 not-italic">— {approval.approvedBy}</span>}
+                          </p>
+                        )}
+                      </div>
+                      {(approval.status === 'Bekliyor' || approval.status === 'İncelemede') && (
+                        <div className="flex flex-col gap-2 shrink-0 min-w-[220px]">
+                          <input
+                            type="text"
+                            placeholder={currentLanguage === 'tr' ? 'Not ekle (opsiyonel)...' : 'Add note (optional)...'}
+                            value={approvalNoteMap[approval.id] || ''}
+                            onChange={e => setApprovalNoteMap(prev => ({ ...prev, [approval.id]: e.target.value }))}
+                            className="apple-input text-sm py-2 px-3 w-full"
+                          />
+                          <div className="flex gap-2">
+                            {approval.status === 'Bekliyor' && (
+                              <button onClick={() => handleApprovalAction(approval.id, 'İncelemede')} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100 transition-colors">
+                                <Eye className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'İncele' : 'Review'}
+                              </button>
+                            )}
+                            <button onClick={() => handleApprovalAction(approval.id, 'Reddedildi')} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-red-50 text-red-500 text-xs font-bold hover:bg-red-100 transition-colors">
+                              <ThumbsDown className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                            </button>
+                            <button onClick={() => handleApprovalAction(approval.id, 'Onaylandı')} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-green-50 text-green-600 text-xs font-bold hover:bg-green-100 transition-colors">
+                              <ThumbsUp className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
