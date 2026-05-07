@@ -1,6 +1,6 @@
 /**
  * LandingPage.tsx — CETPA Cloud ERP — World-class SaaS landing page
- * Claude Design system · Stripe/Linear/Vercel-inspired · 2026
+ * Claude Design system · SAP-inspired corporate sections · 2026
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -9,7 +9,7 @@ import {
   ArrowRight, LayoutDashboard, Zap, Package, Truck, Landmark, Users,
   BarChart3, ShieldCheck, Globe, Check, MessageSquare, Briefcase,
   Activity, Scale, Building2, Code, Database, Moon, Sun,
-  TrendingUp, Clock, Play, ChevronDown, Mail, Star,
+  TrendingUp, Clock, Play, Pause, ChevronDown, Mail, Star,
 } from 'lucide-react';
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
@@ -166,6 +166,381 @@ function TestiCard({ quote, name, role, company, rating, darkMode }: { quote: st
   );
 }
 
+// ── Innovation Orb (SAP-style circular animation) ─────────────────────────────
+
+function InnovationOrb({ isTR, darkMode, activeIdx }: {
+  isTR: boolean; darkMode: boolean; activeIdx: number;
+}) {
+  const W = 320; const cx = W / 2; const cy = W / 2;
+  const RO = 126; const RI = 92; const RM = (RO + RI) / 2; const RW = RO - RI;
+
+  const toXY = (deg: number, r: number): [number, number] => {
+    const rad = (deg - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  };
+
+  const arcPath = (r: number, a0: number, a1: number) => {
+    const [sx, sy] = toXY(a0, r);
+    const [ex, ey] = toXY(a1, r);
+    const span = ((a1 - a0) + 360) % 360;
+    return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${span > 180 ? 1 : 0} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+  };
+
+  // 3 segments × 110° each, 10° gaps. Centers at: AI=270 (top), ERP=30 (br), DATA=150 (bl)
+  const segs = [
+    { label: isTR ? 'AI'    : 'AI',   sub: isTR ? 'Yapay Zeka' : 'Intelligence', color: '#7c3aed', a0: 215, a1: 325, center: 270 },
+    { label: isTR ? 'ERP'   : 'ERP',  sub: isTR ? 'Bulut ERP'  : 'Cloud ERP',   color: '#ff4000', a0: 335, a1: 85,  center: 30  },
+    { label: isTR ? 'VERİ'  : 'DATA', sub: isTR ? 'Veri'       : 'Data',        color: '#0ea5e9', a0: 95,  a1: 205, center: 150 },
+  ];
+
+  const centerLines = isTR ? [
+    ['ERP platformu', 'zekayı eyleme', 'dönüştürür'],
+    ['Uygulamalar', 'süreçleri', 'otomatikleştirir'],
+    ['Güvenilir veri', 'her kararın', 'temelinde'],
+  ] : [
+    ['ERP platform', 'turns intelligence', 'into action'],
+    ['Applications', 'automate every', 'process'],
+    ['Reliable data', 'powers every', 'decision'],
+  ];
+
+  return (
+    <div className="relative" style={{ width: W, height: W }}>
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        {/* Dashed orbit rings */}
+        {[RO + 20, RO + 40].map((r, i) => (
+          <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+            stroke={darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}
+            strokeWidth="1" strokeDasharray="4 8" />
+        ))}
+        <circle cx={cx} cy={cy} r={RI - 20} fill="none"
+          stroke={darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}
+          strokeWidth="1" strokeDasharray="4 8" />
+
+        {/* Gray arc tracks */}
+        {segs.map((s, i) => (
+          <path key={`t${i}`} d={arcPath(RM, s.a0, s.a1)} fill="none"
+            stroke={darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}
+            strokeWidth={RW} strokeLinecap="round" />
+        ))}
+
+        {/* Colored arcs — opacity transition on active */}
+        {segs.map((s, i) => (
+          <path key={`a${i}`} d={arcPath(RM, s.a0, s.a1)} fill="none"
+            stroke={s.color} strokeWidth={RW} strokeLinecap="round"
+            opacity={activeIdx === i ? 1 : 0.2}
+            style={{ transition: 'opacity 0.7s ease' }} />
+        ))}
+
+        {/* Glow halo + dot on each arc's midpoint */}
+        {segs.map((s, i) => {
+          const [x, y] = toXY(s.center, RM);
+          const active = activeIdx === i;
+          return (
+            <g key={`d${i}`}>
+              <circle cx={x} cy={y} r={15} fill={s.color}
+                opacity={active ? 0.18 : 0} style={{ transition: 'opacity 0.5s' }} />
+              <circle cx={x} cy={y} r={active ? 7.5 : 5} fill="white"
+                opacity={active ? 1 : 0.35} style={{ transition: 'all 0.5s ease' }} />
+            </g>
+          );
+        })}
+
+        {/* Labels positioned at outer edge of each segment */}
+        {segs.map((s, i) => {
+          const [lx, ly] = toXY(s.center, RO + 34);
+          return (
+            <g key={`l${i}`} opacity={activeIdx === i ? 1 : 0.35}
+              style={{ transition: 'opacity 0.5s' }}>
+              <text x={lx} y={ly - 5} textAnchor="middle" fill={s.color}
+                fontSize="12.5" fontWeight="800" fontFamily="system-ui,sans-serif">{s.label}</text>
+              <text x={lx} y={ly + 9} textAnchor="middle"
+                fill={darkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'}
+                fontSize="8.5" fontFamily="system-ui,sans-serif">{s.sub}</text>
+            </g>
+          );
+        })}
+
+        {/* Center circle */}
+        <circle cx={cx} cy={cy} r={RI - 8}
+          fill={darkMode ? '#0a0a12' : 'white'}
+          stroke={darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'} strokeWidth="1" />
+      </svg>
+
+      {/* Animated center text */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div style={{ width: (RI - 8) * 2 - 20 }} className="text-center px-2">
+          <AnimatePresence mode="wait">
+            <motion.div key={activeIdx}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.4 }}
+              className={cn('text-[11px] font-semibold leading-snug', darkMode ? 'text-white/80' : 'text-gray-600')}>
+              {centerLines[activeIdx].map((line, j) => <span key={j} className="block">{line}</span>)}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Innovation Section (SAP-style "Innovation never stops") ───────────────────
+
+function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashboardClick }: {
+  isTR: boolean; darkMode: boolean; d: (dk: string, lt: string) => string;
+  onTryClick: () => void; isLoggedIn: boolean; onDashboardClick?: () => void;
+}) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (paused) { if (intervalRef.current) clearInterval(intervalRef.current); return; }
+    intervalRef.current = setInterval(() => setActiveIdx(i => (i + 1) % 3), 4000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [paused]);
+
+  const items = [
+    {
+      icon: Activity,
+      title: 'CETPA Business AI',
+      desc: isTR
+        ? 'Gömülü yapay zeka, satış tahminlerini otomatikleştirir ve her süreçte eyleme dönüşür.'
+        : 'Embedded AI automates sales forecasts and turns insights into action across every process.',
+    },
+    {
+      icon: LayoutDashboard,
+      title: isTR ? 'CETPA Cloud ERP' : 'CETPA Cloud ERP',
+      desc: isTR
+        ? 'Bulut ERP uygulamaları, tüm iş süreçlerinizi tek platformda düzenler ve işletmenizin çalışma şeklini geliştirmek için yapay zeka analizlerini etkinleştirir.'
+        : 'Cloud ERP applications organize all your business processes on a single platform and enable AI analytics to improve how your business operates.',
+    },
+    {
+      icon: Database,
+      title: isTR ? 'CETPA Data Cloud' : 'CETPA Data Cloud',
+      desc: isTR
+        ? 'Güvenilir, bağlamsal veriler yapay zekaya ve uygulamalara ortak yön vererek veri odaklı kararlar almanızı sağlar.'
+        : 'Reliable, contextual data guides both AI and applications on a unified path, enabling data-driven decisions.',
+    },
+  ];
+
+  const rightDesc = isTR
+    ? 'Yapay zekayı, verileri ve uygulamaları CETPA Business Suite ile bir araya getirerek her kararın bir sonraki karar için bilgi sağladığı, içgörüyü eyleme ve eylemi sürekli yeniliğe dönüştüren bir sistem oluşturun.'
+    : 'Bring together AI, data and applications with CETPA Business Suite to create a system where every decision informs the next, turning insight into action and action into continuous innovation.';
+
+  return (
+    <section className={cn('py-24 relative overflow-hidden', d('bg-white/[0.02]', 'bg-slate-50/70'))}>
+      {/* Subtle ambient */}
+      <div className="absolute inset-0 pointer-events-none"
+        style={{ background: d(
+          'radial-gradient(ellipse at 15% 55%, rgba(124,58,237,0.06) 0%, transparent 55%)',
+          'radial-gradient(ellipse at 15% 55%, rgba(124,58,237,0.04) 0%, transparent 55%)'
+        )}} />
+
+      <div className="max-w-6xl mx-auto px-6 relative z-10">
+        {/* Eyebrow + title */}
+        <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
+          <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
+            CETPA Business Suite
+          </p>
+          <h2 className={cn('text-3xl md:text-4xl font-black mb-16 leading-tight', d('text-white', 'text-gray-900'))}>
+            {isTR ? 'İnovasyon asla durmaz' : 'Innovation never stops'}
+          </h2>
+        </motion.div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* ── Left: Animated orb ── */}
+          <motion.div className="flex flex-col items-center"
+            initial={{ opacity: 0, scale: 0.9 }} whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }} transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}>
+            <InnovationOrb isTR={isTR} darkMode={darkMode} activeIdx={activeIdx} />
+            {/* Pause/Play toggle */}
+            <button
+              onClick={() => setPaused(p => !p)}
+              className={cn(
+                'mt-3 w-8 h-8 rounded-full border flex items-center justify-center transition-all',
+                d('border-white/15 text-white/35 hover:text-white/65 hover:bg-white/6',
+                  'border-black/12 text-black/30 hover:text-black/55 hover:bg-black/5')
+              )}
+              title={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
+            >
+              {paused
+                ? <Play className="w-3 h-3" />
+                : <Pause className="w-3 h-3" />}
+            </button>
+          </motion.div>
+
+          {/* ── Right: Content ── */}
+          <motion.div initial={{ opacity: 0, x: 24 }} whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}>
+            <h3 className={cn('text-2xl font-black mb-4 leading-tight', d('text-white', 'text-gray-900'))}>
+              {isTR ? 'Bağlantıyı momentuma dönüştürün' : 'Turn connectivity into momentum'}
+            </h3>
+            <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/50'))}>
+              {rightDesc}
+            </p>
+
+            {/* Clickable feature rows */}
+            <div className="space-y-2">
+              {items.map((item, i) => {
+                const Icon = item.icon;
+                const isActive = activeIdx === i;
+                return (
+                  <button key={i} className="w-full text-left"
+                    onClick={() => { setActiveIdx(i); setPaused(true); }}>
+                    <div className={cn(
+                      'flex gap-4 p-4 rounded-2xl transition-all duration-300 group border',
+                      isActive
+                        ? d('bg-white/6 border-white/10', 'bg-white border-black/8 shadow-md')
+                        : d('border-transparent hover:bg-white/4', 'border-transparent hover:bg-white hover:border-black/6 hover:shadow-sm')
+                    )}>
+                      <div className={cn(
+                        'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all',
+                        isActive ? 'bg-brand/15' : 'bg-brand/8 group-hover:bg-brand/12'
+                      )}>
+                        <Icon className="w-[18px] h-[18px] text-brand" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={cn('font-bold text-[13px] transition-colors',
+                            isActive ? 'text-brand' : d('text-white/80', 'text-gray-800'))}>
+                            {item.title}
+                          </span>
+                          <ArrowRight className={cn('w-3.5 h-3.5 transition-all',
+                            isActive ? 'text-brand translate-x-0.5' : d('text-white/25', 'text-black/25'))} />
+                        </div>
+                        <p className={cn('text-xs leading-relaxed', d('text-white/40', 'text-black/45'))}>
+                          {item.desc}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={isLoggedIn ? onDashboardClick : onTryClick}
+              className="mt-8 bg-brand text-white px-6 py-3 rounded-full text-sm font-bold hover:bg-orange-500 transition-all shadow-md shadow-brand/25 flex items-center gap-2 active:scale-95">
+              {isTR ? "CETPA Business Suite'i keşfedin" : 'Explore CETPA Business Suite'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Spotlight Section (enterprise split-layout feature block) ─────────────────
+
+function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ctaLabel, onCta, reverse = false, icon: Icon, accent, stat1, stat2 }: {
+  isTR: boolean; darkMode: boolean; d: (dk: string, lt: string) => string;
+  eyebrow: string; title: string; desc: string; bullets: string[];
+  ctaLabel: string; onCta: () => void;
+  reverse?: boolean;
+  icon: React.ElementType; accent: string;
+  stat1?: { value: string; label: string };
+  stat2?: { value: string; label: string };
+}) {
+  const visual = (
+    <motion.div
+      initial={{ opacity: 0, x: reverse ? -30 : 30 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+      className={cn(
+        'relative rounded-3xl p-8 flex flex-col items-center justify-center gap-6 min-h-[320px]',
+        d('bg-white/4 border border-white/8', 'bg-white border border-black/8 shadow-xl')
+      )}
+      style={{
+        background: d(
+          `radial-gradient(circle at 30% 30%, ${accent}12 0%, transparent 65%)`,
+          `radial-gradient(circle at 30% 30%, ${accent}07 0%, transparent 65%)`
+        )
+      }}
+    >
+      {/* Corner accent blob */}
+      <div className="absolute top-0 right-0 w-48 h-48 rounded-br-3xl overflow-hidden pointer-events-none opacity-30"
+        style={{ background: `radial-gradient(circle at 100% 0%, ${accent}30 0%, transparent 70%)` }} />
+
+      {/* Icon */}
+      <div className="w-20 h-20 rounded-3xl flex items-center justify-center relative z-10"
+        style={{ backgroundColor: `${accent}15`, boxShadow: `0 0 0 8px ${accent}08` }}>
+        <Icon className="w-10 h-10" style={{ color: accent }} />
+      </div>
+
+      {/* Bullet pills */}
+      <div className="w-full space-y-2.5 relative z-10">
+        {bullets.slice(0, 4).map((b, i) => (
+          <motion.div key={i}
+            initial={{ opacity: 0, x: 12 }} whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }} transition={{ delay: i * 0.07 }}
+            className={cn('flex items-center gap-3 px-4 py-2.5 rounded-xl', d('bg-white/6', 'bg-gray-50'))}>
+            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: `${accent}20` }}>
+              <Check className="w-2.5 h-2.5" style={{ color: accent }} />
+            </div>
+            <span className={cn('text-xs font-medium', d('text-white/75', 'text-gray-700'))}>{b}</span>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Mini stats */}
+      {(stat1 || stat2) && (
+        <div className="flex gap-4 w-full relative z-10">
+          {[stat1, stat2].filter(Boolean).map((s, i) => s && (
+            <div key={i} className={cn('flex-1 text-center px-3 py-3 rounded-2xl', d('bg-white/5', 'bg-gray-50'))}>
+              <p className="text-2xl font-black" style={{ color: accent }}>{s.value}</p>
+              <p className={cn('text-[10px] font-medium mt-0.5', d('text-white/40', 'text-black/40'))}>{s.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+
+  const content = (
+    <motion.div
+      initial={{ opacity: 0, x: reverse ? 30 : -30 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: accent }}>{eyebrow}</p>
+      <h2 className={cn('text-3xl md:text-4xl font-black mb-5 leading-tight', d('text-white', 'text-gray-900'))}>
+        {title}
+      </h2>
+      <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/50'))}>{desc}</p>
+      <ul className="space-y-3.5 mb-10">
+        {bullets.map((b, i) => (
+          <li key={i} className={cn('flex items-start gap-3 text-sm', d('text-white/70', 'text-gray-700'))}>
+            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+              style={{ backgroundColor: `${accent}15` }}>
+              <Check className="w-2.5 h-2.5" style={{ color: accent }} />
+            </div>
+            {b}
+          </li>
+        ))}
+      </ul>
+      <button onClick={onCta}
+        className="inline-flex items-center gap-2 font-bold text-sm transition-all hover:gap-3"
+        style={{ color: accent }}>
+        {ctaLabel}
+        <ArrowRight className="w-4 h-4" />
+      </button>
+    </motion.div>
+  );
+
+  return (
+    <section className="py-20">
+      <div className="max-w-6xl mx-auto px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-14 items-center">
+          {reverse ? <>{content}{visual}</> : <>{visual}{content}</>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function LandingPage({
@@ -259,7 +634,7 @@ export default function LandingPage({
   return (
     <div className={cn('min-h-screen font-sans overflow-x-hidden transition-colors duration-500', d('bg-[#05050a] text-[#f5f5f7]', 'bg-[#fafafa] text-[#111]'))}>
 
-      {/* CSS keyframes for sparkle + gradient animations */}
+      {/* CSS keyframes */}
       <style>{`
         @keyframes cetpa-sparkle {
           0%,100% { opacity: 0; transform: scale(0.5) rotate(0deg); }
@@ -321,7 +696,6 @@ export default function LandingPage({
 
       {/* ── Navigation ──────────────────────────────────────────────────────── */}
       <nav className="fixed top-0 left-0 right-0 z-50">
-        {/* Always-visible backdrop — subtle at top, stronger on scroll */}
         <div className={cn(
           'transition-all duration-300',
           scrolled
@@ -329,16 +703,15 @@ export default function LandingPage({
             : d('bg-[#05050a]/50 border-b border-white/4 backdrop-blur-sm', 'bg-white/70 border-b border-black/5 backdrop-blur-sm')
         )}>
           <div className="max-w-6xl mx-auto flex items-center justify-between h-[60px] px-5 sm:px-8">
-
-            {/* Logo + nav links */}
             <div className="flex items-center gap-8">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 w-auto object-contain flex-shrink-0" />
               <div className="hidden md:flex items-center gap-7">
                 {[
-                  { id: 'how',      label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
-                  { id: 'features', label: isTR ? 'Özellikler'    : 'Features'     },
-                  { id: 'pricing',  label: isTR ? 'Fiyatlar'      : 'Pricing'      },
-                  { id: 'solutions',label: isTR ? 'Sektörler'     : 'Industries'   },
+                  { id: 'innovation', label: isTR ? 'Ürünler'       : 'Products'    },
+                  { id: 'how',        label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
+                  { id: 'features',   label: isTR ? 'Özellikler'    : 'Features'    },
+                  { id: 'pricing',    label: isTR ? 'Fiyatlar'      : 'Pricing'     },
+                  { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
                 ].map(({ id, label }) => (
                   <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
                     className={cn('text-[13px] font-medium whitespace-nowrap transition-colors', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
@@ -347,20 +720,15 @@ export default function LandingPage({
                 ))}
               </div>
             </div>
-
-            {/* Right controls */}
             <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* Language */}
               <button onClick={onLanguageToggle}
                 className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
-              {/* Dark mode */}
               <button onClick={onDarkModeToggle}
                 className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
                 {darkMode ? <Sun className="w-[15px] h-[15px]" /> : <Moon className="w-[15px] h-[15px]" />}
               </button>
-
               {!isLoggedIn ? (
                 <>
                   <button onClick={onLoginClick}
@@ -387,18 +755,13 @@ export default function LandingPage({
 
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
       <section className={cn('relative min-h-screen flex flex-col items-center justify-center pt-24 pb-16 overflow-hidden cetpa-grid-bg')}>
-
-        {/* Background orbs */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full blur-[200px] pointer-events-none"
           style={{ background: d('radial-gradient(circle, rgba(255,64,0,0.12) 0%, transparent 70%)', 'radial-gradient(circle, rgba(255,64,0,0.07) 0%, transparent 70%)') }} />
         <div className="absolute bottom-0 right-0 w-[500px] h-[500px] rounded-full blur-[140px] pointer-events-none"
           style={{ background: d('rgba(255,140,0,0.06)', 'rgba(255,140,0,0.04)') }} />
-
-        {/* Sparkles */}
         <SparkleField count={22} color={d('#ff4000', '#ff6020')} />
 
         <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
-          {/* Badge */}
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
             className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-bold tracking-wide mb-8 uppercase', d('bg-white/4 border-white/10 text-white/70', 'bg-black/4 border-black/10 text-black/60'))}>
             <div className="relative">
@@ -408,21 +771,15 @@ export default function LandingPage({
             {isTR ? 'Türkiye\'nin #1 B2B Cloud ERP\'si · 200+ aktif müşteri' : 'Turkey\'s #1 B2B Cloud ERP · 200+ active customers'}
           </motion.div>
 
-          {/* Headline */}
           <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}
             className="text-5xl sm:text-6xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6">
             {isTR ? (
-              <>İşletmenizin<br />
-                <span className="cetpa-gradient-text">Dijital Omurgası</span>
-              </>
+              <>İşletmenizin<br /><span className="cetpa-gradient-text">Dijital Omurgası</span></>
             ) : (
-              <>Your Business<br />
-                <span className="cetpa-gradient-text">Digital Backbone</span>
-              </>
+              <>Your Business<br /><span className="cetpa-gradient-text">Digital Backbone</span></>
             )}
           </motion.h1>
 
-          {/* Subtitle */}
           <motion.p initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}
             className={cn('text-lg md:text-xl leading-relaxed mb-10 max-w-2xl mx-auto', d('text-white/50', 'text-black/50'))}>
             {isTR
@@ -430,7 +787,6 @@ export default function LandingPage({
               : 'Manage sales, logistics, production and accounting on one platform. Full integration with Shopify, Mikro and Luca.'}
           </motion.p>
 
-          {/* CTAs */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.3 }}
             className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
             <button onClick={isLoggedIn ? onDashboardClick : onTryClick}
@@ -446,109 +802,50 @@ export default function LandingPage({
             </button>
           </motion.div>
 
-          {/* Trust line */}
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
             className={cn('text-xs', d('text-white/30', 'text-black/30'))}>
             {isTR ? '✓ Kredi kartı gerekmez · ✓ 14 gün ücretsiz · ✓ İstediğiniz zaman iptal' : '✓ No credit card · ✓ 14-day free trial · ✓ Cancel anytime'}
           </motion.p>
 
-          {/* ── MacBook marketing-shot mockup ── */}
+          {/* MacBook mockup */}
           <motion.div
             initial={{ opacity: 0, y: 70 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 1, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="relative mt-14 px-4 sm:px-0"
           >
-            {/* Ambient glow under MacBook */}
             <div className="absolute left-1/2 -translate-x-1/2 bottom-0 w-3/4 h-24 blur-[60px] pointer-events-none rounded-full"
               style={{ background: 'radial-gradient(ellipse, rgba(255,64,0,0.28) 0%, rgba(255,140,0,0.12) 60%, transparent 100%)' }} />
-
-            {/* MacBook outer wrapper — perspective tilt */}
             <div style={{ perspective: '1800px' }}>
               <div style={{ transform: 'rotateX(4deg)', transformOrigin: 'bottom center' }}>
-
-                {/* ── Screen lid ── */}
-                <div
-                  className="relative mx-auto rounded-t-[18px] rounded-b-[4px] overflow-hidden"
-                  style={{
-                    background: d(
-                      'linear-gradient(180deg, #1c1c1e 0%, #2a2a2e 100%)',
-                      'linear-gradient(180deg, #c8c8cc 0%, #b8b8bc 100%)'
-                    ),
-                    padding: '10px 10px 0',
-                    boxShadow: d(
-                      'inset 0 1px 0 rgba(255,255,255,0.08), 0 -1px 0 rgba(255,255,255,0.04)',
-                      'inset 0 1px 0 rgba(255,255,255,0.6), 0 -1px 0 rgba(0,0,0,0.08)'
-                    ),
-                    maxWidth: '860px',
-                    margin: '0 auto',
-                  }}
-                >
-                  {/* Camera notch */}
+                <div className="relative mx-auto rounded-t-[18px] rounded-b-[4px] overflow-hidden"
+                  style={{ background: d('linear-gradient(180deg, #1c1c1e 0%, #2a2a2e 100%)', 'linear-gradient(180deg, #c8c8cc 0%, #b8b8bc 100%)'), padding: '10px 10px 0', boxShadow: d('inset 0 1px 0 rgba(255,255,255,0.08), 0 -1px 0 rgba(255,255,255,0.04)', 'inset 0 1px 0 rgba(255,255,255,0.6), 0 -1px 0 rgba(0,0,0,0.08)'), maxWidth: '860px', margin: '0 auto' }}>
                   <div className="absolute top-[14px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
                     <div className="w-1.5 h-1.5 rounded-full bg-black/40" />
                   </div>
-
-                  {/* Screen bezel */}
-                  <div
-                    className="rounded-t-[10px] rounded-b-0 overflow-hidden"
-                    style={{
-                      background: '#000',
-                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)',
-                    }}
-                  >
-                    {/* Browser chrome inside screen */}
+                  <div className="rounded-t-[10px] rounded-b-0 overflow-hidden" style={{ background: '#000', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)' }}>
                     <div style={{ background: d('#111116', '#f0f0f5'), height: '34px', display: 'flex', alignItems: 'center', padding: '0 14px', gap: '8px', borderBottom: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }}>
-                      {/* Traffic lights */}
                       <div style={{ display: 'flex', gap: '5px', flexShrink: 0 }}>
                         <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#ff5f56', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
                         <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#febc2e', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
                         <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#28c840', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
                       </div>
-                      {/* URL bar */}
                       <div style={{ flex: 1, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.07)'), borderRadius: 6, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 40px' }}>
                         <span style={{ fontSize: 10, color: d('rgba(255,255,255,0.35)', 'rgba(0,0,0,0.4)'), fontFamily: 'system-ui, sans-serif', letterSpacing: '0.01em' }}>
                           🔒 app.cetpa.io/dashboard
                         </span>
                       </div>
-                      {/* Dots */}
                       <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                         {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: d('rgba(255,255,255,0.15)', 'rgba(0,0,0,0.15)') }} />)}
                       </div>
                     </div>
-                    {/* Dashboard screenshot */}
-                    <img
-                      src={heroImageUrl}
-                      alt="CETPA Dashboard"
-                      className="w-full block"
-                      style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }}
-                    />
+                    <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} />
                   </div>
                 </div>
-
-                {/* ── Hinge shadow strip ── */}
                 <div className="mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
-
-                {/* ── Base / keyboard deck ── */}
-                <div
-                  className="mx-auto"
-                  style={{
-                    maxWidth: '900px',
-                    background: d(
-                      'linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)',
-                      'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'
-                    ),
-                    borderRadius: '0 0 16px 16px',
-                    padding: '10px 32px 0',
-                    boxShadow: d(
-                      '0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)',
-                      '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)'
-                    ),
-                  }}
-                >
-                  {/* Keyboard area (decorative) */}
+                <div className="mx-auto" style={{ maxWidth: '900px', background: d('linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)', 'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'), borderRadius: '0 0 16px 16px', padding: '10px 32px 0', boxShadow: d('0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)', '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)') }}>
                   <div style={{ height: 52, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, opacity: 0.6 }}>
-                    {[3, 4, 3].map((cols, ri) => (
+                    {[3, 4, 3].map((_, ri) => (
                       <div key={ri} style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                         {Array.from({ length: 10 }).map((_, ki) => (
                           <div key={ki} style={{ height: 5, flex: 1, borderRadius: 2, background: d('rgba(255,255,255,0.08)', 'rgba(0,0,0,0.12)') }} />
@@ -556,21 +853,14 @@ export default function LandingPage({
                       </div>
                     ))}
                   </div>
-                  {/* Trackpad */}
                   <div style={{ width: 100, height: 60, borderRadius: 10, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.10)'), margin: '8px auto 10px', border: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }} />
                 </div>
-
-                {/* ── Foot/table reflection ── */}
                 <div className="mx-auto" style={{ maxWidth: '920px', height: '1px', background: d('rgba(255,255,255,0.04)', 'rgba(0,0,0,0.06)') }} />
               </div>
             </div>
 
-            {/* ── Floating stat cards ── */}
-            {/* Left card — Revenue */}
-            <div
-              className={cn('absolute left-0 sm:-left-4 lg:-left-10 top-[18%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
-              style={{ animationDelay: '0s', animationDuration: '5s' }}
-            >
+            {/* Floating stat cards */}
+            <div className={cn('absolute left-0 sm:-left-4 lg:-left-10 top-[18%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))} style={{ animationDelay: '0s', animationDuration: '5s' }}>
               <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
                 <TrendingUp className="w-4.5 h-4.5 text-emerald-500" style={{ width: 18, height: 18 }} />
               </div>
@@ -580,12 +870,7 @@ export default function LandingPage({
                 <p className="text-[9px] text-emerald-500 font-bold mt-0.5">↑ 12% {isTR ? 'geçen aya göre' : 'vs last month'}</p>
               </div>
             </div>
-
-            {/* Right card — Orders */}
-            <div
-              className={cn('absolute right-0 sm:-right-4 lg:-right-10 top-[12%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
-              style={{ animationDelay: '1.2s', animationDuration: '6s' }}
-            >
+            <div className={cn('absolute right-0 sm:-right-4 lg:-right-10 top-[12%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden sm:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))} style={{ animationDelay: '1.2s', animationDuration: '6s' }}>
               <div className="w-9 h-9 rounded-xl bg-brand/15 flex items-center justify-center flex-shrink-0">
                 <Package style={{ width: 18, height: 18 }} className="text-brand" />
               </div>
@@ -595,12 +880,7 @@ export default function LandingPage({
                 <p className="text-[9px] text-brand font-bold mt-0.5">↑ 34 {isTR ? 'bugün eklendi' : 'added today'}</p>
               </div>
             </div>
-
-            {/* Bottom right card — AI Score */}
-            <div
-              className={cn('absolute right-2 sm:right-4 lg:-right-6 bottom-[22%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden lg:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))}
-              style={{ animationDelay: '2.8s', animationDuration: '7s' }}
-            >
+            <div className={cn('absolute right-2 sm:right-4 lg:-right-6 bottom-[22%] cetpa-float rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl hidden lg:flex items-center gap-3', d('bg-[#0f0f14]/95 border-white/12 text-white', 'bg-white/95 border-black/10 text-black'))} style={{ animationDelay: '2.8s', animationDuration: '7s' }}>
               <div className="w-9 h-9 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
                 <BarChart3 style={{ width: 18, height: 18 }} className="text-violet-500" />
               </div>
@@ -640,6 +920,14 @@ export default function LandingPage({
             ))}
           </div>
         </div>
+      </div>
+
+      {/* ── Innovation Section (SAP-style animated ring) ───────────────────── */}
+      <div id="innovation">
+        <InnovationSection
+          isTR={isTR} darkMode={darkMode} d={d}
+          onTryClick={onTryClick} isLoggedIn={isLoggedIn} onDashboardClick={onDashboardClick}
+        />
       </div>
 
       {/* ── Integrations logos ─────────────────────────────────────────────── */}
@@ -682,11 +970,8 @@ export default function LandingPage({
               {isTR ? 'Karmaşık kurulum yok. Hemen başlayın, aynı gün verim alın.' : 'No complex setup. Start immediately, get results the same day.'}
             </p>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
-            {/* Connector line */}
             <div className="hidden md:block absolute top-14 left-[33%] right-[33%] h-px" style={{ background: `linear-gradient(90deg, transparent, ${brand}40, transparent)` }} />
-
             {steps.map((s, i) => {
               const Icon = s.icon;
               return (
@@ -708,11 +993,51 @@ export default function LandingPage({
         </div>
       </section>
 
+      {/* ── Spotlight: CRM & Sales ────────────────────────────────────────── */}
+      <SpotlightSection
+        isTR={isTR} darkMode={darkMode} d={d}
+        eyebrow={isTR ? 'CRM & Satış' : 'CRM & Sales'}
+        title={isTR ? 'Müşterilerinizi merkeze alın' : 'Put your customers at the center'}
+        desc={isTR
+          ? 'AI destekli lead skorlaması, müşteri portföy yönetimi ve satış tahminleri ile satış ekibinizin performansını artırın. B2B ilişkilerini güçlendirin, fırsatları kaçırmayın.'
+          : 'Boost your sales team with AI-powered lead scoring, customer portfolio management and sales forecasting. Strengthen B2B relationships and never miss an opportunity.'}
+        bullets={isTR
+          ? ['AI destekli lead skorlaması ve tahmin', 'B2B müşteri portföy & kredi limiti yönetimi', 'Tekliften siparişe otomatik dönüşüm', 'Satış hedef takibi ve gerçek zamanlı raporlama', 'Pipeline görünümü ve Kanban yönetimi']
+          : ['AI-powered lead scoring and forecasting', 'B2B customer portfolio & credit limit management', 'Automatic quote-to-order conversion', 'Sales target tracking and real-time reporting', 'Pipeline view and Kanban management']}
+        ctaLabel={isTR ? 'CRM Modülünü Keşfet →' : 'Explore CRM Module →'}
+        onCta={isLoggedIn ? (onDashboardClick || onTryClick) : onTryClick}
+        reverse={false}
+        icon={Users}
+        accent="#ff4000"
+        stat1={{ value: '%60', label: isTR ? 'daha az manuel iş' : 'less manual work' }}
+        stat2={{ value: '%35', label: isTR ? 'daha az müşteri kaybı' : 'less customer churn' }}
+      />
+
+      {/* ── Spotlight: Finance & Accounting ──────────────────────────────── */}
+      <SpotlightSection
+        isTR={isTR} darkMode={darkMode} d={d}
+        eyebrow={isTR ? 'Finans & Muhasebe' : 'Finance & Accounting'}
+        title={isTR ? 'Finansal operasyonlarınızı otomatikleştirin' : 'Automate your financial operations'}
+        desc={isTR
+          ? 'e-Fatura, Mikro ERP ve Luca entegrasyonu ile muhasebe süreçlerinizi otomatize edin. Nakit akışını anlık takip edin, ay sonu kapanışını saatlere indirin.'
+          : 'Automate your accounting with e-Invoice, Mikro ERP and Luca integration. Track cash flow in real time and reduce month-end close to hours.'}
+        bullets={isTR
+          ? ['e-Fatura, e-Arşiv ve ihracat faturası', 'Mikro ERP & Luca çift yönlü senkronizasyon', 'Otomatik banka mutabakatı ve çek takibi', 'Gerçek zamanlı nakit akışı ve bütçe analizi', 'Bordro, SGK ve vergi entegrasyonu']
+          : ['e-Invoice, e-Archive and export invoice', 'Mikro ERP & Luca two-way synchronization', 'Automatic bank reconciliation and cheque tracking', 'Real-time cash flow and budget analytics', 'Payroll, social security and tax integration']}
+        ctaLabel={isTR ? 'Finans Modülünü Keşfet →' : 'Explore Finance Module →'}
+        onCta={isLoggedIn ? (onDashboardClick || onTryClick) : onTryClick}
+        reverse={true}
+        icon={Landmark}
+        accent="#3b82f6"
+        stat1={{ value: '3sa', label: isTR ? 'ay sonu kapanış' : 'month-end close' }}
+        stat2={{ value: '99%', label: isTR ? 'e-fatura uyumu' : 'e-invoice compliance' }}
+      />
+
       {/* ── Features ─────────────────────────────────────────────────────── */}
       <section id="features" className="py-32">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-20">
-            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Özellikler' : 'Features'}</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Tüm Modüller' : 'All Modules'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'İşletmenizin her yönü kapsandı' : 'Every aspect of your business covered'}
             </h2>
@@ -738,6 +1063,26 @@ export default function LandingPage({
         </div>
       </section>
 
+      {/* ── Spotlight: Logistics ─────────────────────────────────────────── */}
+      <SpotlightSection
+        isTR={isTR} darkMode={darkMode} d={d}
+        eyebrow={isTR ? 'Lojistik & Depo' : 'Logistics & Warehouse'}
+        title={isTR ? 'Tedarik zincirinizi görünür kılın' : 'Make your supply chain visible'}
+        desc={isTR
+          ? 'Çok depolu stok yönetimi, akıllı kargo rotalama ve gerçek zamanlı teslimat takibi ile lojistik operasyonlarınızı optimize edin. Kargo firmalarıyla doğrudan entegrasyon.'
+          : 'Optimize logistics with multi-warehouse inventory, smart cargo routing and real-time delivery tracking. Direct integration with cargo companies.'}
+        bullets={isTR
+          ? ['Çok depolu stok transferi ve barkod okuma', 'Akıllı rotalama ve sürücü atama', 'Tüm kargo şirketleriyle doğrudan entegrasyon', 'Teslimat fotoğrafı ve müşteri bildirimi', 'Kritik stok uyarıları ve otomatik sipariş']
+          : ['Multi-warehouse transfer and barcode scanning', 'Smart routing and driver assignment', 'Direct integration with all cargo companies', 'Delivery photo capture and customer notification', 'Critical stock alerts and automatic reorder']}
+        ctaLabel={isTR ? 'Lojistik Modülünü Keşfet →' : 'Explore Logistics Module →'}
+        onCta={isLoggedIn ? (onDashboardClick || onTryClick) : onTryClick}
+        reverse={false}
+        icon={Truck}
+        accent="#10b981"
+        stat1={{ value: '%40', label: isTR ? 'teslimat hızı artışı' : 'faster delivery' }}
+        stat2={{ value: '0', label: isTR ? 'kayıp kargo' : 'lost packages' }}
+      />
+
       {/* ── Demo video ───────────────────────────────────────────────────── */}
       <section id="demo" className={cn('py-32 relative overflow-hidden', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
         <div className="absolute inset-0 pointer-events-none"
@@ -750,34 +1095,27 @@ export default function LandingPage({
           <p className={cn('max-w-xl mx-auto mb-12', d('text-white/40', 'text-black/40'))}>
             {isTR ? '4 dakikalık tur ile tüm modülleri keşfedin.' : 'Discover all modules in a 4-minute tour.'}
           </p>
-
-          {/* Video placeholder */}
           <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
             className={cn('relative rounded-3xl border overflow-hidden cursor-pointer group', d('border-white/8', 'border-black/8'))}>
             <img src={heroImageUrl} alt="Demo" className="w-full h-auto blur-[1px] group-hover:blur-0 transition-all duration-500 brightness-75 group-hover:brightness-90" />
-            {/* Play button */}
             <div className="absolute inset-0 flex items-center justify-center">
               <button onClick={onTryClick}
                 className="relative w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-all duration-300 group-hover:bg-brand">
-                {/* Pulse rings */}
                 <div className="absolute inset-0 rounded-full bg-white/30" style={{ animation: 'cetpa-pulse-ring 2s ease-out infinite' }} />
                 <div className="absolute inset-0 rounded-full bg-white/20" style={{ animation: 'cetpa-pulse-ring 2s 0.5s ease-out infinite' }} />
                 <Play className="w-8 h-8 text-brand group-hover:text-white transition-colors ml-1" />
               </button>
             </div>
-            {/* Duration badge */}
             <div className="absolute bottom-4 right-4 bg-black/70 text-white text-xs font-bold px-3 py-1.5 rounded-xl backdrop-blur-sm flex items-center gap-1.5">
               <Clock className="w-3 h-3" /> 4:12
             </div>
           </motion.div>
-
-          {/* Metric counters below video */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16">
             {[
               { label: isTR ? 'Aktif Müşteri' : 'Active Clients',     to: 200,  suffix: '+',   prefix: '' },
               { label: isTR ? 'İşlenen Ciro' : 'Revenue Processed',   to: 2,    suffix: 'B+ ₺',prefix: '' },
               { label: isTR ? 'Aylık Sipariş' : 'Monthly Orders',     to: 50,   suffix: 'K+',  prefix: '' },
-              { label: isTR ? 'Ortalama Puan' : 'Avg. Rating',        to: 4,    suffix: '.9★',  prefix: '' },
+              { label: isTR ? 'Ortalama Puan' : 'Avg. Rating',        to: 4,    suffix: '.9★', prefix: '' },
             ].map((s, i) => (
               <motion.div key={i} initial={{ opacity: 0, y: 12 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1 }}
                 className={cn('p-6 rounded-2xl border text-center', d('bg-white/3 border-white/8', 'bg-white border-black/8 shadow-sm'))}>
@@ -817,7 +1155,6 @@ export default function LandingPage({
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'Her ölçek için doğru plan' : 'The right plan for every scale'}
             </h2>
-            {/* Billing toggle */}
             <div className="inline-flex items-center gap-3 mt-6">
               <span className={cn('text-sm font-semibold', !pricingAnnual && d('text-white/70', 'text-black/70'))}>
                 {isTR ? 'Aylık' : 'Monthly'}
@@ -834,7 +1171,6 @@ export default function LandingPage({
               </span>
             </div>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {pricingPlans.map((plan, i) => {
               const price = isTR
@@ -946,16 +1282,9 @@ export default function LandingPage({
           <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
             className="relative rounded-[3rem] overflow-hidden p-16 md:p-24 text-center cetpa-noise"
             style={{ background: d('linear-gradient(135deg, #0f0a08 0%, #1a0800 30%, #0f0a08 100%)', 'linear-gradient(135deg, #fff5f0 0%, #fff0e8 50%, #fff5f0 100%)') }}>
-
-            {/* Gradient border */}
             <div className="absolute inset-0 rounded-[3rem] pointer-events-none" style={{ background: 'linear-gradient(135deg, rgba(255,64,0,0.3) 0%, transparent 50%, rgba(255,140,0,0.2) 100%)', WebkitMask: 'padding-box, border-box', padding: '1px' }} />
-
-            {/* Sparkles inside CTA */}
             <SparkleField count={16} color={brand} />
-
-            {/* Glow */}
             <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at center, rgba(255,64,0,0.15) 0%, transparent 60%)' }} />
-
             <div className="relative z-10">
               <div className="inline-flex items-center gap-2 bg-brand/15 border border-brand/25 text-brand text-xs font-bold px-4 py-2 rounded-full mb-8 uppercase tracking-wide">
                 <SparkleIcon size={10} />
@@ -995,7 +1324,6 @@ export default function LandingPage({
       <footer className={cn('border-t pt-16 pb-10', d('border-white/6', 'border-black/6'))}>
         <div className="max-w-6xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-12">
-            {/* Brand */}
             <div className="col-span-2 md:col-span-1">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 mb-4" />
               <p className={cn('text-xs leading-relaxed mb-4', d('text-white/35', 'text-black/35'))}>
@@ -1006,7 +1334,6 @@ export default function LandingPage({
                 <span className={cn('text-xs', d('text-white/30', 'text-black/30'))}>99.9% uptime</span>
               </div>
             </div>
-            {/* Product */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Ürün' : 'Product'}</p>
               <div className="space-y-3">
@@ -1016,7 +1343,6 @@ export default function LandingPage({
                 ))}
               </div>
             </div>
-            {/* Company */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Şirket' : 'Company'}</p>
               <div className="space-y-3">
@@ -1025,7 +1351,6 @@ export default function LandingPage({
                 ))}
               </div>
             </div>
-            {/* Legal + contact */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Yasal' : 'Legal'}</p>
               <div className="space-y-3">
@@ -1043,7 +1368,6 @@ export default function LandingPage({
               </div>
             </div>
           </div>
-
           <div className={cn('pt-8 border-t flex flex-col sm:flex-row items-center justify-between gap-4', d('border-white/6', 'border-black/6'))}>
             <p className={cn('text-xs', d('text-white/20', 'text-black/20'))}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
             <div className="flex items-center gap-2">
