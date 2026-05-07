@@ -18317,6 +18317,26 @@ function AppContent() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
+    const usd = exchangeRates?.USD ?? 32;
+    const eur = exchangeRates?.EUR ?? 35;
+    const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
+    const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
+    const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
+    const cv = v / rate;
+    if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
+    return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
+  };
+  const KpiCurrencyToggle = () => (
+    <div className="flex gap-1">
+      {(['TRY','USD','EUR'] as const).map(c => (
+        <button key={c} onClick={() => setKpiCurrency(c)}
+          className={`text-xs px-2.5 py-1 rounded-full font-medium transition-all ${kpiCurrency===c?'bg-brand text-white':'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          {c}
+        </button>
+      ))}
+    </div>
+  );
 
   // ── Commission Rules (for lead detail commission summary) ─────────────────
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
@@ -21976,7 +21996,7 @@ function AppContent() {
                                 <span className="text-[10px] text-gray-400">{s.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
                               </div>
                               <div className="flex items-center gap-3 text-xs">
-                                <span className="text-gray-500">₺{(s.revenue / 1000).toFixed(1)}K</span>
+                                <span className="text-gray-500">{fmtKpi(s.revenue,'K',1)}</span>
                                 <span className={`font-bold ${s.margin >= 30 ? 'text-emerald-600' : s.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
                                   %{s.margin} {currentLanguage === 'tr' ? 'marj' : 'margin'}
                                 </span>
@@ -22794,6 +22814,9 @@ function AppContent() {
                     })}
                   </div>
 
+                  {/* Currency toggle */}
+                  <div className="flex justify-end"><KpiCurrencyToggle /></div>
+
                   {/* ── Genel Muhasebe ── */}
                   {muhasebeTab === 'genel' && (
                     <motion.div key="muhasebe-genel" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -22853,7 +22876,7 @@ function AppContent() {
                           </div>
                           <div className="text-right">
                             <p className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Toplam KDV' : 'Total VAT'}</p>
-                            <p className="text-2xl font-bold text-purple-600">₺{totalKDV.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                            <p className="text-2xl font-bold text-purple-600">{fmtKpi(totalKDV,'full',0)}</p>
                           </div>
                         </div>
                         <div className="grid grid-cols-3 gap-3 mb-5">
@@ -22878,7 +22901,7 @@ function AppContent() {
                                   <div className="h-full bg-purple-400 rounded-full transition-all" style={{ width: `${w}%` }} />
                                 </div>
                                 <span className="text-xs text-gray-600 tabular-nums shrink-0 w-24 text-right">
-                                  ₺{m.kdvCollected.toLocaleString(undefined,{maximumFractionDigits:0})}
+                                  {fmtKpi(m.kdvCollected,'full',0)}
                                 </span>
                                 <span className="text-[10px] text-gray-400 shrink-0">{m.invoiced} {currentLanguage==='tr'?'fatura':'inv.'}</span>
                               </div>
@@ -23265,7 +23288,7 @@ function AppContent() {
                                       onClick={() => { setBankBalanceDraft(String(bankBalance)); setBankBalanceEditing(true); }}
                                       className="text-xl font-black text-blue-700 hover:text-blue-900 transition-colors"
                                     >
-                                      ₺{bankBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      {fmtKpi(bankBalance,'full',0)}
                                       <span className="text-[10px] text-blue-400 ml-1">✎</span>
                                     </button>
                                   )}
@@ -23280,7 +23303,7 @@ function AppContent() {
                                   <div key={i} className={`flex items-center justify-between py-2.5 border-b border-gray-50 ${i === 2 ? 'border-t border-gray-200 pt-3 mt-1' : ''}`}>
                                     <span className="text-sm text-gray-600">{row.label}</span>
                                     <span className={`text-sm font-black ${row.color}`}>
-                                      {row.sign} ₺{Math.abs(row.value).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      {row.sign} {fmtKpi(Math.abs(row.value),'full',0)}
                                     </span>
                                   </div>
                                 ))}
@@ -23290,7 +23313,7 @@ function AppContent() {
                                   <div className="flex items-center justify-between p-3 bg-amber-50 rounded-xl mt-2">
                                     <span className="text-sm font-bold text-amber-700">{currentLanguage === 'tr' ? 'Açıklanamayan Fark' : 'Unexplained Difference'}</span>
                                     <span className="text-sm font-black text-amber-700">
-                                      {gap > 0 ? '+' : '−'} ₺{gapAbs.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      {gap > 0 ? '+' : '−'} {fmtKpi(gapAbs,'full',0)}
                                     </span>
                                   </div>
                                 )}
@@ -23453,7 +23476,7 @@ function AppContent() {
                                   <p className="text-xs font-medium text-gray-800 truncate">{o.customerName}</p>
                                   <p className="text-[10px] text-gray-400">{o.daysOld}g {currentLanguage==='tr'?'gecikmiş':'overdue'}</p>
                                 </div>
-                                <span className="text-xs font-bold text-red-600 shrink-0">₺{(o.totalPrice||0).toLocaleString()}</span>
+                                <span className="text-xs font-bold text-red-600 shrink-0">{fmtKpi((o.totalPrice||0))}</span>
                               </div>
                             );
                           })}
@@ -23608,7 +23631,7 @@ function AppContent() {
                               <div key={row.label} className={`flex items-center justify-between py-3 ${row.bold ? 'bg-gray-50 -mx-2 px-2 rounded-xl' : ''}`}>
                                 <span className={`text-sm ${row.indent ? 'pl-4 text-gray-500' : 'font-semibold text-gray-900'}`}>{row.label}</span>
                                 <span className={`text-sm font-bold tabular-nums ${row.positive ? 'text-emerald-600' : 'text-red-500'}`}>
-                                  {row.value < 0 ? '– ' : ''}₺{Math.abs(row.value).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                  {row.value < 0 ? '– ' : ''}{fmtKpi(Math.abs(row.value),'full',0)}
                                 </span>
                               </div>
                             ))}
@@ -23634,7 +23657,7 @@ function AppContent() {
                                       <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${Math.max(gpW, 0)}%` }} />
                                     </div>
                                   </div>
-                                  <span className="text-xs text-gray-600 w-28 shrink-0 tabular-nums">₺{m.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                                  <span className="text-xs text-gray-600 w-28 shrink-0 tabular-nums">{fmtKpi(m.revenue,'full',0)}</span>
                                 </div>
                               );
                             })}
@@ -23696,8 +23719,8 @@ function AppContent() {
                           </div>
                           <div className="flex items-center justify-between text-[10px] text-gray-400 mt-1">
                             <span>₺0</span>
-                            <span className="text-red-500">▲ {currentLanguage==='tr'?'Başabaş':'B/E'} ₺{(breakEvenRev/1000).toFixed(0)}K</span>
-                            <span>₺{(Math.max(breakEvenRev * 1.5, totalRevBE)/1000).toFixed(0)}K</span>
+                            <span className="text-red-500">▲ {currentLanguage==='tr'?'Başabaş':'B/E'} {fmtKpi(breakEvenRev,'K',0)}</span>
+                            <span>{fmtKpi(Math.max(breakEvenRev * 1.5, totalRevBE),'K',0)}</span>
                           </div>
                         </div>
                         {breakEvenUnits !== null && (
@@ -23733,6 +23756,9 @@ function AppContent() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Currency toggle */}
+                  <div className="flex justify-end"><KpiCurrencyToggle /></div>
 
                   {/* Purchase Orders */}
                   {purchasingSubTab === 'pos' && (
@@ -23825,7 +23851,7 @@ function AppContent() {
                                 <div key={po.id} className="flex items-center gap-3 px-5 py-3">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs font-bold text-gray-800 truncate">{po.supplier || '—'}</p>
-                                    <p className="text-[10px] text-gray-400">₺{(po.totalAmount || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                    <p className="text-[10px] text-gray-400">{fmtKpi((po.totalAmount || 0),'full',0)}</p>
                                   </div>
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${true ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>SAS ✓</span>
@@ -24047,7 +24073,7 @@ function AppContent() {
                                   </div>
                                   <div className="flex items-center gap-4 text-[10px] text-gray-500">
                                     <span>{s.totalPOs} {currentLanguage === 'tr' ? 'sipariş' : 'POs'}</span>
-                                    <span>₺{s.totalSpend.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                                    <span>{fmtKpi(s.totalSpend,'full',0)}</span>
                                     <span className={`font-black text-sm ${s.score >= 80 ? 'text-emerald-600' : s.score >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
                                       {s.score}
                                     </span>
@@ -24122,7 +24148,7 @@ function AppContent() {
                           <div key={g.month} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                             <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
                               <span className="text-sm font-bold text-gray-700 capitalize">{g.month}</span>
-                              <span className="text-sm font-black text-brand">₺{g.total.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                              <span className="text-sm font-black text-brand">{fmtKpi(g.total,'full',0)}</span>
                             </div>
                             <div className="divide-y divide-gray-50">
                               {g.pos.map(po => (
@@ -24134,7 +24160,7 @@ function AppContent() {
                                   <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
                                     po.status === 'Onaylandı' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                                   }`}>{po.status}</span>
-                                  <span className="text-sm font-bold text-gray-800 flex-shrink-0">₺{(po.totalAmount || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                                  <span className="text-sm font-bold text-gray-800 flex-shrink-0">{fmtKpi((po.totalAmount || 0),'full',0)}</span>
                                 </div>
                               ))}
                             </div>
@@ -24222,7 +24248,7 @@ function AppContent() {
                                   <span className="text-xs font-medium text-gray-800 truncate">{sup}</span>
                                   <div className="flex items-center gap-2 shrink-0 ml-2">
                                     <span className="text-[10px] text-gray-400">%{pct}</span>
-                                    <span className="text-xs font-bold text-gray-700 tabular-nums">₺{(spend/1000).toFixed(1)}K</span>
+                                    <span className="text-xs font-bold text-gray-700 tabular-nums">{fmtKpi(spend,'K',1)}</span>
                                   </div>
                                 </div>
                                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -24269,7 +24295,7 @@ function AppContent() {
                               <span className={`text-xs font-bold shrink-0 ${po.daysOpen > 30 ? 'text-red-600' : po.daysOpen > 14 ? 'text-amber-600' : 'text-gray-600'}`}>
                                 {po.daysOpen}g
                               </span>
-                              <span className="text-xs text-gray-600 tabular-nums shrink-0">₺{(po.totalAmount||0).toLocaleString()}</span>
+                              <span className="text-xs text-gray-600 tabular-nums shrink-0">{fmtKpi((po.totalAmount||0))}</span>
                             </div>
                           ))}
                         </div>
@@ -24292,6 +24318,8 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'Çalışan yönetimi, izin, seyahat, avans ve bordro' : 'Employee management, leave, travel, advance and payroll'}
                     icon={Users}
                   />
+                  {/* Currency toggle */}
+                  <div className="flex justify-end"><KpiCurrencyToggle /></div>
                   {/* ── Phase 61: Employee Status Ring Chart ── */}
                   {employees.length > 0 && (() => {
                     const aktif  = employees.filter(e => e.status === 'Aktif').length;
@@ -24419,7 +24447,7 @@ function AppContent() {
                               ].map((k, i) => (
                                 <div key={i} className={`rounded-xl p-3 ${k.bg}`}>
                                   <p className="text-[10px] font-bold text-gray-400 mb-1">{k.label}</p>
-                                  <p className={`text-lg font-black ${k.color}`}>₺{k.value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                                  <p className={`text-lg font-black ${k.color}`}>{fmtKpi(k.value,'full',0)}</p>
                                 </div>
                               ))}
                             </div>
@@ -24450,22 +24478,22 @@ function AppContent() {
                                   <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
                                     <td className="px-4 py-2.5 font-semibold text-gray-800">{p.name}</td>
                                     <td className="px-4 py-2.5 text-gray-500">{p.department}</td>
-                                    <td className="px-4 py-2.5 font-bold text-gray-800">₺{p.gross.toLocaleString('tr-TR')}</td>
-                                    <td className="px-4 py-2.5 text-red-500">−₺{(p.sgkEmp + p.unempEmp).toLocaleString('tr-TR')}</td>
-                                    <td className="px-4 py-2.5 text-red-500">−₺{p.tax.toLocaleString('tr-TR')}</td>
-                                    <td className="px-4 py-2.5 font-black text-emerald-700">₺{p.net.toLocaleString('tr-TR')}</td>
-                                    <td className="px-4 py-2.5 text-blue-700 font-bold">₺{p.employerCost.toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 font-bold text-gray-800">{fmtKpi(p.gross)}</td>
+                                    <td className="px-4 py-2.5 text-red-500">−{fmtKpi((p.sgkEmp + p.unempEmp))}</td>
+                                    <td className="px-4 py-2.5 text-red-500">−{fmtKpi(p.tax)}</td>
+                                    <td className="px-4 py-2.5 font-black text-emerald-700">{fmtKpi(p.net)}</td>
+                                    <td className="px-4 py-2.5 text-blue-700 font-bold">{fmtKpi(p.employerCost)}</td>
                                   </tr>
                                 ))}
                               </tbody>
                               <tfoot>
                                 <tr className="bg-gray-50 border-t-2 border-gray-200 font-black text-[11px]">
                                   <td colSpan={2} className="px-4 py-2.5 text-gray-600">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
-                                  <td className="px-4 py-2.5 text-gray-800">₺{totals.gross.toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 text-gray-800">{fmtKpi(totals.gross)}</td>
                                   <td className="px-4 py-2.5 text-red-500">—</td>
-                                  <td className="px-4 py-2.5 text-red-500">₺{totals.tax.toLocaleString('tr-TR')}</td>
-                                  <td className="px-4 py-2.5 text-emerald-700">₺{totals.net.toLocaleString('tr-TR')}</td>
-                                  <td className="px-4 py-2.5 text-blue-700">₺{totals.cost.toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 text-red-500">{fmtKpi(totals.tax)}</td>
+                                  <td className="px-4 py-2.5 text-emerald-700">{fmtKpi(totals.net)}</td>
+                                  <td className="px-4 py-2.5 text-blue-700">{fmtKpi(totals.cost)}</td>
                                 </tr>
                               </tfoot>
                             </table>
@@ -24626,7 +24654,7 @@ function AppContent() {
                           </div>
                           <div className="flex items-center gap-3 text-xs text-gray-500">
                             <span>{totalActive}/{totalHeadcount} {currentLanguage === 'tr' ? 'aktif' : 'active'}</span>
-                            <span>₺{(totalSalaryBudget / 1000).toFixed(0)}K {currentLanguage === 'tr' ? 'bordro' : 'payroll'}</span>
+                            <span>{fmtKpi(totalSalaryBudget,'K',0)} {currentLanguage === 'tr' ? 'bordro' : 'payroll'}</span>
                           </div>
                         </div>
                         <div className="divide-y divide-gray-50">
@@ -24640,7 +24668,7 @@ function AppContent() {
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0 text-right">
                                 <span className="text-xs font-bold text-gray-700">{d.count} {currentLanguage === 'tr' ? 'kişi' : 'staff'}</span>
-                                <span className="text-[10px] text-gray-400">₺{(d.totalSalary / 1000).toFixed(0)}K</span>
+                                <span className="text-[10px] text-gray-400">{fmtKpi(d.totalSalary,'K',0)}</span>
                                 {d.active < d.count && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{d.count - d.active} {currentLanguage === 'tr' ? 'pasif' : 'inactive'}</span>}
                               </div>
                             </div>
@@ -25323,7 +25351,7 @@ function AppContent() {
                 {orders.slice(0,8).map((o,i) => (
                   <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 px-3 font-medium text-gray-800">{o.customerName||'—'}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-brand">₺{(o.totalPrice||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-brand">{fmtKpi((o.totalPrice||0),'full',2)}</td>
                     <td className="py-2.5 px-3 text-center hidden sm:table-cell">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status==='Delivered'?'bg-green-100 text-green-600':o.status==='Pending'?'bg-yellow-100 text-yellow-600':'bg-gray-100 text-gray-500'}`}>{o.status||'—'}</span>
                     </td>
@@ -26195,6 +26223,8 @@ function AppContent() {
           {/* ── Inventory ── */}
           {activeTab === 'inventory' && (
             <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {/* Currency toggle */}
+              <div className="flex justify-end"><KpiCurrencyToggle /></div>
               {/* ── Phase 71: Inventory Reorder Alert Strip ── */}
               {(() => {
                 const reorderItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
@@ -26476,7 +26506,7 @@ function AppContent() {
                           <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black mb-1 ${s.color}`}>{s.cls}</span>
                           <p className="text-lg font-bold text-gray-800">{s.count}</p>
                           <p className="text-[10px] text-gray-400 leading-tight">{s.label}</p>
-                          <p className="text-xs font-semibold text-gray-600 mt-0.5">₺{(s.val / 1000).toFixed(0)}K</p>
+                          <p className="text-xs font-semibold text-gray-600 mt-0.5">{fmtKpi(s.val,'K',0)}</p>
                         </div>
                       ))}
                     </div>
@@ -26487,7 +26517,7 @@ function AppContent() {
                           <div key={item.id} className="flex items-center gap-3 px-5 py-2.5">
                             <span className="text-[9px] font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded-md flex-shrink-0">A</span>
                             <p className="text-xs text-gray-700 flex-1 truncate">{item.name}</p>
-                            <p className="text-xs font-bold text-gray-800 flex-shrink-0">₺{item.value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                            <p className="text-xs font-bold text-gray-800 flex-shrink-0">{fmtKpi(item.value,'full',0)}</p>
                             <div className="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden flex-shrink-0">
                               <div className="h-1.5 bg-red-400 rounded-full" style={{ width: `${Math.min(item.pct * 2, 100)}%` }} />
                             </div>
@@ -26546,8 +26576,8 @@ function AppContent() {
                           {lowMarginItems.map(item => (
                             <tr key={item.id} className={item.margin < 0 ? 'bg-red-50/40' : ''}>
                               <td className="py-2 px-2 font-medium text-gray-800 text-xs truncate max-w-[180px]">{item.name}</td>
-                              <td className="py-2 px-2 text-right text-xs text-gray-500 tabular-nums">₺{item.cost.toLocaleString()}</td>
-                              <td className="py-2 px-2 text-right text-xs text-gray-700 tabular-nums">₺{item.price.toLocaleString()}</td>
+                              <td className="py-2 px-2 text-right text-xs text-gray-500 tabular-nums">{fmtKpi(item.cost)}</td>
+                              <td className="py-2 px-2 text-right text-xs text-gray-700 tabular-nums">{fmtKpi(item.price)}</td>
                               <td className="py-2 px-2 text-right">
                                 <span className={`text-xs font-bold tabular-nums ${item.margin < 0 ? 'text-red-600' : item.margin < 10 ? 'text-orange-600' : 'text-amber-600'}`}>
                                   %{item.margin}
@@ -26608,6 +26638,9 @@ function AppContent() {
                   })}
                 </div>
               </div>
+
+              {/* Currency toggle (pipeline/hedef tabs) */}
+              {(crmTab === 'pipeline' || crmTab === 'hedefler') && <div className="flex justify-end"><KpiCurrencyToggle /></div>}
 
               {/* CRM sub-tab: Müşteriler */}
               {crmTab === 'musteriler' && (
@@ -27163,7 +27196,7 @@ function AppContent() {
                           <div key={c.id} className={`bg-white border rounded-xl p-4 flex items-center gap-4 shadow-sm ${expired ? 'border-red-100' : expiringSoon ? 'border-amber-100' : 'border-gray-100'}`}>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-bold text-gray-900">{c.title}</p>
-                              <p className="text-xs text-gray-500">{c.customerName} · ₺{(c.value || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                              <p className="text-xs text-gray-500">{c.customerName} · {fmtKpi((c.value || 0),'full',0)}</p>
                               {c.endDate && (
                                 <p className={`text-[10px] mt-0.5 font-semibold ${expired ? 'text-red-600' : expiringSoon ? 'text-amber-600' : 'text-gray-400'}`}>
                                   {currentLanguage === 'tr'
@@ -27305,8 +27338,8 @@ function AppContent() {
                               <p className="text-[10px] text-gray-400 mt-0.5 truncate">{p.reason}</p>
                             </div>
                             <div className="flex flex-col items-end gap-1 flex-shrink-0 text-right">
-                              <p className="text-xs text-gray-400 line-through">₺{(p.standardPrice || 0).toLocaleString('tr-TR')}</p>
-                              <p className="text-sm font-bold text-gray-900">₺{(p.requestedPrice || 0).toLocaleString('tr-TR')}</p>
+                              <p className="text-xs text-gray-400 line-through">{fmtKpi((p.standardPrice || 0))}</p>
+                              <p className="text-sm font-bold text-gray-900">{fmtKpi((p.requestedPrice || 0))}</p>
                               <span className={`text-[9px] font-bold ${discountPct < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                 {discountPct < 0 ? '▼' : '▲'}{Math.abs(discountPct)}%
                               </span>
@@ -27359,7 +27392,7 @@ function AppContent() {
                           <div key={s.key} className={`apple-card p-4 border ${s.border}`}>
                             <p className={`text-xs font-semibold ${s.color}`}>{s.label}</p>
                             <p className="text-2xl font-bold text-gray-900 mt-1">{stageleads.length}</p>
-                            {totalValue > 0 && <p className="text-xs text-gray-400 mt-0.5">₺{totalValue.toLocaleString()}</p>}
+                            {totalValue > 0 && <p className="text-xs text-gray-400 mt-0.5">{fmtKpi(totalValue)}</p>}
                           </div>
                         );
                       })}
@@ -27393,7 +27426,7 @@ function AppContent() {
                                   )}
                                 </div>
                                 {lead.creditLimit ? (
-                                  <p className="text-xs text-gray-400 mt-1.5">₺{lead.creditLimit.toLocaleString()}</p>
+                                  <p className="text-xs text-gray-400 mt-1.5">{fmtKpi(lead.creditLimit)}</p>
                                 ) : null}
                                 {lead.assignedTo && (
                                   <p className="text-[10px] text-gray-400 mt-1 truncate">👤 {lead.assignedTo}</p>
@@ -27467,8 +27500,8 @@ function AppContent() {
                         </div>
                       ) : (
                         <div className="flex items-end gap-3 mb-4">
-                          <span className="text-3xl font-bold text-gray-900">₺{globalActual.toLocaleString()}</span>
-                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? `₺${monthlyTarget.toLocaleString()}` : <span className="italic">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
+                          <span className="text-3xl font-bold text-gray-900">{fmtKpi(globalActual)}</span>
+                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : <span className="italic">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
                         </div>
                       )}
                       <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
@@ -27491,7 +27524,7 @@ function AppContent() {
                                     {i === 0 && <span>🏆</span>}
                                     {r.rep}
                                   </span>
-                                  <span className="text-gray-500">₺{r.actual.toLocaleString('tr-TR', {maximumFractionDigits:0})} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
+                                  <span className="text-gray-500">{fmtKpi(r.actual,'full',0)} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
                                 </div>
                                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                                   <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : 'bg-brand'}`}
@@ -28780,7 +28813,7 @@ function AppContent() {
                                 <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.active ? (overdue ? 'bg-red-400' : 'bg-emerald-400') : 'bg-gray-200'}`} />
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-bold text-gray-800 truncate">{r.templateName}</p>
-                                  <p className="text-[10px] text-gray-400">{r.customerName} · ₺{(r.totalPrice || 0).toLocaleString('tr-TR')}</p>
+                                  <p className="text-[10px] text-gray-400">{r.customerName} · {fmtKpi((r.totalPrice || 0))}</p>
                                 </div>
                                 <span className="text-[10px] text-gray-500 flex-shrink-0">
                                   {r.frequency === 'weekly' ? (currentLanguage === 'tr' ? 'Haftalık' : 'Weekly')
@@ -30747,7 +30780,7 @@ function AppContent() {
                       max={returnModal.order.totalPrice}
                     />
                   </div>
-                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} ₺{(returnModal.order.totalPrice || 0).toLocaleString('tr-TR')}</p>
+                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} {fmtKpi((returnModal.order.totalPrice || 0))}</p>
                 </div>
               </div>
               <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
