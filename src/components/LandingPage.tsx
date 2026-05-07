@@ -339,8 +339,8 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
       <div className="max-w-6xl mx-auto px-6 relative z-10">
         {/* Eyebrow + title */}
         <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-          <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
-            CETPA Business Suite
+          <p className="text-xs font-bold tracking-widest text-brand mb-3">
+            CETPA BUSINESS SUITE
           </p>
           <h2 className={cn('text-3xl md:text-4xl font-black mb-16 leading-tight', d('text-white', 'text-gray-900'))}>
             {isTR ? 'İnovasyon asla durmaz' : 'Innovation never stops'}

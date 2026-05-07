@@ -105,7 +105,9 @@ import {
   Sun,
   Copy,
   Check,
-  Tag
+  Tag,
+  ChevronDown,
+  BarChart2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -18892,6 +18894,16 @@ function AppContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [orderStatusFilter,  setOrderStatusFilter]  = useState<string>('All'); // Phase 55
   const [leadStatusFilter,   setLeadStatusFilter]   = useState<string>('All'); // Phase 72
+  // ── Phase 501-515 ────────────────────────────────────────────────────────────
+  const [orderDateRange, setOrderDateRange] = useState<'all'|'today'|'week'|'month'|'quarter'>('all'); // Phase 501
+  const [showStmtModal, setShowStmtModal] = useState<string|null>(null); // Phase 502 — customerId
+  const [showSmartReorder, setShowSmartReorder] = useState(false); // Phase 503
+  const [smartReorderSelected, setSmartReorderSelected] = useState<Set<string>>(new Set()); // Phase 503
+  const [smartReorderCreating, setSmartReorderCreating] = useState(false); // Phase 503
+  const [deliveryNoteOrder, setDeliveryNoteOrder] = useState<Order|null>(null); // Phase 506
+  const [deliveryNoteText, setDeliveryNoteText] = useState(''); // Phase 506
+  const [invPayPending, setInvPayPending] = useState(false); // Phase 511
+  const [p513Selected, setP513Selected] = useState<string|null>(null); // Phase 513 — orderId profit popup
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -26322,6 +26334,143 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 503: Smart Reorder Panel ── */}
+              {(() => {
+                const reorderItems = inventory
+                  .filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5))
+                  .map(i => {
+                    const outMovements = inventoryMovements.filter(m =>
+                      m.type === 'out' &&
+                      (m.productId === i.id || (m as unknown as Record<string, unknown>).productName === i.name) &&
+                      (() => {
+                        const ts = typeof (m.timestamp as { toDate?: () => Date }).toDate === 'function'
+                          ? (m.timestamp as { toDate: () => Date }).toDate()
+                          : new Date(m.timestamp as string | number);
+                        return Date.now() - ts.getTime() < 30 * 86400000; // last 30 days
+                      })()
+                    );
+                    const monthlyUsage = outMovements.reduce((s, m) => s + (m.quantity || 0), 0);
+                    const suggested = Math.max(Math.ceil(monthlyUsage * 2), (i.lowStockThreshold ?? 5) * 3, 10);
+                    return { ...i, monthlyUsage, suggestedQty: suggested, isCritical: (i.stockLevel ?? 0) === 0 };
+                  })
+                  .sort((a, b) => (b.isCritical ? 1 : 0) - (a.isCritical ? 1 : 0) || b.suggestedQty - a.suggestedQty);
+                if (reorderItems.length === 0) return null;
+                return (
+                  <div className={cn("rounded-2xl border overflow-hidden", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-200 shadow-sm")}>
+                    {/* Header */}
+                    <button
+                      onClick={() => setShowSmartReorder(!showSmartReorder)}
+                      className="w-full flex items-center justify-between px-5 py-4 text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">
+                            {currentLanguage === 'tr' ? 'Akıllı Yeniden Sipariş' : 'Smart Reorder'}
+                            <span className="ml-2 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                              {reorderItems.length} {currentLanguage === 'tr' ? 'ürün' : 'items'}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Kritik veya düşük stok seviyesindeki ürünler' : 'Items at critical or low stock levels'}</p>
+                        </div>
+                      </div>
+                      <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform", showSmartReorder && "rotate-180")} />
+                    </button>
+                    {showSmartReorder && (
+                      <div className="border-t border-gray-100">
+                        {/* Bulk action bar */}
+                        {smartReorderSelected.size > 0 && (
+                          <div className="flex items-center justify-between px-5 py-3 bg-amber-50 border-b border-amber-100">
+                            <span className="text-xs font-bold text-amber-700">
+                              {smartReorderSelected.size} {currentLanguage === 'tr' ? 'ürün seçildi' : 'items selected'}
+                            </span>
+                            <div className="flex gap-2">
+                              <button onClick={() => setSmartReorderSelected(new Set())} className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-full bg-white border border-gray-200 transition-colors">
+                                {currentLanguage === 'tr' ? 'Seçimi Kaldır' : 'Deselect'}
+                              </button>
+                              <button
+                                disabled={smartReorderCreating}
+                                onClick={async () => {
+                                  setSmartReorderCreating(true);
+                                  try {
+                                    const selected = reorderItems.filter(i => smartReorderSelected.has(i.id));
+                                    const poRef = doc(collection(db, 'purchaseOrders'));
+                                    await setDoc(poRef, {
+                                      id: poRef.id,
+                                      createdAt: serverTimestamp(),
+                                      status: 'Bekliyor',
+                                      autoGenerated: true,
+                                      items: selected.map(i => ({ productId: i.id, sku: i.sku, name: i.name, quantity: i.suggestedQty, costPrice: i.costPrice ?? 0, supplier: i.supplier ?? '' })),
+                                      totalCost: selected.reduce((s, i) => s + i.suggestedQty * (i.costPrice ?? 0), 0),
+                                      notes: currentLanguage === 'tr' ? 'Akıllı yeniden sipariş ile oluşturuldu' : 'Auto-generated via Smart Reorder',
+                                    });
+                                    toast(currentLanguage === 'tr' ? `Satın alma siparişi oluşturuldu ✓` : `Purchase order created ✓`, 'success');
+                                    setSmartReorderSelected(new Set());
+                                  } catch (e) { console.error(e); } finally { setSmartReorderCreating(false); }
+                                }}
+                                className="flex items-center gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-full transition-colors disabled:opacity-50"
+                              >
+                                {smartReorderCreating ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ShoppingCart className="w-3 h-3" />}
+                                {currentLanguage === 'tr' ? 'Satın Alma Siparişi Oluştur' : 'Create Purchase Order'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+                          {reorderItems.map(item => (
+                            <div key={item.id} className={cn("flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors", smartReorderSelected.has(item.id) && "bg-amber-50/50")}>
+                              <input
+                                type="checkbox"
+                                className="rounded accent-amber-500 cursor-pointer"
+                                checked={smartReorderSelected.has(item.id)}
+                                onChange={e => {
+                                  const next = new Set(smartReorderSelected);
+                                  if (e.target.checked) next.add(item.id); else next.delete(item.id);
+                                  setSmartReorderSelected(next);
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-gray-800 truncate">{item.name}</span>
+                                  {item.isCritical && <span className="text-[9px] font-black bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full shrink-0">{currentLanguage === 'tr' ? 'KRİTİK' : 'CRITICAL'}</span>}
+                                </div>
+                                <p className="text-[10px] text-gray-400">{item.sku} · {currentLanguage === 'tr' ? `Stok: ${item.stockLevel ?? 0}` : `Stock: ${item.stockLevel ?? 0}`} · {currentLanguage === 'tr' ? `Aylık kullanım: ${item.monthlyUsage}` : `Monthly usage: ${item.monthlyUsage}`}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="text-sm font-bold text-amber-700">{item.suggestedQty} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Önerilen' : 'Suggested'}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Select All footer */}
+                        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50">
+                          <button
+                            onClick={() => {
+                              if (smartReorderSelected.size === reorderItems.length) {
+                                setSmartReorderSelected(new Set());
+                              } else {
+                                setSmartReorderSelected(new Set(reorderItems.map(i => i.id)));
+                              }
+                            }}
+                            className="text-xs font-semibold text-gray-500 hover:text-brand transition-colors"
+                          >
+                            {smartReorderSelected.size === reorderItems.length
+                              ? (currentLanguage === 'tr' ? 'Tümünü Kaldır' : 'Deselect All')
+                              : (currentLanguage === 'tr' ? 'Tümünü Seç' : 'Select All')}
+                          </button>
+                          <p className="text-[10px] text-gray-400">
+                            {currentLanguage === 'tr' ? `Tahmini toplam maliyet: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*(i.costPrice??0),0).toLocaleString('tr-TR')}` : `Est. total cost: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*(i.costPrice??0),0).toLocaleString('tr-TR')}`}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 75: Inventory Category Distribution ── */}
               {inventory.length > 0 && (() => {
                 const catMap: Record<string, { units: number; value: number }> = {};
@@ -28334,6 +28483,15 @@ function AppContent() {
                         <FileDown className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Ekstre PDF' : 'Statement PDF'}
                       </button>
+                      {/* Phase 502: In-app Customer Statement Modal */}
+                      <button
+                        onClick={() => setShowStmtModal(selectedLead.id)}
+                        className="apple-button-secondary flex items-center gap-2"
+                        title={currentLanguage === 'tr' ? 'Hesap ekstresi görüntüle' : 'View account statement'}
+                      >
+                        <BarChart2 className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Ekstre Görüntüle' : 'View Statement'}
+                      </button>
                       {/* Phase 92: Mark as Won / Reopen */}
                       {selectedLead.status !== 'Closed' ? (
                         <button
@@ -29066,6 +29224,32 @@ function AppContent() {
                 })}
               </div>
 
+              {/* ── Phase 501: Date Range Quick Filter ── */}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className={cn("text-[10px] font-semibold uppercase tracking-wider", darkMode ? "text-white/40" : "text-gray-400")}>
+                  {currentLanguage === 'tr' ? 'Dönem' : 'Period'}:
+                </span>
+                {([
+                  { v: 'all',     tr: 'Tümü',       en: 'All Time' },
+                  { v: 'today',   tr: 'Bugün',       en: 'Today' },
+                  { v: 'week',    tr: 'Bu Hafta',    en: 'This Week' },
+                  { v: 'month',   tr: 'Bu Ay',       en: 'This Month' },
+                  { v: 'quarter', tr: 'Bu Çeyrek',   en: 'This Quarter' },
+                ] as { v: 'all'|'today'|'week'|'month'|'quarter'; tr: string; en: string }[]).map(({ v, tr, en }) => (
+                  <button key={v} onClick={() => setOrderDateRange(v)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-full text-xs font-semibold transition-all border",
+                      orderDateRange === v
+                        ? "bg-brand text-white border-transparent shadow-sm"
+                        : darkMode
+                          ? "bg-white/5 border-white/10 text-white/60 hover:bg-white/10"
+                          : "bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-800"
+                    )}>
+                    {currentLanguage === 'tr' ? tr : en}
+                  </button>
+                ))}
+              </div>
+
               {/* ── Phase 70: Order Aging Alert ── */}
               {(() => {
                 const now = Date.now();
@@ -29162,12 +29346,26 @@ function AppContent() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {(() => {
-                        const filtered = orders.filter(o =>
-                          (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
-                          (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                          o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                          o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
-                        );
+                        const filtered = orders.filter(o => {
+                          if (orderStatusFilter !== 'All' && o.status !== orderStatusFilter) return false;
+                          const q = orderSearch.toLowerCase();
+                          if (q && !o.customerName.toLowerCase().includes(q) && !o.shopifyOrderId?.toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
+                          // Phase 501: date range filter
+                          if (orderDateRange !== 'all') {
+                            const raw = o.createdAt ?? o.syncedAt;
+                            if (raw) {
+                              const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                                ? (raw as { toDate: () => Date }).toDate()
+                                : new Date(raw as string | number | Date);
+                              const now = new Date();
+                              if (orderDateRange === 'today' && d.toDateString() !== now.toDateString()) return false;
+                              if (orderDateRange === 'week') { const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); ws.setHours(0,0,0,0); if (d < ws) return false; }
+                              if (orderDateRange === 'month' && (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear())) return false;
+                              if (orderDateRange === 'quarter' && (Math.floor(d.getMonth()/3) !== Math.floor(now.getMonth()/3) || d.getFullYear() !== now.getFullYear())) return false;
+                            }
+                          }
+                          return true;
+                        });
                         const sorted = sortData(filtered, orderSort.key, orderSort.dir);
                         return sorted.length === 0 ? (
                           <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
@@ -29216,7 +29414,11 @@ function AppContent() {
                             </td>
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                               <select value={order.status} onChange={(e) => {
-                                e.stopPropagation(); openConfirm({
+                                e.stopPropagation();
+                                const newStatus = e.target.value as Order['status'];
+                                // Phase 506: delivery note modal
+                                if (newStatus === 'Delivered') { setDeliveryNoteOrder(order); setDeliveryNoteText(''); return; }
+                                openConfirm({
                                   title: currentT.status,
                                   message: `Update status to "${e.target.value}"?`,
                                   onConfirm: () => handleUpdateOrderStatus(order.id, e.target.value as Order['status'])
@@ -29479,6 +29681,102 @@ function AppContent() {
                         <MessageSquare className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
                       </button>
+                      {/* Phase 511: Payment Reminder copy button */}
+                      {!selectedOrder.paid && (
+                        <button
+                          onClick={() => {
+                            const o = selectedOrder;
+                            const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                            const rate = kpiCurrency === 'TRY' ? 1 : kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
+                            const amt = `${sym}${(o.totalPrice / rate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            const msg = currentLanguage === 'tr'
+                              ? `Sayın ${o.customerName},\n\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
+                              : `Dear ${o.customerName},\n\nPayment of ${amt} for Order #${o.shopifyOrderId || o.id.slice(-6)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
+                            navigator.clipboard.writeText(msg).then(() =>
+                              toast(currentLanguage === 'tr' ? 'Ödeme hatırlatması kopyalandı ✓' : 'Payment reminder copied ✓', 'success')
+                            ).catch(() => {});
+                          }}
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-amber-200 transition-colors"
+                          title={currentLanguage === 'tr' ? 'Ödeme hatırlatma mesajını kopyala' : 'Copy payment reminder message'}
+                        >
+                          <Bell className="w-4 h-4" />
+                          {currentLanguage === 'tr' ? 'Hatırlatma' : 'Reminder'}
+                        </button>
+                      )}
+                      {/* Phase 513: Order Profitability popup */}
+                      {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && (() => {
+                        const revenue = selectedOrder.totalPrice || 0;
+                        const cogs = selectedOrder.lineItems.reduce((s, li) => {
+                          const inv = inventory.find(i => i.id === li.inventoryId || i.sku === li.sku);
+                          return s + (li.costPrice ?? inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+                        }, 0);
+                        const gp = revenue - cogs;
+                        const margin = revenue > 0 ? (gp / revenue * 100) : 0;
+                        return (
+                          <div className="relative">
+                            <button
+                              onClick={() => setP513Selected(p513Selected === selectedOrder.id ? null : selectedOrder.id)}
+                              className={cn(
+                                "px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border transition-colors",
+                                margin >= 30 ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                                  : margin >= 10 ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
+                                  : "bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                              )}
+                              title={currentLanguage === 'tr' ? 'Kâr analizi' : 'Profit analysis'}
+                            >
+                              <TrendingUp className="w-4 h-4" />
+                              {currentLanguage === 'tr' ? `Kâr %${margin.toFixed(1)}` : `Margin ${margin.toFixed(1)}%`}
+                            </button>
+                            {p513Selected === selectedOrder.id && (
+                              <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 p-5">
+                                <div className="flex items-center justify-between mb-4">
+                                  <h4 className="font-bold text-sm">{currentLanguage === 'tr' ? 'Kâr Analizi' : 'Profit Analysis'}</h4>
+                                  <button onClick={() => setP513Selected(null)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+                                </div>
+                                <div className="space-y-2.5 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Gelir' : 'Revenue'}</span>
+                                    <span className="font-bold text-emerald-600">₺{revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Maliyet (COGS)' : 'Cost (COGS)'}</span>
+                                    <span className="font-bold text-red-500">−₺{cogs.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="h-px bg-gray-100" />
+                                  <div className="flex justify-between">
+                                    <span className="font-bold">{currentLanguage === 'tr' ? 'Brüt Kâr' : 'Gross Profit'}</span>
+                                    <span className={cn("font-black", gp >= 0 ? "text-emerald-600" : "text-red-600")}>₺{gp.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Kâr Marjı' : 'Margin'}</span>
+                                    <span className={cn("font-bold px-2 py-0.5 rounded-full text-xs", margin >= 30 ? "bg-emerald-100 text-emerald-700" : margin >= 10 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
+                                      %{margin.toFixed(1)}
+                                    </span>
+                                  </div>
+                                  {/* Item-level breakdown */}
+                                  {selectedOrder.lineItems!.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
+                                      {selectedOrder.lineItems!.map((li, i) => {
+                                        const inv2 = inventory.find(x => x.id === li.inventoryId || x.sku === li.sku);
+                                        const liCost = (li.costPrice ?? inv2?.costPrice ?? inv2?.cost ?? li.price * 0.6) * li.quantity;
+                                        const liRev = li.price * li.quantity;
+                                        return (
+                                          <div key={i} className="flex justify-between text-[11px]">
+                                            <span className="text-gray-500 truncate max-w-[160px]">{li.name} ×{li.quantity}</span>
+                                            <span className={liRev >= liCost ? "text-emerald-600 font-semibold" : "text-red-500 font-semibold"}>
+                                              ₺{(liRev - liCost).toLocaleString('tr-TR', { minimumFractionDigits: 0 })}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {/* Phase 112: RMA / Return button */}
                       {selectedOrder.status === 'Delivered' && (
                         <button
@@ -31231,6 +31529,178 @@ function AppContent() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Phase 502: Customer Statement Modal ── */}
+      <AnimatePresence>
+        {showStmtModal && (() => {
+          const stmtLead = leads.find(l => l.id === showStmtModal);
+          const stmtOrders = orders.filter(o => o.leadId === showStmtModal || o.customerName === stmtLead?.name);
+          const totalRev = stmtOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const paidRev = stmtOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const unpaidRev = totalRev - paidRev;
+          return (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+              >
+                {/* Header */}
+                <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-brand/5 to-transparent">
+                  <div>
+                    <p className="text-[10px] font-bold text-brand uppercase tracking-widest mb-0.5">
+                      {currentLanguage === 'tr' ? 'Hesap Ekstresi' : 'Account Statement'}
+                    </p>
+                    <h3 className="text-lg font-black text-gray-900">{stmtLead?.name || showStmtModal}</h3>
+                    {stmtLead?.company && <p className="text-xs text-gray-400">{stmtLead.company}</p>}
+                  </div>
+                  <button onClick={() => setShowStmtModal(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="w-5 h-5 text-gray-500" />
+                  </button>
+                </div>
+                {/* KPI strip */}
+                <div className="grid grid-cols-3 gap-px bg-gray-100 shrink-0">
+                  {[
+                    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: totalRev, color: 'text-gray-900' },
+                    { label: currentLanguage === 'tr' ? 'Tahsil Edilen' : 'Collected', value: paidRev, color: 'text-emerald-600' },
+                    { label: currentLanguage === 'tr' ? 'Alacak' : 'Outstanding', value: unpaidRev, color: unpaidRev > 0 ? 'text-red-600' : 'text-gray-400' },
+                  ].map(k => (
+                    <div key={k.label} className="bg-white px-5 py-4">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                      <p className={cn("text-lg font-black", k.color)}>₺{k.value.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</p>
+                    </div>
+                  ))}
+                </div>
+                {/* Order list */}
+                <div className="overflow-y-auto flex-1">
+                  {stmtOrders.length === 0 ? (
+                    <div className="flex items-center justify-center h-40 text-gray-400 text-sm">
+                      {currentLanguage === 'tr' ? 'Sipariş bulunamadı' : 'No orders found'}
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Sipariş' : 'Order'}</th>
+                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</th>
+                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                          <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tutar' : 'Amount'}</th>
+                          <th className="px-5 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {stmtOrders.sort((a, b) => {
+                          const ta = a.createdAt ? (typeof (a.createdAt as { toDate?: () => Date }).toDate === 'function' ? (a.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(a.createdAt as string | number).getTime()) : 0;
+                          const tb = b.createdAt ? (typeof (b.createdAt as { toDate?: () => Date }).toDate === 'function' ? (b.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(b.createdAt as string | number).getTime()) : 0;
+                          return tb - ta;
+                        }).map(o => {
+                          const rawDate = o.createdAt ?? o.syncedAt;
+                          const oDate = rawDate ? (typeof (rawDate as { toDate?: () => Date }).toDate === 'function' ? (rawDate as { toDate: () => Date }).toDate() : new Date(rawDate as string | number)) : null;
+                          const statusColors: Record<string, string> = { Pending: 'bg-amber-50 text-amber-600', Processing: 'bg-purple-50 text-purple-600', Shipped: 'bg-blue-50 text-blue-600', Delivered: 'bg-emerald-50 text-emerald-600', Cancelled: 'bg-gray-100 text-gray-500' };
+                          const statusTR: Record<string, string> = { Pending: 'Bekliyor', Processing: 'Hazırlanıyor', Shipped: 'Kargoda', Delivered: 'Teslim', Cancelled: 'İptal' };
+                          return (
+                            <tr key={o.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-5 py-3 font-medium text-gray-800">#{o.shopifyOrderId || o.id.slice(-6)}</td>
+                              <td className="px-5 py-3 text-gray-500">{oDate?.toLocaleDateString('tr-TR') || '—'}</td>
+                              <td className="px-5 py-3">
+                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", statusColors[o.status] || 'bg-gray-100 text-gray-500')}>
+                                  {currentLanguage === 'tr' ? (statusTR[o.status] || o.status) : o.status}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-right font-bold text-gray-900">₺{(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                              <td className="px-5 py-3 text-center">
+                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", o.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-50 text-amber-600')}>
+                                  {o.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                  <button
+                    onClick={() => { const stmtLead2 = leads.find(l => l.id === showStmtModal); if (stmtLead2) exportCustomerStatement(stmtLead2, stmtOrders, currentLanguage as 'tr' | 'en'); }}
+                    className="apple-button-secondary flex items-center gap-2 text-sm"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    {currentLanguage === 'tr' ? 'PDF İndir' : 'Download PDF'}
+                  </button>
+                  <button onClick={() => setShowStmtModal(null)} className="apple-button-primary text-sm px-5">
+                    {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* ── Phase 506: Delivery Note Modal ── */}
+      <AnimatePresence>
+        {deliveryNoteOrder && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="px-6 pt-6 pb-2 flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Teslim Onayı' : 'Confirm Delivery'}</h3>
+                  <p className="text-xs text-gray-400">#{deliveryNoteOrder.shopifyOrderId || deliveryNoteOrder.id.slice(-6)} · {deliveryNoteOrder.customerName}</p>
+                </div>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                <p className="text-sm text-gray-600">
+                  {currentLanguage === 'tr' ? 'Siparişi teslim edildi olarak işaretlemek üzeresiniz. İsterseniz bir teslimat notu ekleyin.' : 'You are about to mark this order as delivered. Optionally add a delivery note.'}
+                </p>
+                <textarea
+                  value={deliveryNoteText}
+                  onChange={e => setDeliveryNoteText(e.target.value)}
+                  rows={3}
+                  placeholder={currentLanguage === 'tr' ? 'Teslimat notu (isteğe bağlı)…' : 'Delivery note (optional)…'}
+                  className="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-200 resize-none"
+                />
+              </div>
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={() => { setDeliveryNoteOrder(null); setDeliveryNoteText(''); }}
+                  className="flex-1 apple-button-secondary"
+                >
+                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  onClick={async () => {
+                    const ord = deliveryNoteOrder;
+                    await handleUpdateOrderStatus(ord.id, 'Delivered');
+                    if (deliveryNoteText.trim()) {
+                      await updateDoc(doc(db, 'orders', ord.id), { deliveryNote: deliveryNoteText.trim(), deliveredAt: serverTimestamp() });
+                    }
+                    if (selectedOrder?.id === ord.id) setSelectedOrder({ ...selectedOrder!, status: 'Delivered' });
+                    setDeliveryNoteOrder(null);
+                    setDeliveryNoteText('');
+                    toast(currentLanguage === 'tr' ? 'Sipariş teslim edildi ✓' : 'Order marked as delivered ✓', 'success');
+                  }}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Teslim Edildi' : 'Mark Delivered'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
