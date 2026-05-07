@@ -2109,6 +2109,17 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
   const [reportsTab, setReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'>('genel');
   const [invSummarySort, setInvSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'name', dir: 'asc'});
   const [logisticsSummarySort, setLogisticsSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'customerName', dir: 'asc'});
+  const [analyticsCurrency, setAnalyticsCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  const fmtAna = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
+    const usd = exchangeRates?.USD ?? 32;
+    const eur = exchangeRates?.EUR ?? 35;
+    const rate = analyticsCurrency === 'USD' ? usd : analyticsCurrency === 'EUR' ? eur : 1;
+    const sym = analyticsCurrency === 'USD' ? '$' : analyticsCurrency === 'EUR' ? '€' : '₺';
+    const locale = analyticsCurrency === 'USD' ? 'en-US' : analyticsCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
+    const cv = v / rate;
+    if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
+    return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
+  };
 
   // HR Data for Reports
   const [hrStats, setHrStats] = useState({
@@ -2295,6 +2306,16 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         </div>
       </div>
 
+      {/* Analytics Currency Toggle */}
+      <div className="flex justify-end gap-1">
+        {(['TRY','USD','EUR'] as const).map(c => (
+          <button key={c} onClick={() => setAnalyticsCurrency(c)}
+            className={`text-xs px-2.5 py-1 rounded-full font-medium transition-all ${analyticsCurrency===c?'bg-brand text-white':'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+            {c}
+          </button>
+        ))}
+      </div>
+
       {/* ── GENEL BAKIŞ ── */}
       {reportsTab === 'genel' && (
         <div className="space-y-6">
@@ -2401,12 +2422,12 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-emerald-50 rounded-2xl p-4">
                 <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide">MRR</p>
-                <p className="text-3xl font-black text-emerald-700 mt-1">₺{(mrr/1000).toFixed(1)}K</p>
+                <p className="text-3xl font-black text-emerald-700 mt-1">{fmtAna(mrr,'K',1)}</p>
                 <p className="text-[10px] text-emerald-600 mt-0.5">{currentLanguage==='tr'?'Aylık tekrarlayan':'Monthly recurring'}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide">ARR</p>
-                <p className="text-3xl font-black text-blue-700 mt-1">₺{(arr/1000).toFixed(0)}K</p>
+                <p className="text-3xl font-black text-blue-700 mt-1">{fmtAna(arr,'K',0)}</p>
                 <p className="text-[10px] text-blue-600 mt-0.5">{currentLanguage==='tr'?'Yıllık projeksiyon':'Annual projection'}</p>
               </div>
             </div>
@@ -2416,7 +2437,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 return (
                   <div key={r.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
                     <span className="text-gray-700 truncate">{r.templateName} · {r.customerName}</span>
-                    <span className="font-bold text-emerald-600 shrink-0 ml-2">₺{Math.round(monthly).toLocaleString()}/m</span>
+                    <span className="font-bold text-emerald-600 shrink-0 ml-2">{fmtAna(Math.round(monthly))}/m</span>
                   </div>
                 );
               })}
@@ -2873,7 +2894,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       </td>
                       <td className="py-2.5 px-3 text-gray-500 text-xs hidden sm:table-cell">{item.category||'—'}</td>
                       <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{item.stockLevel}</td>
-                      <td className="py-2.5 px-3 text-right text-gray-500 text-xs hidden md:table-cell">₺{((item.stockLevel*(item.prices?.['Retail']||0))).toLocaleString('tr-TR',{minimumFractionDigits:0})}</td>
+                      <td className="py-2.5 px-3 text-right text-gray-500 text-xs hidden md:table-cell">{fmtAna(item.stockLevel*(item.prices?.['Retail']||0))}</td>
                       <td className="py-2.5 px-3 text-center">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.stockLevel <= item.lowStockThreshold ? 'bg-red-100 text-red-600' : item.stockLevel <= item.lowStockThreshold*2 ? 'bg-yellow-100 text-yellow-600' : 'bg-green-100 text-green-600'}`}>
                           {item.stockLevel <= item.lowStockThreshold ? (currentLanguage==='tr'?'Kritik':'Critical') : item.stockLevel <= item.lowStockThreshold*2 ? (currentLanguage==='tr'?'Düşük':'Low') : (currentLanguage==='tr'?'Normal':'Normal')}
@@ -2930,8 +2951,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                             <p className="text-[9px] text-gray-400">{p.sku}</p>
                           </td>
                           <td className="py-3 px-3 text-right text-xs font-semibold text-gray-600">{p.units}</td>
-                          <td className="py-3 px-3 text-right text-xs font-bold text-gray-800 hidden sm:table-cell">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
-                          <td className="py-3 px-3 text-right text-xs text-gray-500 hidden md:table-cell">₺{p.cogs.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="py-3 px-3 text-right text-xs font-bold text-gray-800 hidden sm:table-cell">{fmtAna(p.revenue)}</td>
+                          <td className="py-3 px-3 text-right text-xs text-gray-500 hidden md:table-cell">{fmtAna(p.cogs)}</td>
                           <td className="py-3 px-3 text-right">
                             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : p.margin >= 15 ? 'bg-amber-100 text-amber-700' : p.cogs > 0 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400'}`}>
                               {p.cogs > 0 ? `%${p.margin}` : '—'}
@@ -2977,7 +2998,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                           <span className="text-[9px] text-gray-400">{c.items} {currentLanguage === 'tr' ? 'ürün' : 'items'}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs">
-                          <span className="text-gray-500">₺{(c.stockValue / 1000).toFixed(1)}K</span>
+                          <span className="text-gray-500">{fmtAna(c.stockValue,'K',1)}</span>
                           {c.costValue > 0 && <span className={`font-bold ${c.margin >= 30 ? 'text-emerald-600' : c.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{c.margin}</span>}
                         </div>
                       </div>
@@ -2989,7 +3010,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 </div>
                 <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between text-xs font-bold text-gray-600">
                   <span>{cats.length} {currentLanguage === 'tr' ? 'kategori' : 'categories'}</span>
-                  <span>{currentLanguage === 'tr' ? 'Toplam Stok Değeri' : 'Total Stock Value'}: ₺{(totalStockVal / 1000).toFixed(1)}K</span>
+                  <span>{currentLanguage === 'tr' ? 'Toplam Stok Değeri' : 'Total Stock Value'}: {fmtAna(totalStockVal,'K',1)}</span>
                 </div>
               </div>
             );
@@ -3108,7 +3129,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                             <div className={`h-full rounded-full ${tier === 'A' ? 'bg-emerald-400' : tier === 'B' ? 'bg-blue-400' : 'bg-gray-300'}`} style={{ width: `${w}%` }} />
                           </div>
                         </div>
-                        <span className="text-xs text-gray-500 shrink-0 tabular-nums w-20 text-right">₺{s.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                        <span className="text-xs text-gray-500 shrink-0 tabular-nums w-20 text-right">{fmtAna(s.revenue,'full',0)}</span>
                       </div>
                     );
                   })}
@@ -3198,7 +3219,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-gray-400">{Math.round((v.revenue / total177) * 100)}%</span>
-                        <span className="font-bold text-gray-800 tabular-nums">₺{(v.revenue/1000).toFixed(1)}K</span>
+                        <span className="font-bold text-gray-800 tabular-nums">{fmtAna(v.revenue,'K',1)}</span>
                       </div>
                     </div>
                   ))}
@@ -3563,11 +3584,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Ciro' : 'Revenue / Employee'}</p>
-                <p className="text-2xl font-black text-gray-800">₺{(revPerEmp188/1000).toFixed(0)}K</p>
+                <p className="text-2xl font-black text-gray-800">{fmtAna(revPerEmp188,'K',0)}</p>
               </div>
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Ort. Maaş' : 'Avg Salary'}</p>
-                <p className="text-2xl font-black text-gray-800">₺{(avgSalary188/1000).toFixed(0)}K</p>
+                <p className="text-2xl font-black text-gray-800">{fmtAna(avgSalary188,'K',0)}</p>
               </div>
             </div>
             <div className="space-y-3">
@@ -3576,7 +3597,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={t.label} className="flex items-center justify-between p-3 bg-purple-50 rounded-xl">
                   <div>
                     <p className="text-xs font-bold text-purple-800">{t.label}</p>
-                    <p className="text-[10px] text-purple-600">₺{(t.rev/1000).toFixed(0)}K {currentLanguage === 'tr' ? 'hedef ciro' : 'target revenue'}</p>
+                    <p className="text-[10px] text-purple-600">{fmtAna(t.rev,'K',0)} {currentLanguage === 'tr' ? 'hedef ciro' : 'target revenue'}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-black text-purple-700">{t.headcount} {currentLanguage === 'tr' ? 'kişi' : 'staff'}</p>
@@ -3660,7 +3681,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                         <div key={dept}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-xs font-medium text-gray-800 truncate">{dept}</span>
-                            <span className="text-xs font-bold text-gray-700 tabular-nums ml-2 shrink-0">₺{total.toLocaleString()}</span>
+                            <span className="text-xs font-bold text-gray-700 tabular-nums ml-2 shrink-0">{fmtAna(total)}</span>
                           </div>
                           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div className="h-full bg-purple-400 rounded-full" style={{ width: `${Math.round((total / maxDeptSal) * 100)}%` }} />
@@ -3724,7 +3745,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     {deptList169.map(([dept, rev]) => (
                       <div key={dept} className="flex items-center justify-between text-xs">
                         <span className="text-gray-700 truncate">{dept}</span>
-                        <span className="font-bold text-gray-800 ml-2">₺{(rev/1000).toFixed(1)}K</span>
+                        <span className="font-bold text-gray-800 ml-2">{fmtAna(rev,'K',1)}</span>
                       </div>
                     ))}
                   </div>
@@ -3775,7 +3796,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-2">
                     <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage==='tr'?'sip.':'ord.'}</span>
-                    <span className="text-xs font-bold text-emerald-600">₺{c.revenue.toLocaleString()}</span>
+                    <span className="text-xs font-bold text-emerald-600">{fmtAna(c.revenue)}</span>
                   </div>
                 </div>
               ))}
@@ -3888,7 +3909,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="mb-5">
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-gray-600">{currentLanguage==='tr'?'Teklif Değeri Dönüşümü':'Quote Value Conversion'}</span>
-                <span className="font-semibold text-emerald-600">₺{convertedValue.toLocaleString()} / ₺{totalQuoteValue.toLocaleString()}</span>
+                <span className="font-semibold text-emerald-600">{fmtAna(convertedValue)} / {fmtAna(totalQuoteValue)}</span>
               </div>
               <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-emerald-400 rounded-full transition-all" style={{ width: `${totalQuoteValue > 0 ? Math.round((convertedValue/totalQuoteValue)*100) : 0}%` }} />
@@ -4040,7 +4061,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <p className="text-xs font-semibold text-gray-800 truncate">{c.name}</p>
                     <p className="text-[10px] text-gray-400">{c.daysDormant} {currentLanguage==='tr'?'gündür sipariş yok':'days since last order'} · {c.orders} {currentLanguage==='tr'?'önceki sip.':'prev orders'}</p>
                   </div>
-                  <span className="text-xs font-bold text-amber-600 shrink-0 ml-3">₺{(c.ltv/1000).toFixed(1)}K LTV</span>
+                  <span className="text-xs font-bold text-amber-600 shrink-0 ml-3">{fmtAna(c.ltv,'K',1)} LTV</span>
                 </div>
               ))}
             </div>
@@ -4083,7 +4104,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${tier.color}`}>{tier.label}</p>
                     <p className={`text-2xl font-black ${tier.color}`}>{tier.customers.length}</p>
                     <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage==='tr'?'müşteri':'customers'}</p>
-                    <p className={`text-sm font-bold mt-2 ${tier.color}`}>₺{(tierLTV/1000).toFixed(1)}K</p>
+                    <p className={`text-sm font-bold mt-2 ${tier.color}`}>{fmtAna(tierLTV,'K',1)}</p>
                     <p className="text-[10px] text-gray-500">{currentLanguage==='tr'?'toplam ciro':'total revenue'}</p>
                     {tier.customers.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-white/60 space-y-0.5">
@@ -4219,7 +4240,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   {churned.slice(0, 5).map(c => (
                     <div key={c} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
                       <span className="text-gray-700 truncate">{c}</span>
-                      <span className="text-red-500 font-medium shrink-0 ml-2">-₺{(prevRevByCustomer[c] ?? 0).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      <span className="text-red-500 font-medium shrink-0 ml-2">-{fmtAna((prevRevByCustomer[c] ?? 0),'full',0)}</span>
                     </div>
                   ))}
                 </div>
@@ -4256,7 +4277,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📉 Fire & Kayıp Raporu' : '📉 Inventory Shrinkage Report'}</h3>
               <span className="text-xs text-red-600 font-semibold bg-red-50 px-2 py-0.5 rounded-full">
-                ₺{totalShrinkVal.toLocaleString(undefined,{maximumFractionDigits:0})} {currentLanguage==='tr'?'toplam kayıp':'total loss'}
+                {fmtAna(totalShrinkVal,'full',0)} {currentLanguage==='tr'?'toplam kayıp':'total loss'}
               </span>
             </div>
             <div className="space-y-2.5">
@@ -4265,7 +4286,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <span className="text-xs font-medium text-gray-800 truncate">{item.name}</span>
                   <div className="flex items-center gap-3 shrink-0 ml-2">
                     <span className="text-xs text-gray-500">{item.qty} {currentLanguage==='tr'?'adet':'units'}</span>
-                    <span className="text-xs font-bold text-red-500">-₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    <span className="text-xs font-bold text-red-500">-{fmtAna(item.value,'full',0)}</span>
                   </div>
                 </div>
               ))}
@@ -4586,7 +4607,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 const isLatest = i === quarters.length - 1;
                 return (
                   <div key={q.label} className="flex-1 flex flex-col items-center gap-1">
-                    <span className="text-[10px] font-semibold text-gray-600 tabular-nums">₺{(q.revenue/1000).toFixed(0)}K</span>
+                    <span className="text-[10px] font-semibold text-gray-600 tabular-nums">{fmtAna(q.revenue,'K',0)}</span>
                     <div className="w-full flex flex-col justify-end" style={{ height: '96px' }}>
                       <div className={`w-full rounded-t-xl transition-all duration-700 ${isLatest ? 'bg-brand' : 'bg-brand/30'}`}
                         style={{ height: `${Math.max(h, 3)}%` }} />
@@ -4657,7 +4678,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               {forecast.map(f => (
                 <div key={f.label} className="bg-emerald-50 rounded-xl p-3 text-center">
                   <p className="text-xs font-bold text-emerald-700">{f.label}</p>
-                  <p className="text-lg font-black text-emerald-700">₺{(f.rev/1000).toFixed(0)}K</p>
+                  <p className="text-lg font-black text-emerald-700">{fmtAna(f.rev,'K',0)}</p>
                 </div>
               ))}
             </div>
@@ -4770,7 +4791,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                         <span key={dim.t} className={`text-[9px] font-bold w-5 h-5 rounded flex items-center justify-center ${dim.v >= 4 ? 'bg-emerald-400 text-white' : dim.v >= 3 ? 'bg-amber-300 text-gray-800' : 'bg-red-200 text-gray-700'}`}>{dim.v}</span>
                       ))}
                     </div>
-                    <span className="text-xs font-bold text-gray-600 shrink-0 ml-1">₺{(c.monetary/1000).toFixed(0)}K</span>
+                    <span className="text-xs font-bold text-gray-600 shrink-0 ml-1">{fmtAna(c.monetary,'K',0)}</span>
                   </div>
                 );
               })}
@@ -4809,7 +4830,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <span className="text-xs font-medium text-gray-700 truncate">{p.name}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : p.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>%{p.margin}</span>
-                      <span className="text-xs font-bold text-gray-700">₺{(p.profit/1000).toFixed(0)}K</span>
+                      <span className="text-xs font-bold text-gray-700">{fmtAna(p.profit,'K',0)}</span>
                     </div>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -4964,7 +4985,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <span className="text-[10px] text-gray-400">{r.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
-                      <span className="text-xs font-bold text-gray-700">₺{(r.rev/1000).toFixed(0)}K</span>
+                      <span className="text-xs font-bold text-gray-700">{fmtAna(r.rev,'K',0)}</span>
                     </div>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -5080,7 +5101,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 return (
                   <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex flex-col items-center" style={{ height: '72px' }}>
-                      {m.aov > 0 && <span className={`text-[9px] font-bold ${isLatest ? 'text-brand' : 'text-gray-500'}`}>₺{(m.aov/1000).toFixed(1)}K</span>}
+                      {m.aov > 0 && <span className={`text-[9px] font-bold ${isLatest ? 'text-brand' : 'text-gray-500'}`}>{fmtAna(m.aov,'K',1)}</span>}
                       <div className="w-full flex items-end mt-auto" style={{ height: '52px' }}>
                         <div className={`w-full rounded-t-md ${isLatest ? 'bg-brand' : 'bg-gray-200'}`} style={{ height: `${Math.max(4, Math.round((m.aov / maxAOV) * 52))}px` }} />
                       </div>
@@ -5129,7 +5150,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '💤 Ölü Stok Alarmı (60 Gün Satışsız)' : '💤 Dead Stock Alert (60 Days No Sales)'}</h3>
               <span className="text-xs font-bold text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full">
-                ₺{(totalDeadVal/1000).toFixed(0)}K {currentLanguage === 'tr' ? 'hareketsiz' : 'idle'}
+                {fmtAna(totalDeadVal,'K',0)} {currentLanguage === 'tr' ? 'hareketsiz' : 'idle'}
               </span>
             </div>
             <div className="space-y-2">
@@ -5139,7 +5160,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <p className="text-xs font-medium text-gray-800">{item.name}</p>
                     <p className="text-[10px] text-gray-400">{item.category} · {item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
                   </div>
-                  <span className="text-xs font-bold text-orange-600 shrink-0 ml-2">₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  <span className="text-xs font-bold text-orange-600 shrink-0 ml-2">{fmtAna(item.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -5317,7 +5338,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div className="h-full bg-brand rounded-full" style={{ width: `${Math.round((rev / maxRev) * 100)}%` }} />
                     </div>
-                    <span className="text-xs font-bold text-gray-700 w-16 text-right shrink-0">₺{(rev/1000).toFixed(1)}K</span>
+                    <span className="text-xs font-bold text-gray-700 w-16 text-right shrink-0">{fmtAna(rev,'K',1)}</span>
                   </div>
                 );
               })}
@@ -5357,7 +5378,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div key={t.label} className={`rounded-2xl p-4 ${margin >= 30 ? 'bg-emerald-50' : margin >= 15 ? 'bg-amber-50' : 'bg-red-50'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-1">{t.label}</p>
                     <p className={`text-3xl font-black ${margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{margin}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{t.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · ₺{(t.rev/1000).toFixed(0)}K</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{t.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {fmtAna(t.rev,'K',0)}</p>
                   </div>
                 );
               })}
@@ -5465,7 +5486,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 return (
                   <div key={c.q} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex flex-col items-center" style={{ height: '80px' }}>
-                      {c.avgLTV > 0 && <span className="text-[8px] font-bold text-gray-500 mb-0.5">₺{(c.avgLTV/1000).toFixed(0)}K</span>}
+                      {c.avgLTV > 0 && <span className="text-[8px] font-bold text-gray-500 mb-0.5">{fmtAna(c.avgLTV,'K',0)}</span>}
                       <div className="w-full flex items-end mt-auto" style={{ height: `${Math.max(4, h)}px` }}>
                         <div className={`w-full rounded-t-md ${isLatest ? 'bg-purple-500' : 'bg-purple-200'}`} style={{ height: '100%' }} />
                       </div>
@@ -5512,7 +5533,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <span className="text-[10px] text-gray-400">%{c.pct}</span>
                       <span className="text-[10px] text-purple-600 font-bold">Σ%{c.cumPct}</span>
-                      <span className="text-xs font-bold text-gray-700">₺{(c.rev/1000).toFixed(0)}K</span>
+                      <span className="text-xs font-bold text-gray-700">{fmtAna(c.rev,'K',0)}</span>
                     </div>
                   </div>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -5724,7 +5745,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-black text-indigo-600">₺{currARPU.toLocaleString()}</p>
+                <p className="text-2xl font-black text-indigo-600">{fmtAna(currARPU)}</p>
                 <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu ay ARPU' : 'This month ARPU'}</p>
               </div>
               <div className="text-right">
@@ -5773,7 +5794,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-xs font-medium text-gray-700">{tier}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · %{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(d.rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(d.rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -5850,7 +5871,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-xs font-medium text-gray-700">{region}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">%{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -5897,7 +5918,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">{e.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
                         <span className="text-[10px] font-bold text-gray-500">%{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(e.rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(e.rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -6006,7 +6027,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div>
                 <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
                   <span>{currentLanguage === 'tr' ? 'Stok Değeri' : 'Inventory Value'}</span>
-                  <span>₺{(inventoryVal216/1000).toFixed(0)}K</span>
+                  <span>{fmtAna(inventoryVal216,'K',0)}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-300 rounded-full" style={{ width: `${currentAssets > 0 ? Math.round((inventoryVal216/currentAssets)*100) : 0}%` }} />
@@ -6015,7 +6036,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div>
                 <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
                   <span>{currentLanguage === 'tr' ? 'Tahsil Edilecek Alacaklar' : 'Accounts Receivable'}</span>
-                  <span>₺{(arBalance216/1000).toFixed(0)}K</span>
+                  <span>{fmtAna(arBalance216,'K',0)}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-amber-300 rounded-full" style={{ width: `${currentAssets > 0 ? Math.round((arBalance216/currentAssets)*100) : 0}%` }} />
@@ -6119,7 +6140,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-xs font-medium text-gray-700 truncate">{name}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">%{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -6160,7 +6181,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                   <div>
                     <p className="text-xs font-medium text-gray-800">{item.name}</p>
-                    <p className="text-[10px] text-gray-400">{item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'} · ₺{item.value.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                    <p className="text-[10px] text-gray-400">{item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'} · {fmtAna(item.value,'full',0)}</p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${item.daysLeft <= 0 ? 'bg-red-200 text-red-800' : item.daysLeft <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                     {item.daysLeft <= 0 ? (currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired') : `${item.daysLeft}d`}
@@ -6261,11 +6282,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-red-50 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-red-600">₺{(totalDiscount/1000).toFixed(0)}K</p>
+                <p className="text-2xl font-black text-red-600">{fmtAna(totalDiscount,'K',0)}</p>
                 <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam İskonto' : 'Total Discount Given'}</p>
               </div>
               <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-gray-700">₺{(totalListPrice/1000).toFixed(0)}K</p>
+                <p className="text-2xl font-black text-gray-700">{fmtAna(totalListPrice,'K',0)}</p>
                 <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Liste Fiyatı Toplamı' : 'Total List Price'}</p>
               </div>
             </div>
@@ -6278,7 +6299,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-gray-700 truncate">{name}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">{d.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
-                        <span className="font-bold text-red-500">-₺{(d.discount/1000).toFixed(0)}K</span>
+                        <span className="font-bold text-red-500">-{fmtAna(d.discount,'K',0)}</span>
                       </div>
                     </div>
                   ))}
@@ -6303,7 +6324,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📋 Sipariş Biriktirme & Boru Hattı Değeri' : '📋 Order Backlog & Pipeline Value'}</h3>
-              <span className="text-sm font-black text-blue-600">₺{(totalPipeline/1000).toFixed(0)}K</span>
+              <span className="text-sm font-black text-blue-600">{fmtAna(totalPipeline,'K',0)}</span>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
               {[
@@ -6312,7 +6333,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               ].map(k => (
                 <div key={k.label} className={`${k.bg} rounded-2xl p-4`}>
                   <p className="text-xl mb-1">{k.icon}</p>
-                  <p className={`text-2xl font-black ${k.color}`}>₺{(k.value/1000).toFixed(0)}K</p>
+                  <p className={`text-2xl font-black ${k.color}`}>{fmtAna(k.value,'K',0)}</p>
                   <p className="text-xs text-gray-600 font-medium mt-1">{k.label}</p>
                   <p className="text-[10px] text-gray-400">{k.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</p>
                 </div>
@@ -6623,7 +6644,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex items-center justify-between mb-0.5">
                     <span className="text-xs font-medium text-gray-700 truncate">{c.cat}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[10px] text-gray-400">₺{(c.avgInv/1000).toFixed(0)}K stok</span>
+                      <span className="text-[10px] text-gray-400">{fmtAna(c.avgInv,'K',0)} stok</span>
                       <span className={`text-sm font-black ${c.turnover >= 6 ? 'text-emerald-600' : c.turnover >= 3 ? 'text-amber-600' : 'text-red-500'}`}>{c.turnover}×</span>
                     </div>
                   </div>
@@ -6694,7 +6715,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                         <p className="text-[10px] text-gray-400">{tier === 'Platinum' ? `Top ${topN}` : tier === 'Silver' ? `Bottom ${botN}` : `Mid ${n228 - topN - botN}`} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</p>
                       </div>
                       <div className="text-right">
-                        <p className={`text-lg font-black ${cls.text}`}>₺{(curr/1000).toFixed(0)}K</p>
+                        <p className={`text-lg font-black ${cls.text}`}>{fmtAna(curr,'K',0)}</p>
                         {growth !== null && <p className={`text-[10px] font-bold ${growth >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{growth >= 0 ? '↑' : '↓'} %{Math.abs(growth)} MoM</p>}
                       </div>
                     </div>
@@ -6856,7 +6877,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={p.name} className="flex items-center gap-2">
                   <span className="text-xs text-gray-700 truncate flex-1">{p.name}</span>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] text-gray-400">₺{p.avgSellPrice.toLocaleString()}</span>
+                    <span className="text-[10px] text-gray-400">{fmtAna(p.avgSellPrice)}</span>
                     <span className={`text-xs font-bold ${p.discount > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
                       {p.discount > 0 ? `-${p.discount}%` : `+${Math.abs(p.discount)}%`}
                     </span>
@@ -7048,11 +7069,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-black text-gray-700">₺{(lastWeek/1000).toFixed(0)}K</p>
+                <p className="text-xl font-black text-gray-700">{fmtAna(lastWeek,'K',0)}</p>
                 <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-black text-blue-600">₺{(annualRunRate/1000).toFixed(0)}K</p>
+                <p className="text-xl font-black text-blue-600">{fmtAna(annualRunRate,'K',0)}</p>
                 <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Yıllık projeksiyon' : 'Annual run rate'}</p>
               </div>
             </div>
@@ -7107,14 +7128,14 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className={`flex items-center justify-between p-2.5 rounded-xl ${b.total ? 'bg-blue-50' : b.neutral ? 'bg-gray-50' : b.value >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
                   <span className={`text-xs font-medium ${b.total ? 'text-blue-800 font-bold' : 'text-gray-700'}`}>{b.label}</span>
                   <span className={`text-sm font-bold shrink-0 ml-2 ${b.total ? 'text-blue-700' : b.neutral ? 'text-gray-700' : b.value >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {!b.neutral && b.value >= 0 ? '+' : ''}{b.neutral ? '' : b.value >= 0 ? '' : ''}₺{Math.round(Math.abs(b.value)/1000)}K{!b.neutral && b.value < 0 ? ' ▼' : !b.neutral ? ' ▲' : ''}
+                    {!b.neutral && b.value >= 0 ? '+' : ''}{b.neutral ? '' : b.value >= 0 ? '' : ''}{fmtAna(Math.abs(b.value),'K',0)}{!b.neutral && b.value < 0 ? ' ▼' : !b.neutral ? ' ▲' : ''}
                   </span>
                 </div>
               ))}
             </div>
             <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
-              <span>{currentLanguage === 'tr' ? 'Önceki: ' : 'Prior: '}₺{(prev235.rev/1000).toFixed(0)}K · %{prev235.margin}</span>
-              <span>{currentLanguage === 'tr' ? 'Bu ay: ' : 'Current: '}₺{(curr235.rev/1000).toFixed(0)}K · %{curr235.margin}</span>
+              <span>{currentLanguage === 'tr' ? 'Önceki: ' : 'Prior: '}{fmtAna(prev235.rev,'K',0)} · %{prev235.margin}</span>
+              <span>{currentLanguage === 'tr' ? 'Bu ay: ' : 'Current: '}{fmtAna(curr235.rev,'K',0)} · %{curr235.margin}</span>
             </div>
           </div>
         );
@@ -7472,7 +7493,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="p-3 bg-purple-50 rounded-xl flex items-center justify-between">
               <span className="text-xs text-purple-700 font-medium">{currentLanguage === 'tr' ? 'Yeni ürün toplam cirosu' : 'Total new product revenue'}</span>
-              <span className="text-sm font-black text-purple-700">₺{(totalLaunchRev/1000).toFixed(0)}K</span>
+              <span className="text-sm font-black text-purple-700">{fmtAna(totalLaunchRev,'K',0)}</span>
             </div>
           </div>
         );
@@ -7507,12 +7528,12 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-emerald-50 rounded-2xl p-4">
                 <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Bu Ay Gerçekleşen' : 'This Month Closed'}</p>
-                <p className="text-3xl font-black text-emerald-700">₺{(monthRev/1000).toFixed(0)}K</p>
+                <p className="text-3xl font-black text-emerald-700">{fmtAna(monthRev,'K',0)}</p>
                 <p className="text-[10px] text-emerald-600 mt-1">{currentLanguage === 'tr' ? 'Kapanmış siparişler' : 'Closed orders'}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
                 <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Açık Teklif Pipeline' : 'Open Quote Pipeline'}</p>
-                <p className="text-3xl font-black text-blue-700">₺{(pipelineVal/1000).toFixed(0)}K</p>
+                <p className="text-3xl font-black text-blue-700">{fmtAna(pipelineVal,'K',0)}</p>
                 <p className="text-[10px] text-blue-600 mt-1">{openQuotes.length} {currentLanguage === 'tr' ? 'açık teklif' : 'open quotes'}</p>
               </div>
             </div>
@@ -7741,7 +7762,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">%{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(s.rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(s.rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -7788,7 +7809,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏰ Teklif Yaşlandırma Analizi' : '⏰ Quotation Aging Analysis'}</h3>
               {staleQuotes > 0 && (
                 <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                  ₺{(staleQuotes/1000).toFixed(0)}K {currentLanguage === 'tr' ? 'eski teklif' : 'stale quotes'}
+                  {fmtAna(staleQuotes,'K',0)} {currentLanguage === 'tr' ? 'eski teklif' : 'stale quotes'}
                 </span>
               )}
             </div>
@@ -7797,7 +7818,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={b.label} className={`rounded-xl p-3 ${b.min >= 15 && b.count > 0 ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50'}`}>
                   <p className={`text-xl font-bold ${b.min >= 15 && b.count > 0 ? 'text-amber-600' : 'text-gray-700'}`}>{b.count}</p>
                   <p className="text-[10px] text-gray-600 font-medium">{b.label}</p>
-                  {b.value > 0 && <p className="text-[9px] text-gray-400">₺{(b.value/1000).toFixed(0)}K</p>}
+                  {b.value > 0 && <p className="text-[9px] text-gray-400">{fmtAna(b.value,'K',0)}</p>}
                 </div>
               ))}
             </div>
@@ -7880,7 +7901,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
                         <span className="text-[10px] font-bold text-gray-500">%{pct}</span>
-                        <span className="text-xs font-bold text-gray-700">₺{(d.rev/1000).toFixed(0)}K</span>
+                        <span className="text-xs font-bold text-gray-700">{fmtAna(d.rev,'K',0)}</span>
                       </div>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -7993,8 +8014,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               })}
             </div>
             <div className="flex items-center gap-4 mb-3">
-              <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-brand" /><span className="text-[10px] text-gray-500">{currYear}: ₺{(totalCurr/1000).toFixed(0)}K</span></div>
-              {hasPrev && <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-gray-300" /><span className="text-[10px] text-gray-500">{prevYear}: ₺{(totalPrev/1000).toFixed(0)}K</span></div>}
+              <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-brand" /><span className="text-[10px] text-gray-500">{currYear}: {fmtAna(totalCurr,'K',0)}</span></div>
+              {hasPrev && <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-gray-300" /><span className="text-[10px] text-gray-500">{prevYear}: {fmtAna(totalPrev,'K',0)}</span></div>}
             </div>
           </div>
         );
@@ -8092,11 +8113,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-emerald-50 rounded-2xl p-4">
                 <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Brüt Kâr' : 'Gross Profit / Employee'}</p>
-                <p className="text-3xl font-black text-emerald-700">₺{(grossPerEmp/1000).toFixed(0)}K</p>
+                <p className="text-3xl font-black text-emerald-700">{fmtAna(grossPerEmp,'K',0)}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Ciro' : 'Revenue / Employee'}</p>
-                <p className="text-3xl font-black text-blue-700">₺{(revPerEmp253/1000).toFixed(0)}K</p>
+                <p className="text-3xl font-black text-blue-700">{fmtAna(revPerEmp253,'K',0)}</p>
               </div>
             </div>
             <div className="p-3 bg-gray-50 rounded-xl flex items-center justify-between">
@@ -8322,7 +8343,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={p.name} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-gray-800 truncate">{p.name}</p>
-                    <p className="text-[10px] text-gray-400">{p.stock} {currentLanguage === 'tr' ? 'stok' : 'in stock'} · ₺{p.value.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                    <p className="text-[10px] text-gray-400">{p.stock} {currentLanguage === 'tr' ? 'stok' : 'in stock'} · {fmtAna(p.value,'full',0)}</p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${p.days > 90 ? 'bg-red-100 text-red-700' : p.days > 60 ? 'bg-orange-100 text-orange-700' : 'bg-amber-100 text-amber-700'}`}>
                     {p.days}d
@@ -8363,7 +8384,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🥧 Bu Ay Müşteri Cüzdan Payı' : '🥧 This Month Customer Wallet Share'}</h3>
-              <span className="text-[10px] text-gray-400">{withCum.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'} · ₺{(total258/1000).toFixed(0)}K</span>
+              <span className="text-[10px] text-gray-400">{withCum.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'} · {fmtAna(total258,'K',0)}</span>
             </div>
             <div className="space-y-2">
               {withCum.map((c, i) => (
@@ -8407,11 +8428,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-red-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-black text-red-600">₺{(annualCarryCost/1000).toFixed(0)}K</p>
+                <p className="text-xl font-black text-red-600">{fmtAna(annualCarryCost,'K',0)}</p>
                 <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Yıllık taşıma maliyeti' : 'Annual carrying cost'}</p>
               </div>
               <div className="bg-amber-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-black text-amber-600">₺{(monthlyCarryCost/1000).toFixed(0)}K</p>
+                <p className="text-xl font-black text-amber-600">{fmtAna(monthlyCarryCost,'K',0)}</p>
                 <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Aylık taşıma maliyeti' : 'Monthly carrying cost'}</p>
               </div>
             </div>
@@ -8424,7 +8445,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-gray-400">%{r.pct}</span>
-                    <span className="font-bold text-gray-700">₺{Math.round(inventoryVal259 * r.pct / 100).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    <span className="font-bold text-gray-700">{fmtAna(Math.round(inventoryVal259 * r.pct / 100),'full',0)}</span>
                   </div>
                 </div>
               ))}
@@ -8522,7 +8543,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i}>
                   <div className="flex justify-between text-xs text-gray-600 mb-1">
                     <span className="font-medium">{d.label}</span>
-                    <span>{d.count} orders · avg ₺{d.avgOrder.toLocaleString('tr-TR', {maximumFractionDigits:0})} · total ₺{d.revenue.toLocaleString('tr-TR', {maximumFractionDigits:0})}</span>
+                    <span>{d.count} orders · avg {fmtAna(d.avgOrder,'full',0)} · total {fmtAna(d.revenue,'full',0)}</span>
                   </div>
                   <div className="h-5 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${maxRev > 0 ? (d.revenue/maxRev*100) : 0}%`, background: ['#dbeafe','#93c5fd','#3b82f6','#1d4ed8'][i] }} />
@@ -8599,14 +8620,14 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Inventory Write-Down Risk</h3>
-            <p className="text-xs text-gray-500 mb-3">Items expiring within 180 days — potential write-down: ₺{totalRisk.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-500 mb-3">Items expiring within 180 days — potential write-down: {fmtAna(totalRisk,'full',0)}</p>
             <div className="space-y-2">
               {risky.map((r,i) => (
                 <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg" style={{ background: r.daysLeft <= 30 ? '#fef2f2' : r.daysLeft <= 90 ? '#fffbeb' : '#f0fdf4' }}>
                   <span className="font-medium text-gray-800">{r.name} <span className="text-gray-400">({r.sku})</span></span>
                   <span className="font-bold" style={{ color: r.daysLeft <= 30 ? '#ef4444' : r.daysLeft <= 90 ? '#f59e0b' : '#10b981' }}>{r.daysLeft}d left</span>
                   <span className="text-gray-600">Qty: {r.stock}</span>
-                  <span className="text-gray-700 font-semibold">₺{r.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-gray-700 font-semibold">{fmtAna(r.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -8642,7 +8663,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             <div className="grid grid-cols-7 gap-1 mt-2">
               {dayRevenue.map((r,i) => (
-                <div key={i} className="text-center text-[8px] text-gray-400">₺{r >= 1000 ? `${(r/1000).toFixed(0)}k` : r.toFixed(0)}</div>
+                <div key={i} className="text-center text-[8px] text-gray-400">{r >= 1000 ? fmtAna(r,'K',0) : fmtAna(r)}</div>
               ))}
             </div>
           </div>
@@ -8676,11 +8697,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full bg-purple-500" style={{ width: `${totalVal > 0 ? (s.totalValue/totalVal*100) : 0}%` }} />
                   </div>
-                  <span className="text-xs text-gray-600 w-28 text-right">₺{s.totalValue.toLocaleString('tr-TR',{maximumFractionDigits:0})} · {s.items} SKUs</span>
+                  <span className="text-xs text-gray-600 w-28 text-right">{fmtAna(s.totalValue,'full',0)} · {s.items} SKUs</span>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-3">Total supplier exposure: ₺{totalVal.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-400 mt-3">Total supplier exposure: {fmtAna(totalVal,'full',0)}</p>
           </div>
         );
       })()}
@@ -8773,12 +8794,12 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   {tierData.map((t,i) => (
                     <tr key={i} className="border-b border-gray-50">
                       <td className="py-2 font-medium text-gray-800">{t.tier}</td>
-                      <td className="py-2 text-right">₺{t.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                      <td className="py-2 text-right">{fmtAna(t.revenue,'full',0)}</td>
                       <td className="py-2 text-right font-bold" style={{ color: i===0?'#10b981':'#6b7280' }}>{totalRevenue > 0 ? ((t.revenue/totalRevenue)*100).toFixed(1) : 0}%</td>
                       <td className="py-2 text-right">{t.orders}</td>
                       <td className="py-2 text-right">{t.customers}</td>
-                      <td className="py-2 text-right">₺{t.avgOrder.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
-                      <td className="py-2 text-right">₺{t.revenuePerCustomer.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                      <td className="py-2 text-right">{fmtAna(t.avgOrder,'full',0)}</td>
+                      <td className="py-2 text-right">{fmtAna(t.revenuePerCustomer,'full',0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -8820,11 +8841,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <span className="text-xs font-bold w-14 text-right" style={{ color: d.ratio > 50 ? '#ef4444' : d.ratio > 30 ? '#f59e0b' : '#10b981' }}>
                     {d.revenue > 0 ? `${d.ratio.toFixed(0)}%` : 'N/A'}
                   </span>
-                  <span className="text-xs text-gray-400 w-24 text-right">₺{d.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-xs text-gray-400 w-24 text-right">{fmtAna(d.revenue,'full',0)}</span>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Monthly payroll base: ₺{totalPayroll.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-400 mt-2">Monthly payroll base: {fmtAna(totalPayroll,'full',0)}</p>
           </div>
         );
       })()}
@@ -8844,13 +8865,13 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Loss-Making Orders Alert</h3>
-            <p className="text-xs text-gray-500 mb-3">Orders where cost {'>'}  revenue — total exposure: ₺{totalLoss.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-500 mb-3">Orders where cost {'>'}  revenue — total exposure: {fmtAna(totalLoss,'full',0)}</p>
             <div className="space-y-2">
               {withMargin.map((o,i) => (
                 <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-red-50">
                   <span className="font-medium text-gray-800 truncate w-32">{o.customer}</span>
-                  <span className="text-gray-500">Revenue: ₺{o.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
-                  <span className="text-red-600 font-bold">Loss: ₺{Math.abs(o.margin).toLocaleString('tr-TR',{maximumFractionDigits:0})} ({o.marginPct.toFixed(1)}%)</span>
+                  <span className="text-gray-500">Revenue: {fmtAna(o.revenue,'full',0)}</span>
+                  <span className="text-red-600 font-bold">Loss: {fmtAna(Math.abs(o.margin),'full',0)} ({o.marginPct.toFixed(1)}%)</span>
                 </div>
               ))}
             </div>
@@ -8953,7 +8974,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                         </td>
                       ))}
                       <td className="py-1.5 text-right font-bold text-gray-800">
-                        ₺{(Object.values(catRevenue[cat]).reduce((s,v)=>s+v,0)/1000).toFixed(0)}k
+                        {fmtAna(Object.values(catRevenue[cat]).reduce((s,v)=>s+v,0),'K',0)}
                       </td>
                     </tr>
                   ))}
@@ -8993,7 +9014,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{ width: `${maxMargin > 0 ? Math.max(2, r.margin/maxMargin*100) : 2}%`, background: r.marginPct >= 30 ? '#10b981' : r.marginPct >= 15 ? '#f59e0b' : '#ef4444' }} />
                   </div>
                   <span className="text-xs font-bold w-12 text-right" style={{ color: r.marginPct >= 30 ? '#10b981' : r.marginPct >= 15 ? '#f59e0b' : '#ef4444' }}>{r.marginPct.toFixed(0)}%</span>
-                  <span className="text-xs text-gray-400 w-20 text-right">₺{r.margin.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-xs text-gray-400 w-20 text-right">{fmtAna(r.margin,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -9104,10 +9125,10 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <span className="text-sm font-black" style={{ color: d.marginPct >= 25 ? '#10b981' : d.marginPct >= 10 ? '#f59e0b' : '#ef4444' }}>{d.marginPct.toFixed(1)}% margin</span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 text-xs text-center">
-                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.revenue/1000).toFixed(0)}k</div><div className="text-gray-400">Revenue</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.margin/1000).toFixed(0)}k</div><div className="text-gray-400">Margin</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{fmtAna(d.revenue,'K',0)}</div><div className="text-gray-400">Revenue</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{fmtAna(d.margin,'K',0)}</div><div className="text-gray-400">Margin</div></div>
                     <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{d.customers}</div><div className="text-gray-400">Customers</div></div>
-                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">₺{(d.ltv/1000).toFixed(0)}k</div><div className="text-gray-400">LTV</div></div>
+                    <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{fmtAna(d.ltv,'K',0)}</div><div className="text-gray-400">LTV</div></div>
                   </div>
                 </div>
               ))}
@@ -9151,7 +9172,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <span className="text-sm font-bold" style={{ color: b.color }}>{b.label}</span>
                     <span className="text-xs text-gray-500 ml-2">{b.count} orders</span>
                   </div>
-                  <div className="text-sm font-bold text-gray-700">₺{b.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+                  <div className="text-sm font-bold text-gray-700">{fmtAna(b.revenue,'full',0)}</div>
                 </div>
               ))}
             </div>
@@ -9185,7 +9206,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <h3 className="font-bold text-gray-800 mb-4">Employee Efficiency Ratios</h3>
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-blue-50 rounded-xl p-3 text-center">
-                <div className="text-lg font-black text-blue-700">₺{(revenuePerEmp/1000).toFixed(0)}k</div>
+                <div className="text-lg font-black text-blue-700">{fmtAna(revenuePerEmp,'K',0)}</div>
                 <div className="text-[10px] text-gray-500 mt-0.5">Revenue/Employee (Annual)</div>
               </div>
               <div className="rounded-xl p-3 text-center" style={{ background: payrollRatio <= 25 ? '#f0fdf4' : payrollRatio <= 40 ? '#fffbeb' : '#fef2f2' }}>
@@ -9202,7 +9223,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="text-gray-600 w-32 truncate">{dept}</span>
                   <span className="text-gray-400">{d.count} staff</span>
-                  <span className="font-medium text-gray-800">₺{d.payroll.toLocaleString('tr-TR',{maximumFractionDigits:0})}/mo</span>
+                  <span className="font-medium text-gray-800">{fmtAna(d.payroll,'full',0)}/mo</span>
                 </div>
               ))}
             </div>
@@ -9287,7 +9308,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   </div>
                   <span className="text-xs text-gray-500 w-10 text-right">{r.orders} ord</span>
                   <span className="text-xs font-bold text-indigo-700 w-10 text-right">{totalRev>0?((r.revenue/totalRev)*100).toFixed(0):0}%</span>
-                  <span className="text-xs text-gray-600 w-20 text-right">₺{r.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-xs text-gray-600 w-20 text-right">{fmtAna(r.revenue,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -9405,7 +9426,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">SKU Rationalization Candidates</h3>
-            <p className="text-xs text-gray-500 mb-3">Zero-sales SKUs holding ₺{deadValue.toLocaleString('tr-TR',{maximumFractionDigits:0})} in capital</p>
+            <p className="text-xs text-gray-500 mb-3">Zero-sales SKUs holding {fmtAna(deadValue,'full',0)} in capital</p>
             {noSales.length > 0 && (
               <div className="mb-3">
                 <p className="text-xs font-bold text-red-600 mb-1">🔴 Discontinue (0 sales, stock in hand)</p>
@@ -9414,7 +9435,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div key={i} className="flex justify-between text-xs p-1.5 bg-red-50 rounded-lg">
                       <span className="text-gray-700 truncate w-40">{s.name}</span>
                       <span className="text-gray-400">{s.sku}</span>
-                      <span className="font-medium text-red-700">Qty: {s.stock} · ₺{s.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                      <span className="font-medium text-red-700">Qty: {s.stock} · {fmtAna(s.value,'full',0)}</span>
                     </div>
                   ))}
                 </div>
@@ -9642,14 +9663,14 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Restock Cost Forecast (Next 60 Days)</h3>
-            <p className="text-xs text-gray-500 mb-3">Estimated 30-day restock cost: <span className="font-bold text-purple-700">₺{totalRestockCost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>
+            <p className="text-xs text-gray-500 mb-3">Estimated 30-day restock cost: <span className="font-bold text-purple-700">{fmtAna(totalRestockCost,'full',0)}</span></p>
             <div className="space-y-2">
               {restockItems.map((r,i) => (
                 <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg" style={{ background: r.daysLeft <= 14 ? '#fef2f2' : r.daysLeft <= 30 ? '#fffbeb' : '#f0fdf4' }}>
                   <span className="font-medium text-gray-800 truncate w-36">{r.name}</span>
                   <span style={{ color: r.daysLeft <= 14 ? '#ef4444' : r.daysLeft <= 30 ? '#f59e0b' : '#10b981' }} className="font-bold">{r.daysLeft}d left</span>
                   <span className="text-gray-500">{r.unitsNeeded} units</span>
-                  <span className="font-bold text-purple-700">₺{r.cost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="font-bold text-purple-700">{fmtAna(r.cost,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -9777,7 +9798,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Revenue Attribution Waterfall (MoM)</h3>
-            <p className="text-xs text-gray-500 mb-4">Net change: <span className={netChange >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{netChange >= 0 ? '+' : ''}₺{netChange.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>
+            <p className="text-xs text-gray-500 mb-4">Net change: <span className={netChange >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{netChange >= 0 ? '+' : ''}{fmtAna(netChange,'full',0)}</span></p>
             <div className="space-y-2">
               {items.map((item,i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -9789,7 +9810,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     }} />
                   </div>
                   <span className="text-xs font-bold w-24 text-right" style={{ color: item.type==='base'?'#6366f1':item.type==='add'?'#10b981':'#ef4444' }}>
-                    {item.type !== 'base' && (item.value >= 0 ? '+' : '')}₺{Math.abs(item.value).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                    {item.type !== 'base' && (item.value >= 0 ? '+' : '')}{fmtAna(Math.abs(item.value),'full',0)}
                   </span>
                 </div>
               ))}
@@ -9922,11 +9943,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             </div>
             {shrinkageValue > 0 && (
               <div className="bg-red-50 rounded-xl p-3 text-center">
-                <div className="text-sm font-bold text-red-700">Estimated Shrinkage Exposure: ₺{shrinkageValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+                <div className="text-sm font-bold text-red-700">Estimated Shrinkage Exposure: {fmtAna(shrinkageValue,'full',0)}</div>
                 <div className="text-xs text-gray-500 mt-0.5">From items with negative stock levels</div>
               </div>
             )}
-            <div className="mt-3 text-xs text-gray-500 text-center">Total inventory at cost: ₺{totalStockValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+            <div className="mt-3 text-xs text-gray-500 text-center">Total inventory at cost: {fmtAna(totalStockValue,'full',0)}</div>
           </div>
         );
       })()}
@@ -10014,7 +10035,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full bg-teal-500" style={{ width: `${maxRevPerHead>0?(d.revPerHead/maxRevPerHead*100):0}%` }} />
                   </div>
-                  <span className="text-xs font-bold text-teal-700 w-20 text-right">₺{(d.revPerHead/1000).toFixed(0)}k/emp</span>
+                  <span className="text-xs font-bold text-teal-700 w-20 text-right">{fmtAna(d.revPerHead,'K',0)}/emp</span>
                 </div>
               ))}
             </div>
@@ -10042,14 +10063,14 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Stale Quote Recovery Opportunities</h3>
-            <p className="text-xs text-gray-500 mb-3">Unconverted quotes (7+ days old) — ₺{totalOpportunity.toLocaleString('tr-TR',{maximumFractionDigits:0})} total opportunity</p>
+            <p className="text-xs text-gray-500 mb-3">Unconverted quotes (7+ days old) — {fmtAna(totalOpportunity,'full',0)} total opportunity</p>
             <div className="space-y-2">
               {staleQuotes.map((q,i) => (
                 <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg" style={{ background: q.age >= 30 ? '#fef2f2' : q.age >= 14 ? '#fffbeb' : '#f8fafc' }}>
                   <span className="font-medium text-gray-800 truncate w-32">{q.customer}</span>
                   <span className="text-gray-400 capitalize">{q.status}</span>
                   <span style={{ color: q.age >= 30 ? '#ef4444' : q.age >= 14 ? '#f59e0b' : '#6b7280' }} className="font-bold">{q.age}d old</span>
-                  <span className="font-bold text-gray-800">₺{q.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="font-bold text-gray-800">{fmtAna(q.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -10337,7 +10358,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Inventory Cost by Category</h3>
-            <p className="text-xs text-gray-500 mb-3">Total at cost: ₺{totalValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-500 mb-3">Total at cost: {fmtAna(totalValue,'full',0)}</p>
             <div className="flex h-4 rounded-full overflow-hidden mb-4 gap-0.5">
               {cats.slice(0,8).map(([,d],i) => (
                 <div key={i} style={{ width: `${totalValue>0?(d.value/totalValue*100):0}%`, background: colors[i%colors.length], minWidth: d.value>0?'2px':'0' }} title={`${cats[i][0]}: ₺${d.value.toLocaleString()}`} />
@@ -10350,7 +10371,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <span className="text-xs text-gray-700 truncate flex-1">{cat}</span>
                   <span className="text-xs text-gray-400">{d.items} SKUs</span>
                   <span className="text-xs text-gray-400">{d.units} units</span>
-                  <span className="text-xs font-bold text-gray-800">₺{d.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-xs font-bold text-gray-800">{fmtAna(d.value,'full',0)}</span>
                   <span className="text-xs text-gray-400 w-8 text-right">{totalValue>0?((d.value/totalValue)*100).toFixed(0):0}%</span>
                 </div>
               ))}
@@ -10427,7 +10448,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className={`flex justify-between items-center px-3 py-2 rounded-lg ${item.type==='subtotal'?'bg-blue-50':item.type==='total'?'bg-gray-100 font-black':'bg-gray-50'}`}>
                   <span className={`text-xs ${item.type==='total'?'font-black text-gray-800':'font-medium text-gray-700'}`}>{item.label}</span>
                   <span className={`text-sm font-bold ${item.value>=0?'text-green-600':'text-red-500'}`}>
-                    {item.value>=0?'+':''}₺{Math.abs(item.value).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                    {item.value>=0?'+':''}{fmtAna(Math.abs(item.value),'full',0)}
                   </span>
                 </div>
               ))}
@@ -10575,7 +10596,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 </div>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Total lost revenue (6mo): ₺{data.reduce((s,d)=>s+d.cancelledRev,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-xs text-gray-400 mt-2">Total lost revenue (6mo): {fmtAna(data.reduce((s,d)=>s+d.cancelledRev,0),'full',0)}</p>
           </div>
         );
       })()}
@@ -10644,7 +10665,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${maxRev>0?(rev/maxRev*100):0}%`, background: i===0?'#f59e0b':i<3?'#10b981':'#3b82f6' }} />
                   </div>
-                  <span className="text-xs font-bold text-gray-800 w-24 text-right">₺{rev.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-xs font-bold text-gray-800 w-24 text-right">{fmtAna(rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -10679,7 +10700,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Rolling 7-Day Avg Revenue — Last 28 Days</h3>
             <p className="text-xs text-gray-500 mb-4">
-              Trend: <span className={trend >= 0 ? 'text-green-600 font-bold' : 'text-red-500 font-bold'}>{trend >= 0 ? '↑' : '↓'} ₺{Math.abs(trend).toLocaleString('tr-TR', {maximumFractionDigits: 0})}/day avg</span>
+              Trend: <span className={trend >= 0 ? 'text-green-600 font-bold' : 'text-red-500 font-bold'}>{trend >= 0 ? '↑' : '↓'} {fmtAna(Math.abs(trend),'full',0)}/day avg</span>
             </p>
             <div className="flex items-end gap-0.5 h-20">
               {rolling7.map((v, i) => (
@@ -10711,7 +10732,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div className="bg-red-50 rounded-xl p-3 text-center">
                 <div className="text-2xl font-black text-red-600">{critical.length}</div>
                 <div className="text-[10px] text-gray-500">Out of Stock</div>
-                <div className="text-[9px] text-red-400 mt-0.5">₺{criticalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})} to restock</div>
+                <div className="text-[9px] text-red-400 mt-0.5">{fmtAna(criticalValue,'full',0)} to restock</div>
               </div>
               <div className="bg-amber-50 rounded-xl p-3 text-center">
                 <div className="text-2xl font-black text-amber-600">{low.length}</div>
@@ -10736,7 +10757,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 ))}
               </div>
             )}
-            <p className="text-xs text-gray-400 mt-3 text-center">Total inventory value: ₺{totalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-400 mt-3 text-center">Total inventory value: {fmtAna(totalValue,'full',0)}</p>
           </div>
         );
       })()}
@@ -10792,7 +10813,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                           </td>
                         );
                       })}
-                      <td className="py-1 text-right font-bold text-gray-800">₺{(r.total / 1000).toFixed(0)}k</td>
+                      <td className="py-1 text-right font-bold text-gray-800">{fmtAna(r.total,'K',0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -10842,7 +10863,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${maxAov > 0 ? p.aov / maxAov * 100 : 0}%`, background: p.color}} />
                   </div>
                   <div className="text-base font-black" style={{color: p.color}}>
-                    ₺{p.aov.toLocaleString('tr-TR', {maximumFractionDigits: 0})}
+                    {fmtAna(p.aov,'full',0)}
                   </div>
                   <div className="text-[9px] text-gray-400">avg order value</div>
                 </div>
@@ -10873,17 +10894,17 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div className="bg-green-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-green-600">{paid.length}</div>
                 <div className="text-[10px] text-gray-500">Paid</div>
-                <div className="text-[9px] text-green-500">₺{(paidRev / 1000).toFixed(0)}k</div>
+                <div className="text-[9px] text-green-500">{fmtAna(paidRev,'K',0)}</div>
               </div>
               <div className="bg-amber-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-amber-600">{unpaid.length}</div>
                 <div className="text-[10px] text-gray-500">Awaiting</div>
-                <div className="text-[9px] text-amber-500">₺{(unpaidRev / 1000).toFixed(0)}k</div>
+                <div className="text-[9px] text-amber-500">{fmtAna(unpaidRev,'K',0)}</div>
               </div>
               <div className="bg-red-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-red-600">{overdue.length}</div>
                 <div className="text-[10px] text-gray-500">Overdue 30d+</div>
-                <div className="text-[9px] text-red-500">₺{(overdueRev / 1000).toFixed(0)}k</div>
+                <div className="text-[9px] text-red-500">{fmtAna(overdueRev,'K',0)}</div>
               </div>
             </div>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex gap-0.5">
@@ -10933,7 +10954,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     }} />
                   </div>
                   <span className="text-xs font-bold w-10 text-right" style={{color: p.marginPct >= 40 ? '#10b981' : p.marginPct >= 20 ? '#3b82f6' : '#f59e0b'}}>{p.marginPct.toFixed(0)}%</span>
-                  <span className="text-xs text-gray-400 w-16 text-right">₺{p.margin.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs text-gray-400 w-16 text-right">{fmtAna(p.margin,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -10965,24 +10986,24 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">On-Hold Order Value</h3>
-            <p className="text-xs text-gray-500 mb-4">{pending.length} orders holding ₺{totalHeld.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · oldest: {oldestDays}d</p>
+            <p className="text-xs text-gray-500 mb-4">{pending.length} orders holding {fmtAna(totalHeld,'full',0)} · oldest: {oldestDays}d</p>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-amber-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-amber-600">{byStatus.Pending.length}</div>
                 <div className="text-[10px] text-gray-500">Pending</div>
-                <div className="text-[9px] text-amber-400">₺{byStatus.Pending.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+                <div className="text-[9px] text-amber-400">{fmtAna(byStatus.Pending.reduce((s,o)=>s+o.totalPrice,0),'full',0)}</div>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-blue-600">{byStatus.Processing.length}</div>
                 <div className="text-[10px] text-gray-500">Processing</div>
-                <div className="text-[9px] text-blue-400">₺{byStatus.Processing.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</div>
+                <div className="text-[9px] text-blue-400">{fmtAna(byStatus.Processing.reduce((s,o)=>s+o.totalPrice,0),'full',0)}</div>
               </div>
             </div>
             <div className="space-y-1">
               {aging.map((a, i) => (
                 <div key={i} className="flex justify-between text-xs p-2 rounded-lg" style={{background: i >= 2 ? '#fef2f2' : '#f8fafc'}}>
                   <span className="text-gray-600 font-medium">{a.label}</span>
-                  <span className="font-bold" style={{color: i >= 2 ? '#ef4444' : '#6b7280'}}>{a.orders.length} orders · ₺{a.orders.reduce((s,o)=>s+o.totalPrice,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="font-bold" style={{color: i >= 2 ? '#ef4444' : '#6b7280'}}>{a.orders.length} orders · {fmtAna(a.orders.reduce((s,o)=>s+o.totalPrice,0),'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11011,7 +11032,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Salary Band Distribution</h3>
-            <p className="text-xs text-gray-500 mb-4">Active employees · avg: ₺{avg.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · median: ₺{median.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Active employees · avg: {fmtAna(avg,'full',0)} · median: {fmtAna(median,'full',0)}</p>
             <div className="flex items-end gap-2 h-20 mb-3">
               {buckets.map((b, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
@@ -11026,8 +11047,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               ))}
             </div>
             <div className="flex gap-4 mt-3 text-xs text-gray-500">
-              <span>Min: ₺{min.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
-              <span>Max: ₺{max.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+              <span>Min: {fmtAna(min,'full',0)}</span>
+              <span>Max: {fmtAna(max,'full',0)}</span>
             </div>
           </div>
         );
@@ -11094,7 +11115,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Revenue per Employee</h3>
-            <p className="text-xs text-gray-500 mb-4">Estimated revenue contribution per headcount by department · Overall: ₺{revPerEmp.toLocaleString('tr-TR', {maximumFractionDigits: 0})}/emp</p>
+            <p className="text-xs text-gray-500 mb-4">Estimated revenue contribution per headcount by department · Overall: {fmtAna(revPerEmp,'full',0)}/emp</p>
             <div className="space-y-2">
               {deptRevPerEmp.map((d, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -11103,7 +11124,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full bg-indigo-400 transition-all" style={{width: `${(d.perHead / maxPH) * 100}%`}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-10 text-right">{d.cnt} emp</span>
-                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">₺{d.perHead.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">{fmtAna(d.perHead,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11264,7 +11285,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full bg-blue-400 transition-all" style={{width: `${(c.revenue / maxRev) * 100}%`}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-10 text-right">{c.count} ord</span>
-                  <span className="text-xs font-bold text-blue-600 w-24 text-right">₺{c.revenue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold text-blue-600 w-24 text-right">{fmtAna(c.revenue,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11368,7 +11389,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <div className="h-full rounded-full" style={{width: `${pct}%`, background: colors328[i % colors328.length]}} />
                     </div>
                     <span className="text-[10px] text-gray-400 w-8 text-right">{pct.toFixed(0)}%</span>
-                    <span className="text-xs font-bold w-24 text-right" style={{color: colors328[i % colors328.length]}}>₺{m.revenue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                    <span className="text-xs font-bold w-24 text-right" style={{color: colors328[i % colors328.length]}}>{fmtAna(m.revenue,'full',0)}</span>
                   </div>
                 );
               })}
@@ -11394,7 +11415,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Department Salary Cost</h3>
-            <p className="text-xs text-gray-500 mb-4">Monthly payroll by department · Total: ₺{totalCost329.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Monthly payroll by department · Total: {fmtAna(totalCost329,'full',0)}</p>
             <div className="space-y-2">
               {deptRows.map((d, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -11403,7 +11424,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full transition-all" style={{width: `${(d.cost / maxCost329) * 100}%`, background: colors329[i % colors329.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-10 text-right">{d.headcount} emp</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors329[i % colors329.length]}}>₺{d.cost.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors329[i % colors329.length]}}>{fmtAna(d.cost,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11426,7 +11447,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Order Cancellation Analysis</h3>
-            <p className="text-xs text-gray-500 mb-4">{cancelled330.length} cancelled orders · {cancelRate}% rate · ₺{cancelRevLost.toLocaleString('tr-TR', {maximumFractionDigits: 0})} revenue lost</p>
+            <p className="text-xs text-gray-500 mb-4">{cancelled330.length} cancelled orders · {cancelRate}% rate · {fmtAna(cancelRevLost,'full',0)} revenue lost</p>
             <div className="space-y-2">
               {reasons.map((r, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -11554,7 +11575,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${(r.revenue / maxRev333) * 100}%`, background: colors333[i % colors333.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-10 text-right">{r.orders} ord</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors333[i % colors333.length]}}>₺{r.revenue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors333[i % colors333.length]}}>{fmtAna(r.revenue,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11580,7 +11601,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Inventory Value by Category</h3>
-            <p className="text-xs text-gray-500 mb-4">Total stock value · ₺{totalVal334.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Total stock value · {fmtAna(totalVal334,'full',0)}</p>
             <div className="space-y-2">
               {cats334.map((c, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -11589,7 +11610,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${(c.value / maxVal334) * 100}%`, background: colors334[i % colors334.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-12 text-right">{c.count} SKU</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors334[i % colors334.length]}}>₺{c.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors334[i % colors334.length]}}>{fmtAna(c.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -11616,13 +11637,13 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Recurring Order Health</h3>
-            <p className="text-xs text-gray-500 mb-4">{active335.length} active subscriptions · {inactive335.length} paused · ARR: ₺{totalARR.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">{active335.length} active subscriptions · {inactive335.length} paused · ARR: {fmtAna(totalARR,'full',0)}</p>
             <div className="grid grid-cols-3 gap-3">
               {freqBreak.map((f, i) => (
                 <div key={i} className="bg-gray-50 rounded-xl p-3 text-center">
                   <p className="text-[10px] text-gray-400 capitalize mb-1">{f.freq}</p>
                   <p className="text-xl font-black text-gray-800">{f.count}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">₺{(f.arr / 1000).toFixed(0)}K ARR</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{fmtAna(f.arr,'K',0)} ARR</p>
                 </div>
               ))}
             </div>
@@ -11831,7 +11852,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Order Value Percentile Bands</h3>
-            <p className="text-xs text-gray-500 mb-4">{vals341.length} orders · Avg: ₺{avg341.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">{vals341.length} orders · Avg: {fmtAna(avg341,'full',0)}</p>
             <div className="space-y-1.5">
               {bands.map((b, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -11839,7 +11860,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full" style={{width: `${(b.val / maxB341) * 100}%`, background: b.color}} />
                   </div>
-                  <span className="text-xs text-gray-600 w-24 text-right">₺{b.val.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs text-gray-600 w-24 text-right">{fmtAna(b.val,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12053,7 +12074,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Avg Salary by Position</h3>
-            <p className="text-xs text-gray-500 mb-4">Company average: ₺{overallAvg.toLocaleString('tr-TR', {maximumFractionDigits: 0})}/mo</p>
+            <p className="text-xs text-gray-500 mb-4">Company average: {fmtAna(overallAvg,'full',0)}/mo</p>
             <div className="space-y-2">
               {positions.map((p, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -12062,7 +12083,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full bg-violet-400 transition-all" style={{width: `${(p.avg / maxAvg) * 100}%`}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-8 text-right">{p.count}×</span>
-                  <span className="text-xs font-bold text-violet-600 w-24 text-right">₺{p.avg.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold text-violet-600 w-24 text-right">{fmtAna(p.avg,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12094,7 +12115,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Monthly COGS Trend</h3>
-            <p className="text-xs text-gray-500 mb-4">Cost of Goods Sold · {keys348.length}-month total: ₺{totalCOGS.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Cost of Goods Sold · {keys348.length}-month total: {fmtAna(totalCOGS,'full',0)}</p>
             <div className="flex items-end gap-2 h-24">
               {keys348.map(k => (
                 <div key={k} className="flex-1 flex flex-col items-center gap-0.5">
@@ -12446,7 +12467,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Quote Value Pipeline</h3>
-            <p className="text-xs text-gray-500 mb-4">Total pipeline: ₺{totalPipeline.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Total pipeline: {fmtAna(totalPipeline,'full',0)}</p>
             <div className="space-y-2">
               {pipelineData.map((d, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -12455,7 +12476,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${(d.value / maxVal357) * 100}%`, background: colors357[d.status] || '#94a3b8'}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-10 text-right">{totalPipeline > 0 ? ((d.value / totalPipeline) * 100).toFixed(0) : 0}%</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors357[d.status] || '#94a3b8'}}>₺{d.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors357[d.status] || '#94a3b8'}}>{fmtAna(d.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12496,14 +12517,14 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Dead Stock Report</h3>
-            <p className="text-xs text-gray-500 mb-4">No sales in 180+ days · Locked capital: ₺{totalDeadValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">No sales in 180+ days · Locked capital: {fmtAna(totalDeadValue,'full',0)}</p>
             <div className="space-y-2">
               {deadStock.map((d, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <span className="text-xs text-gray-600 flex-1 truncate">{d.name}</span>
                   <span className="text-[10px] text-gray-400 w-16 text-right">{d.days === 999 ? 'Never sold' : `${d.days}d ago`}</span>
                   <span className="text-[10px] text-gray-500 w-12 text-right">{d.stock} units</span>
-                  <span className="text-xs font-bold text-red-500 w-24 text-right">₺{d.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold text-red-500 w-24 text-right">{fmtAna(d.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12571,7 +12592,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Payroll-to-Revenue Ratio</h3>
-            <p className="text-xs text-gray-500 mb-4">Monthly salary (₺{totalSalary.toLocaleString('tr-TR',{maximumFractionDigits:0})}) as % of revenue · Avg: {avgRatio.toFixed(1)}%</p>
+            <p className="text-xs text-gray-500 mb-4">Monthly salary ({fmtAna(totalSalary,'full',0)}) as % of revenue · Avg: {avgRatio.toFixed(1)}%</p>
             <div className="flex items-end gap-2 h-24">
               {ratioData.map((d, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
@@ -12602,7 +12623,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Revenue by Product Category</h3>
-            <p className="text-xs text-gray-500 mb-4">Line-item revenue share · Total: ₺{totalRev361.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Line-item revenue share · Total: {fmtAna(totalRev361,'full',0)}</p>
             <div className="space-y-2">
               {cats361.map((c, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -12611,7 +12632,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${(c.rev / maxRev361) * 100}%`, background: colors361[i % colors361.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-8 text-right">{totalRev361 > 0 ? ((c.rev / totalRev361) * 100).toFixed(0) : 0}%</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors361[i % colors361.length]}}>₺{c.rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors361[i % colors361.length]}}>{fmtAna(c.rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12684,7 +12705,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${(s.value / maxVal363) * 100}%`, background: colors363[i % colors363.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-12 text-right">{s.count} SKU</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors363[i % colors363.length]}}>₺{s.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors363[i % colors363.length]}}>{fmtAna(s.value,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12894,8 +12915,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Recurring Revenue Overview</h3>
             <div className="flex gap-6 mb-4">
-              <div><p className="text-xl font-black text-[#ff4000]">₺{mrr.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p><p className="text-[10px] text-gray-400">MRR</p></div>
-              <div><p className="text-xl font-black text-indigo-600">₺{arr.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p><p className="text-[10px] text-gray-400">ARR</p></div>
+              <div><p className="text-xl font-black text-[#ff4000]">{fmtAna(mrr,'full',0)}</p><p className="text-[10px] text-gray-400">MRR</p></div>
+              <div><p className="text-xl font-black text-indigo-600">{fmtAna(arr,'full',0)}</p><p className="text-[10px] text-gray-400">ARR</p></div>
               <div><p className="text-xl font-black text-gray-700">{activeRec.length}</p><p className="text-[10px] text-gray-400">active subs</p></div>
             </div>
             <div className="space-y-1.5">
@@ -12905,7 +12926,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full bg-indigo-400" style={{width: `${(d.v / maxMRR) * 100}%`}} />
                   </div>
-                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">₺{d.v.toLocaleString('tr-TR', {maximumFractionDigits: 0})}/mo</span>
+                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">{fmtAna(d.v,'full',0)}/mo</span>
                 </div>
               ))}
             </div>
@@ -12927,7 +12948,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Revenue by Customer Segment</h3>
-            <p className="text-xs text-gray-500 mb-4">Total: ₺{totalRev370.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Total: {fmtAna(totalRev370,'full',0)}</p>
             <div className="space-y-2">
               {segs370.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -12936,7 +12957,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${totalRev370 > 0 ? (s.rev / totalRev370) * 100 : 0}%`, background: colors370[i % colors370.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-8 text-right">{totalRev370 > 0 ? ((s.rev / totalRev370) * 100).toFixed(0) : 0}%</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: colors370[i % colors370.length]}}>₺{s.rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: colors370[i % colors370.length]}}>{fmtAna(s.rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -12969,7 +12990,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">30-Day Revenue Forecast</h3>
             <div className="flex gap-6 mb-4">
-              <div><p className="text-2xl font-black text-[#ff4000]">₺{forecast.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p><p className="text-[10px] text-gray-400">projected</p></div>
+              <div><p className="text-2xl font-black text-[#ff4000]">{fmtAna(forecast,'full',0)}</p><p className="text-[10px] text-gray-400">projected</p></div>
               <div><p className="text-2xl font-black text-gray-700">{confidence.toFixed(0)}%</p><p className="text-[10px] text-gray-400">confidence</p></div>
               <div><p className="text-2xl font-black" style={{color: momGrowth >= 0 ? '#10b981' : '#ef4444'}}>{momGrowth >= 0 ? '+' : ''}{(momGrowth * 100).toFixed(1)}%</p><p className="text-[10px] text-gray-400">MoM trend</p></div>
             </div>
@@ -13041,7 +13062,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${totalRev373 > 0 ? (s.rev / totalRev373) * 100 : 0}%`, background: colors373[i % colors373.length]}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-8 text-right">{totalRev373 > 0 ? ((s.rev / totalRev373) * 100).toFixed(0) : 0}%</span>
-                  <span className="text-xs font-bold w-20 text-right" style={{color: colors373[i % colors373.length]}}>₺{s.rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-20 text-right" style={{color: colors373[i % colors373.length]}}>{fmtAna(s.rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -13084,7 +13105,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className="flex items-center gap-2">
                   <span className="text-[9px] font-black w-4 text-center rounded" style={{color: classColors[d.class], background: classColors[d.class] + '22'}}>{d.class}</span>
                   <span className="text-[10px] text-gray-600 flex-1 truncate">{d.name}</span>
-                  <span className="text-[10px] font-bold text-gray-500">₺{d.rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-[10px] font-bold text-gray-500">{fmtAna(d.rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -13158,7 +13179,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full bg-emerald-400 transition-all" style={{width: `${(d.rev / maxRev376) * 100}%`}} />
                   </div>
                   <span className="text-[10px] text-gray-400 w-12 text-right">{d.units} sold</span>
-                  <span className="text-xs font-bold text-emerald-600 w-24 text-right">₺{d.rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold text-emerald-600 w-24 text-right">{fmtAna(d.rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -13325,7 +13346,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full transition-all" style={{width: `${(rev / maxDay) * 100}%`, background: i === 0 ? '#ff4000' : '#6366f1'}} />
                   </div>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: i === 0 ? '#ff4000' : '#6366f1'}}>₺{rev.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: i === 0 ? '#ff4000' : '#6366f1'}}>{fmtAna(rev,'full',0)}</span>
                 </div>
               ))}
             </div>
@@ -13806,8 +13827,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <text x={cx} y={cy+8} textAnchor="middle" fontSize="11" fontWeight="bold" fill={pct >= 0 ? '#22c55e' : '#ef4444'}>{pct >= 0 ? '+' : ''}{pct.toFixed(0)}%</text>
               </svg>
               <div className="flex-1 space-y-1">
-                <div className="flex justify-between text-xs"><span className="text-gray-500">This month</span><span className="font-bold">₺{thisMRev.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Last month</span><span className="text-gray-700">₺{lastMRev.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-gray-500">This month</span><span className="font-bold">{fmtAna(thisMRev,'full',0)}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-gray-500">Last month</span><span className="text-gray-700">{fmtAna(lastMRev,'full',0)}</span></div>
               </div>
             </div>
           </div>
@@ -13957,7 +13978,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-white text-[9px] font-bold">{d.count}</span>
                     </div>
                   </div>
-                  {d.salarySum > 0 && <span className="text-[9px] text-gray-400 w-16 text-right">avg ₺{Math.round(d.salarySum / d.count).toLocaleString('tr-TR')}</span>}
+                  {d.salarySum > 0 && <span className="text-[9px] text-gray-400 w-16 text-right">avg {fmtAna(Math.round(d.salarySum / d.count))}</span>}
                 </div>
               ))}
             </div>
@@ -14068,7 +14089,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={r.label}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-gray-600">{r.label}</span>
-                    <span className="font-bold" style={{color: r.color}}>₺{r.val.toLocaleString('tr-TR',{maximumFractionDigits:0})} <span className="font-normal text-gray-400">({r.n})</span></span>
+                    <span className="font-bold" style={{color: r.color}}>{fmtAna(r.val,'full',0)} <span className="font-normal text-gray-400">({r.n})</span></span>
                   </div>
                   <div className="bg-gray-100 rounded-full h-3 overflow-hidden">
                     <div className="h-full rounded-full" style={{width: `${(r.val / maxVal) * 100}%`, background: r.color}} />
@@ -14158,13 +14179,13 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-gray-600">Total Revenue</span>
-                  <span className="font-bold">₺{(totalRevenue/1000).toFixed(0)}k <span className="text-gray-400">/ ₺{(rMilestone/1000).toFixed(0)}k</span></span>
+                  <span className="font-bold">{fmtAna(totalRevenue,'K',0)} <span className="text-gray-400">/ {fmtAna(rMilestone,'K',0)}</span></span>
                 </div>
                 <div className="bg-gray-100 rounded-full h-3 overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{width: `${rPct}%`, background: 'linear-gradient(90deg, #6366f1, #a78bfa)'}} />
                 </div>
                 <div className="flex justify-between text-[9px] text-gray-400 mt-0.5">
-                  <span>₺{(prevR/1000).toFixed(0)}k</span><span>₺{(rMilestone/1000).toFixed(0)}k</span>
+                  <span>{fmtAna(prevR,'K',0)}</span><span>{fmtAna(rMilestone,'K',0)}</span>
                 </div>
               </div>
             </div>
@@ -14194,7 +14215,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-sm">YTD Revenue by Quarter ({year})</h3>
-              <span className="text-xs font-bold text-brand">₺{(ytdTotal/1000).toFixed(0)}k</span>
+              <span className="text-xs font-bold text-brand">{fmtAna(ytdTotal,'K',0)}</span>
             </div>
             <div className="flex items-end gap-3 h-24 mb-1">
               {Object.entries(quarters).map(([q, rev]) => (
@@ -14237,7 +14258,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-sm">Lost Revenue (Cancellations)</h3>
-              <span className="text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5">₺{(totalLost/1000).toFixed(1)}k total</span>
+              <span className="text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5">{fmtAna(totalLost,'K',1)} total</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
               {months.map(m => (
@@ -14506,7 +14527,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-2 gap-3">
               {[{label:'Last 30 Days', val: rpe30, color: '#3b82f6'}, {label:'YTD', val: rpeYTD, color: '#ff4000'}].map(r => (
                 <div key={r.label} className="rounded-xl p-3 text-center" style={{background: `${r.color}12`}}>
-                  <p className="text-lg font-bold" style={{color: r.color}}>₺{(r.val/1000).toFixed(1)}k</p>
+                  <p className="text-lg font-bold" style={{color: r.color}}>{fmtAna(r.val,'K',1)}</p>
                   <p className="text-[10px] text-gray-500">{r.label}</p>
                   <p className="text-[9px] text-gray-400">{activeCount} employees</p>
                 </div>
@@ -14637,7 +14658,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               {churnRisk.map((c, i) => (
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="truncate flex-1 text-gray-700">{c.name}</span>
-                  <span className="text-gray-400 mx-2">₺{(c.revenue/1000).toFixed(0)}k</span>
+                  <span className="text-gray-400 mx-2">{fmtAna(c.revenue,'K',0)}</span>
                   <span className="font-bold" style={{color: c.daysSince >= 180 ? '#ef4444' : '#f59e0b'}}>{c.daysSince}d</span>
                 </div>
               ))}
@@ -14743,7 +14764,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-sm">Salary Distribution</h3>
-              <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg ₺{(avgSal/1000).toFixed(1)}k</span>
+              <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg {fmtAna(avgSal,'K',1)}</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
               {buckets.map(b => (
@@ -15208,11 +15229,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="truncate flex-1 text-gray-700">{item.name}</span>
                   <span className="text-gray-400 mx-2">×{item.stock}</span>
-                  <span className="text-gray-600">₺{item.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                  <span className="text-gray-600">{fmtAna(item.value,'full',0)}</span>
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-gray-400 mt-2 text-right">Total tied-up: ₺{totalValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+            <p className="text-[10px] text-gray-400 mt-2 text-right">Total tied-up: {fmtAna(totalValue,'full',0)}</p>
           </div>
         );
       })()}
@@ -15470,7 +15491,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <span className="text-white text-[9px] font-bold">{t.count > 0 ? t.count : ''}</span>
                     </div>
                   </div>
-                  {t.avgPrice > 0 && <span className="text-[9px] text-gray-400 w-14 text-right">avg ₺{t.avgPrice.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>}
+                  {t.avgPrice > 0 && <span className="text-[9px] text-gray-400 w-14 text-right">avg {fmtAna(t.avgPrice,'full',0)}</span>}
                 </div>
               ))}
             </div>
@@ -15754,7 +15775,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <span className="text-xs w-16 text-gray-700">{month}</span>
                   <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
                     <div className="h-full rounded-full flex items-center pl-2 transition-all" style={{width:`${(rev/maxRev)*100}%`,background:i===0?'#ff4000':'#6366f1'}}>
-                      <span className="text-white text-[9px] font-bold">₺{(rev/1000).toFixed(0)}k</span>
+                      <span className="text-white text-[9px] font-bold">{fmtAna(rev,'K',0)}</span>
                     </div>
                   </div>
                 </div>
@@ -15787,7 +15808,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="font-semibold text-sm">Cumulative Revenue Trajectory</h3>
-              <span className="text-xs font-bold text-brand">₺{(maxV/1000).toFixed(0)}k total</span>
+              <span className="text-xs font-bold text-brand">{fmtAna(maxV,'K',0)} total</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
               <defs>
@@ -15826,7 +15847,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-sm">Quotation Pipeline</h3>
-              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{active.length} active • ₺{(totalValue/1000).toFixed(0)}k</span>
+              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{active.length} active • {fmtAna(totalValue,'K',0)}</span>
             </div>
             <div className="grid grid-cols-2 gap-1">
               {statusRows.map(([s,n]) => (
@@ -15868,7 +15889,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <p className="text-[10px] text-gray-500">subscriptions</p>
               </div>
               {totalValue > 0 && <div className="text-center">
-                <p className="text-2xl font-bold text-brand">₺{(totalValue/1000).toFixed(1)}k</p>
+                <p className="text-2xl font-bold text-brand">{fmtAna(totalValue,'K',1)}</p>
                 <p className="text-[10px] text-gray-500">period value</p>
               </div>}
             </div>
@@ -15916,7 +15937,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={cat} className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:palette[i]}} />
                   <span className="text-xs truncate flex-1 text-gray-700">{cat}</span>
-                  <span className="text-xs font-bold">₺{(rev/1000).toFixed(1)}k</span>
+                  <span className="text-xs font-bold">{fmtAna(rev,'K',1)}</span>
                   <span className="text-[9px] text-gray-400 w-8 text-right">{Math.round((rev/totalRev)*100)}%</span>
                 </div>
               ))}
@@ -15944,18 +15965,18 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <h3 className="font-semibold text-sm mb-3">Monthly Payroll Estimate</h3>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div className="rounded-xl p-3 bg-indigo-50">
-                <p className="text-xl font-bold text-indigo-600">₺{(totalPayroll/1000).toFixed(0)}k</p>
+                <p className="text-xl font-bold text-indigo-600">{fmtAna(totalPayroll,'K',0)}</p>
                 <p className="text-[10px] text-gray-500">Total monthly</p>
               </div>
               <div className="rounded-xl p-3 bg-purple-50">
-                <p className="text-xl font-bold text-purple-600">₺{(median/1000).toFixed(1)}k</p>
+                <p className="text-xl font-bold text-purple-600">{fmtAna(median,'K',1)}</p>
                 <p className="text-[10px] text-gray-500">Median salary</p>
               </div>
             </div>
             <div className="flex justify-between text-xs text-gray-500">
-              <span>Min: ₺{(minSal/1000).toFixed(1)}k</span>
-              <span>Avg: ₺{(avgSalary/1000).toFixed(1)}k</span>
-              <span>Max: ₺{(maxSal/1000).toFixed(1)}k</span>
+              <span>Min: {fmtAna(minSal,'K',1)}</span>
+              <span>Avg: {fmtAna(avgSalary,'K',1)}</span>
+              <span>Max: {fmtAna(maxSal,'K',1)}</span>
             </div>
           </div>
         );
@@ -16141,7 +16162,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     {r.pct>=0?'+':''}{r.pct.toFixed(0)}%
                   </p>
                   <p className="text-[10px] text-gray-500">{r.label}</p>
-                  <p className="text-[9px] text-gray-400">₺{(r.currRev/1000).toFixed(0)}k</p>
+                  <p className="text-[9px] text-gray-400">{fmtAna(r.currRev,'K',0)}</p>
                 </div>
               ))}
             </div>
@@ -16407,9 +16428,9 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">{overallMargin.toFixed(1)}% margin</div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              <div className="rounded-xl p-2 bg-gray-50"><p className="font-bold">₺{(totalCost/1000).toFixed(0)}k</p><p className="text-gray-400">Cost</p></div>
-              <div className="rounded-xl p-2 bg-green-50"><p className="font-bold text-green-600">₺{(profitPotential/1000).toFixed(0)}k</p><p className="text-gray-400">Profit</p></div>
-              <div className="rounded-xl p-2 bg-blue-50"><p className="font-bold text-blue-600">₺{(totalRetail/1000).toFixed(0)}k</p><p className="text-gray-400">Retail</p></div>
+              <div className="rounded-xl p-2 bg-gray-50"><p className="font-bold">{fmtAna(totalCost,'K',0)}</p><p className="text-gray-400">Cost</p></div>
+              <div className="rounded-xl p-2 bg-green-50"><p className="font-bold text-green-600">{fmtAna(profitPotential,'K',0)}</p><p className="text-gray-400">Profit</p></div>
+              <div className="rounded-xl p-2 bg-blue-50"><p className="font-bold text-blue-600">{fmtAna(totalRetail,'K',0)}</p><p className="text-gray-400">Retail</p></div>
             </div>
           </div>
         );
@@ -16595,7 +16616,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="w-16 bg-gray-100 rounded-full h-3 overflow-hidden">
                     <div className="h-full rounded-full" style={{width:`${(d.revenue/maxRev)*100}%`,background:i===0?'#ff4000':i<=2?'#f59e0b':'#6366f1'}} />
                   </div>
-                  <span className="text-[10px] font-bold text-gray-600 w-12 text-right">₺{(d.revenue/1000).toFixed(0)}k</span>
+                  <span className="text-[10px] font-bold text-gray-600 w-12 text-right">{fmtAna(d.revenue,'K',0)}</span>
                 </div>
               ))}
             </div>
@@ -16872,7 +16893,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="font-semibold text-sm">7-Day Rolling Revenue Avg</h3>
-              <span className="text-xs font-bold text-brand">₺{(latestAvg/1000).toFixed(1)}k/day</span>
+              <span className="text-xs font-bold text-brand">{fmtAna(latestAvg,'K',1)}/day</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
               <defs><linearGradient id="rollGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ff4000" stopOpacity="0.25"/><stop offset="100%" stopColor="#ff4000" stopOpacity="0"/></linearGradient></defs>
@@ -16946,8 +16967,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-2">Net Revenue (excl. cancelled)</h3>
             <div className="flex items-center justify-between mb-3">
-              <div><p className="text-2xl font-bold text-brand">₺{(netRev/1000).toFixed(1)}k</p><p className="text-[10px] text-gray-400">net all-time</p></div>
-              {cancelledRev>0&&<div className="text-right"><p className="text-sm font-bold text-red-500">-₺{(cancelledRev/1000).toFixed(1)}k</p><p className="text-[10px] text-gray-400">from cancellations</p></div>}
+              <div><p className="text-2xl font-bold text-brand">{fmtAna(netRev,'K',1)}</p><p className="text-[10px] text-gray-400">net all-time</p></div>
+              {cancelledRev>0&&<div className="text-right"><p className="text-sm font-bold text-red-500">-{fmtAna(cancelledRev,'K',1)}</p><p className="text-[10px] text-gray-400">from cancellations</p></div>}
             </div>
             <div className="flex items-end gap-2 h-16">
               {months.map(m=><div key={m} className="flex-1 flex flex-col items-center gap-0.5">
@@ -17284,10 +17305,10 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <span className="text-xs w-10 text-gray-600">{r.label}</span>
                   <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
                     <div className="h-full rounded-full flex items-center pl-2" style={{width:`${(r.velocity/maxV)*100}%`,background:'#ff4000',minWidth:r.velocity>0?24:0}}>
-                      <span className="text-white text-[9px] font-bold">₺{(r.velocity/1000).toFixed(1)}k</span>
+                      <span className="text-white text-[9px] font-bold">{fmtAna(r.velocity,'K',1)}</span>
                     </div>
                   </div>
-                  <span className="text-[9px] text-gray-400 w-14 text-right">₺{(r.rev/1000).toFixed(0)}k tot</span>
+                  <span className="text-[9px] text-gray-400 w-14 text-right">{fmtAna(r.rev,'K',0)} tot</span>
                 </div>
               ))}
             </div>
@@ -17321,7 +17342,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={s.label} className="rounded-xl p-3" style={{background:`${s.color}12`}}>
                   <p className="text-sm font-bold" style={{color:s.color}}>{s.count} orders</p>
                   <p className="text-[10px] text-gray-500">{s.label}</p>
-                  {s.rev>0&&<p className="text-[10px] text-gray-400">₺{(s.rev/1000).toFixed(1)}k rev</p>}
+                  {s.rev>0&&<p className="text-[10px] text-gray-400">{fmtAna(s.rev,'K',1)} rev</p>}
                 </div>
               ))}
             </div>
@@ -17426,7 +17447,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                   <div className="w-16 bg-gray-100 rounded-full h-3 overflow-hidden">
                     <div className="h-full rounded-full" style={{width:`${(rev/maxRev)*100}%`,background:i===0?'#ff4000':'#6366f1'}}/>
                   </div>
-                  <span className="text-[10px] font-bold text-gray-600 w-10 text-right">₺{(rev/1000).toFixed(0)}k</span>
+                  <span className="text-[10px] font-bold text-gray-600 w-10 text-right">{fmtAna(rev,'K',0)}</span>
                 </div>
               ))}
             </div>
@@ -17506,7 +17527,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <div className="grid grid-cols-3 gap-2 text-center text-xs">
               {[{label:'Expired',val:expiredValue,color:'#ef4444'},{label:'<30d',val:nearExpiryValue,color:'#f59e0b'},{label:'Healthy',val:healthyValue,color:'#22c55e'}].map(s=>(
                 <div key={s.label} className="rounded-xl p-2" style={{background:`${s.color}10`}}>
-                  <p className="font-bold" style={{color:s.color}}>₺{(s.val/1000).toFixed(0)}k</p>
+                  <p className="font-bold" style={{color:s.color}}>{fmtAna(s.val,'K',0)}</p>
                   <p className="text-gray-400">{s.label}</p>
                 </div>
               ))}
@@ -17532,7 +17553,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="font-semibold text-sm">Order Values (90d)</h3>
-              <span className="text-xs text-gray-500">avg ₺{(avgVal/1000).toFixed(1)}k</span>
+              <span className="text-xs text-gray-500">avg {fmtAna(avgVal,'K',1)}</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
               <line x1={pad} y1={h-pad-(avgVal/maxV)*(h-2*pad)} x2={w-pad} y2={h-pad-(avgVal/maxV)*(h-2*pad)} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="4 4"/>
@@ -17663,7 +17684,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="truncate flex-1 text-gray-700">{item.name}</span>
                   <span className="text-gray-400 ml-2">×{(item.stock as number|undefined)??0}</span>
-                  <span className="text-gray-500 ml-2">₺{(item.prices?.['Retail'] as number|undefined)?.toLocaleString('tr-TR')??'—'}</span>
+                  <span className="text-gray-500 ml-2">{(item.prices?.['Retail'] as number|undefined) != null ? fmtAna((item.prices?.['Retail'] as number)) : '—'}</span>
                 </div>
               ))}
             </div>
@@ -17731,7 +17752,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-sm">Order Value Distribution</h3>
-              <span className="text-xs text-gray-500">median ₺{(median/1000).toFixed(1)}k</span>
+              <span className="text-xs text-gray-500">median {fmtAna(median,'K',1)}</span>
             </div>
             <div className="flex items-end gap-1 h-20 mb-1">
               {buckets.map((b,i)=>(
@@ -17765,7 +17786,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             <h3 className="font-semibold text-sm mb-3">3-Month Revenue Forecast</h3>
             <div className="flex items-end gap-2 h-24 mb-1">
               {vals.map((v,i)=><div key={i} className="flex-1 flex flex-col items-center gap-0.5"><div className="w-full rounded-sm" style={{height:`${(v/maxV)*72}px`,background:'#ff4000'}}/><span className="text-[9px] text-gray-400">{months[i]?.slice(5)}</span></div>)}
-              {forecasts.map((f,i)=><div key={f.month} className="flex-1 flex flex-col items-center gap-0.5"><span className="text-[8px] text-indigo-400">₺{(f.rev/1000).toFixed(0)}k</span><div className="w-full rounded-sm border-2 border-dashed border-indigo-300" style={{height:`${(f.rev/maxV)*72}px`,background:`rgba(99,102,241,${0.15+i*0.1})`}}/><span className="text-[9px] text-indigo-400">{f.month.slice(5)}</span></div>)}
+              {forecasts.map((f,i)=><div key={f.month} className="flex-1 flex flex-col items-center gap-0.5"><span className="text-[8px] text-indigo-400">{fmtAna(f.rev,'K',0)}</span><div className="w-full rounded-sm border-2 border-dashed border-indigo-300" style={{height:`${(f.rev/maxV)*72}px`,background:`rgba(99,102,241,${0.15+i*0.1})`}}/><span className="text-[9px] text-indigo-400">{f.month.slice(5)}</span></div>)}
             </div>
             <p className="text-[10px] text-gray-400 text-center">Based on {(avgGrowth*100).toFixed(1)}% avg monthly growth</p>
           </div>
@@ -17852,7 +17873,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 <p className="text-[10px] text-gray-500">Shipped/Delivered</p>
               </div>
               <div className="rounded-xl p-3 bg-brand/10 text-center">
-                <p className="text-2xl font-bold text-brand">₺{(rev/1000).toFixed(1)}k</p>
+                <p className="text-2xl font-bold text-brand">{fmtAna(rev,'K',1)}</p>
                 <p className="text-[10px] text-gray-500">Revenue</p>
               </div>
             </div>
@@ -17964,7 +17985,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">Inventory Ageing Pyramid</h3>
-            <p className="text-xs text-gray-500 mb-4">Stock value by days since last sale — total: ₺{totalValue.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</p>
+            <p className="text-xs text-gray-500 mb-4">Stock value by days since last sale — total: {fmtAna(totalValue)}</p>
             <div className="space-y-2">
               {tierData.map((t, i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -17973,7 +17994,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                     <div className="h-full rounded-full" style={{width: `${maxValue > 0 ? t.value / maxValue * 100 : 0}%`, background: t.color}} />
                   </div>
                   <span className="text-xs text-gray-500 w-8">{t.count} SKU</span>
-                  <span className="text-xs font-bold w-24 text-right" style={{color: t.color}}>₺{t.value.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                  <span className="text-xs font-bold w-24 text-right" style={{color: t.color}}>{fmtAna(t.value)}</span>
                 </div>
               ))}
             </div>
@@ -27414,8 +27435,10 @@ function AppContent() {
                         <h2 className="text-xl font-bold text-gray-900">{currentLanguage === 'tr' ? 'Satış Hedefleri' : 'Sales Targets'}</h2>
                         <p className="text-sm text-gray-500">{now.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' })}</p>
                       </div>
-                      <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
-                        className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Hedef Güncelle' : 'Update Target'}</button>
+                      {!isEditingTarget && (
+                        <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
+                          className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Hedef Güncelle' : 'Update Target'}</button>
+                      )}
                     </div>
                     {/* Global target card */}
                     <div className="apple-card p-6">
@@ -27423,10 +27446,31 @@ function AppContent() {
                         <p className="text-sm font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Aylık Hedef' : 'Monthly Target'}</p>
                         <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${globalPct >= 100 ? 'bg-emerald-100 text-emerald-700' : globalPct >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{globalPct}%</span>
                       </div>
-                      <div className="flex items-end gap-3 mb-4">
-                        <span className="text-3xl font-bold text-gray-900">₺{globalActual.toLocaleString()}</span>
-                        <span className="text-gray-400 mb-1">/ ₺{monthlyTarget.toLocaleString()}</span>
-                      </div>
+                      {isEditingTarget ? (
+                        <div className="flex items-center gap-2 mb-4">
+                          <span className="text-sm text-gray-500">₺</span>
+                          <input
+                            autoFocus
+                            type="number"
+                            value={targetDraft}
+                            onChange={e => setTargetDraft(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }
+                              if (e.key === 'Escape') setIsEditingTarget(false);
+                            }}
+                            className="apple-input text-lg font-bold w-48 px-3 py-1.5"
+                            placeholder="0"
+                          />
+                          <button onClick={() => { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }}
+                            className="apple-button-primary text-xs px-4 py-1.5">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                          <button onClick={() => setIsEditingTarget(false)} className="text-sm text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-end gap-3 mb-4">
+                          <span className="text-3xl font-bold text-gray-900">₺{globalActual.toLocaleString()}</span>
+                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? `₺${monthlyTarget.toLocaleString()}` : <span className="italic">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
+                        </div>
+                      )}
                       <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all ${globalPct >= 100 ? 'bg-emerald-500' : globalPct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
                           style={{ width: `${globalPct}%` }} />
@@ -27447,7 +27491,7 @@ function AppContent() {
                                     {i === 0 && <span>🏆</span>}
                                     {r.rep}
                                   </span>
-                                  <span className="text-gray-500">₺{r.actual.toLocaleString()} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
+                                  <span className="text-gray-500">₺{r.actual.toLocaleString('tr-TR', {maximumFractionDigits:0})} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
                                 </div>
                                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                                   <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : 'bg-brand'}`}
