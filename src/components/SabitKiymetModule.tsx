@@ -35,6 +35,9 @@ interface SabitKiymet {
 interface SabitKiymetModuleProps {
   currentLanguage: 'tr' | 'en';
   isAuthenticated: boolean;
+  kpiCurrency?: 'TRY' | 'USD' | 'EUR';
+  setKpiCurrency?: (c: 'TRY' | 'USD' | 'EUR') => void;
+  exchangeRates?: { USD?: number; EUR?: number };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -309,11 +312,13 @@ function StatCard({
   label,
   value,
   color,
+  toggle,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   color: string;
+  toggle?: React.ReactNode;
 }) {
   return (
     <motion.div
@@ -325,8 +330,11 @@ function StatCard({
       <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0', color)}>
         <Icon className="w-5 h-5" />
       </div>
-      <div className="min-w-0">
-        <p className="text-[11px] text-[#86868B] font-medium truncate">{label}</p>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1">
+          <p className="text-[11px] text-[#86868B] font-medium truncate">{label}</p>
+          {toggle && <div className="shrink-0">{toggle}</div>}
+        </div>
         <p className="text-lg font-bold text-[#1D1D1F] leading-tight truncate">{value}</p>
       </div>
     </motion.div>
@@ -439,8 +447,29 @@ const emptyForm = (): Omit<SabitKiymet, 'id'> => ({
 export default function SabitKiymetModule({
   currentLanguage,
   isAuthenticated,
+  kpiCurrency = 'TRY',
+  setKpiCurrency,
+  exchangeRates,
 }: SabitKiymetModuleProps) {
   const t = T[currentLanguage] as typeof T['tr'];
+
+  // Currency helpers
+  const currRate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+  const currSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+  const fmtMoney = (val: number) => {
+    const converted = kpiCurrency === 'TRY' ? val : val / currRate;
+    return `${currSym}${new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(converted)}`;
+  };
+  const CurrToggle = setKpiCurrency ? () => (
+    <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+      {(['TRY', 'USD', 'EUR'] as const).map(c => (
+        <button key={c} onClick={() => setKpiCurrency!(c)}
+          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   // Data
   const [items, setItems] = useState<SabitKiymet[]>([]);
@@ -789,20 +818,23 @@ export default function SabitKiymetModule({
         <StatCard
           icon={BarChart3}
           label={t.toplamKayitliDeger}
-          value={formatCurrency(stats.kayitliDeger)}
+          value={fmtMoney(stats.kayitliDeger)}
           color="bg-green-100 text-green-700"
+          toggle={CurrToggle ? <CurrToggle /> : undefined}
         />
         <StatCard
           icon={TrendingDown}
           label={t.toplamDefterDeger}
-          value={formatCurrency(stats.defterDeger)}
+          value={fmtMoney(stats.defterDeger)}
           color="bg-indigo-100 text-indigo-700"
+          toggle={CurrToggle ? <CurrToggle /> : undefined}
         />
         <StatCard
           icon={Calendar}
           label={t.birikmisSalinma}
-          value={formatCurrency(stats.birikmisSalinma)}
+          value={fmtMoney(stats.birikmisSalinma)}
           color="bg-orange-100 text-orange-700"
+          toggle={CurrToggle ? <CurrToggle /> : undefined}
         />
       </div>
 

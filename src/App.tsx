@@ -22802,35 +22802,32 @@ function AppContent() {
                   />
 
                   {/* ── Sub-tab navigation ── */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
-                      {([
-                        { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
-                        { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
-                        { id: 'ap',           label: currentLanguage === 'tr' ? 'Ödenecekler (AP)' : 'Payables (AP)',     icon: Building2  },
-                        { id: 'butce',        label: currentLanguage === 'tr' ? 'Bütçe Planı'      : 'Budget Plan',       icon: BarChart3  },
-                        { id: 'banka',        label: currentLanguage === 'tr' ? 'Banka Mutabakatı'  : 'Bank Recon',        icon: CreditCard },
-                        { id: 'sabit-kiymet',      label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
-                        { id: 'maliyet',           label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
-                        { id: 'ar-aging',          label: currentLanguage === 'tr' ? 'Müşteri Yaşlandırma': 'AR Aging',         icon: Users },
-                        { id: 'finansal-oranlar',  label: currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios',  icon: Activity },
-                        { id: 'pnl',               label: currentLanguage === 'tr' ? 'Gelir Tablosu'    : 'P&L Statement',      icon: TrendingUp },
-                      ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
-                        const Icon = tab.icon;
-                        const isActive = muhasebeTab === tab.id;
-                        return (
-                          <button
-                            key={tab.id}
-                            onClick={() => setMuhasebeTab(tab.id)}
-                            className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
-                          >
-                            <Icon className="w-3.5 h-3.5" />
-                            {tab.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <KpiCurrencyToggle />
+                  <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
+                    {([
+                      { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
+                      { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
+                      { id: 'ap',           label: currentLanguage === 'tr' ? 'Ödenecekler (AP)' : 'Payables (AP)',     icon: Building2  },
+                      { id: 'butce',        label: currentLanguage === 'tr' ? 'Bütçe Planı'      : 'Budget Plan',       icon: BarChart3  },
+                      { id: 'banka',        label: currentLanguage === 'tr' ? 'Banka Mutabakatı'  : 'Bank Recon',        icon: CreditCard },
+                      { id: 'sabit-kiymet',      label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
+                      { id: 'maliyet',           label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
+                      { id: 'ar-aging',          label: currentLanguage === 'tr' ? 'Müşteri Yaşlandırma': 'AR Aging',         icon: Users },
+                      { id: 'finansal-oranlar',  label: currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios',  icon: Activity },
+                      { id: 'pnl',               label: currentLanguage === 'tr' ? 'Gelir Tablosu'    : 'P&L Statement',      icon: TrendingUp },
+                    ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
+                      const Icon = tab.icon;
+                      const isActive = muhasebeTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setMuhasebeTab(tab.id)}
+                          className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {tab.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* ── Genel Muhasebe ── */}
@@ -23352,6 +23349,9 @@ function AppContent() {
                       <SabitKiymetModule
                         currentLanguage={currentLanguage as 'tr' | 'en'}
                         isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                        kpiCurrency={kpiCurrency}
+                        setKpiCurrency={setKpiCurrency}
+                        exchangeRates={exchangeRates}
                       />
                     </motion.div>
                   )}
@@ -23758,22 +23758,19 @@ function AppContent() {
                   {!hasFullAccess('satin-alma') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
 
                   {/* ── Sub-tab switcher ── */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-                      {([
-                        { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
-                        { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
-                        { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
-                        { key: 'odeme-takvimi',  label: currentLanguage === 'tr' ? 'Ödeme Takvimi' : 'Payment Schedule',    icon: Calendar },
-                      ] as { key: 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'; label: string; icon: React.ElementType }[]).map(t => (
-                        <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
-                          className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
-                            purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
-                          <t.icon className="w-4 h-4" /> {t.label}
-                        </button>
-                      ))}
-                    </div>
-                    <KpiCurrencyToggle />
+                  <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+                    {([
+                      { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
+                      { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
+                      { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
+                      { key: 'odeme-takvimi',  label: currentLanguage === 'tr' ? 'Ödeme Takvimi' : 'Payment Schedule',    icon: Calendar },
+                    ] as { key: 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'; label: string; icon: React.ElementType }[]).map(t => (
+                      <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
+                        className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                          purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
+                        <t.icon className="w-4 h-4" /> {t.label}
+                      </button>
+                    ))}
                   </div>
 
                   {/* Purchase Orders */}
@@ -23808,9 +23805,12 @@ function AppContent() {
                                 <BarChart3 className="w-3.5 h-3.5" />
                                 {currentLanguage === 'tr' ? '6 Aylık Maliyet Trendi' : '6-Month Cost Trend'}
                               </h3>
-                              <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
-                                {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?totalCost6m:totalCost6m/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
+                                  {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?totalCost6m:totalCost6m/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                                </span>
+                                <KpiCurrencyToggle />
+                              </div>
                             </div>
                             <div className="flex items-end gap-1.5 h-16">
                               {months.map((m, i) => (
@@ -24329,14 +24329,11 @@ function AppContent() {
               {!canAccess('ik') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources'} /> : (
                 <>
                   {!hasFullAccess('ik') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <div className="flex items-start justify-between gap-3">
-                    <ModuleHeader
-                      title={currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources'}
-                      subtitle={currentLanguage === 'tr' ? 'Çalışan yönetimi, izin, seyahat, avans ve bordro' : 'Employee management, leave, travel, advance and payroll'}
-                      icon={Users}
-                    />
-                    <div className="shrink-0 pt-1"><KpiCurrencyToggle /></div>
-                  </div>
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources'}
+                    subtitle={currentLanguage === 'tr' ? 'Çalışan yönetimi, izin, seyahat, avans ve bordro' : 'Employee management, leave, travel, advance and payroll'}
+                    icon={Users}
+                  />
                   {/* ── Phase 61: Employee Status Ring Chart ── */}
                   {employees.length > 0 && (() => {
                     const aktif  = employees.filter(e => e.status === 'Aktif').length;
@@ -24441,6 +24438,7 @@ function AppContent() {
                             <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bordro Özeti' : 'Payroll Summary'}</h3>
                           </div>
                           <div className="flex items-center gap-2">
+                            <KpiCurrencyToggle />
                             <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} className="apple-input text-xs px-2 py-1" />
                             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                               {(['summary', 'detail'] as const).map(v => (
@@ -26657,7 +26655,6 @@ function AppContent() {
                       </button>
                     );
                   })}
-                  {(crmTab === 'pipeline' || crmTab === 'hedefler') && <div className="ml-2 shrink-0 flex items-center self-center"><KpiCurrencyToggle /></div>}
                 </div>
               </div>
 
@@ -27400,7 +27397,10 @@ function AppContent() {
                         <h2 className="text-xl font-bold text-gray-900">{currentLanguage === 'tr' ? 'Satış Pipeline' : 'Sales Pipeline'}</h2>
                         <p className="text-sm text-gray-500">{leads.length} {currentLanguage === 'tr' ? 'müşteri adayı' : 'leads total'}</p>
                       </div>
-                      <button onClick={() => setIsAddingLead(true)} className="apple-button-primary"><Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Aday' : 'New Lead'}</button>
+                      <div className="flex items-center gap-2">
+                        <KpiCurrencyToggle />
+                        <button onClick={() => setIsAddingLead(true)} className="apple-button-primary"><Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Aday' : 'New Lead'}</button>
+                      </div>
                     </div>
                     {/* KPI strip */}
                     <div className="grid grid-cols-4 gap-3">
