@@ -18904,6 +18904,20 @@ function AppContent() {
   const [monthlyTarget, setMonthlyTarget] = useState<number>(() => Number(localStorage.getItem('cetpa-monthly-target') || 0));
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState('');
+  // Per-month target history: { "2026-05": 100000, ... }
+  const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('cetpa-monthly-targets') || '{}'); } catch { return {}; }
+  });
+  const [editingMonthKey, setEditingMonthKey] = useState<string | null>(null);
+  const [editingMonthDraft, setEditingMonthDraft] = useState('');
+  const saveMonthlyTarget = (monthKey: string, value: number) => {
+    const isCurrentMonth = monthKey === (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+    if (isCurrentMonth) { setMonthlyTarget(value); localStorage.setItem('cetpa-monthly-target', String(value)); }
+    const updated = { ...monthlyTargets, [monthKey]: value };
+    if (value === 0) { delete updated[monthKey]; }
+    setMonthlyTargets(updated);
+    localStorage.setItem('cetpa-monthly-targets', JSON.stringify(updated));
+  };
   // ── Phase 100: In-App Email Compose ──────────────────────────────────────
   const [emailCompose, setEmailCompose] = useState<{ open: boolean; to: string; name: string; subject: string; body: string }>({
     open: false, to: '', name: '', subject: '', body: ''
@@ -21347,8 +21361,8 @@ function AppContent() {
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
                                   const v = Number(targetDraft);
-                                  setMonthlyTarget(v);
-                                  localStorage.setItem('cetpa-monthly-target', String(v));
+                                  const mk = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+                                  saveMonthlyTarget(mk, v);
                                   setIsEditingTarget(false);
                                 }
                                 if (e.key === 'Escape') setIsEditingTarget(false);
@@ -21356,7 +21370,7 @@ function AppContent() {
                               className="text-sm font-bold bg-gray-100 rounded-lg px-2 py-1 outline-none w-36"
                               placeholder="0"
                             />
-                            <button onClick={() => { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }}
+                            <button onClick={() => { const v = Number(targetDraft); const mk = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })(); saveMonthlyTarget(mk, v); setIsEditingTarget(false); }}
                               className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
                             <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
                           </div>
@@ -27444,98 +27458,266 @@ function AppContent() {
               {/* ── Phase 142: Sales Target Tracker ── */}
               {crmTab === 'hedefler' && (() => {
                 const now = new Date();
-                const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-                // Aggregate actual sales this month per rep from orders
-                const repMap: Record<string, { rep: string; actual: number; deals: number }> = {};
+                const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+                // ── Build revenue-per-month from all orders ──────────────────
+                const revenueByMonth: Record<string, number> = {};
+                const dealsByMonth: Record<string, number> = {};
+                const repByMonth: Record<string, Record<string, { actual: number; deals: number }>> = {};
                 for (const o of orders) {
-                  const rep = (o.assignedTo as string | undefined) || o.customerName || '—';
                   const dateStr = o.createdAt
                     ? (() => { try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; } catch { return ''; } })()
                     : '';
-                  if (!repMap[rep]) repMap[rep] = { rep, actual: 0, deals: 0 };
-                  if (dateStr === thisMonth) {
-                    repMap[rep].actual += o.totalPrice || 0;
-                    repMap[rep].deals++;
-                  }
+                  if (!dateStr) continue;
+                  revenueByMonth[dateStr] = (revenueByMonth[dateStr] || 0) + (o.totalPrice || 0);
+                  dealsByMonth[dateStr] = (dealsByMonth[dateStr] || 0) + 1;
+                  const rep = (o.assignedTo as string | undefined) || '—';
+                  if (!repByMonth[dateStr]) repByMonth[dateStr] = {};
+                  if (!repByMonth[dateStr][rep]) repByMonth[dateStr][rep] = { actual: 0, deals: 0 };
+                  repByMonth[dateStr][rep].actual += o.totalPrice || 0;
+                  repByMonth[dateStr][rep].deals++;
                 }
-                const repList = Object.values(repMap).sort((a, b) => b.actual - a.actual);
-                const globalActual = repList.reduce((s, r) => s + r.actual, 0);
-                const globalPct = monthlyTarget > 0 ? Math.min(Math.round((globalActual / monthlyTarget) * 100), 100) : 0;
+
+                // ── Build last 12 months list ───────────────────────────────
+                const months: { key: string; label: string; year: number; month: number }[] = [];
+                for (let i = 11; i >= 0; i--) {
+                  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                  const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                  const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: 'numeric' });
+                  months.push({ key, label, year: d.getFullYear(), month: d.getMonth()+1 });
+                }
+
+                const thisMonthActual = revenueByMonth[thisMonthKey] || 0;
+                const globalPct = monthlyTarget > 0 ? Math.min(Math.round((thisMonthActual / monthlyTarget) * 100), 100) : 0;
+                const repList = Object.entries(repByMonth[thisMonthKey] || {})
+                  .map(([rep, v]) => ({ rep, ...v }))
+                  .sort((a, b) => b.actual - a.actual);
+
+                // ── Summary stats ────────────────────────────────────────────
+                const hitCount = months.filter(m => {
+                  const t = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
+                  const a = revenueByMonth[m.key] || 0;
+                  return t > 0 && a >= t;
+                }).length;
+                const monthsWithTarget = months.filter(m => (monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0)) > 0).length;
+                const totalActual12 = months.reduce((s, m) => s + (revenueByMonth[m.key] || 0), 0);
+                const totalTarget12 = months.reduce((s, m) => s + (monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0)), 0);
+                const avg12Pct = totalTarget12 > 0 ? Math.round((totalActual12 / totalTarget12) * 100) : 0;
+                const best12 = months.reduce<{ key: string; pct: number } | null>((best, m) => {
+                  const t = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
+                  const a = revenueByMonth[m.key] || 0;
+                  if (t === 0) return best;
+                  const pct = Math.round((a / t) * 100);
+                  return (!best || pct > best.pct) ? { key: m.key, pct } : best;
+                }, null);
+
                 return (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
+                  <div className="space-y-5">
+                    {/* ── Header ─────────────────────────────────────────── */}
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <h2 className="text-xl font-bold text-gray-900">{currentLanguage === 'tr' ? 'Satış Hedefleri' : 'Sales Targets'}</h2>
                         <p className="text-sm text-gray-500">{now.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' })}</p>
                       </div>
-                      {!isEditingTarget && (
-                        <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
-                          className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Hedef Güncelle' : 'Update Target'}</button>
-                      )}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <KpiCurrencyToggle />
+                        {!isEditingTarget && (
+                          <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
+                            className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Bu Ay Hedef Güncelle' : 'Update This Month'}</button>
+                        )}
+                      </div>
                     </div>
-                    {/* Global target card */}
+
+                    {/* ── Bu Ay Card ─────────────────────────────────────── */}
                     <div className="apple-card p-6">
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Aylık Hedef' : 'Monthly Target'}</p>
+                        <p className="text-sm font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Bu Ay' : 'This Month'}</p>
                         <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${globalPct >= 100 ? 'bg-emerald-100 text-emerald-700' : globalPct >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{globalPct}%</span>
                       </div>
                       {isEditingTarget ? (
-                        <div className="flex items-center gap-2 mb-4">
+                        <div className="flex items-center gap-2 mb-4 flex-wrap">
                           <span className="text-sm text-gray-500">₺</span>
-                          <input
-                            autoFocus
-                            type="number"
-                            value={targetDraft}
-                            onChange={e => setTargetDraft(e.target.value)}
+                          <input autoFocus type="number" value={targetDraft} onChange={e => setTargetDraft(e.target.value)}
                             onKeyDown={e => {
-                              if (e.key === 'Enter') { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }
+                              if (e.key === 'Enter') { const v = Number(targetDraft); saveMonthlyTarget(thisMonthKey, v); setIsEditingTarget(false); }
                               if (e.key === 'Escape') setIsEditingTarget(false);
                             }}
-                            className="apple-input text-lg font-bold w-48 px-3 py-1.5"
-                            placeholder="0"
-                          />
-                          <button onClick={() => { const v = Number(targetDraft); setMonthlyTarget(v); localStorage.setItem('cetpa-monthly-target', String(v)); setIsEditingTarget(false); }}
+                            className="apple-input text-lg font-bold w-48 px-3 py-1.5" placeholder="0" />
+                          <button onClick={() => { const v = Number(targetDraft); saveMonthlyTarget(thisMonthKey, v); setIsEditingTarget(false); }}
                             className="apple-button-primary text-xs px-4 py-1.5">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
                           <button onClick={() => setIsEditingTarget(false)} className="text-sm text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
                         </div>
                       ) : (
                         <div className="flex items-end gap-3 mb-4">
-                          <span className="text-3xl font-bold text-gray-900">{fmtKpi(globalActual)}</span>
-                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : <span className="italic">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
+                          <span className="text-3xl font-bold text-gray-900">{fmtKpi(thisMonthActual)}</span>
+                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : <span className="italic text-gray-300">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
                         </div>
                       )}
                       <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all ${globalPct >= 100 ? 'bg-emerald-500' : globalPct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
+                        <div className={`h-full rounded-full transition-all duration-700 ${globalPct >= 100 ? 'bg-emerald-500' : globalPct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
                           style={{ width: `${globalPct}%` }} />
                       </div>
-                    </div>
-                    {/* Per-rep breakdown */}
-                    {repList.length > 0 && (
-                      <div className="apple-card p-4">
-                        <h3 className="font-semibold text-gray-800 mb-3 text-sm">{currentLanguage === 'tr' ? 'Temsilci Bazlı' : 'Per Representative'}</h3>
-                        <div className="space-y-3">
+                      {repList.length > 0 && (
+                        <div className="mt-4 space-y-2 border-t border-gray-50 pt-3">
+                          <p className="text-xs font-semibold text-gray-500 mb-2">{currentLanguage === 'tr' ? 'Temsilci Bazlı' : 'Per Rep'}</p>
                           {repList.map((r, i) => {
                             const repTarget = monthlyTarget > 0 ? monthlyTarget / Math.max(repList.length, 1) : 0;
                             const pct = repTarget > 0 ? Math.min(Math.round((r.actual / repTarget) * 100), 100) : 0;
                             return (
                               <div key={r.rep}>
-                                <div className="flex items-center justify-between text-xs mb-1">
-                                  <span className="font-medium text-gray-800 flex items-center gap-1">
-                                    {i === 0 && <span>🏆</span>}
-                                    {r.rep}
-                                  </span>
-                                  <span className="text-gray-500">{fmtKpi(r.actual,'full',0)} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
+                                <div className="flex items-center justify-between text-xs mb-0.5">
+                                  <span className="font-medium text-gray-800 flex items-center gap-1">{i === 0 && '🏆'}{r.rep}</span>
+                                  <span className="text-gray-500">{fmtKpi(r.actual)} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
                                 </div>
-                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                  <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : 'bg-brand'}`}
-                                    style={{ width: `${pct}%` }} />
+                                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
                                 </div>
                               </div>
                             );
                           })}
                         </div>
+                      )}
+                    </div>
+
+                    {/* ── 12-Month Summary KPI Cards ──────────────────────── */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { label: currentLanguage === 'tr' ? '12 Ay Ciro' : '12-Mo Revenue', value: fmtKpi(totalActual12,'K',1), sub: `${months.filter(m => (revenueByMonth[m.key] || 0) > 0).length} ${currentLanguage === 'tr' ? 'aktif ay' : 'active months'}`, color: 'text-emerald-600', icon: '📈' },
+                        { label: currentLanguage === 'tr' ? 'Ort. Başarı' : 'Avg. Attainment', value: `%${avg12Pct}`, sub: `${monthsWithTarget} ${currentLanguage === 'tr' ? 'hedefli ay' : 'months w/ target'}`, color: avg12Pct >= 100 ? 'text-emerald-600' : avg12Pct >= 70 ? 'text-amber-600' : 'text-red-500', icon: '🎯' },
+                        { label: currentLanguage === 'tr' ? 'Hedef Tutturan' : 'Target Hit', value: `${hitCount}/${monthsWithTarget}`, sub: currentLanguage === 'tr' ? 'ay' : 'months', color: 'text-blue-600', icon: '✅' },
+                        { label: currentLanguage === 'tr' ? 'En İyi Ay' : 'Best Month', value: best12 ? `%${best12.pct}` : '—', sub: best12 ? months.find(m => m.key === best12.key)?.label || '' : currentLanguage === 'tr' ? 'veri yok' : 'no data', color: 'text-purple-600', icon: '🏆' },
+                      ].map((k, i) => (
+                        <div key={i} className="apple-card p-4">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-base">{k.icon}</span>
+                            <p className="text-xs text-gray-500 font-medium">{k.label}</p>
+                          </div>
+                          <p className={`text-2xl font-black ${k.color}`}>{k.value}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{k.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ── Last 6 Months Mini Cards ─────────────────────── */}
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-700 mb-2">{currentLanguage === 'tr' ? 'Son 6 Ay' : 'Last 6 Months'}</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                        {months.slice(6).map(m => {
+                          const target = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
+                          const actual = revenueByMonth[m.key] || 0;
+                          const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+                          const isCurrent = m.key === thisMonthKey;
+                          const barColor = pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : target > 0 ? 'bg-red-400' : 'bg-gray-300';
+                          const textColor = pct >= 100 ? 'text-emerald-600' : pct >= 70 ? 'text-amber-600' : target > 0 ? 'text-red-500' : 'text-gray-400';
+                          return (
+                            <div key={m.key} className={`rounded-2xl border p-3 ${isCurrent ? 'border-brand/30 bg-brand/5' : 'border-gray-100 bg-white'} shadow-sm`}>
+                              <p className={`text-[10px] font-bold mb-1 ${isCurrent ? 'text-brand' : 'text-gray-500'}`}>{m.label}</p>
+                              <p className={`text-base font-black ${target > 0 ? textColor : 'text-gray-700'}`}>
+                                {target > 0 ? `%${pct}` : '—'}
+                              </p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">{fmtKpi(actual,'K',1)}</p>
+                              {target > 0 && <p className="text-[9px] text-gray-300 mt-0.5">{currentLanguage === 'tr' ? 'Hdf:' : 'Tgt:'} {fmtKpi(target,'K',1)}</p>}
+                              <div className="h-1 bg-gray-100 rounded-full mt-1.5 overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    )}
+                    </div>
+
+                    {/* ── Historical Table ──────────────────────────────── */}
+                    <div className="apple-card overflow-hidden">
+                      <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                        <h3 className="font-bold text-gray-800 text-sm">{currentLanguage === 'tr' ? 'Geçmiş Hedefler (12 Ay)' : 'Target History (12 Months)'}</h3>
+                        <p className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Hedefi düzenlemek için satıra tıklayın' : 'Click a row to edit its target'}</p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider">
+                              <th className="text-left px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Ay' : 'Month'}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Hedef' : 'Target'}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Fark' : 'Gap'}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">%</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}</th>
+                              <th className="px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {[...months].reverse().map(m => {
+                              const target = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
+                              const actual = revenueByMonth[m.key] || 0;
+                              const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+                              const gap = actual - target;
+                              const isCurrent = m.key === thisMonthKey;
+                              const isEditingThis = editingMonthKey === m.key;
+                              const statusLabel = !target ? (currentLanguage === 'tr' ? '—' : '—') : pct >= 100 ? (currentLanguage === 'tr' ? '✅ Tuttu' : '✅ Hit') : pct >= 70 ? (currentLanguage === 'tr' ? '🟡 Yakın' : '🟡 Close') : (currentLanguage === 'tr' ? '🔴 Geride' : '🔴 Behind');
+                              const statusColor = !target ? 'text-gray-300' : pct >= 100 ? 'text-emerald-600' : pct >= 70 ? 'text-amber-600' : 'text-red-500';
+                              return (
+                                <tr key={m.key}
+                                  className={`hover:bg-gray-50 cursor-pointer transition-colors ${isCurrent ? 'bg-brand/5 font-semibold' : ''}`}
+                                  onClick={() => { if (!isEditingThis) { setEditingMonthKey(m.key); setEditingMonthDraft(String(target || '')); } }}>
+                                  <td className="px-4 py-3">
+                                    <span className={`${isCurrent ? 'text-brand font-bold' : 'text-gray-700'}`}>{m.label}</span>
+                                    {isCurrent && <span className="ml-1.5 text-[9px] bg-brand text-white px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Bu ay' : 'Now'}</span>}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    {isEditingThis ? (
+                                      <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                        <input
+                                          autoFocus
+                                          type="number"
+                                          value={editingMonthDraft}
+                                          onChange={e => setEditingMonthDraft(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') { saveMonthlyTarget(m.key, Number(editingMonthDraft)); setEditingMonthKey(null); }
+                                            if (e.key === 'Escape') setEditingMonthKey(null);
+                                          }}
+                                          className="w-28 text-right bg-white border border-brand rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand"
+                                          placeholder="0"
+                                        />
+                                        <button onClick={e => { e.stopPropagation(); saveMonthlyTarget(m.key, Number(editingMonthDraft)); setEditingMonthKey(null); }}
+                                          className="bg-brand text-white rounded-lg px-2 py-1 text-[10px] font-bold whitespace-nowrap">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                                        <button onClick={e => { e.stopPropagation(); setEditingMonthKey(null); }}
+                                          className="text-gray-400 hover:text-gray-600 text-[10px]">✕</button>
+                                      </div>
+                                    ) : (
+                                      <span className={`${target > 0 ? 'text-gray-700' : 'text-gray-300 italic'}`}>
+                                        {target > 0 ? fmtKpi(target) : (currentLanguage === 'tr' ? 'Hedef yok' : 'No target')}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-gray-700">{actual > 0 ? fmtKpi(actual) : <span className="text-gray-300">—</span>}</td>
+                                  <td className={`px-4 py-3 text-right ${target > 0 && actual > 0 ? (gap >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-gray-300'}`}>
+                                    {target > 0 && actual > 0 ? `${gap >= 0 ? '+' : ''}${fmtKpi(Math.abs(gap),'K',1)}` : '—'}
+                                  </td>
+                                  <td className={`px-4 py-3 text-right font-bold ${statusColor}`}>{target > 0 ? `${pct}%` : '—'}</td>
+                                  <td className="px-4 py-3 text-right text-gray-500">{dealsByMonth[m.key] || 0}</td>
+                                  <td className={`px-4 py-3 text-xs font-semibold ${statusColor}`}>{statusLabel}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          {totalTarget12 > 0 && (
+                            <tfoot>
+                              <tr className="bg-gray-50 font-bold text-gray-800 border-t-2 border-gray-200">
+                                <td className="px-4 py-3 text-xs">{currentLanguage === 'tr' ? 'TOPLAM (12 Ay)' : 'TOTAL (12 Mo)'}</td>
+                                <td className="px-4 py-3 text-right text-xs">{fmtKpi(totalTarget12,'K',1)}</td>
+                                <td className="px-4 py-3 text-right text-xs">{fmtKpi(totalActual12,'K',1)}</td>
+                                <td className={`px-4 py-3 text-right text-xs ${totalActual12 >= totalTarget12 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                  {totalActual12 >= totalTarget12 ? '+' : ''}{fmtKpi(Math.abs(totalActual12-totalTarget12),'K',1)}
+                                </td>
+                                <td className={`px-4 py-3 text-right text-xs ${avg12Pct >= 100 ? 'text-emerald-600' : avg12Pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}>%{avg12Pct}</td>
+                                <td className="px-4 py-3 text-right text-xs">{Object.values(dealsByMonth).reduce((s, v) => s + v, 0)}</td>
+                                <td className="px-4 py-3" />
+                              </tr>
+                            </tfoot>
+                          )}
+                        </table>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
