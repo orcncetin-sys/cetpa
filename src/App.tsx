@@ -18165,6 +18165,12 @@ function AppContent() {
     };
   }, []);
 
+  // Phase 514: live clock
+  useEffect(() => {
+    const t = setInterval(() => setDashClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   React.useEffect(() => {
     const html = document.documentElement;
     if (darkMode) {
@@ -18904,6 +18910,14 @@ function AppContent() {
   const [deliveryNoteText, setDeliveryNoteText] = useState(''); // Phase 506
   const [invPayPending, setInvPayPending] = useState(false); // Phase 511
   const [p513Selected, setP513Selected] = useState<string|null>(null); // Phase 513 — orderId profit popup
+  // ── Phase 504-520 ────────────────────────────────────────────────────────────
+  const [starredOrders, setStarredOrders] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('cetpa-starred-orders') || '[]')); } catch { return new Set(); } }); // Phase 504
+  const [showStockCount, setShowStockCount] = useState(false); // Phase 507
+  const [stockCountDraft, setStockCountDraft] = useState<Record<string, number>>({}); // Phase 507
+  const [stockCountSaving, setStockCountSaving] = useState(false); // Phase 507
+  const [stockCountSearch, setStockCountSearch] = useState(''); // Phase 507
+  const [dashClock, setDashClock] = useState(new Date()); // Phase 514
+  const [showQuickShipment, setShowQuickShipment] = useState<Order|null>(null); // Phase 512
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -20926,10 +20940,10 @@ function AppContent() {
               {/* Welcome */}
               <ModuleHeader
                 title={`${(() => {
-                  const h = new Date().getHours();
+                  const h = dashClock.getHours();
                   if (currentLanguage === 'tr') return h < 12 ? 'Günaydın' : h < 17 ? 'İyi öğlenler' : 'İyi akşamlar';
                   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-                })()}${user?.displayName ? `, ${user.displayName.split(' ')[0]}` : ''} ${new Date().getHours() < 12 ? '☀️' : new Date().getHours() < 17 ? '👋' : '🌙'}`}
+                })()}${user?.displayName ? `, ${user.displayName.split(' ')[0]}` : ''} ${dashClock.getHours() < 12 ? '☀️' : dashClock.getHours() < 17 ? '👋' : '🌙'}`}
                 subtitle={dashT.subtitle}
                 icon={LayoutDashboard}
                 actionButton={
@@ -20947,7 +20961,11 @@ function AppContent() {
                       onEndDateChange={(d) => setDateRange(prev => ({ ...prev, endDate: d }))}
                       currentLanguage={currentLanguage}
                     />
-                    <div className="hidden lg:block text-sm text-gray-400 whitespace-nowrap">{new Date().toLocaleDateString(currentLanguage === 'en' ? 'en-US' : 'tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                    {/* Phase 514: Live clock */}
+                    <div className="hidden lg:flex flex-col items-end text-right">
+                      <span className="text-sm font-black text-gray-800 tabular-nums">{dashClock.toLocaleTimeString(currentLanguage === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                      <span className="text-[10px] text-gray-400">{dashClock.toLocaleDateString(currentLanguage === 'en' ? 'en-US' : 'tr-TR', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                    </div>
                   </div>
                 }
               />
@@ -26312,7 +26330,18 @@ function AppContent() {
                   <>
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Envanter Özeti' : 'Inventory Summary'}</p>
-                    <KpiCurrencyToggle />
+                    <div className="flex items-center gap-2">
+                      {/* Phase 507: Quick Stock Count button */}
+                      <button
+                        onClick={() => { setStockCountDraft({}); setStockCountSearch(''); setShowStockCount(true); }}
+                        className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-brand bg-white border border-gray-200 hover:border-brand/30 px-3 py-1.5 rounded-full transition-all shadow-sm"
+                        title={currentLanguage === 'tr' ? 'Hızlı stok sayımı' : 'Quick stock count'}
+                      >
+                        <Calculator className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Stok Sayımı' : 'Stock Count'}
+                      </button>
+                      <KpiCurrencyToggle />
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
@@ -26331,6 +26360,60 @@ function AppContent() {
                     ))}
                   </div>
                   </>
+                );
+              })()}
+
+              {/* ── Phase 510: Inventory ABC Analysis ── */}
+              {inventory.length >= 5 && (() => {
+                const sorted510 = [...inventory].sort((a, b) =>
+                  ((b.prices?.['Retail'] ?? b.price ?? 0) * (b.stockLevel ?? 0)) - ((a.prices?.['Retail'] ?? a.price ?? 0) * (a.stockLevel ?? 0))
+                );
+                const totalVal510 = sorted510.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
+                let cum510 = 0;
+                const classes510 = { A: 0, B: 0, C: 0 };
+                const classA: string[] = [], classB: string[] = [], classC: string[] = [];
+                for (const item of sorted510) {
+                  const v = (item.prices?.['Retail'] ?? item.price ?? 0) * (item.stockLevel ?? 0);
+                  cum510 += v;
+                  const pct = totalVal510 > 0 ? cum510 / totalVal510 : 1;
+                  if (pct <= 0.7) { classes510.A++; classA.push(item.name); }
+                  else if (pct <= 0.9) { classes510.B++; classB.push(item.name); }
+                  else { classes510.C++; classC.push(item.name); }
+                }
+                const aVal = classA.length / sorted510.length * 100;
+                const bVal = classB.length / sorted510.length * 100;
+                const cVal = classC.length / sorted510.length * 100;
+                return (
+                  <div className={cn("rounded-2xl border px-5 py-4", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? 'ABC Analizi (Stok Değeri)' : 'ABC Analysis (Stock Value)'}
+                      </p>
+                      <span className="text-[10px] text-gray-400">{sorted510.length} SKU</span>
+                    </div>
+                    {/* Stacked bar */}
+                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-3">
+                      <div className="bg-emerald-400 rounded-l-full transition-all" style={{ width: `${aVal}%` }} title={`A: ${classes510.A} items`} />
+                      <div className="bg-amber-400 transition-all" style={{ width: `${bVal}%` }} title={`B: ${classes510.B} items`} />
+                      <div className="bg-gray-300 rounded-r-full transition-all" style={{ width: `${cVal}%` }} title={`C: ${classes510.C} items`} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { cls: 'A', count: classes510.A, color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-100', desc: currentLanguage === 'tr' ? 'Yüksek Değer (İlk %70)' : 'High Value (Top 70%)', top: classA[0] },
+                        { cls: 'B', count: classes510.B, color: 'text-amber-700',   bg: 'bg-amber-50',   border: 'border-amber-100',   desc: currentLanguage === 'tr' ? 'Orta Değer (%70-90)'  : 'Mid Value (70-90%)',  top: classB[0] },
+                        { cls: 'C', count: classes510.C, color: 'text-gray-500',    bg: 'bg-gray-50',    border: 'border-gray-100',    desc: currentLanguage === 'tr' ? 'Düşük Değer (Son %10)' : 'Low Value (Bottom 10%)', top: classC[0] },
+                      ].map(x => (
+                        <div key={x.cls} className={cn("rounded-xl border p-3", x.bg, x.border)}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={cn("text-lg font-black", x.color)}>Sınıf {x.cls}</span>
+                            <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full", x.bg, x.color)}>{x.count} SKU</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400">{x.desc}</p>
+                          {x.top && <p className="text-[9px] text-gray-500 truncate mt-1 font-medium" title={x.top}>{x.top}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 );
               })()}
 
@@ -28023,6 +28106,60 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 508: Recent CRM Activity Feed ── */}
+              {(() => {
+                const allActivities = leads.flatMap(l =>
+                  (l.activities || []).map(a => ({
+                    ...a,
+                    leadName: l.name,
+                    leadId: l.id,
+                    company: l.company,
+                  }))
+                ).filter(a => a.date).sort((a, b) => {
+                  const ta = typeof (a.date as { toDate?: () => Date }).toDate === 'function'
+                    ? (a.date as { toDate: () => Date }).toDate().getTime()
+                    : new Date(a.date as string | number).getTime();
+                  const tb = typeof (b.date as { toDate?: () => Date }).toDate === 'function'
+                    ? (b.date as { toDate: () => Date }).toDate().getTime()
+                    : new Date(b.date as string | number).getTime();
+                  return tb - ta;
+                }).slice(0, 8);
+                if (allActivities.length === 0) return null;
+                const typeIcon: Record<string, string> = { Call: '📞', Email: '✉️', Meeting: '🤝', Note: '📝', Visit: '🏢' };
+                return (
+                  <div className={cn("rounded-2xl border px-5 py-4", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                      {currentLanguage === 'tr' ? 'Son Aktiviteler' : 'Recent Activity'}
+                    </p>
+                    <div className="space-y-2">
+                      {allActivities.map((a, i) => {
+                        const ts = typeof (a.date as { toDate?: () => Date }).toDate === 'function'
+                          ? (a.date as { toDate: () => Date }).toDate()
+                          : new Date(a.date as string | number);
+                        const daysAgo = Math.floor((Date.now() - ts.getTime()) / 86400000);
+                        const timeLabel = daysAgo === 0 ? (currentLanguage === 'tr' ? 'Bugün' : 'Today')
+                          : daysAgo === 1 ? (currentLanguage === 'tr' ? 'Dün' : 'Yesterday')
+                          : `${daysAgo}${currentLanguage === 'tr' ? ' gün önce' : 'd ago'}`;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => { const l = leads.find(x => x.id === a.leadId); if (l) setSelectedLead(l); }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors text-left"
+                          >
+                            <span className="text-lg flex-shrink-0">{typeIcon[a.type] || '📋'}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-800 truncate">{a.description}</p>
+                              <p className="text-[10px] text-gray-400">{a.leadName}{a.company ? ` · ${a.company}` : ''}</p>
+                            </div>
+                            <span className="text-[10px] text-gray-400 flex-shrink-0">{timeLabel}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {viewMode === 'list' ? (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2 space-y-3">
@@ -29222,6 +29359,21 @@ function AppContent() {
                     </button>
                   );
                 })}
+                {/* Phase 509: Starred filter chip */}
+                {starredOrders.size > 0 && (
+                  <button
+                    onClick={() => setOrderStatusFilter(orderStatusFilter === '__starred__' ? 'All' : '__starred__')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border",
+                      orderStatusFilter === '__starred__'
+                        ? "bg-amber-400 text-white border-transparent shadow-sm"
+                        : darkMode ? "bg-white/5 border-white/10 text-white/60 hover:bg-white/10" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-amber-600"
+                    )}
+                  >
+                    ★ {currentLanguage === 'tr' ? 'Yıldızlı' : 'Starred'}
+                    <span className={cn("text-[9px] px-1 py-0.5 rounded-full", orderStatusFilter === '__starred__' ? "bg-white/20" : darkMode ? "bg-white/10" : "bg-gray-100")}>{starredOrders.size}</span>
+                  </button>
+                )}
               </div>
 
               {/* ── Phase 501: Date Range Quick Filter ── */}
@@ -29347,7 +29499,8 @@ function AppContent() {
                     <tbody className="divide-y divide-gray-100">
                       {(() => {
                         const filtered = orders.filter(o => {
-                          if (orderStatusFilter !== 'All' && o.status !== orderStatusFilter) return false;
+                          if (orderStatusFilter === '__starred__' && !starredOrders.has(o.id)) return false;
+                          if (orderStatusFilter !== 'All' && orderStatusFilter !== '__starred__' && o.status !== orderStatusFilter) return false;
                           const q = orderSearch.toLowerCase();
                           if (q && !o.customerName.toLowerCase().includes(q) && !o.shopifyOrderId?.toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
                           // Phase 501: date range filter
@@ -29516,6 +29669,20 @@ function AppContent() {
                                     <CheckCircle2 className="w-3 h-3"/>Mikro
                                   </span>
                                 )}
+                                {/* Phase 509: Star/Pin order */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const next = new Set(starredOrders);
+                                    if (next.has(order.id)) next.delete(order.id); else next.add(order.id);
+                                    setStarredOrders(next);
+                                    localStorage.setItem('cetpa-starred-orders', JSON.stringify([...next]));
+                                  }}
+                                  className={cn("transition-colors", starredOrders.has(order.id) ? "text-amber-400 hover:text-amber-500" : "text-gray-200 hover:text-amber-300")}
+                                  title={starredOrders.has(order.id) ? (currentLanguage === 'tr' ? 'Yıldızı kaldır' : 'Unstar') : (currentLanguage === 'tr' ? 'Önemli olarak işaretle' : 'Star order')}
+                                >
+                                  ★
+                                </button>
                                 <button onClick={() => openConfirm({
                                   title: currentT.confirm_delete_title,
                                   message: currentT.confirm_delete,
@@ -29646,6 +29813,98 @@ function AppContent() {
                           <CheckCircle2 className="w-4 h-4"/> iyzico {selectedOrder.iyzicoSandbox ? '(sandbox)' : ''}
                         </a>
                       )}
+                      {/* Phase 504: Clone/Duplicate Order */}
+                      <button
+                        onClick={() => {
+                          const o = selectedOrder;
+                          setNewOrder({
+                            customerName: o.customerName,
+                            customerEmail: o.customerEmail,
+                            shippingAddress: o.shippingAddress,
+                            status: 'Pending',
+                            customerType: o.customerType,
+                            cargoCompany: o.cargoCompany,
+                            faturali: o.faturali,
+                            faturaTipi: o.faturaTipi,
+                            kdvOran: o.kdvOran,
+                            notes: o.notes,
+                            totalPrice: o.totalPrice,
+                          });
+                          setOrderLineItems((o.lineItems || []).map(li => ({ ...li, id: `${li.id}-clone-${Date.now()}` })));
+                          setSelectedLead(leads.find(l => l.id === o.leadId) || null);
+                          setIsAddingOrder(true);
+                          toast(currentLanguage === 'tr' ? 'Sipariş kopyalandı — düzenleyebilirsiniz' : 'Order cloned — you can now edit it', 'success');
+                        }}
+                        className="bg-white hover:bg-indigo-50 text-gray-700 hover:text-indigo-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-indigo-200 transition-colors"
+                        title={currentLanguage === 'tr' ? 'Siparişi klonla (yeni taslak olarak aç)' : 'Clone order as new draft'}
+                      >
+                        <Copy className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Klonla' : 'Clone'}
+                      </button>
+                      {/* Phase 505: Print Order Receipt PDF */}
+                      <button
+                        onClick={() => {
+                          const o = selectedOrder;
+                          const doc505 = new jsPDF({ format: 'a4', unit: 'mm' });
+                          const W = doc505.internal.pageSize.getWidth();
+                          doc505.setFillColor(255, 64, 0);
+                          doc505.rect(0, 0, W, 28, 'F');
+                          doc505.setTextColor(255, 255, 255);
+                          doc505.setFontSize(16); doc505.setFont('helvetica', 'bold');
+                          doc505.text('CETPA', 14, 13);
+                          doc505.setFontSize(10); doc505.setFont('helvetica', 'normal');
+                          doc505.text(currentLanguage === 'tr' ? 'SİPARİŞ FIŞI' : 'ORDER RECEIPT', 14, 21);
+                          doc505.setTextColor(80, 80, 80);
+                          doc505.setFontSize(9);
+                          const rawD = o.createdAt ?? o.syncedAt;
+                          const oDate = rawD ? (typeof (rawD as { toDate?: () => Date }).toDate === 'function' ? (rawD as { toDate: () => Date }).toDate() : new Date(rawD as string | number)).toLocaleDateString('tr-TR') : '—';
+                          doc505.text(`#${o.shopifyOrderId || o.id.slice(-8)}`, W - 14, 13, { align: 'right' });
+                          doc505.text(oDate, W - 14, 21, { align: 'right' });
+                          doc505.setTextColor(30, 30, 30);
+                          doc505.setFontSize(11); doc505.setFont('helvetica', 'bold');
+                          doc505.text(o.customerName, 14, 38);
+                          doc505.setFontSize(9); doc505.setFont('helvetica', 'normal');
+                          doc505.setTextColor(120, 120, 120);
+                          if (o.shippingAddress) doc505.text(o.shippingAddress, 14, 44);
+                          if (o.customerEmail) doc505.text(o.customerEmail, 14, 49);
+                          const lineItems505 = (o.lineItems || []);
+                          if (lineItems505.length > 0) {
+                            autoTable(doc505, {
+                              startY: 58,
+                              head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
+                              body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, `₺${(li.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, `₺${((li.price || 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` ]),
+                              styles: { fontSize: 9, cellPadding: 3 },
+                              headStyles: { fillColor: [255, 64, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
+                              alternateRowStyles: { fillColor: [253, 248, 246] },
+                              foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, `₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`]],
+                              footStyles: { fillColor: [245, 245, 245], fontStyle: 'bold', fontSize: 10 },
+                            });
+                          } else {
+                            const y505 = 58;
+                            doc505.setFontSize(10); doc505.setTextColor(30,30,30);
+                            doc505.text(`${currentLanguage === 'tr' ? 'Toplam Tutar' : 'Total Amount'}: ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, 14, y505);
+                          }
+                          const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
+                          doc505.setFontSize(8); doc505.setTextColor(150,150,150);
+                          doc505.text(`${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${o.status} · ${o.paid ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓') : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending')}`, 14, finalY505 + 10);
+                          doc505.text('CETPA Business Suite — cetpa.io', W / 2, finalY505 + 18, { align: 'center' });
+                          doc505.save(`receipt-${o.shopifyOrderId || o.id.slice(-8)}.pdf`);
+                        }}
+                        className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
+                        title={currentLanguage === 'tr' ? 'Sipariş fişi PDF indir' : 'Download order receipt PDF'}
+                      >
+                        <FileDown className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Fiş PDF' : 'Receipt'}
+                      </button>
+                      {/* Phase 512: Quick Shipment from Order */}
+                      <button
+                        onClick={() => setShowQuickShipment(selectedOrder)}
+                        className="bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-blue-200 transition-colors"
+                        title={currentLanguage === 'tr' ? 'Sevkiyat oluştur' : 'Create shipment'}
+                      >
+                        <Truck className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment'}
+                      </button>
                       {/* Copy public tracking link */}
                       <button
                         onClick={() => {
@@ -31699,6 +31958,186 @@ function AppContent() {
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* ── Phase 507: Quick Stock Count Modal ── */}
+      <AnimatePresence>
+        {showStockCount && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold text-brand uppercase tracking-widest mb-0.5">{currentLanguage === 'tr' ? 'Hızlı Stok Sayımı' : 'Quick Stock Count'}</p>
+                  <h3 className="text-lg font-black text-gray-900">{currentLanguage === 'tr' ? 'Stok Seviyelerini Güncelle' : 'Update Stock Levels'}</h3>
+                </div>
+                <button onClick={() => setShowStockCount(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-5 h-5 text-gray-500" /></button>
+              </div>
+              {/* Search */}
+              <div className="px-6 py-3 border-b border-gray-100">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input type="text" value={stockCountSearch} onChange={e => setStockCountSearch(e.target.value)}
+                    placeholder={currentLanguage === 'tr' ? 'Ürün ara…' : 'Search products…'}
+                    className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand"
+                  />
+                </div>
+                {Object.keys(stockCountDraft).length > 0 && (
+                  <p className="text-[10px] text-amber-600 font-bold mt-2">
+                    ⚠ {Object.keys(stockCountDraft).length} {currentLanguage === 'tr' ? 'üründe değişiklik var' : 'items have pending changes'}
+                  </p>
+                )}
+              </div>
+              {/* Items */}
+              <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+                {inventory
+                  .filter(i => !stockCountSearch || i.name.toLowerCase().includes(stockCountSearch.toLowerCase()) || (i.sku || '').toLowerCase().includes(stockCountSearch.toLowerCase()))
+                  .map(item => {
+                    const current = item.stockLevel ?? 0;
+                    const draft = stockCountDraft[item.id] ?? current;
+                    const changed = draft !== current;
+                    return (
+                      <div key={item.id} className={cn("flex items-center gap-4 px-6 py-3", changed ? "bg-amber-50" : "hover:bg-gray-50")}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{item.name}</p>
+                          <p className="text-[10px] text-gray-400">{item.sku}{item.category ? ` · ${item.category}` : ''}</p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <span className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Mevcut:' : 'Current:'} <strong className="text-gray-700">{current}</strong></span>
+                          {changed && <span className="text-[10px] font-bold text-amber-600">→ {draft}</span>}
+                          <input
+                            type="number"
+                            min={0}
+                            value={draft}
+                            onChange={e => {
+                              const v = parseInt(e.target.value, 10);
+                              setStockCountDraft(prev => {
+                                const next = { ...prev };
+                                if (!isNaN(v) && v !== current) next[item.id] = v;
+                                else delete next[item.id];
+                                return next;
+                              });
+                            }}
+                            className="w-20 text-center text-sm font-bold bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-brand"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-gray-50/50">
+                <button onClick={() => setStockCountDraft({})} className="text-xs font-semibold text-gray-500 hover:text-gray-700 transition-colors">
+                  {currentLanguage === 'tr' ? 'Sıfırla' : 'Reset changes'}
+                </button>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowStockCount(false)} className="apple-button-secondary text-sm px-5">
+                    {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                  </button>
+                  <button
+                    disabled={Object.keys(stockCountDraft).length === 0 || stockCountSaving}
+                    onClick={async () => {
+                      if (Object.keys(stockCountDraft).length === 0) return;
+                      setStockCountSaving(true);
+                      try {
+                        await Promise.all(Object.entries(stockCountDraft).map(([id, qty]) =>
+                          updateDoc(doc(db, 'inventory', id), { stockLevel: qty, updatedAt: serverTimestamp() })
+                        ));
+                        toast(currentLanguage === 'tr' ? `${Object.keys(stockCountDraft).length} ürün güncellendi ✓` : `${Object.keys(stockCountDraft).length} items updated ✓`, 'success');
+                        setStockCountDraft({});
+                        setShowStockCount(false);
+                      } catch (e) { console.error(e); toast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error saving', 'error'); } finally { setStockCountSaving(false); }
+                    }}
+                    className="apple-button-primary text-sm px-5 disabled:opacity-40"
+                  >
+                    {stockCountSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {currentLanguage === 'tr' ? `Kaydet (${Object.keys(stockCountDraft).length})` : `Save (${Object.keys(stockCountDraft).length})`}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Phase 512: Quick Shipment Modal ── */}
+      <AnimatePresence>
+        {showQuickShipment && (() => {
+          const qsOrder = showQuickShipment;
+          const today = new Date().toISOString().slice(0, 10);
+          return (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+              >
+                <div className="px-6 pt-6 pb-2 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center shrink-0">
+                    <Truck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
+                    <p className="text-xs text-gray-400">#{qsOrder.shopifyOrderId || qsOrder.id.slice(-6)} · {qsOrder.customerName}</p>
+                  </div>
+                  <button onClick={() => setShowQuickShipment(null)} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-4 h-4 text-gray-400" /></button>
+                </div>
+                <form
+                  className="px-6 py-4 space-y-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const fd = new FormData(e.currentTarget);
+                    try {
+                      await addDoc(collection(db, 'shipments'), {
+                        customerName: qsOrder.customerName,
+                        orderId: qsOrder.id,
+                        destination: fd.get('destination') || qsOrder.shippingAddress || '',
+                        cargoFirm: fd.get('cargoFirm') || '',
+                        driver: fd.get('driver') || '',
+                        date: fd.get('date') || today,
+                        status: 'Pending',
+                        trackingNo: fd.get('trackingNo') || qsOrder.trackingNumber || '',
+                        createdAt: serverTimestamp(),
+                      });
+                      toast(currentLanguage === 'tr' ? 'Sevkiyat oluşturuldu ✓' : 'Shipment created ✓', 'success');
+                      setShowQuickShipment(null);
+                    } catch (err) { console.error(err); }
+                  }}
+                >
+                  {[
+                    { name: 'destination', label: currentLanguage === 'tr' ? 'Adres' : 'Destination', defaultValue: qsOrder.shippingAddress || '' },
+                    { name: 'cargoFirm',   label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Company', defaultValue: qsOrder.cargoCompany || '' },
+                    { name: 'driver',      label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver', defaultValue: '' },
+                    { name: 'trackingNo',  label: currentLanguage === 'tr' ? 'Takip No' : 'Tracking No', defaultValue: qsOrder.trackingNumber || '' },
+                    { name: 'date',        label: currentLanguage === 'tr' ? 'Tarih' : 'Date', defaultValue: today, type: 'date' },
+                  ].map(f => (
+                    <div key={f.name}>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{f.label}</label>
+                      <input
+                        name={f.name}
+                        type={f.type || 'text'}
+                        defaultValue={f.defaultValue}
+                        className="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 outline-none focus:border-brand"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex gap-3 pt-2">
+                    <button type="button" onClick={() => setShowQuickShipment(null)} className="flex-1 apple-button-secondary">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                    <button type="submit" className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm">
+                      <Truck className="w-4 h-4" />
+                      {currentLanguage === 'tr' ? 'Sevkiyat Oluştur' : 'Create Shipment'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
     </div>
