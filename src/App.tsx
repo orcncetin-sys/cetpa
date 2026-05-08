@@ -21207,14 +21207,14 @@ function AppContent() {
                   { label: dashT.inventory_label, value: inventory.length, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
                 ].map((kpi, i) => (
                   <button key={i} onClick={() => setActiveTab(kpi.tab)}
-                    className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 cursor-pointer group">
-                    <div className="flex items-start justify-between mb-3">
+                    className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 cursor-pointer group flex flex-col min-h-[130px]">
+                    <div className="flex items-start justify-between mb-2">
                       <div className={`w-9 h-9 rounded-xl ${kpi.bg} flex items-center justify-center`}>
                         <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
                       </div>
                       <DeltaBadge delta={kpi.delta} />
                     </div>
-                    <p className="text-2xl font-bold" style={{color:'var(--text-primary)'}}>{kpi.value}</p>
+                    <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{kpi.value}</p>
                     <p className="text-xs font-semibold text-gray-500 mt-1">{kpi.label}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5">{kpi.sub}</p>
                     <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
@@ -21230,8 +21230,8 @@ function AppContent() {
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                   const revDelta = summaryData?.revenue?.delta;
                   return (
-                    <div className="apple-card p-4 text-left group">
-                      <div className="flex items-center justify-between mb-3">
+                    <div className="apple-card p-4 text-left group flex flex-col min-h-[130px]">
+                      <div className="flex items-center justify-between mb-2">
                         <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center">
                           <DollarSign className="w-4 h-4 text-green-500" />
                         </div>
@@ -21251,7 +21251,7 @@ function AppContent() {
                           </div>
                         </div>
                       </div>
-                      <p className="text-2xl font-bold" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                      <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                       <p className="text-xs font-semibold text-gray-500 mt-1">{dashT.total_revenue}</p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
                         {summaryData ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days') : dashT.all_time}
@@ -21317,7 +21317,7 @@ function AppContent() {
                       onClick={() => setActiveTab('reports')}
                       role="button" tabIndex={0}
                       onKeyDown={e => e.key === 'Enter' && setActiveTab('reports')}
-                      className="apple-card p-4 cursor-pointer hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
+                      className="apple-card p-4 cursor-pointer hover:shadow-md hover:scale-[1.02] transition-all duration-150 group flex flex-col min-h-[130px]"
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
@@ -21333,7 +21333,7 @@ function AppContent() {
                           ))}
                         </div>
                       </div>
-                      <p className="text-xl font-bold text-emerald-600">
+                      <p className="text-2xl font-bold text-emerald-600 mt-auto">
                         {insightSymbol}{cvtWeek.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
@@ -21375,16 +21375,14 @@ function AppContent() {
                         <button
                           key={i}
                           onClick={stat.onClick}
-                          className="apple-card p-4 flex items-center gap-3 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group"
+                          className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 group flex flex-col min-h-[130px]"
                         >
-                          <div className={`w-9 h-9 rounded-xl ${stat.bg} flex items-center justify-center flex-shrink-0`}>
+                          <div className={`w-9 h-9 rounded-xl ${stat.bg} flex items-center justify-center mb-2`}>
                             <Icon className={`w-4 h-4 ${stat.color}`} />
                           </div>
-                          <div className="min-w-0">
-                            <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
-                            <p className="text-[10px] font-semibold text-gray-500 truncate">{stat.label}</p>
-                            <p className="text-[10px] text-gray-400 truncate">{stat.sub}</p>
-                          </div>
+                          <p className={`text-2xl font-bold ${stat.color} mt-auto`}>{stat.value}</p>
+                          <p className="text-[10px] font-semibold text-gray-500 mt-0.5 truncate">{stat.label}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{stat.sub}</p>
                         </button>
                       );
                     })}
