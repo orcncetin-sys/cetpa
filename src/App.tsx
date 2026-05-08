@@ -18942,6 +18942,13 @@ function AppContent() {
   const [p528Dismissed, setP528Dismissed] = useState<Set<string>>(new Set()); // Phase 528 — smart alerts
   const [showLeadFunnel, setShowLeadFunnel] = useState(false); // Phase 529 — pipeline funnel
   const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null); // Phase 530 — copy ID feedback
+  const [p532PayOrder, setP532PayOrder] = useState<Order|null>(null); // Phase 532 — payment method picker
+  const [p532Method, setP532Method] = useState<Order['paymentMethod']>('bank_transfer'); // Phase 532
+  const [showOverduePanel, setShowOverduePanel] = useState(false); // Phase 538 — overdue payments panel
+  const [shipmentsExpanded, setShipmentsExpanded] = useState(false); // Phase 539 — shipments KPI
+  const [reorderExpanded, setReorderExpanded] = useState(false); // Phase 541 — inventory reorder list
+  const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null); // Phase 542 — AI rescore
+  const [crmLeadSort, setCrmLeadSort] = useState<'default'|'score'|'activity'|'name'>('default'); // Phase 537
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -20162,22 +20169,31 @@ function AppContent() {
     }
   };
 
-  // ── Phase 89: Toggle order payment status ─────────────────────────────────
-  const handleToggleOrderPaid = async (order: Order) => {
-    const next = !order.paid;
+  // ── Phase 89 + Phase 532: Toggle order payment status (with method picker) ──
+  const handleToggleOrderPaid = (order: Order) => {
+    if (!order.paid) {
+      // Phase 532: show payment method picker before marking as paid
+      setP532PayOrder(order);
+      setP532Method('bank_transfer');
+    } else {
+      // Mark as unpaid directly (no method needed)
+      updateDoc(doc(db, 'orders', order.id), { paid: false, paidAt: null, paymentMethod: null })
+        .then(() => toast(currentLanguage === 'tr' ? 'Ödeme bekliyor olarak işaretlendi' : 'Marked as unpaid', 'info'))
+        .catch(err => handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`));
+    }
+  };
+  const handleConfirmPayment = async () => {
+    if (!p532PayOrder) return;
     try {
-      await updateDoc(doc(db, 'orders', order.id), {
-        paid:   next,
-        paidAt: next ? serverTimestamp() : null,
+      await updateDoc(doc(db, 'orders', p532PayOrder.id), {
+        paid: true,
+        paidAt: serverTimestamp(),
+        paymentMethod: p532Method,
       });
-      toast(
-        next
-          ? (currentLanguage === 'tr' ? '✓ Ödeme alındı olarak işaretlendi' : '✓ Marked as paid')
-          : (currentLanguage === 'tr' ? 'Ödeme bekliyor olarak işaretlendi' : 'Marked as unpaid'),
-        next ? 'success' : 'info'
-      );
+      toast(currentLanguage === 'tr' ? '✓ Ödeme alındı' : '✓ Payment recorded', 'success');
+      setP532PayOrder(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+      handleFirestoreError(error, OperationType.UPDATE, `orders/${p532PayOrder.id}`);
     }
   };
 
@@ -21725,6 +21741,15 @@ function AppContent() {
                       <div key={i} className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold border ${a.level === 'danger' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-amber-50 border-amber-100 text-amber-700'}`}>
                         <span>{a.icon}</span>
                         <span className="flex-1">{a.message}</span>
+                        {/* Phase 538: open overdue panel for payment alerts */}
+                        {a.icon === '💳' && (
+                          <button
+                            onClick={() => setShowOverduePanel(true)}
+                            className="text-[10px] font-bold underline underline-offset-2 opacity-80 hover:opacity-100 shrink-0"
+                          >
+                            {currentLanguage === 'tr' ? 'Tümünü Gör' : 'View All'}
+                          </button>
+                        )}
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.level === 'danger' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
                           {a.level === 'danger' ? (currentLanguage === 'tr' ? 'Kritik' : 'Critical') : (currentLanguage === 'tr' ? 'Uyarı' : 'Warning')}
                         </span>
@@ -21835,6 +21860,92 @@ function AppContent() {
                       ))}
                     </div>
                     <p className="text-[9px] text-gray-400 mt-1 text-right">{currentLanguage==='tr'?'Son 8 hafta':'Last 8 weeks'}</p>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 539: Shipments Mini-Widget ── */}
+              {shipments.length > 0 && (() => {
+                const todayStr539 = new Date().toDateString();
+                const inTransit  = shipments.filter(s => s.status === 'In Transit').length;
+                const pending539 = shipments.filter(s => s.status === 'Pending').length;
+                const delivToday = shipments.filter(s => {
+                  if (s.status !== 'Delivered') return false;
+                  const raw = (s as unknown as Record<string, unknown>).updatedAt ?? (s as unknown as Record<string, unknown>).date;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string);
+                  return d.toDateString() === todayStr539;
+                }).length;
+                const recent539 = [...shipments]
+                  .sort((a, b) => {
+                    const getT = (s: Shipment) => {
+                      const raw = (s as unknown as Record<string, unknown>).createdAt;
+                      if (!raw) return 0;
+                      return typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                        ? (raw as { toDate: () => Date }).toDate().getTime()
+                        : new Date(raw as string).getTime();
+                    };
+                    return getT(b) - getT(a);
+                  })
+                  .slice(0, 5);
+                const statusColor539 = (st: string) =>
+                  st === 'Delivered' ? 'text-emerald-600 bg-emerald-50' :
+                  st === 'In Transit' || st === 'Shipped' ? 'text-blue-600 bg-blue-50' :
+                  st === 'Pending' ? 'text-amber-600 bg-amber-50' : 'text-gray-500 bg-gray-50';
+                return (
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🚚</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Sevkiyat Durumu' : 'Shipments Overview'}</h3>
+                          <p className="text-[10px] text-gray-400">{shipments.length} {currentLanguage === 'tr' ? 'toplam sevkiyat' : 'total shipments'}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShipmentsExpanded(e => !e)}
+                        className="text-[10px] font-bold text-gray-400 hover:text-brand transition-colors flex items-center gap-1"
+                      >
+                        {shipmentsExpanded ? (currentLanguage === 'tr' ? 'Gizle' : 'Hide') : (currentLanguage === 'tr' ? 'Detaylar' : 'Details')}
+                        <ChevronDown className={cn("w-3 h-3 transition-transform", shipmentsExpanded && "rotate-180")} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mb-3">
+                      {[
+                        { label: currentLanguage === 'tr' ? 'Yolda'     : 'In Transit',   value: inTransit,  color: 'text-blue-600',    bg: 'bg-blue-50' },
+                        { label: currentLanguage === 'tr' ? 'Bekliyor'  : 'Pending',       value: pending539, color: 'text-amber-600',   bg: 'bg-amber-50' },
+                        { label: currentLanguage === 'tr' ? 'Bugün Teslim' : 'Del. Today', value: delivToday, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                      ].map(c => (
+                        <div key={c.label} className={`text-center rounded-xl p-3 ${c.bg}`}>
+                          <p className={`text-xl font-black ${c.color}`}>{c.value}</p>
+                          <p className="text-[9px] text-gray-500 leading-tight mt-0.5">{c.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Phase 539: Expandable recent shipments list */}
+                    {shipmentsExpanded && (
+                      <div className="border-t border-gray-100 pt-3 space-y-2">
+                        {recent539.map(s => (
+                          <div key={s.id} className="flex items-center gap-3 text-xs">
+                            <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-bold shrink-0", statusColor539(s.status))}>
+                              {s.status}
+                            </span>
+                            <span className="font-medium text-gray-800 flex-1 truncate">{s.customerName}</span>
+                            <span className="text-gray-400 truncate max-w-[120px]">{(s as unknown as Record<string, string>).destination || '—'}</span>
+                            <span className="text-gray-400 shrink-0">{(s as unknown as Record<string, string>).cargoFirm || '—'}</span>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => setActiveTab('lojistik')}
+                          className="text-[10px] text-brand font-bold flex items-center gap-1 mt-1"
+                        >
+                          <ChevronRight className="w-3 h-3" />
+                          {currentLanguage === 'tr' ? 'Tüm Sevkiyatlar' : 'All Shipments'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -26413,40 +26524,104 @@ function AppContent() {
                 const critical = reorderItems.filter(i => (i.stockLevel ?? 0) === 0).length;
                 const low      = reorderItems.length - critical;
                 return (
-                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
-                      <Package className="w-4 h-4 text-red-500" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-red-800">
-                        {currentLanguage === 'tr'
-                          ? `${reorderItems.length} ürün yeniden sipariş eşiğinde`
-                          : `${reorderItems.length} product${reorderItems.length > 1 ? 's' : ''} at reorder threshold`}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {critical > 0 && (
-                          <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
-                            {critical} {currentLanguage === 'tr' ? 'Stok Yok' : 'Out of Stock'}
+                  // Phase 541: wrap in outer div so expanded list can be sibling of the header row
+                  <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
+                        <Package className="w-4 h-4 text-red-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-red-800">
+                          {currentLanguage === 'tr'
+                            ? `${reorderItems.length} ürün yeniden sipariş eşiğinde`
+                            : `${reorderItems.length} product${reorderItems.length > 1 ? 's' : ''} at reorder threshold`}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {critical > 0 && (
+                            <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                              {critical} {currentLanguage === 'tr' ? 'Stok Yok' : 'Out of Stock'}
+                            </span>
+                          )}
+                          {low > 0 && (
+                            <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
+                              {low} {currentLanguage === 'tr' ? 'Düşük Stok' : 'Low Stock'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* Scroll-to-first hint — top 3 items */}
+                      <div className="hidden sm:flex flex-col items-end gap-0.5 flex-shrink-0 max-w-[140px]">
+                        {reorderItems.slice(0, 3).map(i => (
+                          <span key={i.id} className="text-[9px] text-red-500 truncate max-w-full font-medium">
+                            {i.name} ({i.stockLevel ?? 0})
                           </span>
-                        )}
-                        {low > 0 && (
-                          <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
-                            {low} {currentLanguage === 'tr' ? 'Düşük Stok' : 'Low Stock'}
-                          </span>
+                        ))}
+                        {reorderItems.length > 3 && (
+                          <span className="text-[9px] text-red-400">+{reorderItems.length - 3} more</span>
                         )}
                       </div>
+                      {/* Phase 541: toggle expand */}
+                      <button
+                        onClick={() => setReorderExpanded(e => !e)}
+                        className="shrink-0 p-1.5 rounded-lg hover:bg-red-100 transition-colors"
+                        title={reorderExpanded ? (currentLanguage === 'tr' ? 'Gizle' : 'Collapse') : (currentLanguage === 'tr' ? 'Tümünü Gör' : 'View All')}
+                      >
+                        <ChevronDown className={cn("w-4 h-4 text-red-500 transition-transform", reorderExpanded && "rotate-180")} />
+                      </button>
                     </div>
-                    {/* Scroll-to-first hint — top 3 items */}
-                    <div className="hidden sm:flex flex-col items-end gap-0.5 flex-shrink-0 max-w-[140px]">
-                      {reorderItems.slice(0, 3).map(i => (
-                        <span key={i.id} className="text-[9px] text-red-500 truncate max-w-full font-medium">
-                          {i.name} ({i.stockLevel ?? 0})
-                        </span>
-                      ))}
-                      {reorderItems.length > 3 && (
-                        <span className="text-[9px] text-red-400">+{reorderItems.length - 3} more</span>
-                      )}
-                    </div>
+                    {/* Phase 541: Expanded reorder list */}
+                    {reorderExpanded && (
+                      <div className="border-t border-red-100 bg-white px-4 py-3 space-y-2">
+                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-wider mb-2">
+                          {currentLanguage === 'tr' ? 'Yeniden Sipariş Listesi' : 'Reorder List'}
+                        </p>
+                        {reorderItems.map(item => {
+                          const stock541 = item.stockLevel ?? 0;
+                          const thresh541 = item.lowStockThreshold ?? 5;
+                          const isOut = stock541 === 0;
+                          return (
+                            <div key={item.id} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2 border border-red-100">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-800 truncate">{item.name}</p>
+                                <p className="text-[10px] text-gray-400">{(item as unknown as Record<string, string>).sku || item.category || '—'}</p>
+                              </div>
+                              <div className="text-center shrink-0">
+                                <p className={`text-sm font-black ${isOut ? 'text-red-600' : 'text-amber-600'}`}>{stock541}</p>
+                                <p className="text-[9px] text-gray-400">{currentLanguage === 'tr' ? 'stok' : 'stock'}</p>
+                              </div>
+                              <div className="text-center shrink-0">
+                                <p className="text-sm font-bold text-gray-500">{thresh541}</p>
+                                <p className="text-[9px] text-gray-400">{currentLanguage === 'tr' ? 'eşik' : 'thresh'}</p>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await addDoc(collection(db, 'inventoryMovements'), {
+                                      productId: item.id,
+                                      productName: item.name,
+                                      type: 'Reorder Request',
+                                      quantity: Math.max(thresh541 * 3 - stock541, thresh541),
+                                      note: currentLanguage === 'tr' ? 'Otomatik yeniden sipariş talebi' : 'Auto reorder request',
+                                      createdAt: serverTimestamp(),
+                                      requestedBy: auth.currentUser?.email ?? 'system',
+                                    });
+                                    toast(
+                                      currentLanguage === 'tr'
+                                        ? `${item.name} için yeniden sipariş talebi oluşturuldu ✓`
+                                        : `Reorder request created for ${item.name} ✓`,
+                                      'success'
+                                    );
+                                  } catch (e) { console.error(e); }
+                                }}
+                                className="shrink-0 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                              >
+                                {currentLanguage === 'tr' ? 'Talep Et' : 'Request'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -28195,6 +28370,24 @@ function AppContent() {
                   <BarChart2 className="w-4 h-4" />
                   <span className="hidden sm:inline">{currentLanguage === 'tr' ? 'Huni' : 'Funnel'}</span>
                 </button>
+                {/* Phase 537: Sort controls */}
+                <div className="bg-white border border-gray-200 rounded-xl p-1 flex items-center shadow-sm shrink-0">
+                  {([
+                    { key: 'default',  icon: '⇅', title: currentLanguage === 'tr' ? 'Varsayılan' : 'Default' },
+                    { key: 'score',    icon: '★',  title: currentLanguage === 'tr' ? 'Skora göre' : 'By score' },
+                    { key: 'activity', icon: '🕐', title: currentLanguage === 'tr' ? 'Son aktiviteye göre' : 'By last activity' },
+                    { key: 'name',     icon: 'A',  title: currentLanguage === 'tr' ? 'İsme göre' : 'By name' },
+                  ] as { key: typeof crmLeadSort; icon: string; title: string }[]).map(s => (
+                    <button
+                      key={s.key}
+                      onClick={() => setCrmLeadSort(s.key)}
+                      className={cn("px-2 py-1 rounded-lg text-[10px] font-bold transition-colors", crmLeadSort === s.key ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600")}
+                      title={s.title}
+                    >
+                      {s.icon}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* ── Phase 529: Pipeline Conversion Funnel ── */}
@@ -28498,13 +28691,32 @@ function AppContent() {
                         l.email.toLowerCase().includes(crmSearch.toLowerCase()))
                       );
                       const sorted = sortData(filtered, crmSort.key, crmSort.dir);
-                      return sorted.length === 0 ? (
+                      // Phase 537: apply crmLeadSort secondary sort
+                      const finalSorted = crmLeadSort === 'score'
+                        ? [...sorted].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+                        : crmLeadSort === 'name'
+                          ? [...sorted].sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+                          : crmLeadSort === 'activity'
+                            ? [...sorted].sort((a, b) => {
+                                const actTs = (acts: LeadActivity[]) => acts.length > 0
+                                  ? Math.max(...acts.map(act => {
+                                      const raw = act as unknown as Record<string, unknown>;
+                                      if (typeof raw.date === 'string') return new Date(raw.date).getTime();
+                                      const cs = raw.createdAt as {seconds?: number} | undefined;
+                                      if (cs?.seconds) return cs.seconds * 1000;
+                                      return 0;
+                                    }))
+                                  : 0;
+                                return actTs(b.activities ?? []) - actTs(a.activities ?? []);
+                              })
+                            : sorted;
+                      return finalSorted.length === 0 ? (
                       <div className="bg-white p-12 rounded-xl border border-gray-200 text-center">
                         <Users className="w-12 h-12 text-gray-200 mx-auto mb-4" />
                         <p className="text-gray-500">{currentT.no_leads_found}</p>
                       </div>
                     ) : (
-                      sorted.map(lead => (
+                      finalSorted.map(lead => (
                         <div key={lead.id} className={cn("bg-white p-4 rounded-xl border hover:shadow-md transition-shadow flex items-center justify-between gap-4", selectedLeadIds.has(lead.id) ? "border-indigo-300 bg-indigo-50/30" : "border-gray-200")}>
                           {/* Phase 519: checkbox */}
                           <input type="checkbox" className="rounded accent-indigo-500 cursor-pointer flex-shrink-0"
@@ -28564,6 +28776,15 @@ function AppContent() {
                               )}>
                                 {currentT[lead.status.toLowerCase()] || lead.status}
                               </span>
+                              {/* Phase 533: Activity count badge */}
+                              {lead.activities && lead.activities.length > 0 && (
+                                <span
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 flex-shrink-0"
+                                  title={currentLanguage === 'tr' ? `${lead.activities.length} aktivite kaydı` : `${lead.activities.length} activity record${lead.activities.length !== 1 ? 's' : ''}`}
+                                >
+                                  {lead.activities.length} {currentLanguage === 'tr' ? 'akt.' : 'act.'}
+                                </span>
+                              )}
                               {/* Phase 527: Last-activity recency badge */}
                               {(() => {
                                 const lastAct = lead.activities && lead.activities.length > 0
@@ -29054,9 +29275,39 @@ function AppContent() {
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.ai_score}</span>
-                        <span className={cn("font-bold text-lg", (selectedLead.score || 0) > 70 ? "text-emerald-600" : "text-[#1D2226]")}>
-                          {selectedLead.score || '--'}
-                        </span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={cn("font-bold text-lg", (selectedLead.score || 0) > 70 ? "text-emerald-600" : "text-[#1D2226]")}>
+                            {selectedLead.score || '--'}
+                          </span>
+                          {/* Phase 542: AI Re-score button */}
+                          <button
+                            disabled={rescoreLeadId === selectedLead.id}
+                            onClick={async () => {
+                              setRescoreLeadId(selectedLead.id);
+                              try {
+                                const newScore = await scoreLead(selectedLead);
+                                if (typeof newScore === 'number' && !isNaN(newScore)) {
+                                  await updateDoc(doc(db, 'leads', selectedLead.id), { score: newScore, scoredAt: serverTimestamp() });
+                                  setSelectedLead({ ...selectedLead, score: newScore });
+                                  toast(
+                                    currentLanguage === 'tr'
+                                      ? `AI skoru güncellendi: ${newScore}/100`
+                                      : `AI score updated: ${newScore}/100`,
+                                    'success'
+                                  );
+                                }
+                              } catch (e) { console.error(e); }
+                              finally { setRescoreLeadId(null); }
+                            }}
+                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors disabled:opacity-40 flex items-center gap-1"
+                            title={currentLanguage === 'tr' ? 'AI ile yeniden puanla' : 'Re-score with AI'}
+                          >
+                            {rescoreLeadId === selectedLead.id
+                              ? <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                              : '✦'}
+                            {currentLanguage === 'tr' ? 'Yeniden Puan' : 'Re-score'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -30045,6 +30296,24 @@ function AppContent() {
                               {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
                             </td>
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                              {/* Phase 534: days in current status */}
+                              {(() => {
+                                const raw534 = order.createdAt ?? order.syncedAt;
+                                if (!raw534) return null;
+                                const d534 = typeof (raw534 as { toDate?: () => Date }).toDate === 'function'
+                                  ? (raw534 as { toDate: () => Date }).toDate()
+                                  : new Date(raw534 as string | number);
+                                const days534 = Math.floor((Date.now() - d534.getTime()) / 86400000);
+                                if (days534 < 1) return null;
+                                const warn534 = order.status === 'Pending' && days534 > 3;
+                                return (
+                                  <span className={cn("block text-[8px] font-bold mb-1 px-1.5 py-0.5 rounded-full w-fit",
+                                    warn534 ? "bg-red-50 text-red-400" : "bg-gray-100 text-gray-400"
+                                  )}>
+                                    {days534}{currentLanguage === 'tr' ? 'g' : 'd'}
+                                  </span>
+                                );
+                              })()}
                               <select value={order.status} onChange={(e) => {
                                 e.stopPropagation();
                                 const newStatus = e.target.value as Order['status'];
@@ -30092,7 +30361,7 @@ function AppContent() {
                                     Mikro
                                   </span>
                                 ) : null}
-                                {/* Phase 89: Payment status badge */}
+                                {/* Phase 89 + Phase 532 + Phase 535: Payment status badge + method */}
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
                                   title={order.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
@@ -30100,6 +30369,21 @@ function AppContent() {
                                 >
                                   {order.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                                 </button>
+                                {/* Phase 535: payment method micro-badge */}
+                                {order.paid && order.paymentMethod && (() => {
+                                  const pmLabels: Record<string, string> = {
+                                    cash: currentLanguage === 'tr' ? 'Nakit' : 'Cash',
+                                    bank_transfer: currentLanguage === 'tr' ? 'EFT' : 'Transfer',
+                                    credit_card: currentLanguage === 'tr' ? 'Kart' : 'Card',
+                                    check: currentLanguage === 'tr' ? 'Çek' : 'Check',
+                                    other: currentLanguage === 'tr' ? 'Diğer' : 'Other',
+                                  };
+                                  return (
+                                    <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-gray-100 text-gray-500">
+                                      {pmLabels[order.paymentMethod] ?? order.paymentMethod}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </td>
                             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -32656,6 +32940,187 @@ function AppContent() {
             </div>
           );
         })()}
+      </AnimatePresence>
+
+      {/* ── Phase 538: Overdue Payments Slide-in Panel ── */}
+      <AnimatePresence>
+        {showOverduePanel && (() => {
+          const nowMs538 = Date.now();
+          const getAge = (o: Order): number => {
+            const raw = o.createdAt ?? o.syncedAt;
+            if (!raw) return 0;
+            const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+              ? (raw as { toDate: () => Date }).toDate()
+              : new Date(raw as string | number);
+            return Math.floor((nowMs538 - d.getTime()) / 86400000);
+          };
+          const overdueList = orders
+            .filter(o => !o.paid && o.status !== 'Cancelled')
+            .sort((a, b) => getAge(b) - getAge(a));
+          const totalOwed = overdueList.reduce((s, o) => s + (o.totalPrice ?? o.totalAmount ?? 0), 0);
+          return (
+            <div className="fixed inset-0 z-[9998] flex items-stretch justify-end">
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="flex-1 bg-black/30 backdrop-blur-[2px]"
+                onClick={() => setShowOverduePanel(false)}
+              />
+              {/* Drawer */}
+              <motion.div
+                initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="w-full max-w-md bg-white shadow-2xl flex flex-col overflow-hidden"
+              >
+                {/* Header */}
+                <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
+                    <CreditCard className="w-5 h-5 text-red-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-black text-gray-900">
+                      {currentLanguage === 'tr' ? 'Vadesi Geçmiş Ödemeler' : 'Overdue Payments'}
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      {overdueList.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · ₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'toplam' : 'total'}
+                    </p>
+                  </div>
+                  <button onClick={() => setShowOverduePanel(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="w-4 h-4 text-gray-400" />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                  {overdueList.length === 0 ? (
+                    <div className="text-center py-12">
+                      <CheckCircle2 className="w-12 h-12 text-emerald-300 mx-auto mb-3" />
+                      <p className="text-gray-400 font-medium">
+                        {currentLanguage === 'tr' ? 'Gecikmiş ödeme yok 🎉' : 'No overdue payments 🎉'}
+                      </p>
+                    </div>
+                  ) : overdueList.map(order => {
+                    const age = getAge(order);
+                    const isOld = age > 30;
+                    const amount = order.totalPrice ?? order.totalAmount ?? 0;
+                    return (
+                      <div key={order.id} className={`rounded-2xl border p-4 ${isOld ? 'border-red-200 bg-red-50/50' : 'border-gray-200 bg-white'}`}>
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-bold text-sm text-gray-900 truncate">{order.customerName}</p>
+                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${isOld ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {age}{currentLanguage === 'tr' ? 'g' : 'd'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-gray-400">#{order.shopifyOrderId || order.id.slice(-6)} · {order.status}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-black text-gray-900">₺{amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                            <button
+                              onClick={() => {
+                                setShowOverduePanel(false);
+                                handleToggleOrderPaid(order);
+                              }}
+                              className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 mt-1"
+                            >
+                              {currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Mark Paid'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Footer total */}
+                {overdueList.length > 0 && (
+                  <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between">
+                    <span className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable'}</span>
+                    <span className="text-lg font-black text-red-600">₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* ── Phase 532: Payment Method Picker Modal ── */}
+      <AnimatePresence>
+        {p532PayOrder && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
+            >
+              <div className="px-6 pt-6 pb-2 flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
+                  <CreditCard className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Ödeme Al' : 'Record Payment'}</h3>
+                  <p className="text-xs text-gray-400">
+                    #{p532PayOrder.shopifyOrderId || p532PayOrder.id.slice(-6)} · {p532PayOrder.customerName}
+                    {' · '}₺{(p532PayOrder.totalPrice ?? p532PayOrder.totalAmount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <button onClick={() => setP532PayOrder(null)} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <X className="w-4 h-4 text-gray-400" />
+                </button>
+              </div>
+
+              <div className="px-6 py-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                  {currentLanguage === 'tr' ? 'Ödeme Yöntemi' : 'Payment Method'}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: 'cash',          icon: '💵', label: currentLanguage === 'tr' ? 'Nakit'    : 'Cash'          },
+                    { key: 'bank_transfer', icon: '🏦', label: currentLanguage === 'tr' ? 'EFT/Havale' : 'Bank Transfer' },
+                    { key: 'credit_card',   icon: '💳', label: currentLanguage === 'tr' ? 'Kredi Kartı' : 'Credit Card'  },
+                    { key: 'check',         icon: '📄', label: currentLanguage === 'tr' ? 'Çek'       : 'Cheque'         },
+                    { key: 'other',         icon: '🔄', label: currentLanguage === 'tr' ? 'Diğer'     : 'Other'          },
+                  ] as { key: NonNullable<Order['paymentMethod']>; icon: string; label: string }[]).map(opt => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setP532Method(opt.key)}
+                      className={cn(
+                        "flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 text-sm font-semibold transition-all",
+                        p532Method === opt.key
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-gray-100 bg-gray-50 text-gray-600 hover:border-emerald-200"
+                      )}
+                    >
+                      <span className="text-lg leading-none">{opt.icon}</span>
+                      <span className="text-xs">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setP532PayOrder(null)}
+                  className="flex-1 apple-button-secondary"
+                >
+                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPayment}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  <Check className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Ödemeyi Onayla' : 'Confirm Payment'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
     </div>
