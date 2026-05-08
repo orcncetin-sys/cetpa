@@ -146,11 +146,28 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
       : 1;
   const fxSym = fxCurrency === 'USD' ? '$' : fxCurrency === 'EUR' ? '€' : '₺';
 
-  /** Returns a formatted FX equivalent string, or null if TRY or value is zero */
-  const fxHint = (tryValue: number): string | null => {
-    if (fxCurrency === 'TRY' || !tryValue || tryValue === 0 || !exchangeRates) return null;
-    const converted = tryValue / fxRate;
-    return `≈ ${fxSym}${converted.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  /**
+   * Display value for a field stored in TL.
+   * When non-TRY selected → show TL / rate (i.e. the FX equivalent).
+   * Rounds to 2 decimal places for FX, 0 for TRY.
+   */
+  const displayVal = (tryValue: number): number => {
+    if (fxCurrency === 'TRY' || !exchangeRates) return tryValue;
+    return Math.round((tryValue / fxRate) * 100) / 100;
+  };
+
+  /**
+   * Convert user-entered value (in fxCurrency) back to TL for storage.
+   */
+  const toTRY = (inputVal: number): number => {
+    if (fxCurrency === 'TRY' || !exchangeRates) return inputVal;
+    return Math.round(inputVal * fxRate * 100) / 100;
+  };
+
+  /** TL equivalent hint shown below input when non-TRY */
+  const tryHint = (tryValue: number): string | null => {
+    if (fxCurrency === 'TRY' || !tryValue || !exchangeRates) return null;
+    return `≈ ₺${tryValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   return createPortal(
@@ -274,69 +291,84 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
-                <DollarSign className="w-3 h-3" /> Maliyet (TL)
-                {/* Inline FX hint next to label */}
-                {fxHint(formData.costPrice) && (
-                  <span className="text-[10px] font-bold text-brand normal-case ml-1">
-                    {fxHint(formData.costPrice)}
-                  </span>
+              {/* Maliyet label + currency toggle on same row */}
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
+                  <DollarSign className="w-3 h-3" />
+                  {fxCurrency === 'TRY' ? 'Maliyet (₺)' : fxCurrency === 'USD' ? 'Maliyet ($)' : 'Maliyet (€)'}
+                </label>
+                {exchangeRates && (
+                  <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                    {(['TRY', 'USD', 'EUR'] as const).map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setFxCurrency(c)}
+                        className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
+                          fxCurrency === c
+                            ? 'bg-white shadow-sm text-gray-800'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                      >
+                        {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </label>
-              <input
-                required
-                type="number"
-                step="0.01"
-                value={formData.costPrice}
-                onChange={e => setFormData({ ...formData, costPrice: Number(e.target.value) })}
-                className="apple-input w-full"
-              />
+              </div>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 pointer-events-none select-none">
+                  {fxSym}
+                </span>
+                <input
+                  required
+                  type="number"
+                  step="0.01"
+                  value={displayVal(formData.costPrice) || ''}
+                  onChange={e => setFormData({ ...formData, costPrice: toTRY(Number(e.target.value)) })}
+                  className="apple-input w-full pl-8"
+                  placeholder="0.00"
+                />
+              </div>
+              {tryHint(formData.costPrice) && (
+                <p className="text-[10px] text-gray-400 pl-1">{tryHint(formData.costPrice)}</p>
+              )}
             </div>
           </div>
 
           <div className="space-y-4 pt-4 border-t border-gray-50">
-            {/* ── Fiyatlandırma header with currency toggle ── */}
+            {/* ── Fiyatlandırma header — same toggle applies (shared fxCurrency) ── */}
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900">Fiyatlandırma Katmanları</h3>
-              {/* Currency toggle — only shown when exchangeRates are available */}
-              {exchangeRates && (
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setFxCurrency(c)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
-                        fxCurrency === c
-                          ? 'bg-white shadow-sm text-gray-800'
-                          : 'text-gray-400 hover:text-gray-600'
-                      }`}
-                    >
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <h3 className="text-sm font-bold text-gray-900">
+                Fiyatlandırma Katmanları
+                <span className="ml-2 text-[10px] font-normal text-gray-400">
+                  {fxCurrency !== 'TRY' ? `(${fxSym} — ₺'ye çevrilerek kaydedilir)` : '(₺)'}
+                </span>
+              </h3>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {Object.entries(formData.prices).map(([tier, price]) => (
                 <div key={tier} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase truncate">{tier}</label>
-                    {fxHint(price) && (
-                      <span className="text-[9px] font-bold text-brand">{fxHint(price)}</span>
-                    )}
+                  <label className="text-[10px] font-bold text-gray-400 uppercase truncate">{tier}</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-300 pointer-events-none select-none">
+                      {fxSym}
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={displayVal(price) || ''}
+                      onChange={e => setFormData({
+                        ...formData,
+                        prices: { ...formData.prices, [tier]: toTRY(Number(e.target.value)) }
+                      })}
+                      className="apple-input w-full text-sm py-1.5 pl-7"
+                      placeholder="0.00"
+                    />
                   </div>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={price}
-                    onChange={e => setFormData({
-                      ...formData,
-                      prices: { ...formData.prices, [tier]: Number(e.target.value) }
-                    })}
-                    className="apple-input w-full text-sm py-1.5"
-                  />
+                  {tryHint(price) && (
+                    <p className="text-[9px] text-gray-400">{tryHint(price)}</p>
+                  )}
                 </div>
               ))}
             </div>

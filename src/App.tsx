@@ -31432,7 +31432,7 @@ function AppContent() {
                             {col.label}<SortIcon col={col.key} config={shipmentSort} />
                           </th>
                         ))}
-                        <th>İşlemler</th>
+                        <th className="text-right">İşlemler</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -31449,9 +31449,11 @@ function AppContent() {
                             </span>
                           </td>
                           <td className="font-mono text-xs">{shipment.trackingNo}</td>
-                          <td className="flex gap-2">
-                            <button onClick={() => handleEditShipment(shipment)} className="action-btn-edit"><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDeleteShipment(shipment.id)} className="action-btn-delete"><Trash2 className="w-4 h-4" /></button>
+                          <td className="text-right">
+                            <div className="flex gap-2 justify-end">
+                              <button onClick={() => handleEditShipment(shipment)} className="action-btn-edit"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => handleDeleteShipment(shipment.id)} className="action-btn-delete"><Trash2 className="w-4 h-4" /></button>
+                            </div>
                           </td>
                         </tr>
                       ))}
