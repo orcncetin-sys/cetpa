@@ -107,7 +107,13 @@ import {
   Check,
   Tag,
   ChevronDown,
-  BarChart2
+  BarChart2,
+  Wallet,
+  Wrench,
+  Headphones,
+  Ship,
+  GitBranch,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -172,6 +178,13 @@ import BOMPanel from './components/BOMPanel';
 import OrderTrackingView from './components/OrderTrackingView';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import LucaSyncPanel from './components/LucaSyncPanel';
+import EBelgeMerkezi from './components/EBelgeMerkezi';
+import KasaModule from './components/KasaModule';
+import BakimModule from './components/BakimModule';
+import ServisModule from './components/ServisModule';
+import IhracatModule from './components/IhracatModule';
+import SubeModule from './components/SubeModule';
+import VergiTakvimi from './components/VergiTakvimi';
 import GlobalSearch from './components/GlobalSearch';
 import { exportCustomerStatement } from './utils/pdf';
 import { formatCurrency, formatInCurrency } from './utils/currency';
@@ -229,6 +242,14 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   integrations:  { full: [UserRole.Admin], readonly: [UserRole.Manager] },
   admin:         { full: [UserRole.Admin], readonly: [] },
   settings:      { full: [UserRole.Admin, UserRole.Manager], readonly: [] },
+  // New ERP modules
+  ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics] },
+  kasa:          { full: [UserRole.Admin, UserRole.Accounting], readonly: [UserRole.Manager] },
+  bakim:         { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing] },
+  servis:        { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Logistics] },
+  ihracat:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting] },
+  sube:          { full: [UserRole.Admin, UserRole.Manager], readonly: [UserRole.Accounting, UserRole.Sales] },
+  vergi:         { full: [UserRole.Admin, UserRole.Accounting], readonly: [UserRole.Manager] },
 };
 
 interface B2BPortalProps {
@@ -20921,6 +20942,13 @@ function AppContent() {
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
                   { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations', icon: Link },
                   { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
+                  { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge' : 'E-Document', icon: FileText },
+                  { id: 'kasa', label: currentLanguage === 'tr' ? 'Kasa' : 'Cash Desk', icon: Wallet },
+                  { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance', icon: Wrench },
+                  { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'Service', icon: Headphones },
+                  { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', icon: Ship },
+                  { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches', icon: GitBranch },
+                  { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar', icon: Receipt },
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
@@ -26535,6 +26563,125 @@ function AppContent() {
           {activeTab === 'b2b' && (
             <motion.div key="b2b" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} orders={orders} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
+            </motion.div>
+          )}
+
+          {/* ── E-Belge Merkezi ── */}
+          {activeTab === 'ebelge' && (
+            <motion.div key="ebelge" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
+                <>
+                  {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
+                    subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
+                    icon={FileText}
+                  />
+                  <EBelgeMerkezi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ebelge')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Kasa Yönetimi ── */}
+          {activeTab === 'kasa' && (
+            <motion.div key="kasa" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('kasa') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk'} /> : (
+                <>
+                  {!hasFullAccess('kasa') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk Management'}
+                    subtitle={currentLanguage === 'tr' ? 'Kasa hareketleri, günlük kapanış ve kasa tanımları' : 'Cash transactions, daily closing and cash desk definitions'}
+                    icon={Wallet}
+                  />
+                  <KasaModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kasa')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Bakım-Onarım ── */}
+          {activeTab === 'bakim' && (
+            <motion.div key="bakim" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('bakim') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'} /> : (
+                <>
+                  {!hasFullAccess('bakim') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Bakım-Onarım Yönetimi' : 'Plant Maintenance'}
+                    subtitle={currentLanguage === 'tr' ? 'Ekipman sicili, iş emirleri, bakım planı ve arıza takibi' : 'Equipment register, work orders, maintenance schedule and failure tracking'}
+                    icon={Wrench}
+                  />
+                  <BakimModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('bakim')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Servis Yönetimi ── */}
+          {activeTab === 'servis' && (
+            <motion.div key="servis" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('servis') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Servis Yönetimi' : 'Service Management'} /> : (
+                <>
+                  {!hasFullAccess('servis') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Servis Yönetimi' : 'After-Sales Service'}
+                    subtitle={currentLanguage === 'tr' ? 'Servis talepleri, SLA takibi, garanti ve teknisyen yönetimi' : 'Service tickets, SLA tracking, warranty and technician management'}
+                    icon={Headphones}
+                  />
+                  <ServisModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('servis')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── İthalat / İhracat ── */}
+          {activeTab === 'ihracat' && (
+            <motion.div key="ihracat" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('ihracat') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'} /> : (
+                <>
+                  {!hasFullAccess('ihracat') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'İthalat / İhracat' : 'Import / Export'}
+                    subtitle={currentLanguage === 'tr' ? 'Dış ticaret, akreditif ve gümrük beyanname yönetimi' : 'Foreign trade, letters of credit and customs declarations'}
+                    icon={Ship}
+                  />
+                  <IhracatModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ihracat')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Şube Yönetimi ── */}
+          {activeTab === 'sube' && (
+            <motion.div key="sube" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('sube') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'} /> : (
+                <>
+                  {!hasFullAccess('sube') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'}
+                    subtitle={currentLanguage === 'tr' ? 'Şubeler, şubeler arası transfer ve şube bazlı P&L analizi' : 'Branches, inter-branch transfers and branch P&L analysis'}
+                    icon={GitBranch}
+                  />
+                  <SubeModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('sube')} />
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Vergi Takvimi ── */}
+          {activeTab === 'vergi' && (
+            <motion.div key="vergi" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
+                <>
+                  {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                    subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
+                    icon={Receipt}
+                  />
+                  <VergiTakvimi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('vergi')} />
+                </>
+              )}
             </motion.div>
           )}
 
