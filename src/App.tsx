@@ -18148,9 +18148,7 @@ const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'a
 
 function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
-  const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem('cetpa-theme-mode') === 'dark';
-  });
+  const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
 
   // ── Phase 25: Online / offline indicator ──────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -18173,13 +18171,9 @@ function AppContent() {
 
   React.useEffect(() => {
     const html = document.documentElement;
-    if (darkMode) {
-      html.classList.add('dark');
-      localStorage.setItem('cetpa-theme-mode', 'dark');
-    } else {
-      html.classList.remove('dark');
-      localStorage.setItem('cetpa-theme-mode', 'light');
-    }
+    if (darkMode) { html.classList.add('dark'); } else { html.classList.remove('dark'); }
+    const uid = auth.currentUser?.uid;
+    if (uid) setDoc(doc(db, 'userPrefs', uid), { darkMode }, { merge: true }).catch(() => {});
   }, [darkMode]);
   const toast = useToast();
   const currentT = translations[currentLanguage];
@@ -18296,13 +18290,12 @@ function AppContent() {
   const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
   const [mikroSettings, setMikroSettings] = useState<Partial<MikroConfig>>({});
   // Notification preferences — must be top-level (not inside conditional IIFE) to respect Rules of Hooks
-  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>(() => {
-    try { return JSON.parse(localStorage.getItem('cetpa-notif-prefs') ?? '{}'); } catch { return {}; }
-  });
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
   const toggleNotifPref = (key: string) => {
     setNotifPrefs(prev => {
       const next = { ...prev, [key]: !prev[key] };
-      localStorage.setItem('cetpa-notif-prefs', JSON.stringify(next));
+      const uid = auth.currentUser?.uid;
+      if (uid) setDoc(doc(db, 'userPrefs', uid), { notifPrefs: next }, { merge: true }).catch(() => {});
       return next;
     });
   };
@@ -18430,25 +18423,25 @@ function AppContent() {
   };
 
   // ── Phase 38: Recently Viewed trail ───────────────────────────────────────
-  const [recentlyViewed, setRecentlyViewed] = useState<{ type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }[]>(() => {
-    try { return JSON.parse(localStorage.getItem('cetpa-recent') ?? '[]'); } catch { return []; }
-  });
+  const [recentlyViewed, setRecentlyViewed] = useState<{ type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }[]>([]);
   const trackView = useCallback((item: { type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }) => {
     setRecentlyViewed(prev => {
       const next = [item, ...prev.filter(r => r.id !== item.id)].slice(0, 5);
-      localStorage.setItem('cetpa-recent', JSON.stringify(next));
+      const uid = auth.currentUser?.uid;
+      if (uid) setDoc(doc(db, 'userPrefs', uid), { recentlyViewed: next }, { merge: true }).catch(() => {});
       return next;
     });
   }, []);
 
   // ── Phase 27: Dashboard Quick Note ────────────────────────────────────────
-  const [quickNote, setQuickNote] = useState<string>(() => localStorage.getItem('cetpa-quick-note') ?? '');
+  const [quickNote, setQuickNote] = useState<string>('');
   const quickNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleQuickNoteChange = (val: string) => {
     setQuickNote(val);
     if (quickNoteTimer.current) clearTimeout(quickNoteTimer.current);
     quickNoteTimer.current = setTimeout(() => {
-      localStorage.setItem('cetpa-quick-note', val);
+      const uid = auth.currentUser?.uid;
+      if (uid) setDoc(doc(db, 'userPrefs', uid), { quickNote: val }, { merge: true }).catch(() => {});
     }, 600);
   };
 
@@ -18826,18 +18819,22 @@ function AppContent() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-  // Lead quick-note — top-level to avoid hooks-in-conditional violation
+  // Lead quick-note — saved to leads/{id}.quickNote in Firestore
   const [leadNoteText, setLeadNoteText] = useState('');
   const leadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const stored = selectedLead ? (localStorage.getItem(`cetpa-lead-note-${selectedLead.id}`) ?? '') : '';
+    const stored = selectedLead
+      ? ((selectedLead as unknown as Record<string, unknown>)['quickNote'] as string ?? '')
+      : '';
     setLeadNoteText(stored);
   }, [selectedLead?.id]);
   const handleLeadNoteChange = (val: string) => {
     setLeadNoteText(val);
     if (leadNoteTimer.current) clearTimeout(leadNoteTimer.current);
     if (selectedLead) {
-      leadNoteTimer.current = setTimeout(() => localStorage.setItem(`cetpa-lead-note-${selectedLead.id}`, val), 600);
+      leadNoteTimer.current = setTimeout(() => {
+        updateDoc(doc(db, 'leads', selectedLead.id), { quickNote: val }).catch(() => {});
+      }, 600);
     }
   };
   // Order quick-note — top-level to avoid hooks-in-conditional violation
@@ -18911,7 +18908,7 @@ function AppContent() {
   const [invPayPending, setInvPayPending] = useState(false); // Phase 511
   const [p513Selected, setP513Selected] = useState<string|null>(null); // Phase 513 — orderId profit popup
   // ── Phase 504-520 ────────────────────────────────────────────────────────────
-  const [starredOrders, setStarredOrders] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('cetpa-starred-orders') || '[]')); } catch { return new Set(); } }); // Phase 504
+  const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set()); // Phase 504 — synced from userPrefs/{uid}
   const [showStockCount, setShowStockCount] = useState(false); // Phase 507
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, number>>({}); // Phase 507
   const [stockCountSaving, setStockCountSaving] = useState(false); // Phase 507
@@ -18936,22 +18933,20 @@ function AppContent() {
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   // ── Phase 99: Monthly Sales Target ───────────────────────────────────────
-  const [monthlyTarget, setMonthlyTarget] = useState<number>(() => Number(localStorage.getItem('cetpa-monthly-target') || 0));
+  const [monthlyTarget, setMonthlyTarget] = useState<number>(0);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState('');
-  // Per-month target history: { "2026-05": 100000, ... }
-  const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem('cetpa-monthly-targets') || '{}'); } catch { return {}; }
-  });
+  // Per-month target history: { "2026-05": 100000, ... } — synced from settings/targets
+  const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
   const [editingMonthKey, setEditingMonthKey] = useState<string | null>(null);
   const [editingMonthDraft, setEditingMonthDraft] = useState('');
   const saveMonthlyTarget = (monthKey: string, value: number) => {
     const isCurrentMonth = monthKey === (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
-    if (isCurrentMonth) { setMonthlyTarget(value); localStorage.setItem('cetpa-monthly-target', String(value)); }
+    if (isCurrentMonth) setMonthlyTarget(value);
     const updated = { ...monthlyTargets, [monthKey]: value };
     if (value === 0) { delete updated[monthKey]; }
     setMonthlyTargets(updated);
-    localStorage.setItem('cetpa-monthly-targets', JSON.stringify(updated));
+    setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
   };
   // ── Phase 100: In-App Email Compose ──────────────────────────────────────
   const [emailCompose, setEmailCompose] = useState<{ open: boolean; to: string; name: string; subject: string; body: string }>({
@@ -19040,14 +19035,16 @@ function AppContent() {
   });
   // ── Phase 113: Budget vs Actuals ─────────────────────────────────────────
   type BudgetEntry = { dept: string; budgetTRY: number };
-  const [budgets, setBudgets] = useState<BudgetEntry[]>(() => {
-    try { return JSON.parse(localStorage.getItem('cetpa-budgets') || '[]') as BudgetEntry[]; }
-    catch { return []; }
-  });
+  const [budgets, setBudgets] = useState<BudgetEntry[]>([]);
+  const [allBudgetsFirestore, setAllBudgetsFirestore] = useState<Record<string, BudgetEntry[]>>({});
   const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
   const [budgetMonth, setBudgetMonth] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
+  // Sync budgets state when month selector or Firestore data changes
+  useEffect(() => {
+    setBudgets(allBudgetsFirestore[budgetMonth] ?? []);
+  }, [budgetMonth, allBudgetsFirestore]);
   const [butceCurrency, setButceCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   // Merge Firestore category master list with any category strings on existing inventory items
   const inventoryCategories = [...new Set([
@@ -19416,6 +19413,32 @@ function AppContent() {
       setAppQuotations(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quotation)));
     }, () => { /* non-critical */ });
 
+    // ── userPrefs listener — dark mode, notif prefs, starred orders, quick note, recently viewed ──
+    const unsubUserPrefs = onSnapshot(doc(db, 'userPrefs', user.uid), (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      if (d.darkMode !== undefined) setDarkMode(d.darkMode as boolean);
+      if (d.notifPrefs) setNotifPrefs(d.notifPrefs as Record<string, boolean>);
+      if (Array.isArray(d.starredOrders)) setStarredOrders(new Set(d.starredOrders as string[]));
+      if (typeof d.quickNote === 'string') setQuickNote(d.quickNote);
+      if (Array.isArray(d.recentlyViewed)) setRecentlyViewed(d.recentlyViewed);
+    }, () => { /* non-critical */ });
+
+    // ── Monthly targets listener ──────────────────────────────────────────────
+    const unsubTargets = onSnapshot(doc(db, 'settings', 'targets'), (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data() as Record<string, number>;
+      setMonthlyTargets(d);
+      const curKey = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+      if (d[curKey] !== undefined) setMonthlyTarget(d[curKey]);
+    }, () => { /* non-critical */ });
+
+    // ── Budget vs Actuals listener ────────────────────────────────────────────
+    const unsubBudgets = onSnapshot(doc(db, 'settings', 'budgets'), (snap) => {
+      if (!snap.exists()) return;
+      setAllBudgetsFirestore(snap.data() as Record<string, BudgetEntry[]>);
+    }, () => { /* non-critical */ });
+
     return () => {
       unsubLeads();
       unsubOrders();
@@ -19433,6 +19456,9 @@ function AppContent() {
       unsubLeave();
       unsubPriceOverrides();
       unsubAppQuotations();
+      unsubUserPrefs();
+      unsubTargets();
+      unsubBudgets();
     };
   }, [user, userRole, isAuthReady]);
 
@@ -22688,7 +22714,11 @@ function AppContent() {
                         <span className="truncate max-w-[140px]">{item.label}</span>
                       </button>
                     ))}
-                    <button onClick={() => { setRecentlyViewed([]); localStorage.removeItem('cetpa-recent'); }}
+                    <button onClick={() => {
+                      setRecentlyViewed([]);
+                      const uid = auth.currentUser?.uid;
+                      if (uid) setDoc(doc(db, 'userPrefs', uid), { recentlyViewed: [] }, { merge: true }).catch(() => {});
+                    }}
                       className="text-[10px] text-gray-400 hover:text-gray-600 px-2 py-1.5 ml-auto self-center transition-colors">
                       {currentLanguage === 'tr' ? 'Temizle' : 'Clear'}
                     </button>
@@ -23151,7 +23181,9 @@ function AppContent() {
 
                         const saveBudgets = (newBudgets: BudgetEntry[]) => {
                           setBudgets(newBudgets);
-                          localStorage.setItem('cetpa-budgets', JSON.stringify(newBudgets));
+                          const updated = { ...allBudgetsFirestore, [budgetMonth]: newBudgets };
+                          setAllBudgetsFirestore(updated);
+                          setDoc(doc(db, 'settings', 'budgets'), { [budgetMonth]: newBudgets }, { merge: true }).catch(() => {});
                         };
 
                         const butceRate = butceCurrency === 'USD' ? (exchangeRates?.USD || 1) : butceCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
@@ -29891,7 +29923,8 @@ function AppContent() {
                                     const next = new Set(starredOrders);
                                     if (next.has(order.id)) next.delete(order.id); else next.add(order.id);
                                     setStarredOrders(next);
-                                    localStorage.setItem('cetpa-starred-orders', JSON.stringify([...next]));
+                                    const uid = auth.currentUser?.uid;
+                                    if (uid) setDoc(doc(db, 'userPrefs', uid), { starredOrders: [...next] }, { merge: true }).catch(() => {});
                                   }}
                                   className={cn("transition-colors", starredOrders.has(order.id) ? "text-amber-400 hover:text-amber-500" : "text-gray-200 hover:text-amber-300")}
                                   title={starredOrders.has(order.id) ? (currentLanguage === 'tr' ? 'Yıldızı kaldır' : 'Unstar') : (currentLanguage === 'tr' ? 'Önemli olarak işaretle' : 'Star order')}
