@@ -330,6 +330,30 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+// ── Multi-currency helpers ──────────────────────────────────────────────────
+/**
+ * Returns the cost of an inventory item expressed in TRY.
+ * Items now store their native currency in costCurrency (USD/EUR/TRY).
+ * Backward-compatible: items without costCurrency are assumed TRY.
+ */
+function itemCostTRY(item: InventoryItem, rates: Record<string, number> | null | undefined): number {
+  const raw = item.costPrice ?? (item.cost as number | undefined) ?? 0;
+  const cur = item.costCurrency;
+  if (!cur || cur === 'TRY' || !rates) return raw;
+  return raw * (rates[cur] ?? 1);
+}
+
+/**
+ * Returns a specific price tier of an item expressed in TRY.
+ * Items may store prices in USD/EUR (priceCurrency). Falls back to TRY if unset.
+ */
+function itemPriceTRY(item: InventoryItem, tier: string, rates: Record<string, number> | null | undefined): number {
+  const raw = (item.prices?.[tier] as number | undefined) ?? item.price ?? 0;
+  const cur = item.priceCurrency;
+  if (!cur || cur === 'TRY' || !rates) return raw;
+  return raw * (rates[cur] ?? 1);
+}
+
 // --- Route Optimizer Utilities ---
 // --- SortHeader Component ---
 const SortHeader = ({ 
@@ -2526,7 +2550,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const dailyRev185 = monthly90Rev / days90;
         const dso = dailyRev185 > 0 ? Math.round(arBalance / dailyRev185) : 0;
         // DIO: avg inventory value / daily COGS
-        const inventoryVal185 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const inventoryVal185 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         const dailyCOGS185 = monthly90Rev * 0.6 / days90; // assume 60% COGS ratio
         const dio = dailyCOGS185 > 0 ? Math.round(inventoryVal185 / dailyCOGS185) : 0;
         const ccc = dso + dio;
@@ -2996,7 +3020,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               const cat = item.category || (currentLanguage === 'tr' ? 'Kategorisiz' : 'Uncategorized');
               if (!catMap[cat]) catMap[cat] = { category: cat, items: 0, stockValue: 0, costValue: 0, margin: 0 };
               const retail = item.prices?.['Retail'] ?? item.price ?? 0;
-              const cost = item.costPrice ?? item.cost ?? 0;
+              const cost = itemCostTRY(item, exchangeRates);
               const qty = item.stockLevel ?? 0;
               catMap[cat].items++;
               catMap[cat].stockValue += retail * qty;
@@ -3165,7 +3189,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             for (const i of inventory) {
               const cat = i.category || currentLanguage === 'tr' ? 'Diğer' : 'Other';
               if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
-              catMap[cat].avgStock += (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0);
+              catMap[cat].avgStock += (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates);
             }
             for (const o of orders) {
               if (o.status === 'Cancelled') continue;
@@ -3173,7 +3197,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
                 const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
                 if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
-                catMap[cat].totalCOGS += (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+                catMap[cat].totalCOGS += (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
               }
             }
             const cats = Object.entries(catMap)
@@ -4288,7 +4312,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const name = inv?.name || (m.productName as string) || pid || '—';
           if (!shrinkMap[name]) shrinkMap[name] = { name, qty: 0, value: 0 };
           shrinkMap[name].qty += Math.abs(qty);
-          shrinkMap[name].value += Math.abs(qty) * (inv?.costPrice ?? inv?.cost ?? 0);
+          shrinkMap[name].value += Math.abs(qty) * (inv ? itemCostTRY(inv, exchangeRates) : 0);
         }
         const shrinkItems = Object.values(shrinkMap).sort((a, b) => b.value - a.value).slice(0, 8);
         if (shrinkItems.length === 0) return null;
@@ -4347,7 +4371,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                 const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
                 if (!inv || inv.category !== c) continue;
                 rev += li.price * li.quantity;
-                cogs += (inv.costPrice ?? inv.cost ?? li.price * 0.6) * li.quantity;
+                cogs += itemCostTRY(inv, exchangeRates) * li.quantity;
               }
             }
             heatmap[c][mi] = rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : -1;
@@ -4411,7 +4435,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const suppMap183: Record<string, { value: number; items: number }> = {};
         for (const item of inventory) {
           const supp = item.supplier?.trim() || (currentLanguage === 'tr' ? 'Bilinmiyor' : 'Unknown');
-          const val = (item.costPrice ?? item.cost ?? 0) * (item.stockLevel ?? 0);
+          const val = itemCostTRY(item, exchangeRates) * (item.stockLevel ?? 0);
           if (!suppMap183[supp]) suppMap183[supp] = { value: 0, items: 0 };
           suppMap183[supp].value += val;
           suppMap183[supp].items++;
@@ -4542,7 +4566,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const cogs = mOrders.reduce((s, o) =>
             s + (o.lineItems ?? []).reduce((ls, li) => {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-              return ls + ((inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity);
+              return ls + ((inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity);
             }, 0), 0);
           const margin = rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0;
           return { label, rev, cogs, margin };
@@ -4832,7 +4856,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           custProfit[name].rev += o.totalPrice || 0;
           for (const li of (o.lineItems ?? [])) {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            custProfit[name].cogs += (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            custProfit[name].cogs += (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
           }
         }
         const profitList = Object.entries(custProfit)
@@ -5161,7 +5185,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         ).map(i => ({
           name: i.name,
           stock: i.stockLevel ?? 0,
-          value: (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0),
+          value: (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates),
           category: i.category ?? '—',
         })).sort((a, b) => b.value - a.value).slice(0, 8);
         if (deadStock.length === 0) return null;
@@ -5384,7 +5408,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           tier.count++;
           for (const li of (o.lineItems ?? [])) {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            tier.cogs += (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            tier.cogs += (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
           }
         }
         const activeTiers = tiers203.filter(t => t.count > 0);
@@ -6004,7 +6028,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       {/* ── Phase 216: Working Capital Analysis ── */}
       {reportsTab === 'genel' && orders.length >= 3 && inventory.length > 0 && (() => {
         // Working Capital = Current Assets - Current Liabilities (estimated)
-        const inventoryVal216 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const inventoryVal216 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         const arBalance216 = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered').reduce((s, o) => s + (o.totalPrice || 0), 0);
         const currentAssets = inventoryVal216 + arBalance216;
         // Estimated AP: orders received in last 30 days (proxy for payables)
@@ -6185,7 +6209,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           .map(i => {
             const exp = new Date(i.expiryDate!);
             const daysLeft = Math.round((exp.getTime() - now219.getTime()) / 86400000);
-            return { name: i.name, daysLeft, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0) };
+            return { name: i.name, daysLeft, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates) };
           })
           .filter(i => i.daysLeft <= 90)
           .sort((a, b) => a.daysLeft - b.daysLeft)
@@ -6634,13 +6658,13 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             for (const li of (o.lineItems ?? [])) {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
               const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
-              catSales[cat] = (catSales[cat] ?? 0) + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+              catSales[cat] = (catSales[cat] ?? 0) + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
             }
           } catch { /* skip */ }
         }
         for (const i of inventory) {
           const cat = i.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
-          catCost[cat] = (catCost[cat] ?? 0) + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0);
+          catCost[cat] = (catCost[cat] ?? 0) + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0);
         }
         const cats227 = Object.keys({ ...catSales, ...catCost });
         const turnoverList = cats227
@@ -7113,7 +7137,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const cogs = ordersList.reduce((s, o) =>
             s + (o.lineItems ?? []).reduce((ls, li) => {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-              return ls + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+              return ls + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
             }, 0), 0);
           return { rev, cogs, margin: rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0, gross: rev - cogs };
         };
@@ -7360,11 +7384,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const cogs239 = recentOrders.reduce((s, o) =>
           s + (o.lineItems ?? []).reduce((ls, li) => {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            return ls + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            return ls + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
           }, 0), 0);
         const grossProfit = revenue239 - cogs239;
         const grossMargin = revenue239 > 0 ? Math.round((grossProfit / revenue239) * 100) : 0;
-        const inventoryVal239 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const inventoryVal239 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         const arVal = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered').reduce((s, o) => s + (o.totalPrice || 0), 0);
         const monthlyRevRate = revenue239 / 3;
         const kpis239 = [
@@ -7950,7 +7974,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const rev250 = recentOrds.reduce((s, o) => s + (o.totalPrice || 0), 0);
         const activeEmp250 = employees.filter(e => e.status === 'Aktif').length;
         const lowStockCount = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? i.minStock ?? 5)).length;
-        const inventoryVal250 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const inventoryVal250 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         const totalOrds250 = recentOrds.length;
         const uniqueCusts250 = new Set(recentOrds.map(o => o.customerName || '—')).size;
         const openOrds = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').length;
@@ -8120,7 +8144,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const rev = o.totalPrice || 0;
           const cogs = (o.lineItems ?? []).reduce((ls, li) => {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            return ls + (inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+            return ls + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
           }, 0);
           return s + (rev - cogs);
         }, 0);
@@ -8166,7 +8190,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
               if (!inv) continue;
               const key = inv.id;
-              const margin = li.price > 0 ? Math.round(((li.price - (inv.costPrice ?? inv.cost ?? li.price * 0.6)) / li.price) * 100) : 0;
+              const margin = li.price > 0 ? Math.round(((li.price - itemCostTRY(inv, exchangeRates)) / li.price) * 100) : 0;
               if (!prodPI[key]) prodPI[key] = { name: inv.name, margin, velocity: 0, pi: 0, rev: 0 };
               prodPI[key].velocity += li.quantity;
               prodPI[key].rev += li.price * li.quantity;
@@ -8347,7 +8371,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           .map(i => {
             const lastDate = lastSaleDate[i.id] ?? lastSaleDate[i.name] ?? lastSaleDate[i.sku || ''];
             const days = lastDate ? Math.round((now257.getTime() - lastDate.getTime()) / 86400000) : null;
-            return { name: i.name, days, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * (i.costPrice ?? i.cost ?? 0) };
+            return { name: i.name, days, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates) };
           })
           .filter(p => p.days !== null && p.days > 30 && p.stock > 0)
           .sort((a, b) => (b.days ?? 0) - (a.days ?? 0))
@@ -8429,7 +8453,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 259: Inventory Carrying Cost Estimate ── */}
       {reportsTab === 'envanter' && inventory.length > 0 && (() => {
-        const inventoryVal259 = inventory.reduce((s, i) => s + (i.costPrice ?? i.cost ?? 0) * (i.stockLevel ?? 0), 0);
+        const inventoryVal259 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         if (inventoryVal259 === 0) return null;
         // Carrying cost = typically 20-30% of inventory value per year
         const carryingRates = [
@@ -8626,7 +8650,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         }).map(item => {
           const exp = new Date(item.expiryDate!);
           const daysLeft = Math.floor((exp.getTime() - now.getTime()) / 86400000);
-          const writeDownValue = item.stockLevel * (item.costPrice || 0);
+          const writeDownValue = item.stockLevel * itemCostTRY(item, exchangeRates);
           return { name: item.name, sku: item.sku, daysLeft, stock: item.stockLevel, value: writeDownValue };
         }).sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 8);
         if (risky.length === 0) {
@@ -8698,8 +8722,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const sup = item.supplier || 'Unknown';
           if (!supplierMap[sup]) supplierMap[sup] = { items: 0, avgCost: 0, totalValue: 0 };
           supplierMap[sup].items++;
-          supplierMap[sup].totalValue += (item.costPrice || 0) * item.stockLevel;
-          supplierMap[sup].avgCost += item.costPrice || 0;
+          supplierMap[sup].totalValue += itemCostTRY(item, exchangeRates) * item.stockLevel;
+          supplierMap[sup].avgCost += itemCostTRY(item, exchangeRates);
         });
         const suppliers = Object.entries(supplierMap)
           .map(([name, d]) => ({ name, items: d.items, avgCost: d.items > 0 ? d.avgCost / d.items : 0, totalValue: d.totalValue }))
@@ -8876,7 +8900,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const withMargin = orders.filter(o => o.lineItems && o.lineItems.length > 0).map(o => {
           const cost = (o.lineItems || []).reduce((s, li) => {
             const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
-            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+            return s + (inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice || 0)) * li.quantity;
           }, 0);
           const margin = o.totalPrice - cost;
           return { id: o.id, customer: o.customerName, revenue: o.totalPrice, cost, margin, marginPct: o.totalPrice > 0 ? (margin/o.totalPrice*100) : 0 };
@@ -9016,7 +9040,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           repData[rep].count++;
           repData[rep].cost += (o.lineItems || []).reduce((s, li) => {
             const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
-            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+            return s + (inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice || 0)) * li.quantity;
           }, 0);
         });
         const reps = Object.entries(repData)
@@ -9125,7 +9149,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           segments[seg].customers.add(o.customerName);
           segments[seg].cost += (o.lineItems || []).reduce((s, li) => {
             const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
-            return s + (inv ? (inv.costPrice || 0) : (li.costPrice || 0)) * li.quantity;
+            return s + (inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice || 0)) * li.quantity;
           }, 0);
         });
         const data = Object.entries(segments).map(([seg, d]) => ({
@@ -9265,7 +9289,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           if (!velocityMap[key]) velocityMap[key] = { units: 0, value: 0 };
           velocityMap[key].units += m.quantity || 1;
           const inv = inventory.find(it => it.name === key);
-          velocityMap[key].value += (m.quantity || 1) * (inv?.costPrice || 0);
+          velocityMap[key].value += (m.quantity || 1) * (inv ? itemCostTRY(inv, exchangeRates) : 0);
         });
         const top = Object.entries(velocityMap)
           .map(([name, d]) => ({ name, units: d.units, value: d.value, dailyVelocity: d.units / 30 }))
@@ -9343,11 +9367,11 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const totalRevenue = orders.reduce((s,o) => s+o.totalPrice, 0);
         const totalCost = orders.reduce((s,o) => s + (o.lineItems||[]).reduce((sc, li) => {
           const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
-          return sc + (inv ? (inv.costPrice||0) : (li.costPrice||0)) * li.quantity;
+          return sc + (inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice||0)) * li.quantity;
         }, 0), 0);
         const grossProfit = totalRevenue - totalCost;
         const grossMarginPct = totalRevenue > 0 ? (grossProfit/totalRevenue*100) : 0;
-        const inventoryValue = inventory.reduce((s,i) => s + i.stockLevel * (i.costPrice||0), 0);
+        const inventoryValue = inventory.reduce((s,i) => s + i.stockLevel * itemCostTRY(i, exchangeRates), 0);
         const monthlyRevArr = Array.from({length:12}, (_,i) => {
           const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
           return orders.filter(o => {
@@ -9437,7 +9461,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           sku: item.sku, name: item.name,
           sold: skuSales[item.sku] || 0,
           stock: item.stockLevel,
-          value: item.stockLevel * (item.costPrice||0),
+          value: item.stockLevel * itemCostTRY(item, exchangeRates),
           category: item.category || 'Other',
         }));
         const noSales = skuData.filter(s => s.sold === 0 && s.stock > 0).sort((a,b)=>b.value-a.value).slice(0,6);
@@ -9544,7 +9568,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const rev = mOrders.reduce((s,o)=>s+o.totalPrice,0);
           const cost = mOrders.reduce((s,o)=>s+(o.lineItems||[]).reduce((sc,li)=>{
             const inv = inventory.find(it=>it.id===li.inventoryId||it.sku===li.sku);
-            return sc+(inv?(inv.costPrice||0):(li.costPrice||0))*li.quantity;
+            return sc+(inv?itemCostTRY(inv, exchangeRates):(li.costPrice||0))*li.quantity;
           },0),0);
           const margin = rev > 0 ? ((rev-cost)/rev*100) : 0;
           return { label: m.label, rev, cost, margin };
@@ -9676,7 +9700,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const dailyVel = (velocityMap[item.name] || 0) / 30;
           const daysLeft = dailyVel > 0 ? Math.floor(item.stockLevel / dailyVel) : 60;
           const unitsNeeded = Math.ceil(dailyVel * 30); // 30-day restock
-          const cost = unitsNeeded * (item.costPrice || 0);
+          const cost = unitsNeeded * itemCostTRY(item, exchangeRates);
           return { name: item.name, sku: item.sku, daysLeft, unitsNeeded, cost, dailyVel };
         }).sort((a,b)=>a.daysLeft-b.daysLeft).slice(0,6);
         if (restockItems.length === 0) return null;
@@ -9939,7 +9963,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const totalItems = inventory.length;
         const zeroStock = inventory.filter(i=>i.stockLevel === 0).length;
         const negStock = inventory.filter(i=>i.stockLevel < 0).length;
-        const totalStockValue = inventory.reduce((s,i)=>s+Math.max(0,i.stockLevel)*(i.costPrice||0),0);
+        const totalStockValue = inventory.reduce((s,i)=>s+Math.max(0,i.stockLevel)*itemCostTRY(i,exchangeRates),0);
         const shrinkageValue = inventory.filter(i=>i.stockLevel < 0).reduce((s,i)=>s+Math.abs(i.stockLevel)*(i.costPrice||0),0);
         return (
           <div className="apple-card p-6">
@@ -10191,9 +10215,9 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const totalRevenue = orders.reduce((s,o)=>s+o.totalPrice,0);
         const totalCOGS = orders.reduce((s,o)=>s+(o.lineItems||[]).reduce((sc,li)=>{
           const inv = inventory.find(it=>it.id===li.inventoryId||it.sku===li.sku);
-          return sc+(inv?(inv.costPrice||0):(li.costPrice||0))*li.quantity;
+          return sc+(inv?itemCostTRY(inv,exchangeRates):(li.costPrice||0))*li.quantity;
         },0),0);
-        const inventoryValue = inventory.reduce((s,i)=>s+Math.max(0,i.stockLevel)*(i.costPrice||0),0);
+        const inventoryValue = inventory.reduce((s,i)=>s+Math.max(0,i.stockLevel)*itemCostTRY(i,exchangeRates),0);
         const avgMonthlyRevenue = totalRevenue / Math.max(1, (() => {
           const now = new Date();
           const dates = orders.map(o => (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string));
@@ -10447,7 +10471,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const revenue = mOrders.reduce((s,o)=>s+o.totalPrice,0);
         const cogs = mOrders.reduce((s,o)=>s+(o.lineItems||[]).reduce((sc,li)=>{
           const inv = inventory.find(it=>it.id===li.inventoryId||it.sku===li.sku);
-          return sc+(inv?(inv.costPrice||0):(li.costPrice||0))*li.quantity;
+          return sc+(inv?itemCostTRY(inv,exchangeRates):(li.costPrice||0))*li.quantity;
         },0),0);
         const grossProfit = revenue - cogs;
         const payroll = employees.filter(e=>e.status==='Aktif').reduce((s,e)=>s+(e.salary||0),0);
@@ -10947,7 +10971,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const productRev: Record<string, {revenue: number; cost: number; qty: number}> = {};
         orders.forEach(o => (o.lineItems || []).forEach(li => {
           const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
-          const cost = inv ? (inv.costPrice || 0) : (li.costPrice || 0);
+          const cost = inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice || 0);
           const key = li.name || li.sku;
           if (!productRev[key]) productRev[key] = {revenue: 0, cost: 0, qty: 0};
           productRev[key].revenue += li.price * li.quantity;
@@ -12125,7 +12149,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
           const cogs = (o.lineItems || []).reduce((s: number, li: {costPrice?: number; quantity?: number; sku?: string}) => {
             const item = inventory.find(i => i.sku === li.sku);
-            return s + (li.costPrice || item?.costPrice || 0) * (li.quantity || 1);
+            return s + (li.costPrice || (item ? itemCostTRY(item, exchangeRates) : 0)) * (li.quantity || 1);
           }, 0);
           monthCOGS[key] = (monthCOGS[key] || 0) + (cogs || (o.totalPrice || 0) * 0.55);
         });
@@ -12364,12 +12388,12 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       {/* ── Phase 354: Inventory Cost vs Sell Price Scatter (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 6 && (() => {
         const scatterData = inventory
-          .filter(i => i.costPrice > 0 && (i.prices?.['Retail'] || i.price || 0) > 0)
+          .filter(i => itemCostTRY(i, exchangeRates) > 0 && (i.prices?.['Retail'] || i.price || 0) > 0)
           .map(i => ({
             name: i.name,
-            cost: i.costPrice,
-            sell: i.prices?.['Retail'] || i.price || 0,
-            margin: ((( i.prices?.['Retail'] || i.price || 0) - i.costPrice) / (i.prices?.['Retail'] || i.price || 1)) * 100,
+            cost: itemCostTRY(i, exchangeRates),
+            sell: itemPriceTRY(i, 'Retail', exchangeRates) || i.price || 0,
+            margin: ((( i.prices?.['Retail'] || i.price || 0) - itemCostTRY(i, exchangeRates)) / (i.prices?.['Retail'] || i.price || 1)) * 100,
           }))
           .sort((a, b) => b.sell - a.sell)
           .slice(0, 10);
@@ -13907,7 +13931,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         inventory.forEach(item => {
           const cat = item.category ?? 'Other';
           const retail = (item.prices?.['Retail'] as number | undefined) ?? (item.prices?.['B2B Standard'] as number | undefined) ?? 0;
-          const cost = (item.costPrice as number | undefined) ?? retail * 0.6;
+          const cost = itemCostTRY(item, exchangeRates) || retail * 0.6;
           if (!catData[cat]) catData[cat] = {cost: 0, retail: 0, count: 0};
           catData[cat].retail += retail;
           catData[cat].cost += cost;
@@ -14693,7 +14717,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const products = inventory
           .map(item => {
             const retail = (item.prices?.['Retail'] as number | undefined) ?? 0;
-            const cost = (item.costPrice as number | undefined) ?? retail * 0.6;
+            const cost = itemCostTRY(item, exchangeRates) || retail * 0.6;
             const stk = (item.stock as number | undefined) ?? 0;
             const margin = retail > 0 ? ((retail - cost) / retail) * 100 : 0;
             const potentialProfit = (retail - cost) * stk;
@@ -16433,7 +16457,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         let totalCost=0, totalRetail=0, count=0;
         inventory.forEach(item => {
           const retail = (item.prices?.['Retail'] as number|undefined)??0;
-          const cost = (item.costPrice as number|undefined)??retail*0.6;
+          const cost = itemCostTRY(item, exchangeRates)||retail*0.6;
           const stk = (item.stock as number|undefined)??0;
           if (retail>0 && stk>0) { totalRetail+=retail*stk; totalCost+=cost*stk; count++; }
         });
@@ -22256,7 +22280,7 @@ function AppContent() {
                   // Estimate COGS from lineItems
                   const cogsCost = (o.lineItems || []).reduce((s, li) => {
                     const inv = inventory.find(i => i.id === li.inventoryId || i.name === li.name);
-                    return s + (inv?.costPrice ?? inv?.cost ?? (li.price * 0.6)) * li.quantity;
+                    return s + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
                   }, 0);
                   segMap[type].cogs += cogsCost;
                 }
@@ -22493,7 +22517,7 @@ function AppContent() {
 
               {/* ── Phase 47: Inventory Value Summary ── */}
               {inventory.length > 0 && (() => {
-                const costValue   = inventory.reduce((s, i) => s + (i.costPrice || i.cost || 0) * (i.stockLevel ?? 0), 0);
+                const costValue   = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
                 const retailValue = inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
                 const margin      = retailValue > 0 ? Math.round(((retailValue - costValue) / retailValue) * 100) : 0;
                 const totalUnits  = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
@@ -26633,7 +26657,7 @@ function AppContent() {
                 const totalUnits   = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
                 const outOfStock   = inventory.filter(i => (i.stockLevel ?? 0) === 0).length;
                 const stockVal     = inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
-                const costVal      = inventory.reduce((s, i) => s + (i.costPrice ?? 0) * (i.stockLevel ?? 0), 0);
+                const costVal      = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
                 const avgMarginPct = stockVal > 0 && costVal > 0
                   ? Math.round(((stockVal - costVal) / stockVal) * 100)
                   : null;
@@ -26859,7 +26883,7 @@ function AppContent() {
                               : (currentLanguage === 'tr' ? 'Tümünü Seç' : 'Select All')}
                           </button>
                           <p className="text-[10px] text-gray-400">
-                            {currentLanguage === 'tr' ? `Tahmini toplam maliyet: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*(i.costPrice??0),0).toLocaleString('tr-TR')}` : `Est. total cost: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*(i.costPrice??0),0).toLocaleString('tr-TR')}`}
+                            {currentLanguage === 'tr' ? `Tahmini toplam maliyet: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*itemCostTRY(i,exchangeRates),0).toLocaleString('tr-TR')}` : `Est. total cost: ₺${reorderItems.filter(i => smartReorderSelected.has(i.id)).reduce((s,i)=>s+i.suggestedQty*itemCostTRY(i,exchangeRates),0).toLocaleString('tr-TR')}`}
                           </p>
                         </div>
                       </div>
@@ -30804,7 +30828,7 @@ function AppContent() {
                         const revenue = selectedOrder.totalPrice || 0;
                         const cogs = selectedOrder.lineItems.reduce((s, li) => {
                           const inv = inventory.find(i => i.id === li.inventoryId || i.sku === li.sku);
-                          return s + (li.costPrice ?? inv?.costPrice ?? inv?.cost ?? li.price * 0.6) * li.quantity;
+                          return s + (li.costPrice ?? (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6)) * li.quantity;
                         }, 0);
                         const gp = revenue - cogs;
                         const margin = revenue > 0 ? (gp / revenue * 100) : 0;
@@ -30854,7 +30878,7 @@ function AppContent() {
                                     <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
                                       {selectedOrder.lineItems!.map((li, i) => {
                                         const inv2 = inventory.find(x => x.id === li.inventoryId || x.sku === li.sku);
-                                        const liCost = (li.costPrice ?? inv2?.costPrice ?? inv2?.cost ?? li.price * 0.6) * li.quantity;
+                                        const liCost = (li.costPrice ?? (inv2 ? itemCostTRY(inv2, exchangeRates) : li.price * 0.6)) * li.quantity;
                                         const liRev = li.price * li.quantity;
                                         return (
                                           <div key={i} className="flex justify-between text-[11px]">

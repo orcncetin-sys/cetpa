@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where, getDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
@@ -19,8 +19,6 @@ interface ProductFormProps {
 
 export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses: warehousesProp, existingCategories = [], exchangeRates }: ProductFormProps) {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  // Local currency toggle for FX hints
-  const [fxCurrency, setFxCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
 
   useEffect(() => {
     if (warehousesProp) {
@@ -36,6 +34,8 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
     lowStockThreshold: 5,
     price: 0,
     costPrice: 0,
+    costCurrency: 'TRY' as 'TRY' | 'USD' | 'EUR',
+    priceCurrency: 'TRY' as 'TRY' | 'USD' | 'EUR',
     location: '',
     warehouseId: '',
     supplier: '',
@@ -55,11 +55,21 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
       setFormData(prev => ({
         ...prev,
         ...initialData,
+        costCurrency: (initialData.costCurrency as 'TRY' | 'USD' | 'EUR') || 'TRY',
+        priceCurrency: (initialData.priceCurrency as 'TRY' | 'USD' | 'EUR') || 'TRY',
         prices: {
           ...prev.prices,
           ...(initialData.prices || {})
         }
       }));
+    } else {
+      // reset for new product
+      setFormData({
+        name: '', sku: '', category: '', stockLevel: 0, lowStockThreshold: 5,
+        price: 0, costPrice: 0, costCurrency: 'TRY', priceCurrency: 'TRY',
+        location: '', warehouseId: '', supplier: '', supplierSku: '',
+        prices: { 'Retail': 0, 'B2B Standard': 0, 'B2B Premium': 0, 'Dealer': 0 }
+      });
     }
   }, [initialData, isOpen]);
 
@@ -139,35 +149,15 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
   if (!isOpen) return null;
 
   // ── FX helpers ──────────────────────────────────────────────────────────────
-  const fxRate = fxCurrency === 'USD'
-    ? (exchangeRates?.USD || 1)
-    : fxCurrency === 'EUR'
-      ? (exchangeRates?.EUR || 1)
-      : 1;
-  const fxSym = fxCurrency === 'USD' ? '$' : fxCurrency === 'EUR' ? '€' : '₺';
+  // Each field stores its own currency natively. Helpers work per-currency.
+  const symOf = (cur: 'TRY' | 'USD' | 'EUR') => cur === 'USD' ? '$' : cur === 'EUR' ? '€' : '₺';
 
-  /**
-   * Display value for a field stored in TL.
-   * When non-TRY selected → show TL / rate (i.e. the FX equivalent).
-   * Rounds to 2 decimal places for FX, 0 for TRY.
-   */
-  const displayVal = (tryValue: number): number => {
-    if (fxCurrency === 'TRY' || !exchangeRates) return tryValue;
-    return Math.round((tryValue / fxRate) * 100) / 100;
-  };
-
-  /**
-   * Convert user-entered value (in fxCurrency) back to TL for storage.
-   */
-  const toTRY = (inputVal: number): number => {
-    if (fxCurrency === 'TRY' || !exchangeRates) return inputVal;
-    return Math.round(inputVal * fxRate * 100) / 100;
-  };
-
-  /** TL equivalent hint shown below input when non-TRY */
-  const tryHint = (tryValue: number): string | null => {
-    if (fxCurrency === 'TRY' || !tryValue || !exchangeRates) return null;
-    return `≈ ₺${tryValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  /** TL equivalent hint shown below input when non-TRY (for reference only) */
+  const tryHintFor = (value: number, cur: 'TRY' | 'USD' | 'EUR'): string | null => {
+    if (cur === 'TRY' || !value || !exchangeRates) return null;
+    const rate = cur === 'USD' ? (exchangeRates.USD || 1) : (exchangeRates.EUR || 1);
+    const inTRY = value * rate;
+    return `≈ ₺${inTRY.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   return createPortal(
@@ -295,56 +285,70 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
                   <DollarSign className="w-3 h-3" />
-                  {fxCurrency === 'TRY' ? 'Maliyet (₺)' : fxCurrency === 'USD' ? 'Maliyet ($)' : 'Maliyet (€)'}
+                  {`Maliyet (${symOf(formData.costCurrency)})`}
                 </label>
-                {exchangeRates && (
-                  <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                    {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setFxCurrency(c)}
-                        className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
-                          fxCurrency === c
-                            ? 'bg-white shadow-sm text-gray-800'
-                            : 'text-gray-400 hover:text-gray-600'
-                        }`}
-                      >
-                        {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, costCurrency: c }))}
+                      className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
+                        formData.costCurrency === c
+                          ? 'bg-white shadow-sm text-gray-800'
+                          : 'text-gray-400 hover:text-gray-600'
+                      }`}
+                    >
+                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="relative">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 pointer-events-none select-none">
-                  {fxSym}
+                  {symOf(formData.costCurrency)}
                 </span>
                 <input
                   required
                   type="number"
                   step="0.01"
-                  value={displayVal(formData.costPrice) || ''}
-                  onChange={e => setFormData({ ...formData, costPrice: toTRY(Number(e.target.value)) })}
+                  value={formData.costPrice || ''}
+                  onChange={e => setFormData(prev => ({ ...prev, costPrice: Number(e.target.value) }))}
                   className="apple-input w-full pl-8"
                   placeholder="0.00"
                 />
               </div>
-              {tryHint(formData.costPrice) && (
-                <p className="text-[10px] text-gray-400 pl-1">{tryHint(formData.costPrice)}</p>
+              {tryHintFor(formData.costPrice, formData.costCurrency) && (
+                <p className="text-[10px] text-gray-400 pl-1">{tryHintFor(formData.costPrice, formData.costCurrency)}</p>
               )}
             </div>
           </div>
 
           <div className="space-y-4 pt-4 border-t border-gray-50">
-            {/* ── Fiyatlandırma header — same toggle applies (shared fxCurrency) ── */}
+            {/* ── Fiyatlandırma header with its own currency toggle ── */}
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900">
                 Fiyatlandırma Katmanları
                 <span className="ml-2 text-[10px] font-normal text-gray-400">
-                  {fxCurrency !== 'TRY' ? `(${fxSym} — ₺'ye çevrilerek kaydedilir)` : '(₺)'}
+                  ({symOf(formData.priceCurrency)})
                 </span>
               </h3>
+              <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                {(['TRY', 'USD', 'EUR'] as const).map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, priceCurrency: c }))}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
+                      formData.priceCurrency === c
+                        ? 'bg-white shadow-sm text-gray-800'
+                        : 'text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {Object.entries(formData.prices).map(([tier, price]) => (
@@ -352,22 +356,22 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
                   <label className="text-[10px] font-bold text-gray-400 uppercase truncate">{tier}</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-300 pointer-events-none select-none">
-                      {fxSym}
+                      {symOf(formData.priceCurrency)}
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      value={displayVal(price) || ''}
-                      onChange={e => setFormData({
-                        ...formData,
-                        prices: { ...formData.prices, [tier]: toTRY(Number(e.target.value)) }
-                      })}
+                      value={price || ''}
+                      onChange={e => setFormData(prev => ({
+                        ...prev,
+                        prices: { ...prev.prices, [tier]: Number(e.target.value) }
+                      }))}
                       className="apple-input w-full text-sm py-1.5 pl-7"
                       placeholder="0.00"
                     />
                   </div>
-                  {tryHint(price) && (
-                    <p className="text-[9px] text-gray-400">{tryHint(price)}</p>
+                  {tryHintFor(price, formData.priceCurrency) && (
+                    <p className="text-[9px] text-gray-400">{tryHintFor(price, formData.priceCurrency)}</p>
                   )}
                 </div>
               ))}

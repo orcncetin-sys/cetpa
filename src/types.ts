@@ -39,7 +39,9 @@ export interface InventoryItem {
   prices: Record<string, number>;
   price?: number;
   costPrice: number;
+  costCurrency?: 'TRY' | 'USD' | 'EUR';
   cost?: number;
+  priceCurrency?: 'TRY' | 'USD' | 'EUR';
   location?: string;
   batchNumber?: string;
   expiryDate?: string;
