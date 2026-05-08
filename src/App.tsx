@@ -113,7 +113,8 @@ import {
   Headphones,
   Ship,
   GitBranch,
-  Receipt
+  Receipt,
+  Hash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -185,6 +186,7 @@ import ServisModule from './components/ServisModule';
 import IhracatModule from './components/IhracatModule';
 import SubeModule from './components/SubeModule';
 import VergiTakvimi from './components/VergiTakvimi';
+import LotSeriModule from './components/LotSeriModule';
 import GlobalSearch from './components/GlobalSearch';
 import { exportCustomerStatement } from './utils/pdf';
 import { formatCurrency, formatInCurrency } from './utils/currency';
@@ -250,6 +252,7 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   ihracat:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting] },
   sube:          { full: [UserRole.Admin, UserRole.Manager], readonly: [UserRole.Accounting, UserRole.Sales] },
   vergi:         { full: [UserRole.Admin, UserRole.Accounting], readonly: [UserRole.Manager] },
+  lotseri:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing, UserRole.Sales] },
 };
 
 interface B2BPortalProps {
@@ -20949,6 +20952,7 @@ function AppContent() {
                   { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', icon: Ship },
                   { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches', icon: GitBranch },
                   { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar', icon: Receipt },
+                  { id: 'lotseri', label: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial', icon: Hash },
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
@@ -21999,6 +22003,84 @@ function AppContent() {
                         </button>
                       </div>
                     )}
+                  </div>
+                );
+              })()}
+
+              {/* ── New ERP Module Quick-Status Strip ── */}
+              {(() => {
+                const today = new Date().toISOString().slice(0, 10);
+                const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* E-Belge status */}
+                    <button onClick={() => setActiveTab('ebelge')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                          <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                        </div>
+                        <span className="text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'E-Belge' : 'E-Doc'}</span>
+                      </div>
+                      <p className="text-xl font-bold text-gray-900">
+                        {currentLanguage === 'tr' ? 'GIB Bağlı' : 'GIB Connected'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'E-Fatura · E-Arşiv · E-İrsaliye' : 'E-Invoice · E-Archive · E-Waybill'}</p>
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                        <span className="text-[10px] text-green-600 font-semibold">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</span>
+                      </div>
+                    </button>
+
+                    {/* Kasa balance */}
+                    <button onClick={() => setActiveTab('kasa')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                          <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                        </div>
+                        <span className="text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Kasa' : 'Cash'}</span>
+                      </div>
+                      <p className="text-xl font-bold text-gray-900">
+                        {currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Günlük kapanış ve hareketler' : 'Daily close and transactions'}</p>
+                      <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kasaya git' : 'Go to cash desk'}
+                      </p>
+                    </button>
+
+                    {/* Vergi Takvimi — overdue count */}
+                    <button onClick={() => setActiveTab('vergi')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+                          <Receipt className="w-3.5 h-3.5 text-amber-600" />
+                        </div>
+                        <span className="text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}</span>
+                      </div>
+                      <p className="text-xl font-bold text-gray-900">
+                        {currentLanguage === 'tr' ? 'Beyanname Takibi' : 'Declaration Tracking'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'KDV · Muhtasar · SGK · Geçici Vergi' : 'VAT · WHT · SGK · Provisional Tax'}</p>
+                      <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Takvimi gör' : 'View calendar'}
+                      </p>
+                    </button>
+
+                    {/* Bakım — upcoming */}
+                    <button onClick={() => setActiveTab('bakim')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
+                          <Wrench className="w-3.5 h-3.5 text-orange-600" />
+                        </div>
+                        <span className="text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Bakım' : 'Maintenance'}</span>
+                      </div>
+                      <p className="text-xl font-bold text-gray-900">
+                        {currentLanguage === 'tr' ? 'Ekipman Bakımı' : 'Equipment Maint.'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Önleyici · Düzeltici · Acil iş emirleri' : 'Preventive · Corrective · Emergency orders'}</p>
+                      <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'İş emirlerine git' : 'View work orders'}
+                      </p>
+                    </button>
                   </div>
                 );
               })()}
@@ -26685,6 +26767,22 @@ function AppContent() {
             </motion.div>
           )}
 
+
+          {activeTab === 'lotseri' && (
+            <motion.div key="lotseri" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              {!canAccess('lotseri') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'} /> : (
+                <>
+                  {!hasFullAccess('lotseri') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  <ModuleHeader
+                    title={currentLanguage === 'tr' ? 'Lot & Seri No Takibi' : 'Lot & Serial Tracking'}
+                    subtitle={currentLanguage === 'tr' ? 'Lot kayıtları, seri numaraları, hareketler ve karantina yönetimi' : 'Lot records, serial numbers, movements and quarantine management'}
+                    icon={Hash}
+                  />
+                  <LotSeriModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('lotseri')} />
+                </>
+              )}
+            </motion.div>
+          )}
 
           {/* ── Inventory ── */}
           {activeTab === 'inventory' && (
