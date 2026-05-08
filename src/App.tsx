@@ -18918,6 +18918,13 @@ function AppContent() {
   const [stockCountSearch, setStockCountSearch] = useState(''); // Phase 507
   const [dashClock, setDashClock] = useState(new Date()); // Phase 514
   const [showQuickShipment, setShowQuickShipment] = useState<Order|null>(null); // Phase 512
+  // ── Phase 515-530 ────────────────────────────────────────────────────────────
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set()); // Phase 519
+  const [bulkLeadLoading, setBulkLeadLoading] = useState(false); // Phase 519
+  const [p515Dismissed, setP515Dismissed] = useState(false); // Phase 515 (follow-up alerts)
+  const [orderCustomerFilter, setOrderCustomerFilter] = useState<string|null>(null); // Phase 523
+  const [showInvoiceAging, setShowInvoiceAging] = useState(false); // Phase 521
+  const [p524CLV, setP524CLV] = useState<string|null>(null); // Phase 524 — leadId for CLV popup
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -27982,6 +27989,47 @@ function AppContent() {
                   </div>
                 }
               />
+              {/* ── Phase 515: Follow-up Due Alert ── */}
+              {!p515Dismissed && (() => {
+                const now515 = new Date(); now515.setHours(0,0,0,0);
+                const overdue = leads.filter(l => {
+                  if (!l.nextFollowUpDate || l.status === 'Closed') return false;
+                  const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
+                    ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
+                    : new Date(l.nextFollowUpDate as unknown as string | number);
+                  return due <= now515;
+                });
+                const dueToday = leads.filter(l => {
+                  if (!l.nextFollowUpDate || l.status === 'Closed') return false;
+                  const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
+                    ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
+                    : new Date(l.nextFollowUpDate as unknown as string | number);
+                  const dueD = new Date(due); dueD.setHours(0,0,0,0);
+                  return dueD.getTime() === now515.getTime();
+                });
+                if (overdue.length === 0 && dueToday.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <Bell className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-amber-800">
+                        {overdue.length > 0 && <span className="mr-2">{overdue.length} {currentLanguage === 'tr' ? 'gecikmiş takip' : 'overdue follow-up'}{overdue.length > 1 ? 's' : ''}</span>}
+                        {dueToday.length > 0 && <span className="text-amber-700">{dueToday.length} {currentLanguage === 'tr' ? 'bugün vadeli' : 'due today'}</span>}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {overdue.slice(0,5).map(l => (
+                          <button key={l.id} onClick={() => setSelectedLead(l)}
+                            className="text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 px-2 py-1 rounded-full transition-colors flex items-center gap-1">
+                            <AlertTriangle className="w-2.5 h-2.5" />{l.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button onClick={() => setP515Dismissed(true)} className="text-amber-400 hover:text-amber-600 flex-shrink-0 mt-0.5"><X className="w-4 h-4" /></button>
+                  </div>
+                );
+              })()}
+
               {/* Row 2: Search + secondary actions */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
@@ -28217,6 +28265,34 @@ function AppContent() {
                         </button>
                       ))}
                     </div>
+                    {/* ── Phase 519: Bulk Lead Selection Bar ── */}
+                    {selectedLeadIds.size > 0 && (
+                      <div className={cn("flex items-center justify-between px-4 py-3 rounded-2xl border", darkMode ? "bg-indigo-900/30 border-indigo-500/30" : "bg-indigo-50 border-indigo-200")}>
+                        <span className="text-xs font-bold text-indigo-700">{selectedLeadIds.size} {currentLanguage === 'tr' ? 'aday seçildi' : 'leads selected'}</span>
+                        <div className="flex items-center gap-2">
+                          {(['New','Contacted','Qualified','Closed'] as const).map(s => {
+                            const labelTR519: Record<string,string> = { New:'Yeni', Contacted:'İrtibat', Qualified:'Nitelikli', Closed:'Kapandı' };
+                            return (
+                              <button key={s} disabled={bulkLeadLoading}
+                                onClick={async () => {
+                                  setBulkLeadLoading(true);
+                                  try {
+                                    await Promise.all([...selectedLeadIds].map(id =>
+                                      updateDoc(doc(db, 'leads', id), { status: s, updatedAt: serverTimestamp() })
+                                    ));
+                                    toast(`${selectedLeadIds.size} ${currentLanguage === 'tr' ? 'aday güncellendi ✓' : 'leads updated ✓'}`, 'success');
+                                    setSelectedLeadIds(new Set());
+                                  } catch(e){ console.error(e); } finally { setBulkLeadLoading(false); }
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-1.5 rounded-full bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-40">
+                                → {currentLanguage === 'tr' ? labelTR519[s] : s}
+                              </button>
+                            );
+                          })}
+                          <button onClick={() => setSelectedLeadIds(new Set())} className="text-[10px] font-semibold text-gray-400 hover:text-gray-600 ml-1 transition-colors">{currentLanguage === 'tr' ? 'İptal' : 'Clear'}</button>
+                        </div>
+                      </div>
+                    )}
                     {(() => {
                       const filtered = leads.filter(l =>
                         (leadStatusFilter === 'All' || l.status === leadStatusFilter) &&
@@ -28232,8 +28308,14 @@ function AppContent() {
                       </div>
                     ) : (
                       sorted.map(lead => (
-                        <div key={lead.id} className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow flex items-center justify-between gap-4">
-                          <div className="flex items-center gap-4 min-w-0">
+                        <div key={lead.id} className={cn("bg-white p-4 rounded-xl border hover:shadow-md transition-shadow flex items-center justify-between gap-4", selectedLeadIds.has(lead.id) ? "border-indigo-300 bg-indigo-50/30" : "border-gray-200")}>
+                          {/* Phase 519: checkbox */}
+                          <input type="checkbox" className="rounded accent-indigo-500 cursor-pointer flex-shrink-0"
+                            checked={selectedLeadIds.has(lead.id)}
+                            onChange={e => { const n = new Set(selectedLeadIds); if(e.target.checked) n.add(lead.id); else n.delete(lead.id); setSelectedLeadIds(n); }}
+                            onClick={e => e.stopPropagation()}
+                          />
+                          <div className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer" onClick={() => { trackView({ type: 'lead', id: lead.id, label: `${lead.name} — ${lead.company}`, tab: 'crm' }); setSelectedLead(lead); }}>
                             <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-sm sm:text-lg shrink-0", (lead.score || 0) > 70 ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-400")}>
                               {lead.score || '--'}
                             </div>
@@ -28629,6 +28711,31 @@ function AppContent() {
                         <BarChart2 className="w-4 h-4" />
                         {currentLanguage === 'tr' ? 'Ekstre Görüntüle' : 'View Statement'}
                       </button>
+                      {/* Phase 524: Customer Lifetime Value Badge */}
+                      {(() => {
+                        const clvOrders = orders.filter(o =>
+                          (o.leadId === selectedLead.id || o.customerName === selectedLead.name)
+                          && o.status !== 'Cancelled'
+                        );
+                        const clvTotal = clvOrders.reduce((s, o) => s + (o.totalPrice ?? o.totalAmount ?? 0), 0);
+                        const clvCount = clvOrders.length;
+                        return clvTotal > 0 ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border",
+                              darkMode
+                                ? "bg-violet-900/40 border-violet-700/50 text-violet-300"
+                                : "bg-violet-50 border-violet-200 text-violet-700"
+                            )}
+                            title={currentLanguage === 'tr'
+                              ? `${clvCount} sipariş`
+                              : `${clvCount} order${clvCount !== 1 ? 's' : ''}`}
+                          >
+                            <Tag className="w-3 h-3" />
+                            CLV: ₺{clvTotal.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </span>
+                        ) : null;
+                      })()}
                       {/* Phase 92: Mark as Won / Reopen */}
                       {selectedLead.status !== 'Closed' ? (
                         <button
@@ -29113,6 +29220,96 @@ function AppContent() {
                 }
               />
 
+              {/* ── Phase 522: Order Fulfillment Rate KPI strip ── */}
+              {orders.length >= 3 && (() => {
+                const total522 = orders.filter(o => o.status !== 'Cancelled').length;
+                const delivered522 = orders.filter(o => o.status === 'Delivered').length;
+                const pending522 = orders.filter(o => o.status === 'Pending').length;
+                const inProgress522 = orders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length;
+                const fulfillRate = total522 > 0 ? Math.round((delivered522 / total522) * 100) : 0;
+                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Fulfillment Rate', value: `${fulfillRate}%`, color: fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600', bg: 'bg-white', sub: `${delivered522} / ${total522}` },
+                      { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
+                      { label: currentLanguage === 'tr' ? 'Hazırlanıyor/Kargoda' : 'In Progress', value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
+                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: `₺${(unpaidTotal/1000).toFixed(1)}K`, color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
+                        sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${currentLanguage==='tr'?'sipariş':'orders'}` : null },
+                    ].map((k, i) => (
+                      <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
+                        <p className={cn("text-xl font-black", k.color)}>{k.value}</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{k.label}</p>
+                        {k.sub && <p className="text-[9px] text-gray-400 mt-0.5">{k.sub}</p>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 521: Invoice Aging Alert ── */}
+              {(() => {
+                const unpaid521 = orders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt));
+                if (unpaid521.length === 0) return null;
+                const now521 = Date.now();
+                const buckets521 = [
+                  { label: '0–30', labelTR: '0–30 gün', items: [] as typeof unpaid521 },
+                  { label: '31–60', labelTR: '31–60 gün', items: [] as typeof unpaid521 },
+                  { label: '61–90', labelTR: '61–90 gün', items: [] as typeof unpaid521 },
+                  { label: '90+', labelTR: '90+ gün', items: [] as typeof unpaid521 },
+                ];
+                for (const o of unpaid521) {
+                  const raw = o.createdAt ?? o.syncedAt;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                  const age = Math.floor((now521 - d.getTime()) / 86400000);
+                  if (age <= 30) buckets521[0].items.push(o);
+                  else if (age <= 60) buckets521[1].items.push(o);
+                  else if (age <= 90) buckets521[2].items.push(o);
+                  else buckets521[3].items.push(o);
+                }
+                const hasOld = buckets521[1].items.length + buckets521[2].items.length + buckets521[3].items.length > 0;
+                if (!hasOld && !showInvoiceAging) return (
+                  <button onClick={() => setShowInvoiceAging(true)}
+                    className="text-[10px] font-semibold text-gray-400 hover:text-red-600 transition-colors flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    {unpaid521.length} {currentLanguage === 'tr' ? 'ödenmemiş sipariş — Alacak yaşlandırması görüntüle' : 'unpaid orders — Show aging'}
+                  </button>
+                );
+                return (
+                  <div className={cn("rounded-2xl border overflow-hidden", hasOld ? "border-red-200 bg-red-50/30" : "border-gray-200 bg-white")}>
+                    <button onClick={() => setShowInvoiceAging(!showInvoiceAging)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={cn("w-4 h-4", hasOld ? "text-red-500" : "text-amber-400")} />
+                        <span className="text-xs font-bold text-gray-800">
+                          {currentLanguage === 'tr' ? 'Alacak Yaşlandırma Raporu' : 'Invoice Aging Report'}
+                        </span>
+                        <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", hasOld ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700")}>
+                          {unpaid521.length} {currentLanguage === 'tr' ? 'açık' : 'open'}
+                        </span>
+                      </div>
+                      <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform", showInvoiceAging && "rotate-180")} />
+                    </button>
+                    {showInvoiceAging && (
+                      <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {buckets521.map(b => (
+                          <div key={b.label} className={cn("rounded-xl border p-3 text-center", b.items.length > 0 ? (b.label === '90+' ? 'bg-red-100 border-red-200' : b.label === '61–90' ? 'bg-orange-50 border-orange-100' : b.label === '31–60' ? 'bg-amber-50 border-amber-100' : 'bg-white border-gray-100') : 'bg-white border-gray-100 opacity-50')}>
+                            <p className={cn("text-2xl font-black", b.items.length > 0 && b.label === '90+' ? 'text-red-600' : b.items.length > 0 ? 'text-amber-700' : 'text-gray-300')}>
+                              {b.items.length}
+                            </p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">{currentLanguage === 'tr' ? b.labelTR : b.label}</p>
+                            <p className="text-[9px] text-gray-500 mt-1">
+                              ₺{b.items.reduce((s,o)=>s+(o.totalPrice||0),0).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── Bulk action bar (appears when orders are selected) ── */}
               {selectedOrderIds.size > 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a3a5c] text-white px-5 py-3 rounded-2xl shadow-2xl border border-white/10">
@@ -29376,6 +29573,15 @@ function AppContent() {
                 )}
               </div>
 
+              {/* Phase 523: Active customer filter chip */}
+              {orderCustomerFilter && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-brand/10 border border-brand/20 rounded-xl text-xs font-bold text-brand">
+                  <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                  {orderCustomerFilter}
+                  <button onClick={() => setOrderCustomerFilter(null)} className="ml-1 hover:text-red-600 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              )}
+
               {/* ── Phase 501: Date Range Quick Filter ── */}
               <div className="flex flex-wrap gap-1.5 items-center">
                 <span className={cn("text-[10px] font-semibold uppercase tracking-wider", darkMode ? "text-white/40" : "text-gray-400")}>
@@ -29501,6 +29707,8 @@ function AppContent() {
                         const filtered = orders.filter(o => {
                           if (orderStatusFilter === '__starred__' && !starredOrders.has(o.id)) return false;
                           if (orderStatusFilter !== 'All' && orderStatusFilter !== '__starred__' && o.status !== orderStatusFilter) return false;
+                          // Phase 523: customer filter
+                          if (orderCustomerFilter && o.customerName !== orderCustomerFilter) return false;
                           const q = orderSearch.toLowerCase();
                           if (q && !o.customerName.toLowerCase().includes(q) && !o.shopifyOrderId?.toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
                           // Phase 501: date range filter
@@ -29544,7 +29752,14 @@ function AppContent() {
                             <td className="px-6 py-4 font-medium text-[#1D2226]">{order.shopifyOrderId}</td>
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-2">
-                                <span className="text-gray-600">{order.customerName}</span>
+                                {/* Phase 523: clickable customer name filters to that customer */}
+                                <button
+                                  onClick={e => { e.stopPropagation(); setOrderCustomerFilter(orderCustomerFilter === order.customerName ? null : order.customerName); }}
+                                  className={cn("text-left transition-colors font-medium", orderCustomerFilter === order.customerName ? "text-brand font-bold" : "text-gray-600 hover:text-brand")}
+                                  title={currentLanguage === 'tr' ? `Bu müşterinin siparişlerini filtrele` : `Filter orders by this customer`}
+                                >
+                                  {order.customerName}
+                                </button>
                                 {/* Phase 46: CustomerType badge */}
                                 {order.customerType && (
                                   <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0", order.customerType === 'B2B' ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500")}>
