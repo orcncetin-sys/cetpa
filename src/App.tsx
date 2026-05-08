@@ -1836,6 +1836,22 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                           )}>
                             {item.stockLevel <= item.lowStockThreshold ? currentT.critical : currentT.normal}
                           </span>
+                          {/* Phase 531: stock level progress bar */}
+                          {(() => {
+                            const stock531 = item.stockLevel ?? 0;
+                            const thresh531 = item.lowStockThreshold ?? 5;
+                            const max531 = Math.max(stock531, thresh531 * 3, 1);
+                            const pct531 = Math.min(100, Math.round((stock531 / max531) * 100));
+                            const barColor531 = stock531 === 0 ? 'bg-red-500' : stock531 <= thresh531 ? 'bg-amber-400' : 'bg-emerald-400';
+                            return (
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden max-w-[80px]">
+                                  <div className={cn("h-full rounded-full transition-all", barColor531)} style={{ width: `${pct531}%` }} />
+                                </div>
+                                <span className="text-[9px] text-gray-500 tabular-nums">{stock531}</span>
+                              </div>
+                            );
+                          })()}
                           {/* Phase 66: Last movement date */}
                           {(() => {
                             const lastMov = movements
@@ -18915,13 +18931,17 @@ function AppContent() {
   const [stockCountSearch, setStockCountSearch] = useState(''); // Phase 507
   const [dashClock, setDashClock] = useState(new Date()); // Phase 514
   const [showQuickShipment, setShowQuickShipment] = useState<Order|null>(null); // Phase 512
-  // ── Phase 515-530 ────────────────────────────────────────────────────────────
+  // ── Phase 515-534 ────────────────────────────────────────────────────────────
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set()); // Phase 519
   const [bulkLeadLoading, setBulkLeadLoading] = useState(false); // Phase 519
   const [p515Dismissed, setP515Dismissed] = useState(false); // Phase 515 (follow-up alerts)
   const [orderCustomerFilter, setOrderCustomerFilter] = useState<string|null>(null); // Phase 523
   const [showInvoiceAging, setShowInvoiceAging] = useState(false); // Phase 521
   const [p524CLV, setP524CLV] = useState<string|null>(null); // Phase 524 — leadId for CLV popup
+  const [expandedOrderId, setExpandedOrderId] = useState<string|null>(null); // Phase 525 — inline line items
+  const [p528Dismissed, setP528Dismissed] = useState<Set<string>>(new Set()); // Phase 528 — smart alerts
+  const [showLeadFunnel, setShowLeadFunnel] = useState(false); // Phase 529 — pipeline funnel
+  const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null); // Phase 530 — copy ID feedback
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -21002,6 +21022,85 @@ function AppContent() {
                   </div>
                 }
               />
+
+              {/* ── Phase 528: Smart Alert Strip ── */}
+              {(() => {
+                const now528 = Date.now();
+                const alerts: { id: string; color: string; icon: string; msg: string }[] = [];
+
+                // Orders stuck in Pending > 3 days
+                const stuckPending = orders.filter(o => {
+                  if (o.status !== 'Pending') return false;
+                  const raw = o.createdAt ?? o.syncedAt;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
+                  return (now528 - d.getTime()) > 3 * 86400000;
+                });
+                if (stuckPending.length > 0)
+                  alerts.push({ id: 'stuckPending', color: 'amber', icon: '⏳',
+                    msg: currentLanguage === 'tr'
+                      ? `${stuckPending.length} sipariş 3+ gündür bekliyor`
+                      : `${stuckPending.length} order${stuckPending.length > 1 ? 's' : ''} pending for 3+ days` });
+
+                // Leads with no activity > 7 days
+                const inactiveLeads = leads.filter(l => {
+                  if (l.status === 'Closed') return false;
+                  const raw = l.updatedAt ?? l.createdAt;
+                  if (!raw) return false;
+                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
+                  return (now528 - d.getTime()) > 7 * 86400000;
+                });
+                if (inactiveLeads.length > 0)
+                  alerts.push({ id: 'inactiveLeads', color: 'blue', icon: '👤',
+                    msg: currentLanguage === 'tr'
+                      ? `${inactiveLeads.length} aktif aday 7+ gündür güncellenmedi`
+                      : `${inactiveLeads.length} active lead${inactiveLeads.length > 1 ? 's' : ''} with no activity in 7+ days` });
+
+                // Critical low stock
+                const criticalStock = inventory.filter(i => (i.stockLevel ?? 0) <= 0);
+                if (criticalStock.length > 0)
+                  alerts.push({ id: 'criticalStock', color: 'red', icon: '📦',
+                    msg: currentLanguage === 'tr'
+                      ? `${criticalStock.length} ürün stokta kalmadı (sıfır stok)`
+                      : `${criticalStock.length} product${criticalStock.length > 1 ? 's' : ''} out of stock` });
+
+                // Unpaid delivered orders
+                const unpaidDelivered = orders.filter(o => o.status === 'Delivered' && !o.paid);
+                if (unpaidDelivered.length > 0)
+                  alerts.push({ id: 'unpaidDelivered', color: 'rose', icon: '💳',
+                    msg: currentLanguage === 'tr'
+                      ? `${unpaidDelivered.length} teslim edilmiş sipariş hâlâ ödenmedi`
+                      : `${unpaidDelivered.length} delivered order${unpaidDelivered.length > 1 ? 's' : ''} still unpaid` });
+
+                const visible = alerts.filter(a => !p528Dismissed.has(a.id));
+                if (visible.length === 0) return null;
+
+                const colorMap: Record<string, string> = {
+                  amber: 'bg-amber-50 border-amber-200 text-amber-800',
+                  blue:  'bg-blue-50 border-blue-200 text-blue-800',
+                  red:   'bg-red-50 border-red-200 text-red-800',
+                  rose:  'bg-rose-50 border-rose-200 text-rose-800',
+                };
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {visible.map(alert => (
+                      <div key={alert.id} className={cn("flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium", colorMap[alert.color] ?? colorMap.amber)}>
+                        <span>{alert.icon}</span>
+                        <span>{alert.msg}</span>
+                        <button
+                          onClick={() => setP528Dismissed(prev => new Set([...prev, alert.id]))}
+                          className="ml-1 opacity-50 hover:opacity-100 transition-opacity font-bold text-[10px]"
+                          title={currentLanguage === 'tr' ? 'Kapat' : 'Dismiss'}
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* KPI Cards */}
               {(() => {
@@ -28087,7 +28186,73 @@ function AppContent() {
                   <span className="hidden sm:inline">CSV</span>
                   <input type="file" accept=".csv" className="hidden" onChange={handleCSVUpload} />
                 </label>
+                {/* Phase 529: Funnel view toggle */}
+                <button
+                  onClick={() => setShowLeadFunnel(f => !f)}
+                  className={cn("apple-button-secondary shrink-0", showLeadFunnel && "bg-brand text-white hover:bg-brand/90")}
+                  title={currentLanguage === 'tr' ? 'Pipeline hunisi' : 'Pipeline funnel'}
+                >
+                  <BarChart2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">{currentLanguage === 'tr' ? 'Huni' : 'Funnel'}</span>
+                </button>
               </div>
+
+              {/* ── Phase 529: Pipeline Conversion Funnel ── */}
+              {showLeadFunnel && (() => {
+                const stages = [
+                  { key: 'New',        labelTR: 'Yeni',       color: 'bg-blue-500',    textColor: 'text-blue-700',   bg: 'bg-blue-50'   },
+                  { key: 'Contacted',  labelTR: 'İletişim',   color: 'bg-violet-500',  textColor: 'text-violet-700', bg: 'bg-violet-50' },
+                  { key: 'Qualified',  labelTR: 'Nitelikli',  color: 'bg-amber-500',   textColor: 'text-amber-700',  bg: 'bg-amber-50'  },
+                  { key: 'Closed',     labelTR: 'Kapandı',    color: 'bg-emerald-500', textColor: 'text-emerald-700',bg: 'bg-emerald-50'},
+                ] as const;
+                const counts = stages.map(s => leads.filter(l => l.status === s.key).length);
+                const maxCount = Math.max(...counts, 1);
+                const totalRev = (stageKey: string) =>
+                  orders.filter(o => leads.find(l => l.status === stageKey && (l.name === o.customerName || l.id === o.leadId)))
+                    .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                return (
+                  <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
+                    <h3 className={cn("text-sm font-bold mb-4", darkMode ? "text-white" : "text-gray-800")}>
+                      {currentLanguage === 'tr' ? 'Pipeline Dönüşüm Hunisi' : 'Pipeline Conversion Funnel'}
+                    </h3>
+                    <div className="space-y-3">
+                      {stages.map((s, i) => {
+                        const count = counts[i];
+                        const pct = Math.round((count / maxCount) * 100);
+                        const convPct = i > 0 && counts[i-1] > 0 ? Math.round((count / counts[i-1]) * 100) : null;
+                        const rev = totalRev(s.key);
+                        return (
+                          <div key={s.key} className="flex items-center gap-3">
+                            <div className="w-20 text-xs font-semibold text-right text-gray-500 shrink-0">
+                              {currentLanguage === 'tr' ? s.labelTR : s.key}
+                            </div>
+                            <div className="flex-1 relative h-7 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full transition-all duration-500", s.color)}
+                                style={{ width: `${pct}%` }}
+                              />
+                              <span className="absolute inset-0 flex items-center px-3 text-[10px] font-bold text-white mix-blend-difference">
+                                {count} {currentLanguage === 'tr' ? 'aday' : 'lead'}{count !== 1 ? 's' : ''}
+                                {rev > 0 && ` · ₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                              </span>
+                            </div>
+                            <div className="w-14 text-right shrink-0">
+                              {convPct !== null ? (
+                                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full", s.bg, s.textColor)}>
+                                  {convPct}%
+                                </span>
+                              ) : <span className="text-[10px] text-gray-300">—</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className={cn("text-[10px] mt-3", darkMode ? "text-white/30" : "text-gray-400")}>
+                      {currentLanguage === 'tr' ? '% değerleri bir önceki aşamaya göre dönüşüm oranını gösterir.' : 'Percentages show conversion from the previous stage.'}
+                    </p>
+                  </div>
+                );
+              })()}
 
               {/* ── Phase 91: CRM Win-Rate & Conversion Stats Header ── */}
               {leads.length > 0 && (() => {
@@ -28399,6 +28564,35 @@ function AppContent() {
                               )}>
                                 {currentT[lead.status.toLowerCase()] || lead.status}
                               </span>
+                              {/* Phase 527: Last-activity recency badge */}
+                              {(() => {
+                                const lastAct = lead.activities && lead.activities.length > 0
+                                  ? lead.activities[lead.activities.length - 1]
+                                  : null;
+                                const raw527 = lastAct?.date ?? lead.updatedAt ?? lead.createdAt;
+                                if (!raw527) return null;
+                                const d527 = typeof (raw527 as { toDate?: () => Date }).toDate === 'function'
+                                  ? (raw527 as { toDate: () => Date }).toDate()
+                                  : new Date(raw527 as string | number);
+                                const days527 = Math.floor((Date.now() - d527.getTime()) / 86400000);
+                                if (days527 < 1) return null;
+                                const color527 = days527 <= 3 ? 'bg-emerald-50 text-emerald-600'
+                                  : days527 <= 7 ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-red-50 text-red-500';
+                                const label527 = days527 === 1
+                                  ? (currentLanguage === 'tr' ? '1g' : '1d')
+                                  : days527 <= 30
+                                    ? `${days527}${currentLanguage === 'tr' ? 'g' : 'd'}`
+                                    : `${Math.round(days527/30)}${currentLanguage === 'tr' ? 'a' : 'm'}`;
+                                return (
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${color527}`}
+                                    title={currentLanguage === 'tr' ? `Son aktivite: ${days527} gün önce` : `Last activity: ${days527} day${days527 !== 1 ? 's' : ''} ago`}
+                                  >
+                                    🕐 {label527}
+                                  </span>
+                                );
+                              })()}
                               {/* Phase 36: Follow-up due badge */}
                               {lead.nextFollowUpDate && (() => {
                                 const due = typeof (lead.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
@@ -29763,8 +29957,8 @@ function AppContent() {
                         return sorted.length === 0 ? (
                           <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
                         ) : sorted.map(order => (
+                          <React.Fragment key={order.id}>
                           <tr
-                            key={order.id}
                             className={cn("hover:bg-gray-50 transition-colors cursor-pointer", selectedOrderIds.has(order.id) && "bg-brand/5")}
                             onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `#${order.shopifyOrderId || order.id.slice(-6)} — ${order.customerName}`, tab: 'orders' }); }}
                           >
@@ -29781,7 +29975,45 @@ function AppContent() {
                                 }}
                               />
                             </td>
-                            <td className="px-6 py-4 font-medium text-[#1D2226]">{order.shopifyOrderId}</td>
+                            {/* Phase 525: order ID + expand toggle */}
+                            <td className="px-6 py-4 font-medium text-[#1D2226]" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1.5">
+                                {/* Phase 530: copy order ID */}
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await navigator.clipboard.writeText(order.shopifyOrderId || order.id).catch(() => {});
+                                    setCopiedOrderId(order.id);
+                                    setTimeout(() => setCopiedOrderId(null), 1500);
+                                  }}
+                                  className="text-gray-400 hover:text-brand transition-colors"
+                                  title={currentLanguage === 'tr' ? 'Sipariş ID\'yi kopyala' : 'Copy order ID'}
+                                >
+                                  {copiedOrderId === order.id
+                                    ? <Check className="w-3 h-3 text-emerald-500" />
+                                    : <Copy className="w-3 h-3" />}
+                                </button>
+                                <span className="cursor-pointer" onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `#${order.shopifyOrderId || order.id.slice(-6)} — ${order.customerName}`, tab: 'orders' }); }}>
+                                  {order.shopifyOrderId}
+                                </span>
+                                {order.lineItems && order.lineItems.length > 0 && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); setExpandedOrderId(expandedOrderId === order.id ? null : order.id); }}
+                                    className={cn("ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-colors flex items-center gap-0.5",
+                                      expandedOrderId === order.id
+                                        ? "bg-brand text-white"
+                                        : "bg-gray-100 text-gray-500 hover:bg-brand/10 hover:text-brand"
+                                    )}
+                                    title={expandedOrderId === order.id
+                                      ? (currentLanguage === 'tr' ? 'Ürünleri gizle' : 'Hide items')
+                                      : (currentLanguage === 'tr' ? 'Ürünleri göster' : 'Show items')}
+                                  >
+                                    {order.lineItems.length} {currentLanguage === 'tr' ? 'ürün' : 'item' + (order.lineItems.length !== 1 ? 's' : '')}
+                                    <ChevronDown className={cn("w-2.5 h-2.5 transition-transform", expandedOrderId === order.id && "rotate-180")} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-2">
                                 {/* Phase 523: clickable customer name filters to that customer */}
@@ -29943,6 +30175,44 @@ function AppContent() {
                               </div>
                             </td>
                           </tr>
+                          {/* ── Phase 525: Inline line items expand row ── */}
+                          {expandedOrderId === order.id && order.lineItems && order.lineItems.length > 0 && (
+                            <tr className="bg-gray-50/80">
+                              <td colSpan={7} className="px-8 py-3">
+                                <div className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="bg-gray-50 border-b border-gray-100">
+                                        <th className="text-left px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">SKU</th>
+                                        <th className="text-left px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Adet' : 'Qty'}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price'}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {order.lineItems.map((li, idx) => (
+                                        <tr key={idx} className="border-b border-gray-50 last:border-0">
+                                          <td className="px-4 py-2 text-gray-400 font-mono">{li.sku}</td>
+                                          <td className="px-4 py-2 text-gray-700 font-medium">{li.title ?? li.name}</td>
+                                          <td className="px-4 py-2 text-right text-gray-600">{li.quantity}</td>
+                                          <td className="px-4 py-2 text-right text-gray-600">₺{(li.price ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                                          <td className="px-4 py-2 text-right font-bold text-gray-800">₺{((li.price ?? 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr className="bg-gray-50">
+                                        <td colSpan={4} className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Genel Toplam' : 'Grand Total'}</td>
+                                        <td className="px-4 py-2 text-right font-black text-brand">₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         ));
                       })()}
                     </tbody>
