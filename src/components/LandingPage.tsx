@@ -624,23 +624,23 @@ export default function LandingPage({
   const staticPricingPlans = [
     {
       name: 'Startup',
-      monthlyTR: 1490, yearlyTR: 1192,
-      monthlyEN: 49,   yearlyEN: 39,
+      monthlyTR: 2990, yearlyTR: 2390,
+      monthlyEN: 79,   yearlyEN: 63,
       desc: isTR ? 'Büyüyen işletmeler için' : 'For growing businesses',
       features: isTR
-        ? ['CRM & Lead Yönetimi', 'Stok & Sipariş Takibi', 'Shopify Entegrasyonu', 'e-Fatura', '3 Kullanıcı', 'Mesai İçi Destek']
-        : ['CRM & Lead Management', 'Stock & Order Tracking', 'Shopify Integration', 'e-Invoice', '3 Users', 'Business Hours Support'],
+        ? ['CRM & Lead Yönetimi', 'Stok & Sipariş Takibi', 'Shopify Entegrasyonu', 'e-Fatura · e-Arşiv · e-İrsaliye', '3 Kullanıcı', 'Mesai İçi Destek']
+        : ['CRM & Lead Management', 'Stock & Order Tracking', 'Shopify Integration', 'e-Invoice · e-Archive · e-Waybill', '3 Users', 'Business Hours Support'],
       highlight: false, cta: isTR ? 'Hemen Başla' : 'Start Now',
     },
     {
       name: 'Enterprise',
-      monthlyTR: 4990, yearlyTR: 3992,
-      monthlyEN: 149,  yearlyEN: 119,
+      monthlyTR: 7490, yearlyTR: 5990,
+      monthlyEN: 199,  yearlyEN: 159,
       desc: isTR ? 'Ölçekli operasyonlar için' : 'For scaled operations',
       badge: isTR ? '🔥 En Popüler' : '🔥 Most Popular',
       features: isTR
-        ? ['Tüm Modüller Dahil', 'Mikro & Luca Sync', 'Üretim Planlama', 'İK & Bordro', 'Sınırsız Kullanıcı', '7/24 Öncelikli Destek']
-        : ['All Modules Included', 'Mikro & Luca Sync', 'Production Planning', 'HR & Payroll', 'Unlimited Users', '24/7 Priority Support'],
+        ? ['Tüm Modüller Dahil', 'Mikro & Luca Sync', 'Üretim & BOM Planlama', 'İK & Bordro', 'Sınırsız Kullanıcı', '7/24 Öncelikli Destek']
+        : ['All Modules Included', 'Mikro & Luca Sync', 'Production & BOM Planning', 'HR & Payroll', 'Unlimited Users', '24/7 Priority Support'],
       highlight: true, cta: isTR ? 'Bize Ulaşın' : 'Contact Us',
     },
     {
