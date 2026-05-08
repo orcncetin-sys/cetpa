@@ -1334,46 +1334,83 @@ export default function LandingPage({
                 <span className={cn('text-xs', d('text-white/30', 'text-black/30'))}>99.9% uptime</span>
               </div>
             </div>
+            {/* ── Product column ── */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Ürün' : 'Product'}</p>
               <div className="space-y-3">
-                {[isTR ? 'Özellikler' : 'Features', isTR ? 'Fiyatlar' : 'Pricing', 'Changelog', 'API'].map((l, i) => (
-                  <button key={i} onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
-                    className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>{l}</button>
-                ))}
+                <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  {isTR ? 'Özellikler' : 'Features'}
+                </button>
+                <button onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  {isTR ? 'Fiyatlar' : 'Pricing'}
+                </button>
+                <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  Changelog
+                </button>
+                <a href="mailto:info@cetpa.io?subject=API%20Dokümantasyonu"
+                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  API
+                </a>
               </div>
             </div>
+
+            {/* ── Company column ── */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Şirket' : 'Company'}</p>
               <div className="space-y-3">
-                {[isTR ? 'Hakkımızda' : 'About', isTR ? 'Kariyer' : 'Careers', 'Blog', isTR ? 'Basın' : 'Press'].map((l, i) => (
-                  <span key={i} className={cn('block text-xs', d('text-white/35', 'text-black/35'))}>{l}</span>
-                ))}
+                <button onClick={() => document.getElementById('solutions')?.scrollIntoView({ behavior: 'smooth' })}
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  {isTR ? 'Hakkımızda' : 'About'}
+                </button>
+                <a href="mailto:info@cetpa.io?subject=Kariyer"
+                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  {isTR ? 'Kariyer' : 'Careers'}
+                </a>
+                <a href="mailto:info@cetpa.io?subject=Blog"
+                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  Blog
+                </a>
+                <a href="mailto:info@cetpa.io?subject=Basin"
+                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  {isTR ? 'Basın' : 'Press'}
+                </a>
               </div>
             </div>
+
+            {/* ── Legal column ── */}
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Yasal' : 'Legal'}</p>
               <div className="space-y-3">
                 <button onClick={() => { setActivePage('privacy'); window.scrollTo(0, 0); }}
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}
                 </button>
                 <button onClick={() => { setActivePage('terms'); window.scrollTo(0, 0); }}
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Kullanım Koşulları' : 'Terms of Service'}
                 </button>
-                <a href="mailto:info@cetpa.io" className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                <a href="mailto:info@cetpa.io"
+                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   info@cetpa.io
                 </a>
               </div>
             </div>
           </div>
+
+          {/* ── Bottom bar ── */}
           <div className={cn('pt-8 border-t flex flex-col sm:flex-row items-center justify-between gap-4', d('border-white/6', 'border-black/6'))}>
             <p className={cn('text-xs', d('text-white/20', 'text-black/20'))}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
-            <div className="flex items-center gap-2">
-              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>{isTR ? 'ile yapıldı' : 'Made with'}</span>
-              <span className="text-brand">❤</span>
-              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>{isTR ? 'İstanbul\'da' : 'in Istanbul'}</span>
+            <div className="flex items-center gap-1.5">
+              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>
+                {isTR ? 'CETPA tarafından' : 'Made by CETPA with'}
+              </span>
+              <span className="text-brand text-sm leading-none">❤</span>
+              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>
+                {isTR ? "Antalya'da yapıldı" : "in Antalya"}
+              </span>
             </div>
           </div>
         </div>
