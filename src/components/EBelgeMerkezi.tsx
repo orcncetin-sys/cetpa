@@ -223,31 +223,6 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
         )}
       </AnimatePresence>
 
-      {/* Header */}
-      <div className="apple-card p-5 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-brand/10 flex items-center justify-center">
-            <FileText size={20} className="text-brand" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">E-Belge Merkezi</h2>
-            <p className="text-xs text-gray-500">GIB elektronik belge yönetimi</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* GIB bağlantı durumu */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <Wifi size={13} className="text-green-600" />
-            <span className="text-xs font-medium text-green-700">GIB Bağlı</span>
-          </div>
-          <button onClick={openModal} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
-            <Plus size={15} />
-            Yeni Belge
-          </button>
-        </div>
-      </div>
-
       {/* KPI Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
@@ -268,18 +243,32 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
         ))}
       </div>
 
-      {/* Sub-tabs + Search */}
-      <div className="overflow-x-auto scrollbar-none">
-        <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
-          {SUB_TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${activeTab === tab.key ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {/* Sub-tabs + Actions */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="overflow-x-auto scrollbar-none">
+          <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+            {SUB_TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${activeTab === tab.key ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* GIB status + add button */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <Wifi size={12} className="text-green-600" />
+            <span className="text-xs font-medium text-green-700">GIB Bağlı*</span>
+          </div>
+          <button onClick={openModal} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
+            <Plus size={15} />
+            Yeni Belge
+          </button>
         </div>
       </div>
 

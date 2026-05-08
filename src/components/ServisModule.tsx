@@ -224,17 +224,6 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center">
-          <HeadphonesIcon className="w-5 h-5 text-blue-500" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Servis Yönetimi</h1>
-          <p className="text-xs text-gray-400">Satış Sonrası Destek & SLA Takibi</p>
-        </div>
-      </div>
-
       {/* Tabs */}
       <div className="overflow-x-auto scrollbar-none">
         <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
@@ -257,7 +246,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
               { label: 'Toplam Çözülen', value: cozulenler.length, color: 'text-green-600' },
               { label: 'Müşteri Memnuniyeti', value: `${ortMemnuniyet}%`, color: 'text-purple-600' },
             ].map(k => (
-              <div key={k.label} className="apple-card text-center">
+              <div key={k.label} className="apple-card p-4 text-center">
                 <div className={`text-2xl font-bold ${k.color}`}>{k.value}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{k.label}</div>
               </div>
@@ -333,7 +322,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
       {/* SLA TAKİBİ */}
       {activeTab === 'SLA Takibi' && (
         <div className="space-y-4">
-          <div className="apple-card">
+          <div className="apple-card p-5">
             <h2 className="font-semibold text-gray-800 mb-4">Kategoriye Göre SLA Uyum</h2>
             <div className="space-y-3">
               {slaStats.map(s => (
@@ -351,7 +340,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
             </div>
           </div>
 
-          <div className="apple-card">
+          <div className="apple-card p-5">
             <h2 className="font-semibold text-gray-800 mb-4">Teknisyen Bazlı Yük</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

@@ -269,9 +269,10 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
       {/* P&L Tab */}
       {activeTab === 'pl' && (
         <div className="space-y-4">
-          <div className="apple-card overflow-x-auto">
+          <div className="apple-card p-5">
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Kâr-Zarar Karşılaştırması</h3>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: '560px' }}>
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500">Şube</th>
@@ -306,10 +307,11 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* CSS Bar Chart */}
-          <div className="apple-card">
+          <div className="apple-card p-5">
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Gelir Karşılaştırması (Bu Ay)</h3>
             <div className="space-y-3">
               {mockPL.map(row => {
