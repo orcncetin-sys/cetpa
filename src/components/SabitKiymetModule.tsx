@@ -1,352 +1,279 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Package, Cpu, Monitor, Sofa, Building2, Car, Wrench, HelpCircle,
-  Plus, Search, Download, X, Edit2, Trash2, FileText, ChevronUp,
-  ChevronDown, User, MapPin, Calendar, TrendingDown, BarChart3,
-  CheckCircle, AlertTriangle, Clock, Archive, XCircle
+  Package, Monitor, Building2, Car, Wrench, HelpCircle,
+  Plus, Search, X, Edit2, Trash2, FileText,
+  ChevronUp, ChevronDown, User, MapPin, Calendar,
+  TrendingDown, BarChart3, CheckCircle, AlertTriangle,
+  Archive, ShieldCheck, Sofa, Calculator, RefreshCw,
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
-  query, orderBy, serverTimestamp
+  collection, addDoc, updateDoc, deleteDoc, doc,
+  onSnapshot, query, orderBy, serverTimestamp,
 } from 'firebase/firestore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type Kategori = 'Taşıt' | 'Makine' | 'Bilgisayar' | 'Mobilya' | 'Bina' | 'Diğer';
+type AmortYontemi = 'Doğrusal' | 'Azalan Bakiyeler';
+type ParaBirimi = 'TRY' | 'USD' | 'EUR';
+type VarlikDurum = 'Aktif' | 'Bakımda' | 'Elden Çıkarıldı' | 'Hurdaya Ayrıldı';
+type BakimTuru = 'Periyodik' | 'Arıza' | 'Genel';
+type SigortaDurum = 'Aktif' | 'Süresi Dolmuş' | 'Yenileniyor';
+
 interface SabitKiymet {
   id: string;
-  barkod: string;
+  demirbasNo: string;
   ad: string;
-  kategori: 'Araç' | 'Makine' | 'Ekipman' | 'Bilgisayar' | 'Mobilya' | 'Bina' | 'Diğer';
-  marka: string;
-  model: string;
-  seriNo: string;
+  kategori: Kategori;
   alisTarihi: string;
-  alisFiyati: number;
-  amortismanYili: number;
-  amortismanYontemi: 'Düz Hat' | 'Azalan Bakiye';
-  konum: string;
-  sorumlu: string;
-  durum: 'Aktif' | 'Bakımda' | 'Hurda' | 'Satıldı' | 'Kayıp';
-  notlar: string;
+  alisBedeli: number;
+  paraBirimi: ParaBirimi;
+  amortYontemi: AmortYontemi;
+  faydaliOmur: number; // yıl
+  birikmisSalinma: number; // manuel override, 0 = hesaplansın
+  departman: string;
+  durum: VarlikDurum;
 }
 
-interface SabitKiymetModuleProps {
-  currentLanguage: 'tr' | 'en';
-  isAuthenticated: boolean;
-  kpiCurrency?: 'TRY' | 'USD' | 'EUR';
-  setKpiCurrency?: (c: 'TRY' | 'USD' | 'EUR') => void;
-  exchangeRates?: { USD?: number; EUR?: number };
+interface AmortismanKayit {
+  id: string;
+  varlikId: string;
+  varlikAd: string;
+  donem: string; // "2025-Q1" vb.
+  yillikAmort: number;
+  aylikAmort: number;
+  birikmisSalinma: number;
+  netDegerDefter: number;
+  hesaplamaTarihi: string;
+}
+
+interface BakimKayit {
+  id: string;
+  varlikId: string;
+  varlikAd: string;
+  bakimTarihi: string;
+  bakimTuru: BakimTuru;
+  yapilanIslem: string;
+  maliyet: number;
+  sonrakiBakimTarihi: string;
+}
+
+interface SigortaKayit {
+  id: string;
+  varlikId: string;
+  varlikAd: string;
+  policeNo: string;
+  sigortaSirketi: string;
+  baslangicTarihi: string;
+  bitisTarihi: string;
+  primTutari: number;
+  teminatTutari: number;
+  durum: SigortaDurum;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 
-const formatCurrency = (val: number) =>
+const formatTRY = (val: number) =>
   new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'TRY',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
   }).format(val);
 
-const today = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+const formatDateTR = (str: string): string => {
+  if (!str) return '-';
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return str;
+  return d.toLocaleDateString('tr-TR');
 };
 
-function calcYillikAmortisman(item: SabitKiymet): number {
-  if (item.amortismanYili <= 0) return 0;
-  return item.alisFiyati / item.amortismanYili;
+function calcYillikAmort(item: SabitKiymet): number {
+  if (item.faydaliOmur <= 0) return 0;
+  if (item.amortYontemi === 'Doğrusal') {
+    return item.alisBedeli / item.faydaliOmur;
+  }
+  // Azalan Bakiyeler: oran = 2 / ömür, yıllık = (alisBedeli - birikmiş) * oran
+  const oran = 2 / item.faydaliOmur;
+  const kalanDeger = Math.max(0, item.alisBedeli - calcBirikmisSalinma(item));
+  return kalanDeger * oran;
 }
 
 function calcBirikmisSalinma(item: SabitKiymet): number {
   if (!item.alisTarihi) return 0;
   const alis = new Date(item.alisTarihi);
-  const now = today();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
   if (isNaN(alis.getTime())) return 0;
   const yilGecen = (now.getTime() - alis.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
   if (yilGecen <= 0) return 0;
-  const yil = Math.min(yilGecen, item.amortismanYili);
-  if (item.amortismanYontemi === 'Düz Hat') {
-    return (item.alisFiyati / item.amortismanYili) * yil;
+  const yilCapped = Math.min(yilGecen, item.faydaliOmur);
+  if (item.amortYontemi === 'Doğrusal') {
+    return (item.alisBedeli / item.faydaliOmur) * yilCapped;
   }
-  // Azalan Bakiye: double-declining balance approximation
-  const oran = 2 / item.amortismanYili;
-  let kalanDeger = item.alisFiyati;
+  // Azalan Bakiyeler DDB
+  const oran = 2 / item.faydaliOmur;
+  let kalan = item.alisBedeli;
   let toplam = 0;
-  const tamYil = Math.floor(yil);
+  const tamYil = Math.floor(yilCapped);
   for (let i = 0; i < tamYil; i++) {
-    const amortisman = kalanDeger * oran;
-    toplam += amortisman;
-    kalanDeger -= amortisman;
+    const a = kalan * oran;
+    toplam += a;
+    kalan -= a;
   }
-  const kesirYil = yil - tamYil;
-  if (kesirYil > 0) {
-    toplam += kalanDeger * oran * kesirYil;
-  }
-  return Math.min(toplam, item.alisFiyati);
+  const kesir = yilCapped - tamYil;
+  if (kesir > 0) toplam += kalan * oran * kesir;
+  return Math.min(toplam, item.alisBedeli);
 }
 
-function calcNetDegerDefter(item: SabitKiymet): number {
-  return Math.max(0, item.alisFiyati - calcBirikmisSalinma(item));
+function calcNetDeger(item: SabitKiymet): number {
+  return Math.max(0, item.alisBedeli - calcBirikmisSalinma(item));
 }
 
-function calcEkonomikOmurSonu(item: SabitKiymet): string {
-  if (!item.alisTarihi) return '-';
-  const alis = new Date(item.alisTarihi);
-  if (isNaN(alis.getTime())) return '-';
-  const omur = new Date(alis);
-  omur.setFullYear(omur.getFullYear() + item.amortismanYili);
-  return omur.toISOString().split('T')[0];
+function calcAylikAmort(item: SabitKiymet): number {
+  return calcYillikAmort(item) / 12;
 }
 
-function formatDateTR(str: string): string {
-  if (!str) return '-';
-  const d = new Date(str);
-  if (isNaN(d.getTime())) return str;
-  return d.toLocaleDateString('tr-TR');
-}
-
-function generateBarkod(existing: SabitKiymet[]): string {
-  const year = new Date().getFullYear();
-  const prefix = `SK-${year}-`;
+function generateDemirbasNo(existing: SabitKiymet[]): string {
   const nums = existing
-    .filter(e => e.barkod?.startsWith(prefix))
-    .map(e => parseInt(e.barkod.replace(prefix, ''), 10))
+    .filter(e => e.demirbasNo?.startsWith('DMB-'))
+    .map(e => parseInt(e.demirbasNo.replace('DMB-', ''), 10))
     .filter(n => !isNaN(n));
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-  return `${prefix}${String(next).padStart(3, '0')}`;
+  return `DMB-${String(next).padStart(4, '0')}`;
 }
 
-// ─── Translations ─────────────────────────────────────────────────────────────
+function daysUntil(dateStr: string): number {
+  const d = new Date(dateStr);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
 
-const T = {
-  tr: {
-    title: 'Sabit Kıymet / Demirbaş Yönetimi',
-    subtitle: 'Varlık takibi, amortisman ve zimmet yönetimi',
-    tabVarliklar: 'Varlıklar',
-    tabAmortisman: 'Amortisman Takvimi',
-    toplamDemirbas: 'Toplam Demirbaş',
-    toplamKayitliDeger: 'Toplam Kayıtlı Değer',
-    toplamDefterDeger: 'Toplam Defter Değeri',
-    birikmisSalinma: 'Birikmiş Amortisman',
-    yeniEkle: 'Yeni Demirbaş',
-    ara: 'Ad, barkod veya sorumlu ara…',
-    tumKategoriler: 'Tüm Kategoriler',
-    tumDurumlar: 'Tüm Durumlar',
-    barkod: 'Barkod',
-    ad: 'Ad',
-    kategori: 'Kategori',
-    alisTarihi: 'Alış Tarihi',
-    alisFiyati: 'Alış Fiyatı',
-    yillikAmort: 'Yıllık Amortisman',
-    birikmiS: 'Birikmiş',
-    netDefter: 'Net Defter Değeri',
-    sorumlu: 'Sorumlu',
-    durum: 'Durum',
-    islemler: 'İşlemler',
-    zimmetVer: 'Zimmet Ver',
-    kaydet: 'Kaydet',
-    iptal: 'İptal',
-    sil: 'Sil',
-    duzenle: 'Düzenle',
-    exportZimmet: 'Zimmet Listesi (CSV)',
-    exportAmort: 'Amortisman Raporu (CSV)',
-    marka: 'Marka',
-    model: 'Model',
-    seriNo: 'Seri No',
-    amortismanYili: 'Amortisman Yılı',
-    amortismanYontemi: 'Amortisman Yöntemi',
-    konum: 'Konum',
-    notlar: 'Notlar',
-    yeniDemirbas: 'Yeni Demirbaş',
-    duzenleBaslik: 'Demirbaşı Düzenle',
-    silOnayi: 'Bu demirbaşı silmek istediğinize emin misiniz?',
-    evet: 'Evet, Sil',
-    zimmetBaslik: 'Zimmet Devret',
-    zimmetYeniSorumlu: 'Yeni Sorumlu',
-    zimmetTarih: 'Devir Tarihi',
-    zimmetNot: 'Not',
-    zimmetKaydet: 'Zimmeti Kaydet',
-    amortTabVarlik: 'Varlık',
-    amortTabYil1: 'Yıl 1',
-    amortTabYil2: 'Yıl 2',
-    amortTabYil3: 'Yıl 3',
-    amortTabYil4: 'Yıl 4',
-    amortTabYil5: 'Yıl 5',
-    amortTabToplam: 'Toplam (5 Yıl)',
-    ekonomikOmur: 'Ekonomik Ömür Sonu',
-    aktif: 'Aktif',
-    bakimda: 'Bakımda',
-    hurda: 'Hurda',
-    satildi: 'Satıldı',
-    kayip: 'Kayıp',
-    duzHat: 'Düz Hat',
-    azalanBakiye: 'Azalan Bakiye',
-    arac: 'Araç',
-    makine: 'Makine',
-    ekipman: 'Ekipman',
-    bilgisayar: 'Bilgisayar',
-    mobilya: 'Mobilya',
-    bina: 'Bina',
-    diger: 'Diğer',
-    basarili: 'İşlem başarılı.',
-    hata: 'Bir hata oluştu.',
-    zorunlu: 'Zorunlu alan',
-    adet: 'adet',
-    noData: 'Henüz demirbaş kaydı yok.',
-    amortNoData: 'Aktif demirbaş kaydı bulunamadı.',
-  },
-  en: {
-    title: 'Fixed Asset Management',
-    subtitle: 'Asset tracking, depreciation and assignment management',
-    tabVarliklar: 'Assets',
-    tabAmortisman: 'Depreciation Schedule',
-    toplamDemirbas: 'Total Assets',
-    toplamKayitliDeger: 'Total Recorded Value',
-    toplamDefterDeger: 'Total Book Value',
-    birikmisSalinma: 'Accumulated Depreciation',
-    yeniEkle: 'New Asset',
-    ara: 'Search by name, barcode or assignee…',
-    tumKategoriler: 'All Categories',
-    tumDurumlar: 'All Statuses',
-    barkod: 'Barcode',
-    ad: 'Name',
-    kategori: 'Category',
-    alisTarihi: 'Purchase Date',
-    alisFiyati: 'Purchase Price',
-    yillikAmort: 'Annual Depreciation',
-    birikmiS: 'Accumulated',
-    netDefter: 'Net Book Value',
-    sorumlu: 'Assignee',
-    durum: 'Status',
-    islemler: 'Actions',
-    zimmetVer: 'Reassign',
-    kaydet: 'Save',
-    iptal: 'Cancel',
-    sil: 'Delete',
-    duzenle: 'Edit',
-    exportZimmet: 'Assignment List (CSV)',
-    exportAmort: 'Depreciation Report (CSV)',
-    marka: 'Brand',
-    model: 'Model',
-    seriNo: 'Serial No',
-    amortismanYili: 'Useful Life (Years)',
-    amortismanYontemi: 'Depreciation Method',
-    konum: 'Location',
-    notlar: 'Notes',
-    yeniDemirbas: 'New Asset',
-    duzenleBaslik: 'Edit Asset',
-    silOnayi: 'Are you sure you want to delete this asset?',
-    evet: 'Yes, Delete',
-    zimmetBaslik: 'Transfer Assignment',
-    zimmetYeniSorumlu: 'New Assignee',
-    zimmetTarih: 'Transfer Date',
-    zimmetNot: 'Note',
-    zimmetKaydet: 'Save Assignment',
-    amortTabVarlik: 'Asset',
-    amortTabYil1: 'Year 1',
-    amortTabYil2: 'Year 2',
-    amortTabYil3: 'Year 3',
-    amortTabYil4: 'Year 4',
-    amortTabYil5: 'Year 5',
-    amortTabToplam: 'Total (5 Years)',
-    ekonomikOmur: 'Economic Life End',
-    aktif: 'Active',
-    bakimda: 'In Maintenance',
-    hurda: 'Scrap',
-    satildi: 'Sold',
-    kayip: 'Lost',
-    duzHat: 'Straight Line',
-    azalanBakiye: 'Declining Balance',
-    arac: 'Vehicle',
-    makine: 'Machine',
-    ekipman: 'Equipment',
-    bilgisayar: 'Computer',
-    mobilya: 'Furniture',
-    bina: 'Building',
-    diger: 'Other',
-    basarili: 'Operation successful.',
-    hata: 'An error occurred.',
-    zorunlu: 'Required field',
-    adet: 'items',
-    noData: 'No assets recorded yet.',
-    amortNoData: 'No active assets found.',
-  },
-} as const;
+// ─── Config maps ──────────────────────────────────────────────────────────────
 
-// ─── Category config ──────────────────────────────────────────────────────────
-
-const KATEGORI_CONFIG: Record<
-  SabitKiymet['kategori'],
-  { icon: React.ElementType; bg: string; text: string; border: string }
-> = {
-  Araç: { icon: Car, bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
-  Makine: { icon: Wrench, bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
-  Ekipman: { icon: Package, bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
-  Bilgisayar: { icon: Monitor, bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200' },
-  Mobilya: { icon: Sofa, bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' },
-  Bina: { icon: Building2, bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' },
-  Diğer: { icon: HelpCircle, bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' },
+const KATEGORI_CFG: Record<Kategori, { icon: React.ElementType; bg: string; text: string; border: string }> = {
+  Taşıt:      { icon: Car,        bg: 'bg-blue-100',   text: 'text-blue-700',   border: 'border-blue-200'   },
+  Makine:     { icon: Wrench,     bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
+  Bilgisayar: { icon: Monitor,    bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200' },
+  Mobilya:    { icon: Sofa,       bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' },
+  Bina:       { icon: Building2,  bg: 'bg-gray-100',   text: 'text-gray-700',   border: 'border-gray-200'   },
+  Diğer:      { icon: HelpCircle, bg: 'bg-slate-100',  text: 'text-slate-600',  border: 'border-slate-200'  },
 };
 
-const DURUM_CONFIG: Record<
-  SabitKiymet['durum'],
-  { icon: React.ElementType; bg: string; text: string }
-> = {
-  Aktif: { icon: CheckCircle, bg: 'bg-green-100', text: 'text-green-700' },
-  Bakımda: { icon: AlertTriangle, bg: 'bg-yellow-100', text: 'text-yellow-700' },
-  Hurda: { icon: Archive, bg: 'bg-red-100', text: 'text-red-700' },
-  Satıldı: { icon: TrendingDown, bg: 'bg-gray-100', text: 'text-gray-600' },
-  Kayıp: { icon: XCircle, bg: 'bg-rose-100', text: 'text-rose-700' },
+const DURUM_CFG: Record<VarlikDurum, { bg: string; text: string; dot: string }> = {
+  'Aktif':           { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500'  },
+  'Bakımda':         { bg: 'bg-amber-100', text: 'text-amber-700', dot: 'bg-amber-500'  },
+  'Elden Çıkarıldı': { bg: 'bg-red-100',   text: 'text-red-700',   dot: 'bg-red-500'    },
+  'Hurdaya Ayrıldı': { bg: 'bg-red-100',   text: 'text-red-700',   dot: 'bg-red-500'    },
 };
+
+// ─── Bilingual labels ─────────────────────────────────────────────────────────
+
+const LABELS = {
+  title:                { tr: 'Sabit Kıymetler / Demirbaşlar',      en: 'Fixed Assets' },
+  subtitle:             { tr: 'Varlık kaydı, amortisman ve sigorta yönetimi', en: 'Asset register, depreciation & insurance management' },
+  tabVarliklar:         { tr: 'Varlıklar',          en: 'Assets'             },
+  tabAmortisman:        { tr: 'Amortisman',          en: 'Depreciation'       },
+  tabBakim:             { tr: 'Bakım Geçmişi',       en: 'Maintenance History'},
+  tabSigorta:           { tr: 'Sigorta & Belgeler',  en: 'Insurance & Docs'   },
+  toplamVarlik:         { tr: 'Toplam Varlık',       en: 'Total Assets'       },
+  toplamDegerLabel:     { tr: 'Toplam Defter Değeri',en: 'Total Book Value'   },
+  toplamAmort:          { tr: 'Birikmiş Amortisman', en: 'Accumulated Depr.'  },
+  yeniVarlik:           { tr: 'Yeni Varlık',         en: 'New Asset'          },
+  ara:                  { tr: 'Varlık veya departman ara…', en: 'Search asset or dept…' },
+  tumKategoriler:       { tr: 'Tüm Kategoriler',     en: 'All Categories'     },
+  tumDurumlar:          { tr: 'Tüm Durumlar',        en: 'All Statuses'       },
+  demirbasNo:           { tr: 'Demirbaş No',          en: 'Asset No'           },
+  ad:                   { tr: 'Varlık Adı',           en: 'Asset Name'         },
+  kategori:             { tr: 'Kategori',             en: 'Category'           },
+  alisTarihi:           { tr: 'Alış Tarihi',          en: 'Purchase Date'      },
+  alisBedeli:           { tr: 'Alış Bedeli',          en: 'Purchase Value'     },
+  paraBirimi:           { tr: 'Para Birimi',          en: 'Currency'           },
+  amortYontemi:         { tr: 'Amortisman Yöntemi',  en: 'Depreciation Method'},
+  faydaliOmur:          { tr: 'Faydalı Ömür (Yıl)',  en: 'Useful Life (Yrs)'  },
+  birikmisSalinma:      { tr: 'Birikmiş Amortisman', en: 'Accum. Depreciation' },
+  netDegerDefter:       { tr: 'Net Defter Değeri',    en: 'Net Book Value'     },
+  departman:            { tr: 'Departman / Konum',    en: 'Dept / Location'    },
+  durum:                { tr: 'Durum',                en: 'Status'             },
+  islemler:             { tr: 'İşlemler',             en: 'Actions'            },
+  yillikAmort:          { tr: 'Yıllık Amortisman',   en: 'Annual Depr.'       },
+  aylikAmort:           { tr: 'Aylık Amortisman',     en: 'Monthly Depr.'      },
+  donemHesapla:         { tr: 'Dönem Amortismanı Hesapla', en: 'Calculate Period Depreciation' },
+  hesaplandı:           { tr: 'Amortisman kayıtları güncellendi.', en: 'Depreciation entries updated.' },
+  varlikAd:             { tr: 'Varlık Adı',           en: 'Asset Name'         },
+  bakimTarihi:          { tr: 'Bakım Tarihi',         en: 'Maint. Date'        },
+  bakimTuru:            { tr: 'Bakım Türü',           en: 'Maint. Type'        },
+  yapilanIslem:         { tr: 'Yapılan İşlem',        en: 'Work Done'          },
+  maliyet:              { tr: 'Maliyet',              en: 'Cost'               },
+  sonrakiBakim:         { tr: 'Sonraki Bakım',        en: 'Next Service'       },
+  yeniBakim:            { tr: 'Yeni Bakım Kaydı',     en: 'New Maintenance'    },
+  policeNo:             { tr: 'Poliçe No',             en: 'Policy No'          },
+  sigortaSirketi:       { tr: 'Sigorta Şirketi',      en: 'Insurer'            },
+  baslangicTarihi:      { tr: 'Başlangıç Tarihi',     en: 'Start Date'         },
+  bitisTarihi:          { tr: 'Bitiş Tarihi',         en: 'End Date'           },
+  primTutari:           { tr: 'Prim Tutarı',          en: 'Premium'            },
+  teminatTutari:        { tr: 'Teminat Tutarı',       en: 'Coverage'           },
+  yeniSigorta:          { tr: 'Yeni Sigorta Kaydı',   en: 'New Insurance'      },
+  sigortaDurum:         { tr: 'Sigorta Durumu',       en: 'Policy Status'      },
+  yakindaVadesi:        { tr: '30 gün içinde sona eriyor', en: 'Expires within 30 days' },
+  kaydet:               { tr: 'Kaydet',               en: 'Save'               },
+  iptal:                { tr: 'İptal',                en: 'Cancel'             },
+  sil:                  { tr: 'Sil',                  en: 'Delete'             },
+  duzenle:              { tr: 'Düzenle',              en: 'Edit'               },
+  silOnayiMesaj:        { tr: 'Bu kaydı silmek istediğinize emin misiniz?', en: 'Are you sure you want to delete this record?' },
+  evetSil:              { tr: 'Evet, Sil',            en: 'Yes, Delete'        },
+  zorunlu:              { tr: 'Zorunlu alan',         en: 'Required field'     },
+  kayitYok:             { tr: 'Kayıt bulunamadı.',    en: 'No records found.'  },
+  basarili:             { tr: 'İşlem başarılı.',      en: 'Operation successful.' },
+  hata:                 { tr: 'Bir hata oluştu.',     en: 'An error occurred.' },
+  adet:                 { tr: 'adet',                 en: 'items'              },
+  dogrusal:             { tr: 'Doğrusal',             en: 'Straight-Line'      },
+  azalanBakiyeler:      { tr: 'Azalan Bakiyeler',     en: 'Declining Balance'  },
+  aktif:                { tr: 'Aktif',                en: 'Active'             },
+  bakimda:              { tr: 'Bakımda',              en: 'In Maintenance'     },
+  eldenCikarildi:       { tr: 'Elden Çıkarıldı',      en: 'Disposed'           },
+  hurdayaAyrildi:       { tr: 'Hurdaya Ayrıldı',      en: 'Scrapped'           },
+  sigAktif:             { tr: 'Aktif',                en: 'Active'             },
+  sigSüresiDolmus:      { tr: 'Süresi Dolmuş',        en: 'Expired'            },
+  sigYenileniyor:       { tr: 'Yenileniyor',          en: 'Renewing'           },
+  periyodik:            { tr: 'Periyodik',            en: 'Periodic'           },
+  ariza:                { tr: 'Arıza',                en: 'Breakdown'          },
+  genel:                { tr: 'Genel',                en: 'General'            },
+  notlar:               { tr: 'Notlar',               en: 'Notes'              },
+};
+
+type LabelKey = keyof typeof LABELS;
+function t(key: LabelKey, lang: string): string {
+  const entry = LABELS[key];
+  return (entry as Record<string, string>)[lang === 'tr' ? 'tr' : 'en'] ?? key;
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  color,
-  toggle,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  color: string;
-  toggle?: React.ReactNode;
-}) {
+function KategoriBadge({ kategori }: { kategori: Kategori }) {
+  const cfg = KATEGORI_CFG[kategori];
+  const Icon = cfg.icon;
   return (
-    <motion.div
-      className="apple-card p-5 flex items-center gap-4"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0', color)}>
-        <Icon className="w-5 h-5" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-1">
-          <p className="text-[11px] text-[#86868B] font-medium truncate">{label}</p>
-          {toggle && <div className="shrink-0">{toggle}</div>}
-        </div>
-        <p className="text-lg font-bold text-[#1D1D1F] leading-tight truncate">{value}</p>
-      </div>
-    </motion.div>
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border', cfg.bg, cfg.text, cfg.border)}>
+      <Icon className="w-3 h-3" />{kategori}
+    </span>
   );
 }
 
-function SortTh({
-  label,
-  sortKey,
-  current,
-  onSort,
-}: {
+function DurumBadge({ durum }: { durum: VarlikDurum }) {
+  const cfg = DURUM_CFG[durum];
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium', cfg.bg, cfg.text)}>
+      <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />
+      {durum}
+    </span>
+  );
+}
+
+function SortTh({ label, sortKey, current, onSort }: {
   label: string;
   sortKey: string;
   current: { key: string; dir: 'asc' | 'desc' };
@@ -354,92 +281,73 @@ function SortTh({
 }) {
   const active = current.key === sortKey;
   return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider cursor-pointer hover:bg-gray-50 select-none"
-    >
+    <th onClick={() => onSort(sortKey)}
+      className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider cursor-pointer hover:bg-gray-50 select-none">
       <span className="flex items-center gap-1">
         {label}
-        {active ? (
-          current.dir === 'asc' ? (
-            <ChevronUp className="w-3 h-3 text-[#ff4000]" />
-          ) : (
-            <ChevronDown className="w-3 h-3 text-[#ff4000]" />
-          )
-        ) : (
-          <ChevronDown className="w-3 h-3 text-gray-300 group-hover:text-gray-400" />
-        )}
+        {active
+          ? current.dir === 'asc'
+            ? <ChevronUp className="w-3 h-3 text-[#ff4000]" />
+            : <ChevronDown className="w-3 h-3 text-[#ff4000]" />
+          : <ChevronDown className="w-3 h-3 text-gray-300" />}
       </span>
     </th>
   );
 }
 
-function KategoriBadge({ kategori }: { kategori: SabitKiymet['kategori'] }) {
-  const cfg = KATEGORI_CONFIG[kategori];
-  const Icon = cfg.icon;
+function StatCard({ icon: Icon, label, value, color }: {
+  icon: React.ElementType; label: string; value: string; color: string;
+}) {
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border',
-        cfg.bg,
-        cfg.text,
-        cfg.border
-      )}
-    >
-      <Icon className="w-3 h-3" />
-      {kategori}
-    </span>
+    <motion.div className="apple-card p-5 flex items-center gap-4"
+      initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0', color)}>
+        <Icon className="w-5 h-5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] text-[#86868B] font-medium truncate">{label}</p>
+        <p className="text-lg font-bold text-[#1D1D1F] leading-tight truncate">{value}</p>
+      </div>
+    </motion.div>
   );
 }
 
-function DurumBadge({ durum, t }: { durum: SabitKiymet['durum']; t: typeof T['tr'] }) {
-  const cfg = DURUM_CONFIG[durum];
-  const Icon = cfg.icon;
-  const labelMap: Record<SabitKiymet['durum'], string> = {
-    Aktif: t.aktif,
-    Bakımda: t.bakimda,
-    Hurda: t.hurda,
-    Satıldı: t.satildi,
-    Kayıp: t.kayip,
-  };
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium',
-        cfg.bg,
-        cfg.text
-      )}
-    >
-      <Icon className="w-3 h-3" />
-      {labelMap[durum]}
-    </span>
-  );
-}
+// ─── Empty forms ──────────────────────────────────────────────────────────────
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-interface ToastState {
-  msg: string;
-  type: 'success' | 'error';
-}
-
-// ─── Empty form ───────────────────────────────────────────────────────────────
-
-const emptyForm = (): Omit<SabitKiymet, 'id'> => ({
-  barkod: '',
+const emptyVarlik = (): Omit<SabitKiymet, 'id'> => ({
+  demirbasNo: '',
   ad: '',
-  kategori: 'Ekipman',
-  marka: '',
-  model: '',
-  seriNo: '',
+  kategori: 'Diğer' as Kategori,
   alisTarihi: new Date().toISOString().split('T')[0],
-  alisFiyati: 0,
-  amortismanYili: 5,
-  amortismanYontemi: 'Düz Hat',
-  konum: '',
-  sorumlu: '',
-  durum: 'Aktif',
-  notlar: '',
+  alisBedeli: 0,
+  paraBirimi: 'TRY' as ParaBirimi,
+  amortYontemi: 'Doğrusal' as AmortYontemi,
+  faydaliOmur: 5,
+  birikmisSalinma: 0,
+  departman: '',
+  durum: 'Aktif' as VarlikDurum,
+});
+
+const emptyBakim = (): Omit<BakimKayit, 'id'> => ({
+  varlikId: '',
+  varlikAd: '',
+  bakimTarihi: new Date().toISOString().split('T')[0],
+  bakimTuru: 'Periyodik' as BakimTuru,
+  yapilanIslem: '',
+  maliyet: 0,
+  sonrakiBakimTarihi: '',
+});
+
+const emptySigorta = (): Omit<SigortaKayit, 'id'> => ({
+  varlikId: '',
+  varlikAd: '',
+  policeNo: '',
+  sigortaSirketi: '',
+  baslangicTarihi: new Date().toISOString().split('T')[0],
+  bitisTarihi: '',
+  primTutari: 0,
+  teminatTutari: 0,
+  durum: 'Aktif' as SigortaDurum,
 });
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -447,588 +355,418 @@ const emptyForm = (): Omit<SabitKiymet, 'id'> => ({
 export default function SabitKiymetModule({
   currentLanguage,
   isAuthenticated,
-  kpiCurrency = 'TRY',
-  setKpiCurrency,
-  exchangeRates,
-}: SabitKiymetModuleProps) {
-  const t = T[currentLanguage] as typeof T['tr'];
+}: {
+  currentLanguage: string;
+  isAuthenticated: boolean;
+}) {
+  const tr = currentLanguage === 'tr';
+  const L = (key: LabelKey) => t(key, currentLanguage);
 
-  // Currency helpers
-  const currRate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-  const currSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-  const fmtMoney = (val: number) => {
-    const converted = kpiCurrency === 'TRY' ? val : val / currRate;
-    return `${currSym}${new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(converted)}`;
-  };
-  const CurrToggle = setKpiCurrency ? () => (
-    <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-      {(['TRY', 'USD', 'EUR'] as const).map(c => (
-        <button key={c} onClick={() => setKpiCurrency!(c)}
-          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-        </button>
-      ))}
-    </div>
-  ) : null;
-
-  // Data
-  const [items, setItems] = useState<SabitKiymet[]>([]);
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const [varliklar, setVarliklar] = useState<SabitKiymet[]>([]);
+  const [amortKayitlar, setAmortKayitlar] = useState<AmortismanKayit[]>([]);
+  const [bakimlar, setBakimlar] = useState<BakimKayit[]>([]);
+  const [sigortalar, setSigortalar] = useState<SigortaKayit[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // UI state
-  const [activeTab, setActiveTab] = useState<'varliklar' | 'amortisman'>('varliklar');
+  // ── UI ────────────────────────────────────────────────────────────────────
+  type Tab = 'varliklar' | 'amortisman' | 'bakim' | 'sigorta';
+  const [activeTab, setActiveTab] = useState<Tab>('varliklar');
   const [search, setSearch] = useState('');
-  const [filterKategori, setFilterKategori] = useState<string>('');
-  const [filterDurum, setFilterDurum] = useState<string>('');
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({
-    key: 'alisTarihi',
-    dir: 'desc',
-  });
+  const [filterKat, setFilterKat] = useState('');
+  const [filterDurum, setFilterDurum] = useState('');
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'alisTarihi', dir: 'desc' });
 
-  // Panel / modal
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [editItem, setEditItem] = useState<SabitKiymet | null>(null);
-  const [form, setForm] = useState<Omit<SabitKiymet, 'id'>>(emptyForm());
-  const [formErrors, setFormErrors] = useState<Partial<Record<keyof SabitKiymet, string>>>({});
+  // ── Modals ────────────────────────────────────────────────────────────────
+  const [varlikPanel, setVarlikPanel] = useState(false);
+  const [editVarlik, setEditVarlik] = useState<SabitKiymet | null>(null);
+  const [varlikForm, setVarlikForm] = useState<Omit<SabitKiymet, 'id'>>(emptyVarlik());
+  const [varlikErrors, setVarlikErrors] = useState<Partial<Record<keyof SabitKiymet, string>>>({});
+
+  const [bakimPanel, setBakimPanel] = useState(false);
+  const [editBakim, setEditBakim] = useState<BakimKayit | null>(null);
+  const [bakimForm, setBakimForm] = useState<Omit<BakimKayit, 'id'>>(emptyBakim());
+
+  const [sigortaPanel, setSigortaPanel] = useState(false);
+  const [editSigorta, setEditSigorta] = useState<SigortaKayit | null>(null);
+  const [sigortaForm, setSigortaForm] = useState<Omit<SigortaKayit, 'id'>>(emptySigorta());
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; col: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [amortCalcing, setAmortCalcing] = useState(false);
 
-  // Delete confirm
-  const [deleteTarget, setDeleteTarget] = useState<SabitKiymet | null>(null);
-
-  // Zimmet modal
-  const [zimmetTarget, setZimmetTarget] = useState<SabitKiymet | null>(null);
-  const [zimmetForm, setZimmetForm] = useState({
-    yeniSorumlu: '',
-    tarih: new Date().toISOString().split('T')[0],
-    not: '',
-  });
-  const [zimmetSaving, setZimmetSaving] = useState(false);
-
-  // Toast
-  const [toast, setToast] = useState<ToastState | null>(null);
-
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3200);
   }, []);
 
-  // Firestore subscription
+  // ── Firestore listeners ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated) { setLoading(false); return; }
+    const unsubs: (() => void)[] = [];
+
+    const q1 = query(collection(db, 'sabitKiymetler'), orderBy('alisTarihi', 'desc'));
+    unsubs.push(onSnapshot(q1, snap => {
+      setVarliklar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<SabitKiymet, 'id'>) })));
       setLoading(false);
-      return;
-    }
-    const unsub = setTimeout(() => {
-      const q = query(collection(db, 'sabitKiymetler'), orderBy('alisTarihi', 'desc'));
-      const cancel = onSnapshot(
-        q,
-        snap => {
-          setItems(
-            snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<SabitKiymet, 'id'>) }))
-          );
-          setLoading(false);
-        },
-        err => {
-          console.error('sabitKiymetler snapshot error:', err);
-          setLoading(false);
-        }
-      );
-      return cancel;
-    }, 0);
-    return () => clearTimeout(unsub as unknown as number);
+    }, err => { console.error('sabitKiymetler:', err); setLoading(false); }));
+
+    const q2 = query(collection(db, 'amortismanKayitlari'), orderBy('hesaplamaTarihi', 'desc'));
+    unsubs.push(onSnapshot(q2, snap => {
+      setAmortKayitlar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<AmortismanKayit, 'id'>) })));
+    }, err => console.error('amortismanKayitlari:', err)));
+
+    const q3 = query(collection(db, 'sabitKiymetBakim'), orderBy('bakimTarihi', 'desc'));
+    unsubs.push(onSnapshot(q3, snap => {
+      setBakimlar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<BakimKayit, 'id'>) })));
+    }, err => console.error('sabitKiymetBakim:', err)));
+
+    const q4 = query(collection(db, 'sabitKiymetSigorta'), orderBy('bitisTarihi', 'asc'));
+    unsubs.push(onSnapshot(q4, snap => {
+      setSigortalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<SigortaKayit, 'id'>) })));
+    }, err => console.error('sabitKiymetSigorta:', err)));
+
+    return () => unsubs.forEach(u => u());
   }, [isAuthenticated]);
 
-  // ─── Computed stats ────────────────────────────────────────────────────────
-
-  const aktifler = items.filter(i => i.durum === 'Aktif');
-  const stats = {
-    count: aktifler.length,
-    kayitliDeger: aktifler.reduce((s, i) => s + (i.alisFiyati || 0), 0),
-    defterDeger: aktifler.reduce((s, i) => s + calcNetDegerDefter(i), 0),
-    birikmisSalinma: aktifler.reduce((s, i) => s + calcBirikmisSalinma(i), 0),
+  // ── KPI stats ─────────────────────────────────────────────────────────────
+  const aktifVarliklar = varliklar.filter(v => v.durum === 'Aktif');
+  const kpi = {
+    count: varliklar.length,
+    toplamDeger: aktifVarliklar.reduce((s, v) => s + calcNetDeger(v), 0),
+    toplamBirikmiS: aktifVarliklar.reduce((s, v) => s + calcBirikmisSalinma(v), 0),
   };
 
-  // ─── Filtering & sorting ───────────────────────────────────────────────────
-
-  const filtered = items
-    .filter(item => {
-      const q = search.toLowerCase();
-      if (
-        q &&
-        !item.ad.toLowerCase().includes(q) &&
-        !item.barkod.toLowerCase().includes(q) &&
-        !item.sorumlu.toLowerCase().includes(q)
-      )
-        return false;
-      if (filterKategori && item.kategori !== filterKategori) return false;
-      if (filterDurum && item.durum !== filterDurum) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      const k = sort.key as keyof SabitKiymet;
-      let va: string | number = '';
-      let vb: string | number = '';
-      if (k === 'netDeferDeger' as keyof SabitKiymet) {
-        va = calcNetDegerDefter(a);
-        vb = calcNetDegerDefter(b);
-      } else if (k === 'birikmisSalinmaCalc' as keyof SabitKiymet) {
-        va = calcBirikmisSalinma(a);
-        vb = calcBirikmisSalinma(b);
-      } else {
-        va = (a[k] as string | number) ?? '';
-        vb = (b[k] as string | number) ?? '';
-      }
-      if (va < vb) return sort.dir === 'asc' ? -1 : 1;
-      if (va > vb) return sort.dir === 'asc' ? 1 : -1;
-      return 0;
-    });
+  // ── Filtering & sorting (Varlıklar) ───────────────────────────────────────
+  const filtered = varliklar.filter(v => {
+    const q = search.toLowerCase();
+    if (q && !v.ad.toLowerCase().includes(q) && !v.demirbasNo.toLowerCase().includes(q) && !v.departman.toLowerCase().includes(q)) return false;
+    if (filterKat && v.kategori !== filterKat) return false;
+    if (filterDurum && v.durum !== filterDurum) return false;
+    return true;
+  }).sort((a, b) => {
+    const k = sort.key as keyof SabitKiymet;
+    const va = (a[k] as string | number) ?? '';
+    const vb = (b[k] as string | number) ?? '';
+    if (va < vb) return sort.dir === 'asc' ? -1 : 1;
+    if (va > vb) return sort.dir === 'asc' ? 1 : -1;
+    return 0;
+  });
 
   const handleSort = (key: string) => {
-    setSort(prev => ({
-      key,
-      dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc',
-    }));
+    setSort(prev => ({ key, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }));
   };
 
-  // ─── Form handlers ─────────────────────────────────────────────────────────
-
-  const openAdd = () => {
-    const draft = emptyForm();
-    draft.barkod = generateBarkod(items);
-    setForm(draft);
-    setEditItem(null);
-    setFormErrors({});
-    setPanelOpen(true);
+  // ── Varlık form handlers ──────────────────────────────────────────────────
+  const openAddVarlik = () => {
+    const draft = emptyVarlik();
+    draft.demirbasNo = generateDemirbasNo(varliklar);
+    setVarlikForm(draft);
+    setEditVarlik(null);
+    setVarlikErrors({});
+    setVarlikPanel(true);
   };
 
-  const openEdit = (item: SabitKiymet) => {
+  const openEditVarlik = (item: SabitKiymet) => {
     const { id, ...rest } = item;
-    setForm({ ...rest });
-    setEditItem(item);
-    setFormErrors({});
-    setPanelOpen(true);
+    setVarlikForm({ ...rest });
+    setEditVarlik(item);
+    setVarlikErrors({});
+    setVarlikPanel(true);
   };
 
-  const closePanel = () => {
-    setPanelOpen(false);
-    setEditItem(null);
-  };
-
-  const validate = (): boolean => {
+  const validateVarlik = (): boolean => {
     const errs: Partial<Record<keyof SabitKiymet, string>> = {};
-    if (!form.ad.trim()) errs.ad = t.zorunlu;
-    if (!form.barkod.trim()) errs.barkod = t.zorunlu;
-    if (!form.alisTarihi) errs.alisTarihi = t.zorunlu;
-    if (form.alisFiyati <= 0) errs.alisFiyati = t.zorunlu;
-    if (form.amortismanYili <= 0) errs.amortismanYili = t.zorunlu;
-    setFormErrors(errs);
+    if (!varlikForm.ad.trim()) errs.ad = L('zorunlu');
+    if (!varlikForm.demirbasNo.trim()) errs.demirbasNo = L('zorunlu');
+    if (!varlikForm.alisTarihi) errs.alisTarihi = L('zorunlu');
+    if (varlikForm.alisBedeli <= 0) errs.alisBedeli = L('zorunlu');
+    if (varlikForm.faydaliOmur <= 0) errs.faydaliOmur = L('zorunlu');
+    setVarlikErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
-  const handleSave = async () => {
-    if (!validate()) return;
+  const handleSaveVarlik = async () => {
+    if (!validateVarlik()) return;
     setSaving(true);
     try {
-      if (editItem) {
-        await updateDoc(doc(db, 'sabitKiymetler', editItem.id), {
-          ...form,
-          updatedAt: serverTimestamp(),
-        });
+      if (editVarlik) {
+        await updateDoc(doc(db, 'sabitKiymetler', editVarlik.id), { ...varlikForm, updatedAt: serverTimestamp() });
       } else {
-        await addDoc(collection(db, 'sabitKiymetler'), {
-          ...form,
-          createdAt: serverTimestamp(),
-        });
+        await addDoc(collection(db, 'sabitKiymetler'), { ...varlikForm, createdAt: serverTimestamp() });
       }
-      showToast(t.basarili);
-      closePanel();
+      showToast(L('basarili'));
+      setVarlikPanel(false);
     } catch (err) {
       console.error(err);
-      showToast(t.hata, 'error');
+      showToast(L('hata'), 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  // ── Amortisman hesapla ────────────────────────────────────────────────────
+  const handleDonemHesapla = async () => {
+    const aktif = varliklar.filter(v => v.durum === 'Aktif');
+    if (aktif.length === 0) return;
+    setAmortCalcing(true);
+    try {
+      const now = new Date();
+      const donem = `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+      await Promise.all(aktif.map(item =>
+        addDoc(collection(db, 'amortismanKayitlari'), {
+          varlikId: item.id,
+          varlikAd: item.ad,
+          donem,
+          yillikAmort: calcYillikAmort(item),
+          aylikAmort: calcAylikAmort(item),
+          birikmisSalinma: calcBirikmisSalinma(item),
+          netDegerDefter: calcNetDeger(item),
+          hesaplamaTarihi: now.toISOString().split('T')[0],
+          createdAt: serverTimestamp(),
+        })
+      ));
+      showToast(L('hesaplandı'));
+    } catch (err) {
+      console.error(err);
+      showToast(L('hata'), 'error');
+    } finally {
+      setAmortCalcing(false);
+    }
+  };
+
+  // ── Bakım form handlers ───────────────────────────────────────────────────
+  const openAddBakim = () => {
+    setBakimForm(emptyBakim());
+    setEditBakim(null);
+    setBakimPanel(true);
+  };
+
+  const openEditBakim = (item: BakimKayit) => {
+    const { id, ...rest } = item;
+    setBakimForm({ ...rest });
+    setEditBakim(item);
+    setBakimPanel(true);
+  };
+
+  const handleSaveBakim = async () => {
+    if (!bakimForm.varlikAd.trim() || !bakimForm.bakimTarihi) return;
+    setSaving(true);
+    try {
+      if (editBakim) {
+        await updateDoc(doc(db, 'sabitKiymetBakim', editBakim.id), { ...bakimForm, updatedAt: serverTimestamp() });
+      } else {
+        await addDoc(collection(db, 'sabitKiymetBakim'), { ...bakimForm, createdAt: serverTimestamp() });
+      }
+      showToast(L('basarili'));
+      setBakimPanel(false);
+    } catch (err) {
+      console.error(err);
+      showToast(L('hata'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Sigorta form handlers ─────────────────────────────────────────────────
+  const openAddSigorta = () => {
+    setSigortaForm(emptySigorta());
+    setEditSigorta(null);
+    setSigortaPanel(true);
+  };
+
+  const openEditSigorta = (item: SigortaKayit) => {
+    const { id, ...rest } = item;
+    setSigortaForm({ ...rest });
+    setEditSigorta(item);
+    setSigortaPanel(true);
+  };
+
+  const handleSaveSigorta = async () => {
+    if (!sigortaForm.varlikAd.trim() || !sigortaForm.policeNo.trim()) return;
+    setSaving(true);
+    try {
+      if (editSigorta) {
+        await updateDoc(doc(db, 'sabitKiymetSigorta', editSigorta.id), { ...sigortaForm, updatedAt: serverTimestamp() });
+      } else {
+        await addDoc(collection(db, 'sabitKiymetSigorta'), { ...sigortaForm, createdAt: serverTimestamp() });
+      }
+      showToast(L('basarili'));
+      setSigortaPanel(false);
+    } catch (err) {
+      console.error(err);
+      showToast(L('hata'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      await deleteDoc(doc(db, 'sabitKiymetler', deleteTarget.id));
-      showToast(t.basarili);
+      await deleteDoc(doc(db, deleteTarget.col, deleteTarget.id));
+      showToast(L('basarili'));
     } catch (err) {
       console.error(err);
-      showToast(t.hata, 'error');
+      showToast(L('hata'), 'error');
     } finally {
       setDeleteTarget(null);
     }
   };
 
-  // ─── Zimmet handlers ───────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const inputCls = (err?: string) => cn('apple-input w-full px-3 py-2 text-sm', err && 'ring-2 ring-red-400');
 
-  const openZimmet = (item: SabitKiymet) => {
-    setZimmetTarget(item);
-    setZimmetForm({
-      yeniSorumlu: item.sorumlu,
-      tarih: new Date().toISOString().split('T')[0],
-      not: '',
-    });
-  };
-
-  const handleZimmetKaydet = async () => {
-    if (!zimmetTarget || !zimmetForm.yeniSorumlu.trim()) return;
-    setZimmetSaving(true);
-    try {
-      await updateDoc(doc(db, 'sabitKiymetler', zimmetTarget.id), {
-        sorumlu: zimmetForm.yeniSorumlu,
-        updatedAt: serverTimestamp(),
-      });
-      showToast(t.basarili);
-      setZimmetTarget(null);
-    } catch (err) {
-      console.error(err);
-      showToast(t.hata, 'error');
-    } finally {
-      setZimmetSaving(false);
-    }
-  };
-
-  // ─── CSV exports ───────────────────────────────────────────────────────────
-
-  const exportZimmetCSV = () => {
-    const header = [t.barkod, t.ad, t.sorumlu, t.konum, t.durum].join(',');
-    const rows = items.map(i =>
-      [i.barkod, `"${i.ad}"`, `"${i.sorumlu}"`, `"${i.konum}"`, i.durum].join(',')
-    );
-    downloadCSV([header, ...rows].join('\n'), 'zimmet-listesi.csv');
-  };
-
-  const exportAmortCSV = () => {
-    const header = [t.barkod, t.ad, t.yillikAmort, t.birikmiS, t.netDefter, t.ekonomikOmur].join(',');
-    const rows = items.map(i =>
-      [
-        i.barkod,
-        `"${i.ad}"`,
-        calcYillikAmortisman(i).toFixed(2),
-        calcBirikmisSalinma(i).toFixed(2),
-        calcNetDegerDefter(i).toFixed(2),
-        calcEkonomikOmurSonu(i),
-      ].join(',')
-    );
-    downloadCSV([header, ...rows].join('\n'), 'amortisman-raporu.csv');
-  };
-
-  const downloadCSV = (content: string, filename: string) => {
-    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // ─── Amortisman takvimi (next 5 years from now) ────────────────────────────
-
-  const amortRows = aktifler.map(item => {
-    const currentYear = new Date().getFullYear();
-    const alis = new Date(item.alisTarihi);
-    const yillar: number[] = [];
-    let kalanDeger = item.alisFiyati;
-
-    // Calculate accumulated depreciation up to start of current year
-    const yilGecen = currentYear - alis.getFullYear();
-    if (item.amortismanYontemi === 'Düz Hat') {
-      const yillikAmort = item.alisFiyati / item.amortismanYili;
-      const depreciatedYears = Math.min(yilGecen, item.amortismanYili);
-      kalanDeger = item.alisFiyati - yillikAmort * depreciatedYears;
-      for (let i = 0; i < 5; i++) {
-        const remaining = Math.max(0, item.amortismanYili - (depreciatedYears + i));
-        if (remaining <= 0) {
-          yillar.push(0);
-        } else {
-          yillar.push(Math.min(yillikAmort, kalanDeger));
-          kalanDeger = Math.max(0, kalanDeger - yillikAmort);
-        }
-      }
-    } else {
-      // Azalan Bakiye
-      const oran = 2 / item.amortismanYili;
-      const limitedYears = Math.min(yilGecen, item.amortismanYili);
-      for (let i = 0; i < limitedYears; i++) {
-        kalanDeger -= kalanDeger * oran;
-      }
-      for (let i = 0; i < 5; i++) {
-        const amt = kalanDeger * oran;
-        yillar.push(Math.max(0, amt));
-        kalanDeger -= amt;
-      }
-    }
-
-    return { item, yillar };
-  });
+  const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
+    { key: 'varliklar',  label: L('tabVarliklar'),  icon: Package   },
+    { key: 'amortisman', label: L('tabAmortisman'), icon: TrendingDown },
+    { key: 'bakim',      label: L('tabBakim'),      icon: Wrench    },
+    { key: 'sigorta',    label: L('tabSigorta'),    icon: ShieldCheck },
+  ];
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const inputCls = (err?: string) =>
-    cn('apple-input w-full px-3 py-2 text-sm', err && 'ring-2 ring-red-400');
-
   return (
     <div className="space-y-6 p-6">
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#1D1D1F]">{t.title}</h1>
-          <p className="text-sm text-[#86868B] mt-0.5">{t.subtitle}</p>
+          <h1 className="text-2xl font-bold text-[#1D1D1F]">{L('title')}</h1>
+          <p className="text-sm text-[#86868B] mt-0.5">{L('subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            className="apple-button-secondary text-sm px-4 py-2 flex items-center gap-2"
-            onClick={exportZimmetCSV}
-          >
-            <Download className="w-4 h-4" />
-            {t.exportZimmet}
+        {isAuthenticated && activeTab === 'varliklar' && (
+          <button className="apple-button-primary text-sm px-4 py-2 flex items-center gap-2" onClick={openAddVarlik}>
+            <Plus className="w-4 h-4" />{L('yeniVarlik')}
           </button>
-          <button
-            className="apple-button-secondary text-sm px-4 py-2 flex items-center gap-2"
-            onClick={exportAmortCSV}
-          >
-            <FileText className="w-4 h-4" />
-            {t.exportAmort}
+        )}
+        {isAuthenticated && activeTab === 'bakim' && (
+          <button className="apple-button-primary text-sm px-4 py-2 flex items-center gap-2" onClick={openAddBakim}>
+            <Plus className="w-4 h-4" />{L('yeniBakim')}
           </button>
-          {isAuthenticated && (
-            <button
-              className="apple-button-primary text-sm px-4 py-2 flex items-center gap-2"
-              onClick={openAdd}
-            >
-              <Plus className="w-4 h-4" />
-              {t.yeniEkle}
-            </button>
-          )}
-        </div>
+        )}
+        {isAuthenticated && activeTab === 'sigorta' && (
+          <button className="apple-button-primary text-sm px-4 py-2 flex items-center gap-2" onClick={openAddSigorta}>
+            <Plus className="w-4 h-4" />{L('yeniSigorta')}
+          </button>
+        )}
+        {isAuthenticated && activeTab === 'amortisman' && (
+          <button
+            className="apple-button-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-60"
+            onClick={handleDonemHesapla}
+            disabled={amortCalcing}
+          >
+            {amortCalcing
+              ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              : <Calculator className="w-4 h-4" />}
+            {L('donemHesapla')}
+          </button>
+        )}
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={Package}
-          label={t.toplamDemirbas}
-          value={`${stats.count} ${t.adet}`}
-          color="bg-blue-100 text-blue-700"
-        />
-        <StatCard
-          icon={BarChart3}
-          label={t.toplamKayitliDeger}
-          value={fmtMoney(stats.kayitliDeger)}
-          color="bg-green-100 text-green-700"
-          toggle={CurrToggle ? <CurrToggle /> : undefined}
-        />
-        <StatCard
-          icon={TrendingDown}
-          label={t.toplamDefterDeger}
-          value={fmtMoney(stats.defterDeger)}
-          color="bg-indigo-100 text-indigo-700"
-          toggle={CurrToggle ? <CurrToggle /> : undefined}
-        />
-        <StatCard
-          icon={Calendar}
-          label={t.birikmisSalinma}
-          value={fmtMoney(stats.birikmisSalinma)}
-          color="bg-orange-100 text-orange-700"
-          toggle={CurrToggle ? <CurrToggle /> : undefined}
-        />
-      </div>
+      {/* KPI strip — only on Varlıklar tab */}
+      {activeTab === 'varliklar' && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard icon={Package}    label={L('toplamVarlik')}    value={`${kpi.count} ${L('adet')}`}    color="bg-blue-100 text-blue-700" />
+          <StatCard icon={BarChart3}  label={L('toplamDegerLabel')} value={formatTRY(kpi.toplamDeger)}    color="bg-green-100 text-green-700" />
+          <StatCard icon={TrendingDown} label={L('toplamAmort')}   value={formatTRY(kpi.toplamBirikmiS)} color="bg-orange-100 text-orange-700" />
+        </div>
+      )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#F5F5F7] rounded-xl p-1 w-fit">
-        {(['varliklar', 'amortisman'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+      <div className="flex gap-1 bg-[#F5F5F7] rounded-xl p-1 w-fit flex-wrap">
+        {TABS.map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             className={cn(
-              'px-4 py-1.5 text-sm font-medium rounded-lg transition-all',
-              activeTab === tab
-                ? 'bg-white text-[#1D1D1F] shadow-sm'
-                : 'text-[#86868B] hover:text-[#1D1D1F]'
-            )}
-          >
-            {tab === 'varliklar' ? t.tabVarliklar : t.tabAmortisman}
+              'flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-lg transition-all',
+              activeTab === tab.key ? 'bg-white text-[#1D1D1F] shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F]'
+            )}>
+            <tab.icon className="w-3.5 h-3.5" />{tab.label}
           </button>
         ))}
       </div>
 
-      {/* Tab: Varlıklar */}
+      {/* ══════════════════════════ TAB: VARLIKLAR ══════════════════════════ */}
       {activeTab === 'varliklar' && (
-        <motion.div
-          className="space-y-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-        >
+        <motion.div className="space-y-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
           {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#86868B]" />
-              <input
-                className="apple-input w-full pl-9 pr-4 py-2 text-sm"
-                placeholder={t.ara}
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
+              <input className="apple-input w-full pl-9 pr-4 py-2 text-sm" placeholder={L('ara')}
+                value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <select
-              className="apple-input px-3 py-2 text-sm min-w-[160px]"
-              value={filterKategori}
-              onChange={e => setFilterKategori(e.target.value)}
-            >
-              <option value="">{t.tumKategoriler}</option>
-              {Object.keys(KATEGORI_CONFIG).map(k => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
+            <select className="apple-input px-3 py-2 text-sm min-w-[160px]" value={filterKat} onChange={e => setFilterKat(e.target.value)}>
+              <option value="">{L('tumKategoriler')}</option>
+              {(Object.keys(KATEGORI_CFG) as Kategori[]).map(k => <option key={k} value={k}>{k}</option>)}
             </select>
-            <select
-              className="apple-input px-3 py-2 text-sm min-w-[140px]"
-              value={filterDurum}
-              onChange={e => setFilterDurum(e.target.value)}
-            >
-              <option value="">{t.tumDurumlar}</option>
-              {(Object.keys(DURUM_CONFIG) as SabitKiymet['durum'][]).map(d => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
+            <select className="apple-input px-3 py-2 text-sm min-w-[170px]" value={filterDurum} onChange={e => setFilterDurum(e.target.value)}>
+              <option value="">{L('tumDurumlar')}</option>
+              {(['Aktif', 'Bakımda', 'Elden Çıkarıldı', 'Hurdaya Ayrıldı'] as VarlikDurum[]).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
 
           {/* Table */}
           <div className="apple-card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[960px]">
                 <thead className="bg-[#F5F5F7] border-b border-gray-200">
                   <tr>
-                    <SortTh label={t.barkod} sortKey="barkod" current={sort} onSort={handleSort} />
-                    <SortTh label={t.ad} sortKey="ad" current={sort} onSort={handleSort} />
-                    <SortTh label={t.kategori} sortKey="kategori" current={sort} onSort={handleSort} />
-                    <SortTh label={t.alisTarihi} sortKey="alisTarihi" current={sort} onSort={handleSort} />
-                    <SortTh label={t.alisFiyati} sortKey="alisFiyati" current={sort} onSort={handleSort} />
-                    <SortTh label={t.yillikAmort} sortKey="yillikAmort" current={sort} onSort={handleSort} />
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.birikmiS}
-                    </th>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.netDefter}
-                    </th>
-                    <SortTh label={t.sorumlu} sortKey="sorumlu" current={sort} onSort={handleSort} />
-                    <SortTh label={t.durum} sortKey="durum" current={sort} onSort={handleSort} />
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.islemler}
-                    </th>
+                    <SortTh label={L('demirbasNo')}    sortKey="demirbasNo"   current={sort} onSort={handleSort} />
+                    <SortTh label={L('ad')}             sortKey="ad"           current={sort} onSort={handleSort} />
+                    <SortTh label={L('kategori')}       sortKey="kategori"     current={sort} onSort={handleSort} />
+                    <SortTh label={L('alisTarihi')}     sortKey="alisTarihi"   current={sort} onSort={handleSort} />
+                    <SortTh label={L('alisBedeli')}     sortKey="alisBedeli"   current={sort} onSort={handleSort} />
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('birikmisSalinma')}</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('netDegerDefter')}</th>
+                    <SortTh label={L('departman')}      sortKey="departman"    current={sort} onSort={handleSort} />
+                    <SortTh label={L('durum')}          sortKey="durum"        current={sort} onSort={handleSort} />
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('islemler')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {loading ? (
-                    <tr>
-                      <td colSpan={11} className="px-4 py-8 text-center text-sm text-[#86868B]">
-                        <div className="flex justify-center">
-                          <div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" />
+                    <tr><td colSpan={10} className="py-8 text-center">
+                      <div className="flex justify-center"><div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" /></div>
+                    </td></tr>
+                  ) : filtered.length === 0 ? (
+                    <tr><td colSpan={10} className="py-10 text-center text-sm text-[#86868B]">{L('kayitYok')}</td></tr>
+                  ) : filtered.map((item, idx) => (
+                    <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
+                      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.025, duration: 0.2 }}>
+                      <td className="px-4 py-3 text-xs font-mono text-[#86868B]">{item.demirbasNo}</td>
+                      <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.ad}</td>
+                      <td className="px-4 py-3"><KategoriBadge kategori={item.kategori} /></td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.alisTarihi)}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">
+                        {item.paraBirimi !== 'TRY' ? `${item.paraBirimi} ` : ''}{formatTRY(item.alisBedeli).replace('₺', item.paraBirimi === 'TRY' ? '₺' : '')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-orange-600 whitespace-nowrap">{formatTRY(calcBirikmisSalinma(item))}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-green-700 whitespace-nowrap">{formatTRY(calcNetDeger(item))}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 text-sm text-[#1D1D1F]">
+                          <MapPin className="w-3 h-3 text-[#86868B] flex-shrink-0" />
+                          <span className="truncate max-w-[120px]">{item.departman || '-'}</span>
                         </div>
                       </td>
-                    </tr>
-                  ) : filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} className="px-4 py-10 text-center text-sm text-[#86868B]">
-                        {t.noData}
+                      <td className="px-4 py-3"><DurumBadge durum={item.durum} /></td>
+                      <td className="px-4 py-3">
+                        {isAuthenticated && (
+                          <div className="flex items-center gap-1">
+                            <button className="p-1.5 rounded-lg hover:bg-[#F5F5F7] text-[#86868B] hover:text-[#1D1D1F] transition-colors" title={L('duzenle')} onClick={() => openEditVarlik(item)}>
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" title={L('sil')} onClick={() => setDeleteTarget({ id: item.id, col: 'sabitKiymetler' })}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </td>
-                    </tr>
-                  ) : (
-                    filtered.map((item, idx) => {
-                      const birikmiS = calcBirikmisSalinma(item);
-                      const netDefter = calcNetDegerDefter(item);
-                      const yillikAmort = calcYillikAmortisman(item);
-                      return (
-                        <motion.tr
-                          key={item.id}
-                          className="hover:bg-[#F5F5F7]/60 transition-colors"
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: idx * 0.03, duration: 0.2 }}
-                        >
-                          <td className="px-4 py-3 text-xs font-mono text-[#86868B]">{item.barkod}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-sm text-[#1D1D1F]">{item.ad}</div>
-                            {(item.marka || item.model) && (
-                              <div className="text-[11px] text-[#86868B]">
-                                {[item.marka, item.model].filter(Boolean).join(' / ')}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <KategoriBadge kategori={item.kategori} />
-                          </td>
-                          <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">
-                            {formatDateTR(item.alisTarihi)}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">
-                            {formatCurrency(item.alisFiyati)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">
-                            {formatCurrency(yillikAmort)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-orange-600 whitespace-nowrap">
-                            {formatCurrency(birikmiS)}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-semibold text-green-700 whitespace-nowrap">
-                            {formatCurrency(netDefter)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5 text-sm text-[#1D1D1F]">
-                              <User className="w-3 h-3 text-[#86868B] flex-shrink-0" />
-                              <span className="truncate max-w-[100px]">{item.sorumlu || '-'}</span>
-                            </div>
-                            {item.konum && (
-                              <div className="flex items-center gap-1 text-[11px] text-[#86868B] mt-0.5">
-                                <MapPin className="w-2.5 h-2.5 flex-shrink-0" />
-                                <span className="truncate max-w-[100px]">{item.konum}</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <DurumBadge durum={item.durum} t={t} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1">
-                              {isAuthenticated && (
-                                <>
-                                  <button
-                                    className="p-1.5 rounded-lg hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-colors"
-                                    title={t.zimmetVer}
-                                    onClick={() => openZimmet(item)}
-                                  >
-                                    <User className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    className="p-1.5 rounded-lg hover:bg-[#F5F5F7] text-[#86868B] hover:text-[#1D1D1F] transition-colors"
-                                    title={t.duzenle}
-                                    onClick={() => openEdit(item)}
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors"
-                                    title={t.sil}
-                                    onClick={() => setDeleteTarget(item)}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </motion.tr>
-                      );
-                    })
-                  )}
+                    </motion.tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -1036,99 +774,143 @@ export default function SabitKiymetModule({
         </motion.div>
       )}
 
-      {/* Tab: Amortisman Takvimi */}
+      {/* ══════════════════════════ TAB: AMORTİSMAN ══════════════════════════ */}
       {activeTab === 'amortisman' && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-        >
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
           <div className="apple-card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px]">
+              <table className="w-full min-w-[800px]">
                 <thead className="bg-[#F5F5F7] border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.amortTabVarlik}
-                    </th>
-                    {[1, 2, 3, 4, 5].map(y => (
-                      <th
-                        key={y}
-                        className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider"
-                      >
-                        {y === 1
-                          ? t.amortTabYil1
-                          : y === 2
-                          ? t.amortTabYil2
-                          : y === 3
-                          ? t.amortTabYil3
-                          : y === 4
-                          ? t.amortTabYil4
-                          : t.amortTabYil5}
-                      </th>
-                    ))}
-                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.amortTabToplam}
-                    </th>
-                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
-                      {t.ekonomikOmur}
-                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('ad')}</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('amortYontemi')}</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('faydaliOmur')}</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('yillikAmort')}</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('aylikAmort')}</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('birikmisSalinma')}</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{L('netDegerDefter')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {loading ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
-                        <div className="flex justify-center">
-                          <div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" />
+                    <tr><td colSpan={7} className="py-8 text-center">
+                      <div className="flex justify-center"><div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" /></div>
+                    </td></tr>
+                  ) : aktifVarliklar.length === 0 ? (
+                    <tr><td colSpan={7} className="py-10 text-center text-sm text-[#86868B]">{L('kayitYok')}</td></tr>
+                  ) : aktifVarliklar.map((item, idx) => (
+                    <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
+                      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.025, duration: 0.2 }}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <KategoriBadge kategori={item.kategori} />
+                          <div>
+                            <div className="font-medium text-sm text-[#1D1D1F]">{item.ad}</div>
+                            <div className="text-[11px] text-[#86868B] font-mono">{item.demirbasNo}</div>
+                          </div>
                         </div>
                       </td>
-                    </tr>
-                  ) : amortRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-sm text-[#86868B]">
-                        {t.amortNoData}
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F]">
+                        {item.amortYontemi === 'Doğrusal' ? L('dogrusal') : L('azalanBakiyeler')}
                       </td>
-                    </tr>
-                  ) : (
-                    amortRows.map(({ item, yillar }, idx) => {
-                      const toplam = yillar.reduce((s, v) => s + v, 0);
-                      return (
-                        <motion.tr
-                          key={item.id}
-                          className="hover:bg-[#F5F5F7]/60 transition-colors"
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: idx * 0.03, duration: 0.2 }}
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <KategoriBadge kategori={item.kategori} />
-                              <span className="font-medium text-sm text-[#1D1D1F]">{item.ad}</span>
-                            </div>
-                            <div className="text-[11px] text-[#86868B] mt-0.5 font-mono">{item.barkod}</div>
-                          </td>
-                          {yillar.map((v, i) => (
-                            <td
-                              key={i}
-                              className={cn(
-                                'px-4 py-3 text-right text-sm',
-                                v > 0 ? 'text-orange-600 font-medium' : 'text-[#86868B]'
-                              )}
-                            >
-                              {v > 0 ? formatCurrency(v) : '—'}
-                            </td>
-                          ))}
-                          <td className="px-4 py-3 text-right text-sm font-bold text-[#1D1D1F]">
-                            {formatCurrency(toplam)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm text-[#86868B] whitespace-nowrap">
-                            {formatDateTR(calcEkonomikOmurSonu(item))}
-                          </td>
-                        </motion.tr>
-                      );
-                    })
-                  )}
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F]">{item.faydaliOmur} {tr ? 'yıl' : 'yrs'}</td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-orange-600 whitespace-nowrap">{formatTRY(calcYillikAmort(item))}</td>
+                      <td className="px-4 py-3 text-right text-sm text-[#1D1D1F] whitespace-nowrap">{formatTRY(calcAylikAmort(item))}</td>
+                      <td className="px-4 py-3 text-right text-sm text-orange-700 font-semibold whitespace-nowrap">{formatTRY(calcBirikmisSalinma(item))}</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold text-green-700 whitespace-nowrap">{formatTRY(calcNetDeger(item))}</td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Saved depreciation log */}
+          {amortKayitlar.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-[#1D1D1F] mb-3 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-[#86868B]" />
+                {tr ? 'Kaydedilmiş Dönem Hesaplamaları' : 'Saved Period Calculations'}
+              </h3>
+              <div className="apple-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px]">
+                    <thead className="bg-[#F5F5F7] border-b border-gray-200">
+                      <tr>
+                        {[L('varlikAd'), tr ? 'Dönem' : 'Period', L('yillikAmort'), L('birikmisSalinma'), L('netDegerDefter'), tr ? 'Tarih' : 'Date'].map((h, i) => (
+                          <th key={i} className={cn('px-4 py-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider', i > 1 ? 'text-right' : 'text-left')}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {amortKayitlar.slice(0, 50).map(k => (
+                        <tr key={k.id} className="hover:bg-[#F5F5F7]/60 transition-colors">
+                          <td className="px-4 py-2.5 text-sm text-[#1D1D1F]">{k.varlikAd}</td>
+                          <td className="px-4 py-2.5 text-xs font-mono text-[#86868B]">{k.donem}</td>
+                          <td className="px-4 py-2.5 text-right text-sm text-orange-600">{formatTRY(k.yillikAmort)}</td>
+                          <td className="px-4 py-2.5 text-right text-sm text-orange-700 font-medium">{formatTRY(k.birikmisSalinma)}</td>
+                          <td className="px-4 py-2.5 text-right text-sm text-green-700 font-semibold">{formatTRY(k.netDegerDefter)}</td>
+                          <td className="px-4 py-2.5 text-right text-xs text-[#86868B]">{formatDateTR(k.hesaplamaTarihi)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* ══════════════════════════ TAB: BAKIM ══════════════════════════ */}
+      {activeTab === 'bakim' && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
+          <div className="apple-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px]">
+                <thead className="bg-[#F5F5F7] border-b border-gray-200">
+                  <tr>
+                    {[L('varlikAd'), L('bakimTarihi'), L('bakimTuru'), L('yapilanIslem'), L('maliyet'), L('sonrakiBakim'), L('islemler')].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loading ? (
+                    <tr><td colSpan={7} className="py-8 text-center">
+                      <div className="flex justify-center"><div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" /></div>
+                    </td></tr>
+                  ) : bakimlar.length === 0 ? (
+                    <tr><td colSpan={7} className="py-10 text-center text-sm text-[#86868B]">{L('kayitYok')}</td></tr>
+                  ) : bakimlar.map((item, idx) => (
+                    <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
+                      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.025, duration: 0.2 }}>
+                      <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.varlikAd}</td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.bakimTarihi)}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium',
+                          item.bakimTuru === 'Periyodik' ? 'bg-blue-100 text-blue-700' :
+                          item.bakimTuru === 'Arıza' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700')}>
+                          {item.bakimTuru === 'Periyodik' ? L('periyodik') : item.bakimTuru === 'Arıza' ? L('ariza') : L('genel')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] max-w-[200px] truncate">{item.yapilanIslem || '-'}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">{formatTRY(item.maliyet)}</td>
+                      <td className="px-4 py-3 text-sm text-[#86868B] whitespace-nowrap">{item.sonrakiBakimTarihi ? formatDateTR(item.sonrakiBakimTarihi) : '-'}</td>
+                      <td className="px-4 py-3">
+                        {isAuthenticated && (
+                          <div className="flex items-center gap-1">
+                            <button className="p-1.5 rounded-lg hover:bg-[#F5F5F7] text-[#86868B] hover:text-[#1D1D1F] transition-colors" onClick={() => openEditBakim(item)}>
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" onClick={() => setDeleteTarget({ id: item.id, col: 'sabitKiymetBakim' })}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </motion.tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -1136,234 +918,192 @@ export default function SabitKiymetModule({
         </motion.div>
       )}
 
-      {/* ── Add/Edit Panel ── */}
+      {/* ══════════════════════════ TAB: SİGORTA ══════════════════════════ */}
+      {activeTab === 'sigorta' && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
+          <div className="apple-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px]">
+                <thead className="bg-[#F5F5F7] border-b border-gray-200">
+                  <tr>
+                    {[L('varlikAd'), L('policeNo'), L('sigortaSirketi'), L('baslangicTarihi'), L('bitisTarihi'), L('primTutari'), L('teminatTutari'), L('sigortaDurum'), L('islemler')].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loading ? (
+                    <tr><td colSpan={9} className="py-8 text-center">
+                      <div className="flex justify-center"><div className="w-5 h-5 border-2 border-[#ff4000] border-t-transparent rounded-full animate-spin" /></div>
+                    </td></tr>
+                  ) : sigortalar.length === 0 ? (
+                    <tr><td colSpan={9} className="py-10 text-center text-sm text-[#86868B]">{L('kayitYok')}</td></tr>
+                  ) : sigortalar.map((item, idx) => {
+                    const remaining = item.bitisTarihi ? daysUntil(item.bitisTarihi) : null;
+                    const expiringSoon = remaining !== null && remaining >= 0 && remaining <= 30;
+                    return (
+                      <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.025, duration: 0.2 }}>
+                        <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.varlikAd}</td>
+                        <td className="px-4 py-3 text-xs font-mono text-[#86868B]">{item.policeNo}</td>
+                        <td className="px-4 py-3 text-sm text-[#1D1D1F]">{item.sigortaSirketi}</td>
+                        <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.baslangicTarihi)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-[#1D1D1F]">{formatDateTR(item.bitisTarihi)}</span>
+                            {expiringSoon && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                                <AlertTriangle className="w-2.5 h-2.5" />{L('yakindaVadesi')}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">{formatTRY(item.primTutari)}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-green-700 whitespace-nowrap">{formatTRY(item.teminatTutari)}</td>
+                        <td className="px-4 py-3">
+                          <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium',
+                            item.durum === 'Aktif' ? 'bg-green-100 text-green-700' :
+                            item.durum === 'Süresi Dolmuş' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
+                            <span className={cn('w-1.5 h-1.5 rounded-full',
+                              item.durum === 'Aktif' ? 'bg-green-500' : item.durum === 'Süresi Dolmuş' ? 'bg-red-500' : 'bg-amber-500')} />
+                            {item.durum === 'Aktif' ? L('sigAktif') : item.durum === 'Süresi Dolmuş' ? L('sigSüresiDolmus') : L('sigYenileniyor')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {isAuthenticated && (
+                            <div className="flex items-center gap-1">
+                              <button className="p-1.5 rounded-lg hover:bg-[#F5F5F7] text-[#86868B] hover:text-[#1D1D1F] transition-colors" onClick={() => openEditSigorta(item)}>
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" onClick={() => setDeleteTarget({ id: item.id, col: 'sabitKiymetSigorta' })}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ══════════════════════════ SLIDE PANEL: VARLIK ══════════════════════════ */}
       <AnimatePresence>
-        {panelOpen && (
+        {varlikPanel && (
           <>
-            <motion.div
-              className="fixed inset-0 bg-black/30 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={closePanel}
-            />
-            <motion.div
-              className="fixed top-0 right-0 h-full w-full max-w-[480px] bg-white z-50 shadow-2xl overflow-y-auto"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            >
+            <motion.div className="fixed inset-0 bg-black/30 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setVarlikPanel(false)} />
+            <motion.div className="fixed top-0 right-0 h-full w-full max-w-[500px] bg-white z-50 shadow-2xl overflow-y-auto"
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
               <div className="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-100 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-[#1D1D1F]">
-                  {editItem ? t.duzenleBaslik : t.yeniDemirbas}
-                </h2>
-                <button
-                  className="p-2 rounded-xl hover:bg-[#F5F5F7] transition-colors"
-                  onClick={closePanel}
-                >
+                <h2 className="text-lg font-semibold text-[#1D1D1F]">{editVarlik ? L('duzenle') : L('yeniVarlik')}</h2>
+                <button className="p-2 rounded-xl hover:bg-[#F5F5F7] transition-colors" onClick={() => setVarlikPanel(false)}>
                   <X className="w-5 h-5 text-[#86868B]" />
                 </button>
               </div>
               <div className="p-6 space-y-4">
-                {/* Barkod */}
+                {/* Demirbaş No */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.barkod}</label>
-                  <input
-                    className={inputCls(formErrors.barkod)}
-                    value={form.barkod}
-                    onChange={e => setForm(f => ({ ...f, barkod: e.target.value }))}
-                  />
-                  {formErrors.barkod && (
-                    <p className="text-xs text-red-500 mt-1">{formErrors.barkod}</p>
-                  )}
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('demirbasNo')}</label>
+                  <input className={inputCls(varlikErrors.demirbasNo)} value={varlikForm.demirbasNo}
+                    onChange={e => setVarlikForm(f => ({ ...f, demirbasNo: e.target.value }))} />
+                  {varlikErrors.demirbasNo && <p className="text-xs text-red-500 mt-1">{varlikErrors.demirbasNo}</p>}
                 </div>
                 {/* Ad */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.ad} *</label>
-                  <input
-                    className={inputCls(formErrors.ad)}
-                    value={form.ad}
-                    onChange={e => setForm(f => ({ ...f, ad: e.target.value }))}
-                  />
-                  {formErrors.ad && <p className="text-xs text-red-500 mt-1">{formErrors.ad}</p>}
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('ad')} *</label>
+                  <input className={inputCls(varlikErrors.ad)} value={varlikForm.ad}
+                    onChange={e => setVarlikForm(f => ({ ...f, ad: e.target.value }))} />
+                  {varlikErrors.ad && <p className="text-xs text-red-500 mt-1">{varlikErrors.ad}</p>}
                 </div>
                 {/* Kategori */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.kategori}</label>
-                  <select
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.kategori}
-                    onChange={e =>
-                      setForm(f => ({ ...f, kategori: e.target.value as SabitKiymet['kategori'] }))
-                    }
-                  >
-                    {(Object.keys(KATEGORI_CONFIG) as SabitKiymet['kategori'][]).map(k => (
-                      <option key={k} value={k}>
-                        {k}
-                      </option>
-                    ))}
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('kategori')}</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.kategori}
+                    onChange={e => setVarlikForm(f => ({ ...f, kategori: e.target.value as Kategori }))}>
+                    {(Object.keys(KATEGORI_CFG) as Kategori[]).map(k => <option key={k} value={k}>{k}</option>)}
                   </select>
                 </div>
-                {/* Marka / Model */}
+                {/* Alış Tarihi & Para Birimi */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-[#86868B] mb-1">{t.marka}</label>
-                    <input
-                      className="apple-input w-full px-3 py-2 text-sm"
-                      value={form.marka}
-                      onChange={e => setForm(f => ({ ...f, marka: e.target.value }))}
-                    />
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('alisTarihi')} *</label>
+                    <input type="date" className={inputCls(varlikErrors.alisTarihi)} value={varlikForm.alisTarihi}
+                      onChange={e => setVarlikForm(f => ({ ...f, alisTarihi: e.target.value }))} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[#86868B] mb-1">{t.model}</label>
-                    <input
-                      className="apple-input w-full px-3 py-2 text-sm"
-                      value={form.model}
-                      onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
-                    />
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('paraBirimi')}</label>
+                    <select className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.paraBirimi}
+                      onChange={e => setVarlikForm(f => ({ ...f, paraBirimi: e.target.value as ParaBirimi }))}>
+                      <option value="TRY">TRY (₺)</option>
+                      <option value="USD">USD ($)</option>
+                      <option value="EUR">EUR (€)</option>
+                    </select>
                   </div>
                 </div>
-                {/* Seri No */}
+                {/* Alış Bedeli */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.seriNo}</label>
-                  <input
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.seriNo}
-                    onChange={e => setForm(f => ({ ...f, seriNo: e.target.value }))}
-                  />
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('alisBedeli')} *</label>
+                  <input type="number" min={0} className={inputCls(varlikErrors.alisBedeli)} value={varlikForm.alisBedeli || ''}
+                    onChange={e => setVarlikForm(f => ({ ...f, alisBedeli: parseFloat(e.target.value) || 0 }))} />
+                  {varlikErrors.alisBedeli && <p className="text-xs text-red-500 mt-1">{varlikErrors.alisBedeli}</p>}
                 </div>
-                {/* Alış Tarihi */}
+                {/* Amortisman Yöntemi & Faydalı Ömür */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('amortYontemi')}</label>
+                    <select className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.amortYontemi}
+                      onChange={e => setVarlikForm(f => ({ ...f, amortYontemi: e.target.value as AmortYontemi }))}>
+                      <option value="Doğrusal">{L('dogrusal')}</option>
+                      <option value="Azalan Bakiyeler">{L('azalanBakiyeler')}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('faydaliOmur')} *</label>
+                    <input type="number" min={1} max={50} className={inputCls(varlikErrors.faydaliOmur)} value={varlikForm.faydaliOmur || ''}
+                      onChange={e => setVarlikForm(f => ({ ...f, faydaliOmur: parseInt(e.target.value, 10) || 0 }))} />
+                  </div>
+                </div>
+                {/* Birikmiş Amortisman override */}
                 <div>
                   <label className="block text-xs font-medium text-[#86868B] mb-1">
-                    {t.alisTarihi} *
+                    {L('birikmisSalinma')} <span className="text-[10px] font-normal text-[#86868B]">({tr ? '0 = otomatik hesapla' : '0 = auto-calculate'})</span>
                   </label>
-                  <input
-                    type="date"
-                    className={inputCls(formErrors.alisTarihi)}
-                    value={form.alisTarihi}
-                    onChange={e => setForm(f => ({ ...f, alisTarihi: e.target.value }))}
-                  />
+                  <input type="number" min={0} className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.birikmisSalinma || ''}
+                    onChange={e => setVarlikForm(f => ({ ...f, birikmisSalinma: parseFloat(e.target.value) || 0 }))} />
                 </div>
-                {/* Alış Fiyatı */}
-                <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">
-                    {t.alisFiyati} *
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    className={inputCls(formErrors.alisFiyati)}
-                    value={form.alisFiyati || ''}
-                    onChange={e =>
-                      setForm(f => ({ ...f, alisFiyati: parseFloat(e.target.value) || 0 }))
-                    }
-                  />
-                  {formErrors.alisFiyati && (
-                    <p className="text-xs text-red-500 mt-1">{formErrors.alisFiyati}</p>
-                  )}
+                {/* Net defter değeri (computed) */}
+                <div className="bg-[#F5F5F7] rounded-xl p-3">
+                  <p className="text-xs text-[#86868B]">{L('netDegerDefter')}</p>
+                  <p className="text-lg font-bold text-green-700">
+                    {formatTRY(Math.max(0, varlikForm.alisBedeli - (varlikForm.birikmisSalinma || 0)))}
+                  </p>
                 </div>
-                {/* Amortisman Yılı */}
+                {/* Departman */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">
-                    {t.amortismanYili} *
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    className={inputCls(formErrors.amortismanYili)}
-                    value={form.amortismanYili || ''}
-                    onChange={e =>
-                      setForm(f => ({
-                        ...f,
-                        amortismanYili: parseInt(e.target.value, 10) || 0,
-                      }))
-                    }
-                  />
-                </div>
-                {/* Amortisman Yöntemi */}
-                <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">
-                    {t.amortismanYontemi}
-                  </label>
-                  <select
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.amortismanYontemi}
-                    onChange={e =>
-                      setForm(f => ({
-                        ...f,
-                        amortismanYontemi: e.target.value as SabitKiymet['amortismanYontemi'],
-                      }))
-                    }
-                  >
-                    <option value="Düz Hat">{t.duzHat}</option>
-                    <option value="Azalan Bakiye">{t.azalanBakiye}</option>
-                  </select>
-                </div>
-                {/* Konum */}
-                <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.konum}</label>
-                  <input
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.konum}
-                    onChange={e => setForm(f => ({ ...f, konum: e.target.value }))}
-                  />
-                </div>
-                {/* Sorumlu */}
-                <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.sorumlu}</label>
-                  <input
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.sorumlu}
-                    onChange={e => setForm(f => ({ ...f, sorumlu: e.target.value }))}
-                  />
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('departman')}</label>
+                  <input className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.departman}
+                    onChange={e => setVarlikForm(f => ({ ...f, departman: e.target.value }))} />
                 </div>
                 {/* Durum */}
                 <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.durum}</label>
-                  <select
-                    className="apple-input w-full px-3 py-2 text-sm"
-                    value={form.durum}
-                    onChange={e =>
-                      setForm(f => ({ ...f, durum: e.target.value as SabitKiymet['durum'] }))
-                    }
-                  >
-                    {(Object.keys(DURUM_CONFIG) as SabitKiymet['durum'][]).map(d => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('durum')}</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={varlikForm.durum}
+                    onChange={e => setVarlikForm(f => ({ ...f, durum: e.target.value as VarlikDurum }))}>
+                    <option value="Aktif">{L('aktif')}</option>
+                    <option value="Bakımda">{L('bakimda')}</option>
+                    <option value="Elden Çıkarıldı">{L('eldenCikarildi')}</option>
+                    <option value="Hurdaya Ayrıldı">{L('hurdayaAyrildi')}</option>
                   </select>
                 </div>
-                {/* Notlar */}
-                <div>
-                  <label className="block text-xs font-medium text-[#86868B] mb-1">{t.notlar}</label>
-                  <textarea
-                    rows={3}
-                    className="apple-input w-full px-3 py-2 text-sm resize-none"
-                    value={form.notlar}
-                    onChange={e => setForm(f => ({ ...f, notlar: e.target.value }))}
-                  />
-                </div>
-                {/* Actions */}
                 <div className="flex gap-3 pt-2">
-                  <button
-                    className="apple-button-secondary flex-1 py-2 text-sm"
-                    onClick={closePanel}
-                    disabled={saving}
-                  >
-                    {t.iptal}
-                  </button>
-                  <button
-                    className="apple-button-primary flex-1 py-2 text-sm flex items-center justify-center gap-2"
-                    onClick={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : null}
-                    {t.kaydet}
+                  <button className="apple-button-secondary flex-1 py-2 text-sm" onClick={() => setVarlikPanel(false)} disabled={saving}>{L('iptal')}</button>
+                  <button className="apple-button-primary flex-1 py-2 text-sm flex items-center justify-center gap-2" onClick={handleSaveVarlik} disabled={saving}>
+                    {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {L('kaydet')}
                   </button>
                 </div>
               </div>
@@ -1372,161 +1112,205 @@ export default function SabitKiymetModule({
         )}
       </AnimatePresence>
 
-      {/* ── Delete Confirm Modal ── */}
+      {/* ══════════════════════════ SLIDE PANEL: BAKIM ══════════════════════════ */}
+      <AnimatePresence>
+        {bakimPanel && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/30 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setBakimPanel(false)} />
+            <motion.div className="fixed top-0 right-0 h-full w-full max-w-[460px] bg-white z-50 shadow-2xl overflow-y-auto"
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+              <div className="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-[#1D1D1F]">{editBakim ? L('duzenle') : L('yeniBakim')}</h2>
+                <button className="p-2 rounded-xl hover:bg-[#F5F5F7] transition-colors" onClick={() => setBakimPanel(false)}>
+                  <X className="w-5 h-5 text-[#86868B]" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* Varlık Adı */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('varlikAd')} *</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={bakimForm.varlikId}
+                    onChange={e => {
+                      const v = varliklar.find(x => x.id === e.target.value);
+                      setBakimForm(f => ({ ...f, varlikId: e.target.value, varlikAd: v?.ad ?? '' }));
+                    }}>
+                    <option value="">{tr ? '— Seçiniz —' : '— Select —'}</option>
+                    {varliklar.map(v => <option key={v.id} value={v.id}>{v.ad} ({v.demirbasNo})</option>)}
+                  </select>
+                </div>
+                {/* Bakım Tarihi */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('bakimTarihi')} *</label>
+                  <input type="date" className="apple-input w-full px-3 py-2 text-sm" value={bakimForm.bakimTarihi}
+                    onChange={e => setBakimForm(f => ({ ...f, bakimTarihi: e.target.value }))} />
+                </div>
+                {/* Bakım Türü */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('bakimTuru')}</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={bakimForm.bakimTuru}
+                    onChange={e => setBakimForm(f => ({ ...f, bakimTuru: e.target.value as BakimTuru }))}>
+                    <option value="Periyodik">{L('periyodik')}</option>
+                    <option value="Arıza">{L('ariza')}</option>
+                    <option value="Genel">{L('genel')}</option>
+                  </select>
+                </div>
+                {/* Yapılan İşlem */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('yapilanIslem')}</label>
+                  <textarea rows={3} className="apple-input w-full px-3 py-2 text-sm resize-none" value={bakimForm.yapilanIslem}
+                    onChange={e => setBakimForm(f => ({ ...f, yapilanIslem: e.target.value }))} />
+                </div>
+                {/* Maliyet */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('maliyet')}</label>
+                  <input type="number" min={0} className="apple-input w-full px-3 py-2 text-sm" value={bakimForm.maliyet || ''}
+                    onChange={e => setBakimForm(f => ({ ...f, maliyet: parseFloat(e.target.value) || 0 }))} />
+                </div>
+                {/* Sonraki Bakım */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('sonrakiBakim')}</label>
+                  <input type="date" className="apple-input w-full px-3 py-2 text-sm" value={bakimForm.sonrakiBakimTarihi}
+                    onChange={e => setBakimForm(f => ({ ...f, sonrakiBakimTarihi: e.target.value }))} />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button className="apple-button-secondary flex-1 py-2 text-sm" onClick={() => setBakimPanel(false)} disabled={saving}>{L('iptal')}</button>
+                  <button className="apple-button-primary flex-1 py-2 text-sm flex items-center justify-center gap-2" onClick={handleSaveBakim} disabled={saving}>
+                    {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {L('kaydet')}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ══════════════════════════ SLIDE PANEL: SİGORTA ══════════════════════════ */}
+      <AnimatePresence>
+        {sigortaPanel && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/30 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSigortaPanel(false)} />
+            <motion.div className="fixed top-0 right-0 h-full w-full max-w-[460px] bg-white z-50 shadow-2xl overflow-y-auto"
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+              <div className="sticky top-0 bg-white/90 backdrop-blur border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-[#1D1D1F]">{editSigorta ? L('duzenle') : L('yeniSigorta')}</h2>
+                <button className="p-2 rounded-xl hover:bg-[#F5F5F7] transition-colors" onClick={() => setSigortaPanel(false)}>
+                  <X className="w-5 h-5 text-[#86868B]" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* Varlık */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('varlikAd')} *</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.varlikId}
+                    onChange={e => {
+                      const v = varliklar.find(x => x.id === e.target.value);
+                      setSigortaForm(f => ({ ...f, varlikId: e.target.value, varlikAd: v?.ad ?? '' }));
+                    }}>
+                    <option value="">{tr ? '— Seçiniz —' : '— Select —'}</option>
+                    {varliklar.map(v => <option key={v.id} value={v.id}>{v.ad} ({v.demirbasNo})</option>)}
+                  </select>
+                </div>
+                {/* Poliçe No */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('policeNo')} *</label>
+                  <input className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.policeNo}
+                    onChange={e => setSigortaForm(f => ({ ...f, policeNo: e.target.value }))} />
+                </div>
+                {/* Sigorta Şirketi */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('sigortaSirketi')}</label>
+                  <input className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.sigortaSirketi}
+                    onChange={e => setSigortaForm(f => ({ ...f, sigortaSirketi: e.target.value }))} />
+                </div>
+                {/* Başlangıç & Bitiş */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('baslangicTarihi')}</label>
+                    <input type="date" className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.baslangicTarihi}
+                      onChange={e => setSigortaForm(f => ({ ...f, baslangicTarihi: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('bitisTarihi')}</label>
+                    <input type="date" className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.bitisTarihi}
+                      onChange={e => setSigortaForm(f => ({ ...f, bitisTarihi: e.target.value }))} />
+                  </div>
+                </div>
+                {/* Prim & Teminat */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('primTutari')}</label>
+                    <input type="number" min={0} className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.primTutari || ''}
+                      onChange={e => setSigortaForm(f => ({ ...f, primTutari: parseFloat(e.target.value) || 0 }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#86868B] mb-1">{L('teminatTutari')}</label>
+                    <input type="number" min={0} className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.teminatTutari || ''}
+                      onChange={e => setSigortaForm(f => ({ ...f, teminatTutari: parseFloat(e.target.value) || 0 }))} />
+                  </div>
+                </div>
+                {/* Durum */}
+                <div>
+                  <label className="block text-xs font-medium text-[#86868B] mb-1">{L('sigortaDurum')}</label>
+                  <select className="apple-input w-full px-3 py-2 text-sm" value={sigortaForm.durum}
+                    onChange={e => setSigortaForm(f => ({ ...f, durum: e.target.value as SigortaDurum }))}>
+                    <option value="Aktif">{L('sigAktif')}</option>
+                    <option value="Süresi Dolmuş">{L('sigSüresiDolmus')}</option>
+                    <option value="Yenileniyor">{L('sigYenileniyor')}</option>
+                  </select>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button className="apple-button-secondary flex-1 py-2 text-sm" onClick={() => setSigortaPanel(false)} disabled={saving}>{L('iptal')}</button>
+                  <button className="apple-button-primary flex-1 py-2 text-sm flex items-center justify-center gap-2" onClick={handleSaveSigorta} disabled={saving}>
+                    {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {L('kaydet')}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ══════════════════════════ DELETE CONFIRM ══════════════════════════ */}
       <AnimatePresence>
         {deleteTarget && (
-          <motion.div
-            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="apple-card w-full max-w-sm p-6 space-y-4"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
+          <motion.div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="apple-card w-full max-w-sm p-6 space-y-4"
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
                   <AlertTriangle className="w-5 h-5 text-red-600" />
                 </div>
-                <p className="text-sm text-[#1D1D1F] font-medium">{t.silOnayi}</p>
+                <p className="text-sm text-[#1D1D1F] font-medium">{L('silOnayiMesaj')}</p>
               </div>
               <div className="flex gap-3">
-                <button
-                  className="apple-button-secondary flex-1 py-2 text-sm"
-                  onClick={() => setDeleteTarget(null)}
-                >
-                  {t.iptal}
-                </button>
-                <button
-                  className="flex-1 py-2 text-sm font-medium bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-                  onClick={handleDelete}
-                >
-                  {t.evet}
-                </button>
+                <button className="apple-button-secondary flex-1 py-2 text-sm" onClick={() => setDeleteTarget(null)}>{L('iptal')}</button>
+                <button className="flex-1 py-2 text-sm font-medium bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors" onClick={handleDelete}>{L('evetSil')}</button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Zimmet Modal ── */}
-      <AnimatePresence>
-        {zimmetTarget && (
-          <motion.div
-            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="apple-card w-full max-w-sm p-6 space-y-4"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-[#1D1D1F]">{t.zimmetBaslik}</h3>
-                <button
-                  className="p-1.5 rounded-lg hover:bg-[#F5F5F7] transition-colors"
-                  onClick={() => setZimmetTarget(null)}
-                >
-                  <X className="w-4 h-4 text-[#86868B]" />
-                </button>
-              </div>
-              {/* Asset info */}
-              <div className="bg-[#F5F5F7] rounded-xl p-3 text-sm space-y-1">
-                <div className="font-medium text-[#1D1D1F]">{zimmetTarget.ad}</div>
-                <div className="text-[11px] text-[#86868B] font-mono">{zimmetTarget.barkod}</div>
-                <div className="flex items-center gap-1 text-[11px] text-[#86868B]">
-                  <User className="w-3 h-3" />
-                  {t.sorumlu}: {zimmetTarget.sorumlu || '-'}
-                </div>
-              </div>
-              {/* New assignee */}
-              <div>
-                <label className="block text-xs font-medium text-[#86868B] mb-1">
-                  {t.zimmetYeniSorumlu} *
-                </label>
-                <input
-                  className="apple-input w-full px-3 py-2 text-sm"
-                  value={zimmetForm.yeniSorumlu}
-                  onChange={e =>
-                    setZimmetForm(f => ({ ...f, yeniSorumlu: e.target.value }))
-                  }
-                />
-              </div>
-              {/* Date */}
-              <div>
-                <label className="block text-xs font-medium text-[#86868B] mb-1">
-                  {t.zimmetTarih}
-                </label>
-                <input
-                  type="date"
-                  className="apple-input w-full px-3 py-2 text-sm"
-                  value={zimmetForm.tarih}
-                  onChange={e => setZimmetForm(f => ({ ...f, tarih: e.target.value }))}
-                />
-              </div>
-              {/* Note */}
-              <div>
-                <label className="block text-xs font-medium text-[#86868B] mb-1">{t.zimmetNot}</label>
-                <input
-                  className="apple-input w-full px-3 py-2 text-sm"
-                  value={zimmetForm.not}
-                  onChange={e => setZimmetForm(f => ({ ...f, not: e.target.value }))}
-                />
-              </div>
-              {/* Actions */}
-              <div className="flex gap-3">
-                <button
-                  className="apple-button-secondary flex-1 py-2 text-sm"
-                  onClick={() => setZimmetTarget(null)}
-                  disabled={zimmetSaving}
-                >
-                  {t.iptal}
-                </button>
-                <button
-                  className="apple-button-primary flex-1 py-2 text-sm flex items-center justify-center gap-2"
-                  onClick={handleZimmetKaydet}
-                  disabled={zimmetSaving || !zimmetForm.yeniSorumlu.trim()}
-                >
-                  {zimmetSaving ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <User className="w-4 h-4" />
-                  )}
-                  {t.zimmetKaydet}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Toast ── */}
+      {/* ══════════════════════════ TOAST ══════════════════════════ */}
       <AnimatePresence>
         {toast && (
           <motion.div
             className="fixed bottom-6 right-6 z-[60] flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg text-sm font-medium text-white"
-            style={{
-              background: toast.type === 'success' ? '#34C759' : '#FF3B30',
-            }}
+            style={{ background: toast.type === 'success' ? '#34C759' : '#FF3B30' }}
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-          >
-            {toast.type === 'success' ? (
-              <CheckCircle className="w-4 h-4 flex-shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            )}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}>
+            {toast.type === 'success'
+              ? <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
             {toast.msg}
           </motion.div>
         )}
       </AnimatePresence>
+
     </div>
   );
 }

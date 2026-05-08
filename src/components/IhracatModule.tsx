@@ -199,22 +199,6 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-brand/10 flex items-center justify-center">
-            <Globe className="w-5 h-5 text-brand" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Dış Ticaret Modülü</h2>
-            <p className="text-xs text-gray-500">İhracat · İthalat · Akreditif · Gümrük</p>
-          </div>
-        </div>
-        <button onClick={() => setShowModal(true)} className="apple-button-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Yeni Ekle
-        </button>
-      </div>
-
       {/* KPI Strip */}
       {activeTab === 'ihracat' && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -235,17 +219,22 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            <t.icon className="w-3.5 h-3.5" /> {t.label}
-          </button>
-        ))}
+      {/* Tabs + Add */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <t.icon className="w-3.5 h-3.5" /> {t.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setShowModal(true)} className="apple-button-primary flex items-center gap-2">
+          <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New'}
+        </button>
       </div>
 
       {/* İhracat Tab */}

@@ -8,6 +8,7 @@ import {
   Wallet, Layers, Landmark, Palette
 } from 'lucide-react';
 import TahsilatModule from './TahsilatModule';
+import KasaModule from './KasaModule';
 import MaliyetMerkeziModule from './MaliyetMerkeziModule';
 import SabitKiymetModule from './SabitKiymetModule';
 import { formatInCurrency } from '../utils/currency';
@@ -1691,6 +1692,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     { key: 'tahsilat', label: t.tahsilat, icon: Wallet },
     { key: 'maliyet_merkezi', label: t.maliyet_merkezi, icon: Layers },
     { key: 'sabit_kiymet', label: t.sabit_kiymet, icon: Landmark },
+    { key: 'kasa', label: currentLanguage === 'tr' ? 'Kasa' : 'Cash Desk', icon: Wallet },
   ] as const;
 
   const visibleTabs = allowedTabs ? tabs.filter(t => allowedTabs.includes(t.key)) : tabs;
@@ -5341,6 +5343,13 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       {accountingTab === 'sabit_kiymet' && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
           <SabitKiymetModule currentLanguage={currentLanguage} isAuthenticated={isAuthenticated} />
+        </motion.div>
+      )}
+
+      {/* ── Kasa ── */}
+      {accountingTab === 'kasa' && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+          <KasaModule currentLanguage={currentLanguage} isAuthenticated={isAuthenticated ?? false} />
         </motion.div>
       )}
 

@@ -180,7 +180,6 @@ import OrderTrackingView from './components/OrderTrackingView';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import LucaSyncPanel from './components/LucaSyncPanel';
 import EBelgeMerkezi from './components/EBelgeMerkezi';
-import KasaModule from './components/KasaModule';
 import BakimModule from './components/BakimModule';
 import ServisModule from './components/ServisModule';
 import IhracatModule from './components/IhracatModule';
@@ -246,7 +245,6 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   settings:      { full: [UserRole.Admin, UserRole.Manager], readonly: [] },
   // New ERP modules
   ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics] },
-  kasa:          { full: [UserRole.Admin, UserRole.Accounting], readonly: [UserRole.Manager] },
   bakim:         { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing] },
   servis:        { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Logistics] },
   ihracat:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting] },
@@ -20946,7 +20944,6 @@ function AppContent() {
                   { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations', icon: Link },
                   { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
                   { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge' : 'E-Document', icon: FileText },
-                  { id: 'kasa', label: currentLanguage === 'tr' ? 'Kasa' : 'Cash Desk', icon: Wallet },
                   { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance', icon: Wrench },
                   { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'Service', icon: Headphones },
                   { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', icon: Ship },
@@ -23259,7 +23256,7 @@ function AppContent() {
                           'gelir','kdv','luca','mikro','banka_hareketleri','satislar',
                           'musteriler','tedarikciler','urunler','depo','warehouses',
                           'transfer','cekler','calisanlar','giden_irsaliye','gelen_irsaliye',
-                          'isletme_sermayesi'
+                          'isletme_sermayesi','kasa'
                         ]}
                       />
                       {/* ── Vade Analizi (AR Aging) ── */}
@@ -23761,11 +23758,8 @@ function AppContent() {
                   {muhasebeTab === 'sabit-kiymet' && (
                     <motion.div key="muhasebe-sabit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
                       <SabitKiymetModule
-                        currentLanguage={currentLanguage as 'tr' | 'en'}
+                        currentLanguage={currentLanguage}
                         isAuthenticated={!!user && hasFullAccess('muhasebe')}
-                        kpiCurrency={kpiCurrency}
-                        setKpiCurrency={setKpiCurrency}
-                        exchangeRates={exchangeRates}
                       />
                     </motion.div>
                   )}
@@ -26660,23 +26654,6 @@ function AppContent() {
                     icon={FileText}
                   />
                   <EBelgeMerkezi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ebelge')} />
-                </>
-              )}
-            </motion.div>
-          )}
-
-          {/* ── Kasa Yönetimi ── */}
-          {activeTab === 'kasa' && (
-            <motion.div key="kasa" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('kasa') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk'} /> : (
-                <>
-                  {!hasFullAccess('kasa') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk Management'}
-                    subtitle={currentLanguage === 'tr' ? 'Kasa hareketleri, günlük kapanış ve kasa tanımları' : 'Cash transactions, daily closing and cash desk definitions'}
-                    icon={Wallet}
-                  />
-                  <KasaModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kasa')} />
                 </>
               )}
             </motion.div>

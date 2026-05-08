@@ -209,19 +209,6 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-orange-50 flex items-center justify-center">
-            <Wrench className="w-5 h-5 text-orange-500" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Bakım Yönetimi</h1>
-            <p className="text-xs text-gray-400">Ekipman & İş Emri Takibi</p>
-          </div>
-        </div>
-      </div>
-
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
         {TABS.map(t => (
