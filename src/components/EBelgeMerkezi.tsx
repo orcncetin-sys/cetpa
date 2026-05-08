@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc,
+  collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, orderBy, serverTimestamp
 } from 'firebase/firestore';
 
@@ -106,6 +106,31 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const { toast, show: showToast } = useToast();
+
+  // GIB connection — live from Firestore settings/gib
+  const [gibConnected, setGibConnected] = useState(false);
+  const [gibLastCheck, setGibLastCheck] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'gib'), snap => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setGibConnected(d.connected ?? false);
+        setGibLastCheck(d.lastCheck?.toDate?.() ?? null);
+      } else {
+        setGibConnected(false);
+        setGibLastCheck(null);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const toggleGib = async () => {
+    await setDoc(doc(db, 'settings', 'gib'), {
+      connected: !gibConnected,
+      lastCheck: serverTimestamp(),
+    }, { merge: true });
+  };
 
   // Form state
   const [form, setForm] = useState({
@@ -260,11 +285,18 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
         </div>
         {/* GIB status + add button */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <Wifi size={12} className="text-green-600" />
-            <span className="text-xs font-medium text-green-700">GIB Bağlı*</span>
-          </div>
+          <button
+            onClick={isAuthenticated ? toggleGib : undefined}
+            title={isAuthenticated ? (gibConnected ? 'Bağlantıyı kes' : 'GIB bağlantısını etkinleştir') : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-full transition-colors ${gibConnected ? 'bg-green-50 border-green-200 hover:bg-green-100' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'} ${isAuthenticated ? 'cursor-pointer' : 'cursor-default'}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${gibConnected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
+            <Wifi size={12} className={gibConnected ? 'text-green-600' : 'text-gray-400'} />
+            <span className={`text-xs font-medium ${gibConnected ? 'text-green-700' : 'text-gray-500'}`}>
+              {gibConnected ? 'GIB Bağlı' : 'GIB Bağlı Değil'}
+            </span>
+            {gibLastCheck && <span className="text-[10px] text-gray-400 hidden sm:inline">{gibLastCheck.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+          </button>
           <button onClick={openModal} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
             <Plus size={15} />
             Yeni Belge

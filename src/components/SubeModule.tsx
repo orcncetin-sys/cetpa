@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc,
-  doc, serverTimestamp, query, orderBy
+  doc, serverTimestamp, query, orderBy, where, limit
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
@@ -37,12 +37,6 @@ interface SubeTransfer {
   createdAt?: any;
 }
 
-const mockPL = [
-  { subeAdi: 'İstanbul Merkez', buAyGelir: 485000, buAyMaliyet: 312000, gecenAyGelir: 460000, gecenAyMaliyet: 298000 },
-  { subeAdi: 'Ankara Şubesi', buAyGelir: 310000, buAyMaliyet: 201000, gecenAyGelir: 295000, gecenAyMaliyet: 193000 },
-  { subeAdi: 'İzmir Şubesi', buAyGelir: 227000, buAyMaliyet: 148000, gecenAyGelir: 215000, gecenAyMaliyet: 142000 },
-  { subeAdi: 'Bursa Şubesi', buAyGelir: 163000, buAyMaliyet: 109000, gecenAyGelir: 155000, gecenAyMaliyet: 104000 },
-];
 
 function statusBadge(durum: string) {
   const map: Record<string, string> = {
@@ -63,6 +57,17 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [editingSube, setEditingSube] = useState<Sube | null>(null);
   const [saving, setSaving] = useState(false);
+
+  type PLOrder = { subeAdi?: string; totalPrice?: number; costTotal?: number; status?: string; createdAt?: unknown };
+  const [plOrders, setPlOrders] = useState<PLOrder[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(2000)),
+      snap => setPlOrders(snap.docs.map(d => d.data() as PLOrder))
+    );
+    return unsub;
+  }, []);
 
   const emptySube: Omit<Sube, 'id'> = { subeKodu: '', subeAdi: '', sehir: '', adres: '', yonetici: '', telefon: '', email: '', durum: 'Aktif', acilisTarihi: '', calisanSayisi: 0, createdAt: null };
   const [subeForm, setSubeForm] = useState<Omit<Sube, 'id'>>(emptySube);
@@ -134,6 +139,30 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
     { key: 'transfer', label: 'Şubeler Arası Transfer', icon: ArrowRightLeft },
     { key: 'pl', label: 'Şube P&L', icon: BarChart3 },
   ] as const;
+
+  // Computed P&L from real orders
+  const now = new Date();
+  const tmYear = now.getFullYear(), tmMonth = now.getMonth();
+  const lmYear = tmMonth === 0 ? tmYear - 1 : tmYear;
+  const lmMonth = tmMonth === 0 ? 11 : tmMonth - 1;
+
+  function toDate(v: unknown): Date | null {
+    if (!v) return null;
+    if (typeof (v as { toDate?: () => Date }).toDate === 'function') return (v as { toDate: () => Date }).toDate();
+    try { return new Date(v as string); } catch { return null; }
+  }
+
+  const computedPL = subeler.map(s => {
+    const bOrders = plOrders.filter(o => o.subeAdi === s.subeAdi && o.status !== 'Cancelled');
+    const tmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === tmYear && d.getMonth() === tmMonth; });
+    const lmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === lmYear && d.getMonth() === lmMonth; });
+    const buAyGelir     = tmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+    const gecenAyGelir  = lmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+    const buAyMaliyet   = tmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
+    const gecenAyMaliyet = lmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
+    return { subeAdi: s.subeAdi, buAyGelir, buAyMaliyet, gecenAyGelir, gecenAyMaliyet };
+  });
+  const plHasData = computedPL.some(p => p.buAyGelir > 0 || p.gecenAyGelir > 0);
 
   return (
     <div className="space-y-6">
@@ -271,6 +300,12 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
         <div className="space-y-4">
           <div className="apple-card p-5">
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Kâr-Zarar Karşılaştırması</h3>
+            {!plHasData && (
+              <div className="apple-card p-6 text-center text-gray-400">
+                <p className="text-sm font-medium mb-1">{currentLanguage === 'tr' ? 'Henüz şube bazlı sipariş yok' : 'No branch-tagged orders yet'}</p>
+                <p className="text-xs">{currentLanguage === 'tr' ? 'Sipariş oluştururken şube seçin — veriler burada görünür.' : 'Select a branch when creating orders — data will appear here.'}</p>
+              </div>
+            )}
             <div className="overflow-x-auto">
             <table className="w-full text-sm" style={{ minWidth: '560px' }}>
               <thead>
@@ -284,7 +319,7 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
                 </tr>
               </thead>
               <tbody>
-                {mockPL.map(row => {
+                {computedPL.map(row => {
                   const buAyKar = row.buAyGelir - row.buAyMaliyet;
                   const gecenAyKar = row.gecenAyGelir - row.gecenAyMaliyet;
                   const marj = Math.round((buAyKar / row.buAyGelir) * 100);
@@ -314,8 +349,8 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
           <div className="apple-card p-5">
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Gelir Karşılaştırması (Bu Ay)</h3>
             <div className="space-y-3">
-              {mockPL.map(row => {
-                const maxGelir = Math.max(...mockPL.map(r => r.buAyGelir));
+              {computedPL.map(row => {
+                const maxGelir = Math.max(...computedPL.map(r => r.buAyGelir), 1);
                 const pct = Math.round((row.buAyGelir / maxGelir) * 100);
                 const karPct = Math.round(((row.buAyGelir - row.buAyMaliyet) / row.buAyGelir) * 100);
                 return (

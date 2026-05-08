@@ -18380,6 +18380,8 @@ function AppContent() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [exchangeRates, setExchangeRates] = useState<Record<string, number> | null>(null);
   const [notifications, setNotifications] = useState<Record<string, unknown>[]>([]);
+  const [gibConnected, setGibConnected] = useState<boolean>(false);
+  const [branchNames, setBranchNames] = useState<string[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
@@ -19238,6 +19240,20 @@ function AppContent() {
       if (docSnap.exists()) setLucaSettings(docSnap.data() as Partial<LucaConfig>);
     });
     return () => { unsubMikro(); unsubLuca(); };
+  }, [user]);
+
+  // --- GIB connection status + Branch names for order form ---
+  useEffect(() => {
+    if (!user) return;
+    const unsubGib = onSnapshot(doc(db, 'settings', 'gib'), snap => {
+      setGibConnected(snap.exists() ? (snap.data().connected ?? false) : false);
+    });
+    const unsubBranches = onSnapshot(collection(db, 'subeler'), snap => {
+      setBranchNames(
+        snap.docs.map(d => (d.data() as { subeAdi?: string }).subeAdi ?? '').filter(Boolean)
+      );
+    });
+    return () => { unsubGib(); unsubBranches(); };
   }, [user]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -22017,12 +22033,16 @@ function AppContent() {
                         <span className="text-xs font-bold text-gray-500 uppercase truncate">{currentLanguage === 'tr' ? 'E-Belge' : 'E-Doc'}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
-                        {currentLanguage === 'tr' ? 'GIB Bağlı' : 'GIB Connected'}
+                        {gibConnected
+                          ? (currentLanguage === 'tr' ? 'GIB Bağlı' : 'GIB Connected')
+                          : (currentLanguage === 'tr' ? 'GIB Bağlı Değil' : 'GIB Not Connected')}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5 truncate">{currentLanguage === 'tr' ? 'E-Fatura · E-Arşiv · E-İrsaliye' : 'E-Invoice · E-Archive · E-Waybill'}</p>
                       <div className="flex items-center gap-1 mt-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-[10px] text-green-600 font-semibold">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${gibConnected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
+                        <span className={`text-[10px] font-semibold ${gibConnected ? 'text-green-600' : 'text-red-500'}`}>
+                          {gibConnected ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Disconnected')}
+                        </span>
                       </div>
                     </button>
 
@@ -32186,6 +32206,21 @@ function AppContent() {
                       <input type="text" value={newOrder.shippingAddress || ''} onChange={e => setNewOrder({ ...newOrder, shippingAddress: e.target.value })}
                         className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" placeholder={currentT.city_district} />
                     </div>
+                    {branchNames.length > 0 && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">
+                          {currentLanguage === 'tr' ? 'Şube' : 'Branch'}
+                        </label>
+                        <select
+                          value={(newOrder as Record<string, unknown>).subeAdi as string || ''}
+                          onChange={e => setNewOrder({ ...newOrder, subeAdi: e.target.value } as typeof newOrder)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors"
+                        >
+                          <option value="">{currentLanguage === 'tr' ? '— Şube seç (opsiyonel) —' : '— Select branch (optional) —'}</option>
+                          {branchNames.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {/* Fatura / KDV Seçimi */}

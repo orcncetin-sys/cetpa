@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
+import { db } from '../firebase';
+import { collection, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -559,6 +561,35 @@ export default function LandingPage({
     return () => window.removeEventListener('scroll', h);
   }, []);
 
+  // ─── Firestore-backed testimonials (with static fallback) ────────────────────
+  const staticTestimonials = [
+    { quote: isTR ? 'Sipariş yönetiminde harcadığımız zamanı %60 azalttık. CETPA\'nın Shopify entegrasyonu fatura keserken hayat kurtardı.' : 'We reduced time spent on order management by 60%. CETPA\'s Shopify integration is a lifesaver when invoicing.', name: 'Ahmet Y.', role: isTR ? 'Operasyon Müdürü' : 'Operations Manager', company: 'YapıTrade A.Ş.', rating: 5 },
+    { quote: isTR ? 'CRM modülü sayesinde müşteri kaybı %35 düştü. AI lead skorlaması satış ekibimizin önceliklerini doğru belirledi.' : 'Customer churn dropped 35% with the CRM module. AI lead scoring helps our sales team set the right priorities.', name: 'Selin K.', role: isTR ? 'Satış Direktörü' : 'Sales Director', company: 'KozmoTex', rating: 5 },
+    { quote: isTR ? 'e-Fatura ve Mikro entegrasyonu muhasebe ekibimizi kurtardı. Artık ay sonu kapanış 3 gün yerine 3 saatte bitiyor.' : 'The e-Invoice and Mikro integration saved our accounting team. Month-end close takes 3 hours now instead of 3 days.', name: 'Murat D.', role: isTR ? 'CFO' : 'CFO', company: 'DeltaCargo', rating: 5 },
+  ];
+  const [firestoreTestimonials, setFirestoreTestimonials] = useState<typeof staticTestimonials | null>(null);
+  const testimonials = firestoreTestimonials ?? staticTestimonials;
+
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, 'testimonials'), orderBy('order', 'asc')), snap => {
+      if (!snap.empty) {
+        setFirestoreTestimonials(snap.docs.map(d => {
+          const x = d.data();
+          return {
+            quote: isTR ? (x.quote_tr ?? x.quote ?? '') : (x.quote_en ?? x.quote ?? ''),
+            name: x.name ?? '',
+            role: isTR ? (x.role_tr ?? x.role ?? '') : (x.role_en ?? x.role ?? ''),
+            company: x.company ?? '',
+            rating: x.rating ?? 5,
+          };
+        }));
+      } else {
+        setFirestoreTestimonials(null); // fall back to static
+      }
+    }, () => setFirestoreTestimonials(null));
+    return unsub;
+  }, [isTR]);
+
   if (activePage === 'privacy') return <PrivacyPage currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
   if (activePage === 'terms')   return <TermsPage   currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
 
@@ -582,12 +613,6 @@ export default function LandingPage({
     { n: '03', title: isTR ? 'Büyü' : 'Grow',         desc: isTR ? 'AI destekli tahminler ve anlık raporlarla rekabette öne geçin.' : 'Get ahead with AI-driven forecasts and real-time reporting.', icon: TrendingUp },
   ];
 
-  const testimonials = [
-    { quote: isTR ? 'Sipariş yönetiminde harcadığımız zamanı %60 azalttık. CETPA\'nın Shopify entegrasyonu fatura keserken hayat kurtardı.' : 'We reduced time spent on order management by 60%. CETPA\'s Shopify integration is a lifesaver when invoicing.', name: 'Ahmet Y.', role: isTR ? 'Operasyon Müdürü' : 'Operations Manager', company: 'YapıTrade A.Ş.', rating: 5 },
-    { quote: isTR ? 'CRM modülü sayesinde müşteri kaybı %35 düştü. AI lead skorlaması satış ekibimizin önceliklerini doğru belirledi.' : 'Customer churn dropped 35% with the CRM module. AI lead scoring helps our sales team set the right priorities.', name: 'Selin K.', role: isTR ? 'Satış Direktörü' : 'Sales Director', company: 'KozmoTex', rating: 5 },
-    { quote: isTR ? 'e-Fatura ve Mikro entegrasyonu muhasebe ekibimizi kurtardı. Artık ay sonu kapanış 3 gün yerine 3 saatte bitiyor.' : 'The e-Invoice and Mikro integration saved our accounting team. Month-end close takes 3 hours now instead of 3 days.', name: 'Murat D.', role: isTR ? 'CFO' : 'CFO', company: 'DeltaCargo', rating: 5 },
-  ];
-
   const faqs = [
     { q: isTR ? 'Kurulum ne kadar sürer?' : 'How long does setup take?', a: isTR ? 'Temel kurulum 1 iş günü içinde tamamlanır. Shopify ve muhasebe entegrasyonlarıyla birlikte tam onboarding ortalama 3-5 gün sürmektedir.' : 'Basic setup is complete within 1 business day. Full onboarding with Shopify and accounting integrations averages 3-5 days.' },
     { q: isTR ? 'Mevcut verilerim korunur mu?' : 'Is my existing data protected?', a: isTR ? 'Evet. CSV ve API yoluyla mevcut ERP, Excel veya muhasebe yazılımlarından tüm verilerinizi içe aktarıyoruz. Veri kaybı yaşanmaz.' : 'Yes. We import all your data from existing ERP, Excel or accounting software via CSV and API. No data loss.' },
@@ -596,7 +621,7 @@ export default function LandingPage({
     { q: isTR ? 'Teknik destek nasıl çalışır?' : 'How does technical support work?', a: isTR ? 'Enterprise planlarda 7/24 canlı destek ve dedicated hesap yöneticisi sağlanır. Startup planında mesai saatlerinde canlı chat desteği mevcuttur.' : 'Enterprise plans include 24/7 live support and a dedicated account manager. Startup plans include live chat support during business hours.' },
   ];
 
-  const pricingPlans = [
+  const staticPricingPlans = [
     {
       name: 'Startup',
       monthlyTR: 1490, yearlyTR: 1192,
@@ -629,6 +654,30 @@ export default function LandingPage({
       highlight: false, cta: isTR ? 'Teklif Al' : 'Get Quote',
     },
   ];
+  const [firestorePricing, setFirestorePricing] = useState<typeof staticPricingPlans | null>(null);
+  const pricingPlans = firestorePricing ?? staticPricingPlans;
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'pricing'), snap => {
+      if (snap.exists()) {
+        const d = snap.data();
+        // Firestore doc shape: { startup_monthly_tr, startup_yearly_tr, startup_monthly_en, startup_yearly_en,
+        //                         enterprise_monthly_tr, enterprise_yearly_tr, enterprise_monthly_en, enterprise_yearly_en }
+        setFirestorePricing(prev => (prev === null ? staticPricingPlans : prev).map((plan, i) => {
+          const key = i === 0 ? 'startup' : i === 1 ? 'enterprise' : null;
+          if (!key) return plan;
+          return {
+            ...plan,
+            monthlyTR: d[`${key}_monthly_tr`] ?? plan.monthlyTR,
+            yearlyTR:  d[`${key}_yearly_tr`]  ?? plan.yearlyTR,
+            monthlyEN: d[`${key}_monthly_en`] ?? plan.monthlyEN,
+            yearlyEN:  d[`${key}_yearly_en`]  ?? plan.yearlyEN,
+          };
+        }));
+      }
+    }, () => {}); // silently ignore errors on public page
+    return unsub;
+  }, []);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
