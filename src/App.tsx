@@ -27807,18 +27807,24 @@ function AppContent() {
                     const rejected = priceOverrides.filter(p => p.status === 'rejected');
                     const totalDiscount = approved.reduce((s, p) => s + Math.max(0, (p.standardPrice || 0) - (p.requestedPrice || 0)), 0);
                     return (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        {[
-                          { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending.length, color: 'text-amber-600', bg: 'bg-amber-50', icon: '⏳' },
-                          { label: currentLanguage === 'tr' ? 'Onaylı' : 'Approved', value: approved.length, color: 'text-emerald-600', bg: 'bg-emerald-50', icon: '✅' },
-                          { label: currentLanguage === 'tr' ? 'Reddedilen' : 'Rejected', value: rejected.length, color: 'text-red-600', bg: 'bg-red-50', icon: '❌' },
-                          { label: currentLanguage === 'tr' ? 'Toplam İndirim' : 'Total Discount', value: '₺' + totalDiscount.toLocaleString('tr-TR', { maximumFractionDigits: 0 }), color: 'text-brand', bg: 'bg-brand/5', icon: '💸' },
-                        ].map(k => (
-                          <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
-                            <p className="text-xs text-gray-500 mb-1">{k.label}</p>
-                            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-                          </div>
-                        ))}
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {[
+                            { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending',   value: String(pending.length),  color: 'text-amber-600',   bg: 'bg-amber-50',   isMoney: false },
+                            { label: currentLanguage === 'tr' ? 'Onaylı' : 'Approved',    value: String(approved.length), color: 'text-emerald-600', bg: 'bg-emerald-50', isMoney: false },
+                            { label: currentLanguage === 'tr' ? 'Reddedilen' : 'Rejected', value: String(rejected.length), color: 'text-red-600',     bg: 'bg-red-50',     isMoney: false },
+                            { label: currentLanguage === 'tr' ? 'Toplam İndirim' : 'Total Discount', value: fmtKpi(totalDiscount), color: 'text-brand', bg: 'bg-brand/5', isMoney: true },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <div className="flex items-start justify-between mb-1">
+                                <p className="text-xs text-gray-500">{k.label}</p>
+                                {/* Phase — embed currency toggle inside Toplam İndirim card */}
+                                {k.isMoney && <KpiCurrencyToggle />}
+                              </div>
+                              <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     );
                   })()}
@@ -27833,11 +27839,27 @@ function AppContent() {
                             <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'} value={priceOverrideForm.customerName} onChange={e => setPriceOverrideForm(f => ({ ...f, customerName: e.target.value }))} />
                             <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} value={priceOverrideForm.productName} onChange={e => setPriceOverrideForm(f => ({ ...f, productName: e.target.value }))} />
                             <div>
-                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">{currentLanguage === 'tr' ? 'Standart Fiyat ₺' : 'Standard Price ₺'}</label>
+                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">
+                                {currentLanguage === 'tr' ? 'Standart Fiyat' : 'Standard Price'}
+                                {' '}₺
+                                {priceOverrideForm.standardPrice > 0 && kpiCurrency !== 'TRY' && (() => {
+                                  const r = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
+                                  const sym = kpiCurrency === 'USD' ? '$' : '€';
+                                  return <span className="text-brand ml-1 normal-case font-bold">≈ {sym}{(priceOverrideForm.standardPrice / r).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>;
+                                })()}
+                              </label>
                               <input type="number" className="apple-input w-full" value={priceOverrideForm.standardPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, standardPrice: Number(e.target.value) }))} />
                             </div>
                             <div>
-                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">{currentLanguage === 'tr' ? 'Talep Edilen Fiyat ₺' : 'Requested Price ₺'}</label>
+                              <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">
+                                {currentLanguage === 'tr' ? 'Talep Edilen Fiyat' : 'Requested Price'}
+                                {' '}₺
+                                {priceOverrideForm.requestedPrice > 0 && kpiCurrency !== 'TRY' && (() => {
+                                  const r = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
+                                  const sym = kpiCurrency === 'USD' ? '$' : '€';
+                                  return <span className="text-brand ml-1 normal-case font-bold">≈ {sym}{(priceOverrideForm.requestedPrice / r).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>;
+                                })()}
+                              </label>
                               <input type="number" className="apple-input w-full" value={priceOverrideForm.requestedPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, requestedPrice: Number(e.target.value) }))} />
                             </div>
                           </div>
@@ -28069,20 +28091,21 @@ function AppContent() {
                         <h2 className="text-xl font-bold text-gray-900">{currentLanguage === 'tr' ? 'Satış Hedefleri' : 'Sales Targets'}</h2>
                         <p className="text-sm text-gray-500">{now.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' })}</p>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <KpiCurrencyToggle />
-                        {!isEditingTarget && (
-                          <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
-                            className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Bu Ay Hedef Güncelle' : 'Update This Month'}</button>
-                        )}
-                      </div>
+                      {!isEditingTarget && (
+                        <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
+                          className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Bu Ay Hedef Güncelle' : 'Update This Month'}</button>
+                      )}
                     </div>
 
                     {/* ── Bu Ay Card ─────────────────────────────────────── */}
                     <div className="apple-card p-6">
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-sm font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Bu Ay' : 'This Month'}</p>
-                        <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${globalPct >= 100 ? 'bg-emerald-100 text-emerald-700' : globalPct >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{globalPct}%</span>
+                        <div className="flex items-center gap-2">
+                          {/* Currency toggle — embedded in the card */}
+                          <KpiCurrencyToggle />
+                          <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${globalPct >= 100 ? 'bg-emerald-100 text-emerald-700' : globalPct >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{globalPct}%</span>
+                        </div>
                       </div>
                       {isEditingTarget ? (
                         <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -28130,6 +28153,11 @@ function AppContent() {
                     </div>
 
                     {/* ── 12-Month Summary KPI Cards ──────────────────────── */}
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? '12 Ay Özet' : '12-Month Summary'}
+                      </p>
+                    </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {[
                         { label: currentLanguage === 'tr' ? '12 Ay Ciro' : '12-Mo Revenue', value: fmtKpi(totalActual12,'K',1), sub: `${months.filter(m => (revenueByMonth[m.key] || 0) > 0).length} ${currentLanguage === 'tr' ? 'aktif ay' : 'active months'}`, color: 'text-emerald-600', icon: '📈' },
@@ -28150,7 +28178,9 @@ function AppContent() {
 
                     {/* ── Last 6 Months Mini Cards ─────────────────────── */}
                     <div>
-                      <h3 className="text-sm font-bold text-gray-700 mb-2">{currentLanguage === 'tr' ? 'Son 6 Ay' : 'Last 6 Months'}</h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-bold text-gray-700">{currentLanguage === 'tr' ? 'Son 6 Ay' : 'Last 6 Months'}</h3>
+                      </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
                         {months.slice(6).map(m => {
                           const target = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
@@ -28178,9 +28208,12 @@ function AppContent() {
 
                     {/* ── Historical Table ──────────────────────────────── */}
                     <div className="apple-card overflow-hidden">
-                      <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
                         <h3 className="font-bold text-gray-800 text-sm">{currentLanguage === 'tr' ? 'Geçmiş Hedefler (12 Ay)' : 'Target History (12 Months)'}</h3>
-                        <p className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Hedefi düzenlemek için satıra tıklayın' : 'Click a row to edit its target'}</p>
+                        <div className="flex items-center gap-3">
+                          <p className="text-xs text-gray-400 hidden sm:block">{currentLanguage === 'tr' ? 'Hedefi düzenlemek için satıra tıklayın' : 'Click a row to edit its target'}</p>
+                          <KpiCurrencyToggle />
+                        </div>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
