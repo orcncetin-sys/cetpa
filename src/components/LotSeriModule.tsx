@@ -185,13 +185,15 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
       )}
 
       {/* Sub-tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setSubTab(t.id)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${subTab === t.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setSubTab(t.id)}
+              className={`shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${subTab === t.id ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search */}

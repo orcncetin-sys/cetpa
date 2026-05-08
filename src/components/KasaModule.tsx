@@ -293,7 +293,8 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
       </div>
 
       {/* Sub-tabs */}
-      <div className="apple-card p-1 flex gap-1 w-fit">
+      <div className="overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
         {[
           { key: 'hareketler', label: 'Hareketler' },
           { key: 'kapanis', label: 'Günlük Kapanış' },
@@ -302,16 +303,12 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as typeof activeTab)}
-            className={cn(
-              'px-4 py-2 rounded-xl text-sm font-medium transition-all',
-              activeTab === tab.key
-                ? 'bg-brand text-white shadow'
-                : 'text-gray-600 hover:bg-gray-100'
-            )}
+            className={`shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${activeTab === tab.key ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
           >
             {tab.label}
           </button>
         ))}
+        </div>
       </div>
 
       {/* ── TAB: Hareketler ── */}

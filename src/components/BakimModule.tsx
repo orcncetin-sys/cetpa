@@ -210,13 +210,15 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
-        {TABS.map(t => (
-          <button key={t} onClick={() => setActiveTab(t)}
-            className={`px-4 py-2 text-sm font-medium rounded-xl transition-all ${activeTab === t ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t}
-          </button>
-        ))}
+      <div className="overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+          {TABS.map(t => (
+            <button key={t} onClick={() => setActiveTab(t)}
+              className={`shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${activeTab === t ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* EKIPMANLAR TAB */}

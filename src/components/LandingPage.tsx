@@ -705,7 +705,7 @@ export default function LandingPage({
           <div className="max-w-6xl mx-auto flex items-center justify-between h-[60px] px-5 sm:px-8">
             <div className="flex items-center gap-8">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 w-auto object-contain flex-shrink-0" />
-              <div className="hidden md:flex items-center gap-7">
+              <div className="hidden md:flex items-center gap-5">
                 {[
                   { id: 'innovation', label: isTR ? 'Ürünler'       : 'Products'    },
                   { id: 'how',        label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
@@ -714,13 +714,13 @@ export default function LandingPage({
                   { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
                 ].map(({ id, label }) => (
                   <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
-                    className={cn('text-[13px] font-medium whitespace-nowrap transition-colors', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
+                    className={cn('text-[13px] font-medium whitespace-nowrap transition-colors shrink-0', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
                     {label}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-4">
               <button onClick={onLanguageToggle}
                 className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
