@@ -14,10 +14,13 @@ interface ProductFormProps {
   initialData?: InventoryItem;
   warehouses?: Warehouse[];
   existingCategories?: string[];
+  exchangeRates?: Record<string, number>; // { USD: ..., EUR: ... }
 }
 
-export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses: warehousesProp, existingCategories = [] }: ProductFormProps) {
+export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses: warehousesProp, existingCategories = [], exchangeRates }: ProductFormProps) {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  // Local currency toggle for FX hints
+  const [fxCurrency, setFxCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
 
   useEffect(() => {
     if (warehousesProp) {
@@ -134,6 +137,21 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
   };
 
   if (!isOpen) return null;
+
+  // ── FX helpers ──────────────────────────────────────────────────────────────
+  const fxRate = fxCurrency === 'USD'
+    ? (exchangeRates?.USD || 1)
+    : fxCurrency === 'EUR'
+      ? (exchangeRates?.EUR || 1)
+      : 1;
+  const fxSym = fxCurrency === 'USD' ? '$' : fxCurrency === 'EUR' ? '€' : '₺';
+
+  /** Returns a formatted FX equivalent string, or null if TRY or value is zero */
+  const fxHint = (tryValue: number): string | null => {
+    if (fxCurrency === 'TRY' || !tryValue || tryValue === 0 || !exchangeRates) return null;
+    const converted = tryValue / fxRate;
+    return `≈ ${fxSym}${converted.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -258,6 +276,12 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
             <div className="space-y-2">
               <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
                 <DollarSign className="w-3 h-3" /> Maliyet (TL)
+                {/* Inline FX hint next to label */}
+                {fxHint(formData.costPrice) && (
+                  <span className="text-[10px] font-bold text-brand normal-case ml-1">
+                    {fxHint(formData.costPrice)}
+                  </span>
+                )}
               </label>
               <input
                 required
@@ -271,11 +295,38 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
           </div>
 
           <div className="space-y-4 pt-4 border-t border-gray-50">
-            <h3 className="text-sm font-bold text-gray-900">Fiyatlandırma Katmanları</h3>
+            {/* ── Fiyatlandırma header with currency toggle ── */}
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-900">Fiyatlandırma Katmanları</h3>
+              {/* Currency toggle — only shown when exchangeRates are available */}
+              {exchangeRates && (
+                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setFxCurrency(c)}
+                      className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
+                        fxCurrency === c
+                          ? 'bg-white shadow-sm text-gray-800'
+                          : 'text-gray-400 hover:text-gray-600'
+                      }`}
+                    >
+                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {Object.entries(formData.prices).map(([tier, price]) => (
                 <div key={tier} className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase truncate">{tier}</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase truncate">{tier}</label>
+                    {fxHint(price) && (
+                      <span className="text-[9px] font-bold text-brand">{fxHint(price)}</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.01"

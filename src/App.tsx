@@ -1176,7 +1176,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, orders: portalOrders = []
   );
 };
 
-const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses, onPrintLabels, onQuickPO }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[], onPrintLabels?: (items: LabelItem[]) => void, onQuickPO?: (item: { name: string; sku: string }) => void }) => {
+const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCategory, currentT, currentLanguage, inventoryMovements, warehouses, onPrintLabels, onQuickPO, exchangeRates }: { inventory: InventoryItem[], categories: string[], selectedCategory: string, setSelectedCategory: (c: string) => void, currentT: Record<string, string>, currentLanguage: string, isAuthenticated?: boolean, userRole?: string | null, inventoryMovements: InventoryMovement[], warehouses: Warehouse[], onPrintLabels?: (items: LabelItem[]) => void, onQuickPO?: (item: { name: string; sku: string }) => void, exchangeRates?: Record<string, number> | null }) => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<InventoryItem | null>(null);
   const [editingProduct, setEditingProduct] = useState<InventoryItem | null>(null);
@@ -1711,6 +1711,7 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
         }}
         warehouses={warehouses}
         existingCategories={categories}
+        exchangeRates={exchangeRates ?? undefined}
       />
       {selectedProduct && <ProductDetail product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
 
@@ -27169,6 +27170,7 @@ function AppContent() {
                 warehouses={warehouses}
                 onPrintLabels={setLabelItems}
                 onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satinalma'); }}
+                exchangeRates={exchangeRates}
               />
             </motion.div>
           )}
