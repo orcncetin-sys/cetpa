@@ -208,7 +208,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
             { label: 'Bekleyen Gümrük', value: bekleyenGumruk, color: 'text-amber-600' },
             { label: 'Ort. Teslimat (gün)', value: '14', color: 'text-blue-600' },
           ].map(kpi => (
-            <div key={kpi.label} className="apple-card text-center">
+            <div key={kpi.label} className="apple-card p-4 text-center">
               <div className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</div>
               <div className="text-xs text-gray-400 mt-0.5">{kpi.label}</div>
             </div>
@@ -238,7 +238,8 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
 
       {/* İhracat Tab */}
       {activeTab === 'ihracat' && (
-        <div className="apple-card overflow-x-auto">
+        <div className="apple-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -267,12 +268,14 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* İthalat Tab */}
       {activeTab === 'ithalat' && (
-        <div className="apple-card overflow-x-auto">
+        <div className="apple-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -300,12 +303,14 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* Akreditif Tab */}
       {activeTab === 'akreditif' && (
-        <div className="apple-card overflow-x-auto">
+        <div className="apple-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -331,12 +336,14 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* Gümrük Tab */}
       {activeTab === 'gumruk' && (
-        <div className="apple-card overflow-x-auto">
+        <div className="apple-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -361,6 +368,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
