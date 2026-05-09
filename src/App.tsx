@@ -20959,17 +20959,11 @@ function AppContent() {
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
                   { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations', icon: Link },
                   { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
-                  { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge' : 'E-Document', icon: FileText },
-                  { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance', icon: Wrench },
-                  { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'Service', icon: Headphones },
-                  { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', icon: Ship },
-                  { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches', icon: GitBranch },
-                  { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar', icon: Receipt },
-                  { id: 'lotseri', label: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial', icon: Hash },
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const isActive = activeTab === tab.id;
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm' };
+                  const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
                   const badgeCount = tab.id === 'orders'
@@ -23253,6 +23247,15 @@ function AppContent() {
                         </button>
                       );
                     })}
+                    <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
+                    <button onClick={() => setActiveTab('ebelge')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                      <FileText className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'E-Belge' : 'E-Document'}
+                    </button>
+                    <button onClick={() => setActiveTab('vergi')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                      <Receipt className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                    </button>
                   </div>
 
                   {/* ── Genel Muhasebe ── */}
@@ -25215,6 +25218,23 @@ function AppContent() {
               {!canAccess('production') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Üretim Yönetimi':'Production Management'} /> : (
                 <>
                   {!hasFullAccess('production') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Üretim Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Factory className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
+                      </button>
+                      <button onClick={() => setActiveTab('lotseri')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Hash className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
+                      </button>
+                      <button onClick={() => setActiveTab('bakim')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Wrench className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
+                      </button>
+                    </div>
+                  </div>
                   <ProductionModule currentLanguage={currentLanguage} isAuthenticated={!!user} />
                   {/* ── BOM / MRP ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
@@ -26664,6 +26684,23 @@ function AppContent() {
               {!canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
                 <>
                   {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Muhasebe Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('muhasebe')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
+                      </button>
+                      <button onClick={() => setActiveTab('vergi')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Receipt className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
                     subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
@@ -26681,6 +26718,23 @@ function AppContent() {
               {!canAccess('bakim') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'} /> : (
                 <>
                   {!hasFullAccess('bakim') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Üretim Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('production')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Factory className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
+                      </button>
+                      <button onClick={() => setActiveTab('lotseri')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Hash className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Wrench className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Bakım-Onarım Yönetimi' : 'Plant Maintenance'}
                     subtitle={currentLanguage === 'tr' ? 'Ekipman sicili, iş emirleri, bakım planı ve arıza takibi' : 'Equipment register, work orders, maintenance schedule and failure tracking'}
@@ -26698,6 +26752,23 @@ function AppContent() {
               {!canAccess('servis') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Servis Yönetimi' : 'Service Management'} /> : (
                 <>
                   {!hasFullAccess('servis') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── CRM Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('crm')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Users className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales'}
+                      </button>
+                      <button onClick={() => setActiveTab('sube')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <GitBranch className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Headphones className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Servis' : 'Service'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Servis Yönetimi' : 'After-Sales Service'}
                     subtitle={currentLanguage === 'tr' ? 'Servis talepleri, SLA takibi, garanti ve teknisyen yönetimi' : 'Service tickets, SLA tracking, warranty and technician management'}
@@ -26715,6 +26786,19 @@ function AppContent() {
               {!canAccess('ihracat') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'} /> : (
                 <>
                   {!hasFullAccess('ihracat') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Lojistik Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('lojistik')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Truck className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics & Warehouse'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Ship className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'İthalat / İhracat' : 'Import / Export'}
                     subtitle={currentLanguage === 'tr' ? 'Dış ticaret, akreditif ve gümrük beyanname yönetimi' : 'Foreign trade, letters of credit and customs declarations'}
@@ -26732,6 +26816,23 @@ function AppContent() {
               {!canAccess('sube') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'} /> : (
                 <>
                   {!hasFullAccess('sube') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── CRM Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('crm')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Users className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <GitBranch className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}
+                      </button>
+                      <button onClick={() => setActiveTab('servis')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Headphones className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Servis' : 'Service'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'}
                     subtitle={currentLanguage === 'tr' ? 'Şubeler, şubeler arası transfer ve şube bazlı P&L analizi' : 'Branches, inter-branch transfers and branch P&L analysis'}
@@ -26749,6 +26850,23 @@ function AppContent() {
               {!canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
                 <>
                   {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Muhasebe Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('muhasebe')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
+                      </button>
+                      <button onClick={() => setActiveTab('ebelge')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Receipt className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
                     subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
@@ -26766,6 +26884,23 @@ function AppContent() {
               {!canAccess('lotseri') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'} /> : (
                 <>
                   {!hasFullAccess('lotseri') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Üretim Group Nav ── */}
+                  <div className="overflow-x-auto scrollbar-none">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      <button onClick={() => setActiveTab('production')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Factory className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
+                      </button>
+                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
+                        <Hash className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
+                      </button>
+                      <button onClick={() => setActiveTab('bakim')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                        <Wrench className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
+                      </button>
+                    </div>
+                  </div>
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Lot & Seri No Takibi' : 'Lot & Serial Tracking'}
                     subtitle={currentLanguage === 'tr' ? 'Lot kayıtları, seri numaraları, hareketler ve karantina yönetimi' : 'Lot records, serial numbers, movements and quarantine management'}
@@ -27464,6 +27599,15 @@ function AppContent() {
                       </button>
                     );
                   })}
+                  <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
+                  <button onClick={() => setActiveTab('sube')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                    <GitBranch size={13} />
+                    <span>{currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}</span>
+                  </button>
+                  <button onClick={() => setActiveTab('servis')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                    <Headphones size={13} />
+                    <span>{currentLanguage === 'tr' ? 'Servis' : 'Service'}</span>
+                  </button>
                 </div>
               </div>
 
@@ -31440,6 +31584,11 @@ function AppContent() {
                       </button>
                     );
                   })}
+                  <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
+                  <button onClick={() => setActiveTab('ihracat')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
+                    <Ship size={13} />
+                    <span>{currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'}</span>
+                  </button>
                 </div>
               </div>
 
