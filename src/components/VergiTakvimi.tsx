@@ -138,7 +138,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
         </div>
       )}
 
-      <div className="apple-card">
+      <div className="apple-card p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
             {[

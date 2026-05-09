@@ -212,7 +212,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
 
       {/* LOT TAB */}
       {subTab === 'lot' && (
-        <div className="apple-card">
+        <div className="apple-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900">{tr ? 'Lot Kayıtları' : 'Lot Records'}</h3>
             {isAuthenticated && (
@@ -275,7 +275,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
 
       {/* SERİ NO TAB */}
       {subTab === 'seri' && (
-        <div className="apple-card">
+        <div className="apple-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900">{tr ? 'Seri Numara Kayıtları' : 'Serial Number Records'}</h3>
             {isAuthenticated && (
@@ -327,8 +327,9 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
 
       {/* HAREKETLER TAB */}
       {subTab === 'hareketler' && (
-        <div className="apple-card">
+        <div className="apple-card p-5 overflow-hidden">
           <h3 className="font-bold text-gray-900 mb-4">{tr ? 'Lot Hareketleri' : 'Lot Movements'}</h3>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
               <th className="text-left py-2">{tr ? 'Tarih' : 'Date'}</th>
@@ -356,12 +357,13 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* KARANTİNA TAB */}
       {subTab === 'karantina' && (
-        <div className="apple-card">
+        <div className="apple-card p-5">
           <h3 className="font-bold text-gray-900 mb-4">{tr ? 'Karantina Lotları' : 'Quarantined Lots'}</h3>
           {karantina.length === 0 ? (
             <div className="text-center py-12">

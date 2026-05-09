@@ -254,7 +254,8 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
 
       {/* Transfer Tab */}
       {activeTab === 'transfer' && (
-        <div className="apple-card overflow-x-auto">
+        <div className="apple-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -292,6 +293,7 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
