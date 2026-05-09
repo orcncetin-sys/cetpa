@@ -20744,6 +20744,13 @@ function AppContent() {
                 { id: 'admin', label: currentT.admin },
                 { id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings' },
                 { id: 'finance', label: currentLanguage === 'tr' ? 'Finans' : 'Finance' },
+                { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub' },
+                { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar' },
+                { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export' },
+                { id: 'lotseri', label: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial' },
+                { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance' },
+                { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches' },
+                { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service' },
               ].find(t => t.id === activeTab)?.label || activeTab)}
             </span>
           </div>
