@@ -231,7 +231,7 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
               { label: 'Bakımda', value: kpis.bakimda, color: 'text-amber-600' },
               { label: 'Arızalı', value: kpis.arizali, color: 'text-red-600' },
             ].map(k => (
-              <div key={k.label} className="apple-card text-center">
+              <div key={k.label} className="apple-card p-4 text-center">
                 <div className={`text-2xl font-bold ${k.color}`}>{k.value}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{k.label}</div>
               </div>
@@ -355,7 +355,7 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
             <div className="apple-card text-center py-10 text-gray-400">Önümüzdeki 30 günde planlanmış bakım yok</div>
           )}
           {planlilar.map(e => (
-            <div key={e.id} className="apple-card flex items-center justify-between">
+            <div key={e.id} className="apple-card p-4 flex items-center justify-between">
               <div>
                 <div className="font-semibold text-gray-800">{e.ad}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{e.konum} · Son bakım: {e.sonBakim}</div>
