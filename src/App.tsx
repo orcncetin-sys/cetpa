@@ -27573,7 +27573,7 @@ function AppContent() {
                 inventoryMovements={inventoryMovements}
                 warehouses={warehouses}
                 onPrintLabels={setLabelItems}
-                onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satinalma'); }}
+                onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satin-alma'); }}
                 exchangeRates={exchangeRates}
               />
             </motion.div>
