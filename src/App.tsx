@@ -114,7 +114,8 @@ import {
   Ship,
   GitBranch,
   Receipt,
-  Hash
+  Hash,
+  TrendingDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -18505,7 +18506,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -19223,6 +19224,25 @@ function AppContent() {
   // ── Phase 543–545 ────────────────────────────────────────────────────────────
   const [dashVergiDeadlines, setDashVergiDeadlines] = useState<{ id: string; vergiTuru: string; sonTarih: string; durum: string }[]>([]); // Phase 543
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null); // Phase 544 — leadId with open status dropdown
+  // ── Phase 547: Bilanço — bank accounts fetched on demand ──────────────────
+  const [p547BankAccounts, setP547BankAccounts] = useState<Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>>([]);
+  const [p547FixedAssets, setP547FixedAssets]   = useState<Array<{ id: string; name: string; cost: number; depreciation: number }>>([]);
+  // ── Phase 548: Masraf Yönetimi — expense claims ────────────────────────────
+  const [p548Masraflar, setP548Masraflar] = useState<Array<{
+    id: string; employeeName: string; category: string; amount: number; currency: string;
+    date: string; description: string; receiptUrl?: string;
+    status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi'; createdAt?: unknown; rejectionNote?: string;
+  }>>([]);
+  const [p548Form, setP548Form] = useState(false);
+  const [p548Draft, setP548Draft] = useState({ employeeName: '', category: 'Ulaşım', amount: '', currency: 'TRY', date: new Date().toISOString().slice(0,10), description: '' });
+  // ── Phase 549: İade Yönetimi (RMA) ──────────────────────────────────────
+  const [p549Iadeler, setP549Iadeler] = useState<Array<{
+    id: string; orderId: string; customerName: string; items: string; reason: string;
+    condition: 'Hasarlı' | 'Sağlam' | 'Kısmen Hasarlı'; decision: 'İade' | 'Değişim' | 'Kredi Notu' | 'Bekliyor';
+    status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'Tamamlandı'; createdAt?: unknown; notes?: string;
+  }>>([]);
+  const [p549Form, setP549Form] = useState(false);
+  const [p549Draft, setP549Draft] = useState({ orderId: '', customerName: '', items: '', reason: 'Hasarlı Ürün', condition: 'Hasarlı' as const, notes: '' });
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -19249,6 +19269,48 @@ function AppContent() {
     setMonthlyTargets(updated);
     setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
   };
+  // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
+    const unsubBank = onSnapshot(collection(db, 'bankAccounts'), snap => {
+      setP547BankAccounts(snap.docs.map(d => ({
+        id: d.id, bankName: d.data().bankName || d.data().bank || '—',
+        accountType: d.data().accountType || 'Vadesiz',
+        balance: Number(d.data().balance) || 0,
+        currency: d.data().currency || 'TRY',
+      })));
+    }, () => setP547BankAccounts([]));
+    const unsubFA = onSnapshot(collection(db, 'sabitKiymetler'), snap => {
+      setP547FixedAssets(snap.docs.map(d => ({
+        id: d.id, name: d.data().name || '—',
+        cost: Number(d.data().cost) || Number(d.data().edinimBedeli) || 0,
+        depreciation: Number(d.data().birikimliAmortisman) || 0,
+      })));
+    }, () => setP547FixedAssets([]));
+    return () => { unsubBank(); unsubFA(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, muhasebeTab]);
+
+  // ── Phase 548: Fetch expense claims (masraf) ───────────────────────────
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'masraf') return;
+    const unsub = onSnapshot(query(collection(db, 'masraflar'), orderBy('createdAt', 'desc')), snap => {
+      setP548Masraflar(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p548Masraflar[number])));
+    }, () => {});
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, muhasebeTab]);
+
+  // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
+  useEffect(() => {
+    if (activeTab !== 'iade') return;
+    const unsub = onSnapshot(query(collection(db, 'rmaRequests'), orderBy('createdAt', 'desc')), snap => {
+      setP549Iadeler(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p549Iadeler[number])));
+    }, () => {});
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   // ── Phase 543: Subscribe to vergiTakvimi when on dashboard ───────────────
   useEffect(() => {
     if (activeTab !== 'dashboard') return;
@@ -20994,6 +21056,8 @@ function AppContent() {
                 { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance' },
                 { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches' },
                 { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service' },
+                { id: 'iade', label: currentLanguage === 'tr' ? 'İade & Değişim' : 'Returns (RMA)' }, // Phase 549
+                { id: 'orders', label: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
               ].find(t => t.id === activeTab)?.label || activeTab)}
             </span>
           </div>
@@ -21212,7 +21276,7 @@ function AppContent() {
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm' };
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
@@ -21330,11 +21394,12 @@ function AppContent() {
             { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: LayoutDashboard },
             {
               id: 'crm', label: tr ? 'CRM & Satış' : 'CRM & Sales', icon: Users,
-              childIds: ['sube', 'servis'],
+              childIds: ['sube', 'servis', 'iade', 'orders'],
               children: [
                 { label: tr ? 'Müşteri Adayları' : 'Leads',       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
                 { label: tr ? 'Müşteriler' : 'Customers',          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
                 { label: tr ? 'Siparişler' : 'Orders',             subId: 'orders',      action: () => setActiveTab('orders') },
+                { label: tr ? 'İade & Değişim' : 'Returns (RMA)', subId: 'iade',        action: () => setActiveTab('iade') }, // Phase 549
                 { label: tr ? 'Pipeline' : 'Pipeline',             subId: 'pipeline',    action: () => { setActiveTab('crm'); setCrmTab('pipeline'); } },
                 { label: tr ? 'Kampanyalar' : 'Campaigns',         subId: 'kampanya',    action: () => { setActiveTab('crm'); setCrmTab('kampanya'); } },
                 { label: tr ? 'Sözleşmeler' : 'Contracts',         subId: 'sozlesmeler', action: () => { setActiveTab('crm'); setCrmTab('sozlesmeler'); } },
@@ -21372,12 +21437,15 @@ function AppContent() {
               childIds: ['ebelge', 'vergi', 'finance'],
               children: [
                 { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'genel',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); } },
+                { label: tr ? 'Bilanço' : 'Balance Sheet',         subId: 'bilanco',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('bilanco'); } }, // Phase 547
+                { label: 'P & L',                                   subId: 'pnl',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('pnl'); } },
+                { label: tr ? 'Nakit Akışı' : 'Cash Flow',         subId: 'nakit-akis',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('nakit-akis'); } },
                 { label: tr ? 'Kasa' : 'Cash Desk',                subId: 'kasa',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kasa'); } },
                 { label: tr ? 'Banka' : 'Banking',                 subId: 'banka',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('banka'); } },
-                { label: tr ? 'Nakit Akışı' : 'Cash Flow',         subId: 'nakit-akis',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('nakit-akis'); } },
-                { label: 'P & L',                                   subId: 'pnl',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('pnl'); } },
                 { label: tr ? 'Tahsilat' : 'Collections',          subId: 'tahsilat',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tahsilat'); } },
                 { label: tr ? 'Borç Yönetimi' : 'Payables',        subId: 'ap',             action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ap'); } },
+                { label: tr ? 'Mutabakat' : 'Reconciliation',      subId: 'mutabakat',      action: () => { setActiveTab('muhasebe'); setMuhasebeTab('mutabakat'); } }, // Phase 550
+                { label: tr ? 'Masraf Yönetimi' : 'Expenses',      subId: 'masraf',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
                 { label: tr ? 'AR Yaşlandırma' : 'AR Aging',       subId: 'ar-aging',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ar-aging'); } },
                 { label: tr ? 'Bütçe' : 'Budget',                  subId: 'butce',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
                 { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
@@ -21397,7 +21465,13 @@ function AppContent() {
                 { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
               ],
             },
-            { id: 'ik',       label: tr ? 'İnsan Kaynakları' : 'HR',              icon: UserCheck },
+            {
+              id: 'ik', label: tr ? 'İnsan Kaynakları' : 'HR', icon: UserCheck,
+              children: [
+                { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',  subId: 'ik-main',  action: () => setActiveTab('ik') },
+                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports', subId: 'masraf',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
+              ],
+            },
             { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
             { id: 'proje',    label: tr ? 'Proje Yönetimi' : 'Projects',           icon: TargetIcon },
             { id: 'production', label: tr ? 'Üretim' : 'Production',              icon: Factory },
@@ -21445,6 +21519,7 @@ function AppContent() {
                   const isChildActive = (subId: string) => {
                     // check if this sub-item corresponds to current state
                     if (subId === activeTab) return true;
+                    if (subId === 'ik-main' && activeTab === 'ik') return true; // Phase 548: IK main
                     if (activeTab === 'crm') return subId === crmTab;
                     if (activeTab === 'muhasebe') return subId === muhasebeTab;
                     if (activeTab === 'lojistik') return subId === lojistikTab;
@@ -24793,6 +24868,290 @@ function AppContent() {
                       <KasaModule currentLanguage={currentLanguage as 'tr' | 'en'} isAuthenticated={!!user && hasFullAccess('muhasebe')} />
                     </motion.div>
                   )}
+
+                  {/* ── Phase 547: Bilanço (Balance Sheet) ─────────────────────────────── */}
+                  {muhasebeTab === 'bilanco' && (() => {
+                    const tr547 = currentLanguage === 'tr';
+                    const usd547 = exchangeRates?.USD ?? 32; const eur547 = exchangeRates?.EUR ?? 35;
+                    const toTRY = (v: number, cur: string) => cur === 'USD' ? v * usd547 : cur === 'EUR' ? v * eur547 : v;
+                    // — Aktif (Assets) —
+                    const kasa547   = p547BankAccounts.filter(b => b.accountType === 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
+                    const banka547  = p547BankAccounts.filter(b => b.accountType !== 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
+                    const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0);
+                    const stok547   = inventory.reduce((s,i) => s + (i.stockLevel||0) * ((i.prices?.['Retail']??i.price??0)), 0);
+                    const duranVarlık547 = p547FixedAssets.reduce((s,fa) => s + Math.max(0, fa.cost - fa.depreciation), 0);
+                    const toplamAktif547 = kasa547 + banka547 + ar547 + stok547 + duranVarlık547;
+                    // — Pasif (Liabilities + Equity) —
+                    const ap547     = apPurchaseOrders.filter(po => !['Teslim Alındı','İptal Edildi'].includes(po.status)).reduce((s,po) => s + (po.totalAmount||0), 0);
+                    const kdvBorc547 = orders.filter(o => o.faturali && o.kdvTutari).reduce((s,o) => s + (o.kdvTutari||0), 0);
+                    const toplamBorç547 = ap547 + kdvBorc547;
+                    const ozkaynak547 = toplamAktif547 - toplamBorç547;
+                    const toplamPasif547 = toplamBorç547 + ozkaynak547;
+                    const fB = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const aktifRows = [
+                      { group: tr547?'Dönen Varlıklar':'Current Assets', items: [
+                        { label: tr547?'Kasa':'Cash on Hand',          v: kasa547 },
+                        { label: tr547?'Bankalar':'Bank Accounts',      v: banka547 },
+                        { label: tr547?'Ticari Alacaklar':'Trade AR',   v: ar547 },
+                        { label: tr547?'Stoklar':'Inventories',         v: stok547 },
+                      ]},
+                      { group: tr547?'Duran Varlıklar':'Non-Current Assets', items: [
+                        { label: tr547?'Sabit Kıymetler (Net)':'Fixed Assets (Net)', v: duranVarlık547 },
+                      ]},
+                    ];
+                    const pasifRows = [
+                      { group: tr547?'Kısa Vadeli Yükümlülükler':'Current Liabilities', items: [
+                        { label: tr547?'Ticari Borçlar':'Trade Payables', v: ap547 },
+                        { label: tr547?'KDV Borcu':'VAT Payable',         v: kdvBorc547 },
+                      ]},
+                      { group: tr547?'Özkaynaklar':'Equity', items: [
+                        { label: tr547?'Net Özkaynaklar':'Net Equity', v: ozkaynak547 },
+                      ]},
+                    ];
+                    return (
+                      <motion.div key="muhasebe-bilanco" initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }} className="space-y-4">
+                        <ModuleHeader title={tr547?'Bilanço':'Balance Sheet'} subtitle={tr547?'Aktif = Pasif (MSUGT formatı)':'Assets = Liabilities + Equity (MSUGT format)'} icon={Scale} />
+                        {/* KPI strip */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {[
+                            { label: tr547?'Toplam Aktif':'Total Assets',      v: toplamAktif547, color: 'text-blue-700',  bg: 'bg-blue-50' },
+                            { label: tr547?'Toplam Pasif':'Total Liabilities + Equity', v: toplamPasif547, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+                            { label: tr547?'Toplam Borç':'Total Debt',         v: toplamBorç547, color: 'text-red-600',   bg: 'bg-red-50' },
+                            { label: tr547?'Özkaynaklar':'Equity',             v: ozkaynak547,   color: ozkaynak547>=0?'text-emerald-700':'text-red-600', bg: ozkaynak547>=0?'bg-emerald-50':'bg-red-50' },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                              <p className={`text-xl font-bold ${k.color}`}>{fB(k.v)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {Math.abs(toplamAktif547 - toplamPasif547) > 1 && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            {tr547?'Bilanço dengelenmedi — bazı veriler eksik olabilir.':'Balance sheet does not balance — some data may be missing.'}
+                          </div>
+                        )}
+                        {/* Two-column balance sheet */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* AKTİF */}
+                          <div className="apple-card p-5">
+                            <h3 className="font-bold text-blue-700 mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4" />{tr547?'AKTİF':'ASSETS'}</h3>
+                            {aktifRows.map(grp => (
+                              <div key={grp.group} className="mb-3">
+                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{grp.group}</p>
+                                {grp.items.map(it => (
+                                  <div key={it.label} className="flex justify-between py-1 border-b border-gray-50 text-sm">
+                                    <span className="text-gray-600">{it.label}</span>
+                                    <span className="font-semibold text-gray-900 tabular-nums">{fB(it.v)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                            <div className="flex justify-between pt-2 border-t-2 border-blue-200 text-sm font-bold">
+                              <span className="text-blue-700">{tr547?'TOPLAM AKTİF':'TOTAL ASSETS'}</span>
+                              <span className="text-blue-700 tabular-nums">{fB(toplamAktif547)}</span>
+                            </div>
+                          </div>
+                          {/* PASİF */}
+                          <div className="apple-card p-5">
+                            <h3 className="font-bold text-indigo-700 mb-3 flex items-center gap-2"><TrendingDown className="w-4 h-4" />{tr547?'PASİF':'LIABILITIES + EQUITY'}</h3>
+                            {pasifRows.map(grp => (
+                              <div key={grp.group} className="mb-3">
+                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{grp.group}</p>
+                                {grp.items.map(it => (
+                                  <div key={it.label} className="flex justify-between py-1 border-b border-gray-50 text-sm">
+                                    <span className="text-gray-600">{it.label}</span>
+                                    <span className="font-semibold text-gray-900 tabular-nums">{fB(it.v)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                            <div className="flex justify-between pt-2 border-t-2 border-indigo-200 text-sm font-bold">
+                              <span className="text-indigo-700">{tr547?'TOPLAM PASİF':'TOTAL L+E'}</span>
+                              <span className="text-indigo-700 tabular-nums">{fB(toplamPasif547)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-center">{tr547?'Veriler Firestore\'dan anlık hesaplanmaktadır. Muhasebe yazılımı çıktısı olarak kullanmayınız.':'Data is calculated live from Firestore. Do not use as official accounting output.'}</p>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 550: e-Mutabakat (Account Reconciliation) ────────────────── */}
+                  {muhasebeTab === 'mutabakat' && (() => {
+                    const tr550 = currentLanguage === 'tr';
+                    // AR per customer from orders
+                    const arMap: Record<string, { name: string; ar: number; paid: number }> = {};
+                    for (const o of orders) {
+                      if (o.status === 'Cancelled') continue;
+                      const k = o.customerName;
+                      if (!arMap[k]) arMap[k] = { name: k, ar: 0, paid: 0 };
+                      arMap[k].ar += o.totalPrice || o.totalAmount || 0;
+                      if (o.paid) arMap[k].paid += o.totalPrice || o.totalAmount || 0;
+                    }
+                    const mutRows = Object.values(arMap).map(r => ({ ...r, balance: r.ar - r.paid })).sort((a,b) => b.balance - a.balance);
+                    const fM = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    return (
+                      <motion.div key="mutabakat" initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }} className="space-y-4">
+                        <ModuleHeader title={tr550?'Cari Mutabakat':'Account Reconciliation'} subtitle={tr550?'Müşteri bazında alacak/ödeme dengesi':'AR vs. payments balance per customer'} icon={RefreshCw} />
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
+                          {[
+                            { label: tr550?'Toplam Alacak':'Total AR',     v: mutRows.reduce((s,r)=>s+r.ar,0),      color:'text-blue-700',   bg:'bg-blue-50' },
+                            { label: tr550?'Tahsil Edilen':'Collected',     v: mutRows.reduce((s,r)=>s+r.paid,0),    color:'text-emerald-700', bg:'bg-emerald-50' },
+                            { label: tr550?'Bakiye':'Open Balance',         v: mutRows.reduce((s,r)=>s+r.balance,0), color:'text-orange-700',  bg:'bg-orange-50' },
+                          ].map(k=>(
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                              <p className={`text-xl font-bold ${k.color}`}>{fM(k.v)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="apple-card overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50/60">
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr550?'Müşteri':'Customer'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Toplam Borç':'Total Charged'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Tahsil':'Collected'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Bakiye':'Balance'}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr550?'Durum':'Status'}</th>
+                              </tr></thead>
+                              <tbody>
+                                {mutRows.slice(0,30).map((r,i)=>(
+                                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                                    <td className="px-4 py-2.5 font-medium text-gray-800">{r.name}</td>
+                                    <td className="px-4 py-2.5 text-right text-gray-600 tabular-nums">{fM(r.ar)}</td>
+                                    <td className="px-4 py-2.5 text-right text-emerald-600 tabular-nums">{fM(r.paid)}</td>
+                                    <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${r.balance>0?'text-orange-600':'text-emerald-600'}`}>{fM(r.balance)}</td>
+                                    <td className="px-4 py-2.5 text-center">
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${r.balance<=0?'bg-emerald-100 text-emerald-700':r.balance/r.ar>0.5?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700'}`}>
+                                        {r.balance<=0?(tr550?'Kapalı':'Closed'):r.balance/r.ar>0.5?(tr550?'Yüksek Bakiye':'High Balance'):(tr550?'Kısmi':'Partial')}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {mutRows.length === 0 && <p className="text-center py-8 text-gray-400 text-sm">{tr550?'Henüz sipariş verisi yok.':'No order data yet.'}</p>}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 548: Masraf Yönetimi (Expense Management) ───────────────── */}
+                  {muhasebeTab === 'masraf' && (() => {
+                    const tr548 = currentLanguage === 'tr';
+                    const cats548 = [tr548?'Ulaşım':'Transportation', tr548?'Konaklama':'Accommodation', tr548?'Yemek':'Meals', tr548?'Temsil':'Entertainment', tr548?'Kırtasiye':'Office Supplies', tr548?'Diğer':'Other'];
+                    const pending548 = p548Masraflar.filter(m=>m.status==='Bekliyor');
+                    const approved548 = p548Masraflar.filter(m=>m.status==='Onaylandı');
+                    const totalPending = pending548.reduce((s,m)=>s+(m.amount||0),0);
+                    const totalApproved = approved548.reduce((s,m)=>s+(m.amount||0),0);
+                    const fE = (v:number, c:string='TRY') => c==='USD'?`$${v.toFixed(2)}`:c==='EUR'?`€${v.toFixed(2)}`:`₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    return (
+                      <motion.div key="masraf" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader
+                          title={tr548?'Masraf Yönetimi':'Expense Management'}
+                          subtitle={tr548?'Çalışan harcama talepleri ve onay süreci':'Employee expense claims and approval workflow'}
+                          icon={Receipt}
+                          actionButton={hasFullAccess('muhasebe') ? (
+                            <button onClick={()=>setP548Form(true)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
+                              <Plus className="w-3.5 h-3.5" />{tr548?'Masraf Ekle':'Add Expense'}
+                            </button>
+                          ) : undefined}
+                        />
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {[
+                            { label: tr548?'Bekleyen Talep':'Pending', v: pending548.length, sub: `₺${Math.round(totalPending).toLocaleString('tr-TR')}`, color:'text-orange-600', bg:'bg-orange-50' },
+                            { label: tr548?'Onaylanan':'Approved',     v: approved548.length, sub: `₺${Math.round(totalApproved).toLocaleString('tr-TR')}`, color:'text-emerald-600', bg:'bg-emerald-50' },
+                            { label: tr548?'Reddedilen':'Rejected',    v: p548Masraflar.filter(m=>m.status==='Reddedildi').length, sub:'', color:'text-red-500', bg:'bg-red-50' },
+                            { label: tr548?'Toplam Kayıt':'Total',     v: p548Masraflar.length, sub:'', color:'text-gray-600', bg:'bg-gray-50' },
+                          ].map(k=>(
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                              <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
+                              {k.sub && <p className="text-xs text-gray-500 mt-0.5">{k.sub}</p>}
+                            </div>
+                          ))}
+                        </div>
+                        {/* Add expense form */}
+                        {p548Form && (
+                          <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
+                            <h4 className="font-bold text-gray-800">{tr548?'Yeni Masraf Talebi':'New Expense Claim'}</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                              <input value={p548Draft.employeeName} onChange={e=>setP548Draft(d=>({...d,employeeName:e.target.value}))} placeholder={tr548?'Çalışan Adı':'Employee Name'} className="apple-input px-3 py-2 text-sm" />
+                              <select value={p548Draft.category} onChange={e=>setP548Draft(d=>({...d,category:e.target.value}))} className="apple-input px-3 py-2 text-sm">
+                                {cats548.map(c=><option key={c}>{c}</option>)}
+                              </select>
+                              <div className="flex gap-2">
+                                <input type="number" value={p548Draft.amount} onChange={e=>setP548Draft(d=>({...d,amount:e.target.value}))} placeholder={tr548?'Tutar':'Amount'} className="apple-input px-3 py-2 text-sm flex-1" />
+                                <select value={p548Draft.currency} onChange={e=>setP548Draft(d=>({...d,currency:e.target.value}))} className="apple-input px-3 py-2 text-sm w-20">
+                                  {['TRY','USD','EUR'].map(c=><option key={c}>{c}</option>)}
+                                </select>
+                              </div>
+                              <input type="date" value={p548Draft.date} onChange={e=>setP548Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm" />
+                              <input value={p548Draft.description} onChange={e=>setP548Draft(d=>({...d,description:e.target.value}))} placeholder={tr548?'Açıklama':'Description'} className="apple-input px-3 py-2 text-sm md:col-span-2" />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={async()=>{
+                                if(!p548Draft.employeeName||!p548Draft.amount) return;
+                                await addDoc(collection(db,'masraflar'),{...p548Draft,amount:parseFloat(p548Draft.amount),status:'Bekliyor',createdAt:serverTimestamp()});
+                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:new Date().toISOString().slice(0,10),description:''});
+                              }} className="apple-button-primary px-4 py-2 text-sm">{tr548?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP548Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr548?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Expense list */}
+                        <div className="apple-card overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50/60">
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr548?'Çalışan':'Employee'}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr548?'Kategori':'Category'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr548?'Tutar':'Amount'}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{tr548?'Tarih':'Date'}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr548?'Durum':'Status'}</th>
+                                {hasFullAccess('muhasebe') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr548?'İşlem':'Action'}</th>}
+                              </tr></thead>
+                              <tbody>
+                                {p548Masraflar.map(m=>(
+                                  <tr key={m.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                    <td className="px-4 py-2.5">
+                                      <p className="font-medium text-gray-800">{m.employeeName}</p>
+                                      <p className="text-xs text-gray-400 hidden sm:block">{m.description}</p>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{m.category}</td>
+                                    <td className="px-4 py-2.5 text-right font-bold text-gray-800 tabular-nums">{fE(m.amount,m.currency)}</td>
+                                    <td className="px-4 py-2.5 text-gray-500 text-xs hidden md:table-cell">{m.date}</td>
+                                    <td className="px-4 py-2.5 text-center">
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.status==='Onaylandı'?'bg-emerald-100 text-emerald-700':m.status==='Reddedildi'?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700'}`}>{m.status}</span>
+                                    </td>
+                                    {hasFullAccess('muhasebe') && (
+                                      <td className="px-4 py-2.5 text-center">
+                                        {m.status==='Bekliyor' && (
+                                          <div className="flex justify-center gap-1">
+                                            <button onClick={()=>updateDoc(doc(db,'masraflar',m.id),{status:'Onaylandı',approvedBy:user?.displayName||user?.email||''})} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200 transition-colors">{tr548?'Onayla':'Approve'}</button>
+                                            <button onClick={()=>updateDoc(doc(db,'masraflar',m.id),{status:'Reddedildi'})} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200 transition-colors">{tr548?'Reddet':'Reject'}</button>
+                                          </div>
+                                        )}
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {p548Masraflar.length===0 && (
+                            <div className="text-center py-12 space-y-2">
+                              <Receipt className="w-10 h-10 text-gray-200 mx-auto" />
+                              <p className="text-gray-400 text-sm">{tr548?'"Masraf Ekle" ile ilk talebi oluşturun':'Click "Add Expense" to create the first claim'}</p>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -30743,6 +31102,129 @@ function AppContent() {
               </div>
             </motion.div>
           )}
+
+          {/* ── Phase 549: İade & Değişim (RMA) ──────────────────────────────────── */}
+          {activeTab === 'iade' && (() => {
+            const tr549 = currentLanguage === 'tr';
+            const reasons549 = [tr549?'Hasarlı Ürün':'Damaged Product', tr549?'Yanlış Ürün':'Wrong Product', tr549?'Beklentileri Karşılamıyor':'Unmet Expectations', tr549?'Fikir Değişikliği':'Changed Mind', tr549?'Diğer':'Other'];
+            const pending549 = p549Iadeler.filter(r=>r.status==='Bekliyor');
+            const approved549 = p549Iadeler.filter(r=>r.status==='Onaylandı');
+            const done549 = p549Iadeler.filter(r=>r.status==='Tamamlandı');
+            const statusColor = (s: string) => s==='Onaylandı'?'bg-emerald-100 text-emerald-700':s==='Reddedildi'?'bg-red-100 text-red-700':s==='Tamamlandı'?'bg-blue-100 text-blue-700':'bg-orange-100 text-orange-700';
+            const decisionColor = (d: string) => d==='İade'?'bg-rose-100 text-rose-700':d==='Değişim'?'bg-violet-100 text-violet-700':d==='Kredi Notu'?'bg-amber-100 text-amber-700':'bg-gray-100 text-gray-600';
+            return (
+              <motion.div key="iade" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
+                <ModuleHeader
+                  title={tr549?'İade & Değişim Yönetimi':'Return & Exchange (RMA)'}
+                  subtitle={tr549?'Müşteri iade talepleri ve onay süreci (SAP SD Return Order)':'Customer return requests and approval workflow'}
+                  icon={RefreshCw}
+                  actionButton={hasFullAccess('crm') ? (
+                    <button onClick={()=>setP549Form(true)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
+                      <Plus className="w-3.5 h-3.5" />{tr549?'İade Talebi Oluştur':'New Return'}
+                    </button>
+                  ) : undefined}
+                />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: tr549?'Bekleyen':'Pending',    v: pending549.length,  color:'text-orange-600', bg:'bg-orange-50' },
+                    { label: tr549?'Onaylanan':'Approved',  v: approved549.length, color:'text-emerald-600',bg:'bg-emerald-50' },
+                    { label: tr549?'Tamamlanan':'Done',     v: done549.length,     color:'text-blue-600',   bg:'bg-blue-50' },
+                    { label: tr549?'Toplam':'Total',        v: p549Iadeler.length, color:'text-gray-600',   bg:'bg-gray-50' },
+                  ].map(k=>(
+                    <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                      <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
+                    </div>
+                  ))}
+                </div>
+                {/* New RMA form */}
+                {p549Form && (
+                  <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
+                    <h4 className="font-bold text-gray-800">{tr549?'Yeni İade Talebi':'New Return Request'}</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input value={p549Draft.customerName} onChange={e=>setP549Draft(d=>({...d,customerName:e.target.value}))} placeholder={tr549?'Müşteri Adı':'Customer Name'} className="apple-input px-3 py-2 text-sm" />
+                      <input value={p549Draft.orderId} onChange={e=>setP549Draft(d=>({...d,orderId:e.target.value}))} placeholder={tr549?'Sipariş ID (opsiyonel)':'Order ID (optional)'} className="apple-input px-3 py-2 text-sm" />
+                      <input value={p549Draft.items} onChange={e=>setP549Draft(d=>({...d,items:e.target.value}))} placeholder={tr549?'İade Edilecek Ürünler':'Items to Return'} className="apple-input px-3 py-2 text-sm" />
+                      <select value={p549Draft.reason} onChange={e=>setP549Draft(d=>({...d,reason:e.target.value}))} className="apple-input px-3 py-2 text-sm">
+                        {reasons549.map(r=><option key={r}>{r}</option>)}
+                      </select>
+                      <select value={p549Draft.condition} onChange={e=>setP549Draft(d=>({...d,condition:e.target.value as typeof p549Draft.condition}))} className="apple-input px-3 py-2 text-sm">
+                        {(['Hasarlı','Sağlam','Kısmen Hasarlı'] as const).map(c=><option key={c}>{c}</option>)}
+                      </select>
+                      <input value={p549Draft.notes} onChange={e=>setP549Draft(d=>({...d,notes:e.target.value}))} placeholder={tr549?'Notlar':'Notes'} className="apple-input px-3 py-2 text-sm" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={async()=>{
+                        if(!p549Draft.customerName||!p549Draft.items) return;
+                        await addDoc(collection(db,'rmaRequests'),{...p549Draft,decision:'Bekliyor',status:'Bekliyor',createdAt:serverTimestamp()});
+                        setP549Form(false); setP549Draft({orderId:'',customerName:'',items:'',reason:tr549?'Hasarlı Ürün':'Damaged Product',condition:'Hasarlı',notes:''});
+                      }} className="apple-button-primary px-4 py-2 text-sm">{tr549?'Talebi Oluştur':'Create Request'}</button>
+                      <button onClick={()=>setP549Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr549?'İptal':'Cancel'}</button>
+                    </div>
+                  </div>
+                )}
+                {/* RMA list */}
+                <div className="apple-card overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b border-gray-100 bg-gray-50/60">
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr549?'Müşteri':'Customer'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{tr549?'Ürünler':'Items'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr549?'Neden':'Reason'}</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'Karar':'Decision'}</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'Durum':'Status'}</th>
+                        {hasFullAccess('crm') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'İşlem':'Action'}</th>}
+                      </tr></thead>
+                      <tbody>
+                        {p549Iadeler.map(r=>(
+                          <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="px-4 py-2.5">
+                              <p className="font-medium text-gray-800">{r.customerName}</p>
+                              {r.orderId && <p className="text-xs text-gray-400">{tr549?'Sipariş:':'Order:'} {r.orderId.slice(0,8)}</p>}
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-600 text-xs hidden md:table-cell">{r.items}</td>
+                            <td className="px-4 py-2.5 text-gray-500 text-xs hidden sm:table-cell">{r.reason}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              {r.status === 'Bekliyor' && hasFullAccess('crm') ? (
+                                <select defaultValue={r.decision} onChange={e=>updateDoc(doc(db,'rmaRequests',r.id),{decision:e.target.value})}
+                                  className="text-[10px] font-bold px-2 py-0.5 rounded-full border-0 bg-gray-100 text-gray-700">
+                                  {[tr549?'Bekliyor':'Pending',tr549?'İade':'Refund',tr549?'Değişim':'Exchange',tr549?'Kredi Notu':'Credit Note'].map(d=><option key={d}>{d}</option>)}
+                                </select>
+                              ) : (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${decisionColor(r.decision)}`}>{r.decision}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor(r.status)}`}>{r.status}</span>
+                            </td>
+                            {hasFullAccess('crm') && (
+                              <td className="px-4 py-2.5 text-center">
+                                {r.status === 'Bekliyor' && (
+                                  <div className="flex justify-center gap-1">
+                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Onaylandı'})} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200">{tr549?'Onayla':'Approve'}</button>
+                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Reddedildi'})} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200">{tr549?'Reddet':'Reject'}</button>
+                                  </div>
+                                )}
+                                {r.status === 'Onaylandı' && (
+                                  <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Tamamlandı'})} className="text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded-full hover:bg-blue-200">{tr549?'Tamamla':'Complete'}</button>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {p549Iadeler.length===0 && (
+                    <div className="text-center py-12 space-y-2">
+                      <RefreshCw className="w-10 h-10 text-gray-200 mx-auto" />
+                      <p className="text-gray-400 text-sm">{tr549?'Henüz iade talebi yok.':'No return requests yet.'}</p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })()}
 
           {/* ── Orders List ── */}
           {activeTab === 'orders' && !selectedOrder && (
