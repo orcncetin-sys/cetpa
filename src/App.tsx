@@ -18507,7 +18507,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -19298,6 +19298,13 @@ function AppContent() {
   const [p554Search, setP554Search] = useState('');
   // ── Phase 556: SGK e-Bildirge ─────────────────────────────────────────────
   const [p556Period, setP556Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  // ── Phase 558: KDV Analiz Raporu ─────────────────────────────────────────
+  const [p558Year, setP558Year] = useState(() => String(new Date().getFullYear()));
+  // ── Phase 559: Müşteri Cari Hesap Ekstresi ────────────────────────────────
+  const [p559Customer, setP559Customer] = useState('');
+  // ── Phase 560: Sipariş Onay Akışı ────────────────────────────────────────
+  const [p560ApprovalThreshold, setP560ApprovalThreshold] = useState(50000);
+  const [p560PendingOrders, setP560PendingOrders] = useState<string[]>([]);
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -21506,6 +21513,8 @@ function AppContent() {
                 { label: tr ? 'AR Yaşlandırma' : 'AR Aging',       subId: 'ar-aging',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ar-aging'); } },
                 { label: tr ? 'Bütçe & Senaryo' : 'Budget & Scenarios', subId: 'butce',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
                 { label: tr ? 'Ba/Bs Formu' : 'Ba/Bs Tax Form',      subId: 'babs',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('babs'); } }, // Phase 555
+                { label: tr ? 'KDV Analiz' : 'VAT Analysis',       subId: 'kdv',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv'); } }, // Phase 558
+                { label: tr ? 'Cari Hesap' : 'Account Statement',  subId: 'cari',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('cari'); } }, // Phase 559
                 { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
                 { label: tr ? 'Sabit Kıymet' : 'Fixed Assets',     subId: 'sabit-kiymet',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sabit-kiymet'); } },
                 { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
@@ -25408,6 +25417,342 @@ function AppContent() {
                       </motion.div>
                     );
                   })()}
+
+                  {/* ── Phase 558: KDV Analiz Raporu ──────────────────────────────────── */}
+                  {muhasebeTab === 'kdv' && (() => {
+                    const tr558 = currentLanguage === 'tr';
+                    const yearNum = Number(p558Year);
+
+                    // Build monthly KDV collected from orders
+                    const monthlyData = Array.from({length:12},(_,i) => {
+                      const m = i + 1;
+                      const monthOrders = orders.filter(o => {
+                        const raw = o.createdAt ?? o.syncedAt;
+                        if (!raw || o.status === 'Cancelled') return false;
+                        const d = typeof (raw as {toDate?:()=>Date}).toDate === 'function'
+                          ? (raw as {toDate:()=>Date}).toDate()
+                          : new Date(raw as string);
+                        return d.getFullYear() === yearNum && d.getMonth() === i;
+                      });
+                      const collected = monthOrders.reduce((s,o) => s + (Number((o as unknown as Record<string,unknown>).kdvTutari) || 0), 0);
+                      // Estimate KDV paid: assume 18% KDV on 80% of order value (as purchases)
+                      const netSales = monthOrders.reduce((s,o) => s + (o.totalPrice || 0), 0);
+                      const paidEst = Math.round(netSales * 0.8 * 0.18 * 0.3); // rough 30% of sales go as purchases
+                      return { m, collected, paidEst, net: collected - paidEst };
+                    });
+
+                    const totCol = monthlyData.reduce((s,d) => s+d.collected, 0);
+                    const totPaid = monthlyData.reduce((s,d) => s+d.paidEst, 0);
+                    const totNet = totCol - totPaid;
+                    const monthNames = tr558
+                      ? ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara']
+                      : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const maxVal = Math.max(...monthlyData.map(d => d.collected), 1);
+
+                    // KDV by rate breakdown from orders
+                    const rateMap: Record<number,number> = {};
+                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
+                      const rate = Number((o as unknown as Record<string,unknown>).kdvOran) || 18;
+                      const kdv = Number((o as unknown as Record<string,unknown>).kdvTutari) || 0;
+                      if (kdv > 0) rateMap[rate] = (rateMap[rate] || 0) + kdv;
+                    });
+
+                    return (
+                      <motion.div key="kdv" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                            <Receipt className="w-5 h-5 text-brand" />
+                            {tr558 ? 'KDV Analiz Raporu' : 'VAT Analysis Report'}
+                          </h3>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-500">{tr558 ? 'Yıl:' : 'Year:'}</label>
+                            <select className="apple-input text-sm px-3 py-1.5" value={p558Year} onChange={e => setP558Year(e.target.value)}>
+                              {[0,1,2].map(i => { const y = String(new Date().getFullYear() - i); return <option key={y} value={y}>{y}</option>; })}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* KPI bar */}
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { label: tr558?'Tahsil Edilen KDV':'KDV Collected', val: totCol, color:'text-emerald-700', bg:'bg-emerald-50' },
+                            { label: tr558?'Ödenen KDV (Tahmini)':'KDV Paid (Est)', val: totPaid, color:'text-red-600', bg:'bg-red-50' },
+                            { label: tr558?'Net KDV Borcu':'Net KDV Payable', val: totNet, color: totNet>0?'text-amber-700':'text-blue-700', bg: totNet>0?'bg-amber-50':'bg-blue-50' },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400">{k.label}</p>
+                              <p className={`text-xl font-black mt-1 ${k.color}`}>{fmtKpi(k.val,'full',0)}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Monthly bar chart */}
+                        <div className="apple-card p-5">
+                          <h4 className="font-bold text-gray-700 text-sm mb-4">{tr558 ? 'Aylık KDV Tahsilatı' : 'Monthly VAT Collected'} — {p558Year}</h4>
+                          <div className="flex items-end gap-1 h-32">
+                            {monthlyData.map(d => (
+                              <div key={d.m} className="flex-1 flex flex-col items-center gap-1">
+                                <div className="w-full bg-brand/10 rounded-t relative flex flex-col justify-end" style={{height:'100px'}}>
+                                  <div className="bg-brand/70 rounded-t transition-all duration-500 w-full"
+                                    style={{height: `${(d.collected/maxVal)*100}%`, minHeight: d.collected>0?'2px':'0'}} />
+                                  {d.paidEst > 0 && (
+                                    <div className="absolute bottom-0 left-0 right-0 bg-red-300/50 rounded-t" style={{height:`${(d.paidEst/maxVal)*100}%`}} />
+                                  )}
+                                </div>
+                                <span className="text-[9px] text-gray-400">{monthNames[d.m-1]}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-brand/70 inline-block" />{tr558?'Tahsil':'Collected'}</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-300/50 inline-block" />{tr558?'Ödenen (Tahmini)':'Paid (Est)'}</span>
+                          </div>
+                        </div>
+
+                        {/* Monthly table */}
+                        <div className="apple-card p-5">
+                          <h4 className="font-bold text-gray-700 text-sm mb-3">{tr558 ? 'Dönem Detayı' : 'Period Detail'}</h4>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b border-gray-100">
+                                  {[tr558?'Ay':'Month', tr558?'Tahsil Edilen KDV':'Collected', tr558?'Ödenen KDV (Tahmini)':'Paid (Est)', tr558?'Net KDV':'Net'].map(h => (
+                                    <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {monthlyData.map(d => (
+                                  <tr key={d.m} className="hover:bg-gray-50/50">
+                                    <td className="px-3 py-2 font-semibold text-gray-700">{monthNames[d.m-1]}</td>
+                                    <td className="px-3 py-2 text-emerald-700 font-mono">{d.collected > 0 ? `₺${d.collected.toLocaleString('tr-TR')}` : '—'}</td>
+                                    <td className="px-3 py-2 text-red-500 font-mono">{d.paidEst > 0 ? `₺${d.paidEst.toLocaleString('tr-TR')}` : '—'}</td>
+                                    <td className={`px-3 py-2 font-bold font-mono ${d.net > 0 ? 'text-amber-700' : d.net < 0 ? 'text-blue-700' : 'text-gray-400'}`}>
+                                      {d.net !== 0 ? `₺${d.net.toLocaleString('tr-TR')}` : '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t-2 border-gray-200 font-bold bg-gray-50">
+                                  <td className="px-3 py-2 text-[10px] uppercase text-gray-500">{tr558?'Toplam':'Total'}</td>
+                                  <td className="px-3 py-2 text-emerald-700 font-mono">₺{totCol.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2 text-red-500 font-mono">₺{totPaid.toLocaleString('tr-TR')}</td>
+                                  <td className={`px-3 py-2 font-mono ${totNet>0?'text-amber-700':'text-blue-700'}`}>₺{totNet.toLocaleString('tr-TR')}</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                          {Object.keys(rateMap).length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-gray-100">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">{tr558 ? 'KDV Oranına Göre Dağılım (Tüm Zamanlar)' : 'Distribution by VAT Rate (All Time)'}</p>
+                              <div className="flex flex-wrap gap-3">
+                                {Object.entries(rateMap).sort((a,b) => Number(b[0])-Number(a[0])).map(([rate, total]) => (
+                                  <div key={rate} className="bg-gray-50 rounded-xl px-3 py-2">
+                                    <p className="text-[10px] text-gray-400">%{rate} KDV</p>
+                                    <p className="font-bold text-gray-800 text-sm">₺{total.toLocaleString('tr-TR')}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <p className="text-[10px] text-gray-400 mt-3">* {tr558?'Ödenen KDV tahminidir. Gerçek değerler için alış faturalarını muhasebeye girin.':'Paid VAT is estimated. Enter purchase invoices for accurate values.'}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 559: Müşteri Cari Hesap Ekstresi ────────────────────────── */}
+                  {muhasebeTab === 'cari' && (() => {
+                    const tr559 = currentLanguage === 'tr';
+                    // Build customer list from orders + leads
+                    const customerNames = Array.from(new Set([
+                      ...orders.map(o => o.customerName),
+                      ...leads.map(l => l.name),
+                    ])).filter(Boolean).sort();
+
+                    const selCustomer = p559Customer || customerNames[0] || '';
+                    const custOrders = orders.filter(o => o.customerName === selCustomer).sort((a,b) => {
+                      const da = a.createdAt ? (typeof (a.createdAt as {toDate?:()=>Date}).toDate==='function'?(a.createdAt as {toDate:()=>Date}).toDate():new Date(a.createdAt as string)).getTime() : 0;
+                      const db2 = b.createdAt ? (typeof (b.createdAt as {toDate?:()=>Date}).toDate==='function'?(b.createdAt as {toDate:()=>Date}).toDate():new Date(b.createdAt as string)).getTime() : 0;
+                      return da - db2;
+                    });
+                    const custLead = leads.find(l => l.name === selCustomer);
+                    const creditLimit = custLead?.creditLimit ?? 0;
+
+                    // Calculate running balance (+ = receivable/owed, - = credit)
+                    let runBalance = 0;
+                    const ledger = custOrders.map(o => {
+                      const isPaid = o.paid === true;
+                      const amt = o.totalPrice || 0;
+                      runBalance += amt;
+                      return { ...o, runBalance, isPaid, dateStr: (() => {
+                        const raw = o.createdAt ?? o.syncedAt;
+                        if (!raw) return '—';
+                        const d = typeof (raw as {toDate?:()=>Date}).toDate==='function'?(raw as {toDate:()=>Date}).toDate():new Date(raw as string);
+                        return d.toLocaleDateString('tr-TR');
+                      })() };
+                    });
+
+                    const totalInvoiced = custOrders.reduce((s,o) => s+(o.totalPrice||0), 0);
+                    const totalPaid = custOrders.filter(o => o.paid).reduce((s,o) => s+(o.totalPrice||0), 0);
+                    const outstanding = totalInvoiced - totalPaid;
+                    const creditUtil = creditLimit > 0 ? (outstanding / creditLimit) * 100 : 0;
+
+                    return (
+                      <motion.div key="cari" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                            <Users className="w-5 h-5 text-brand" />
+                            {tr559 ? 'Müşteri Cari Hesap Ekstresi' : 'Customer Account Statement'}
+                          </h3>
+                          <select className="apple-input text-sm px-3 py-1.5 max-w-xs"
+                            value={selCustomer} onChange={e => setP559Customer(e.target.value)}>
+                            {customerNames.map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Customer KPI row */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {[
+                            { label: tr559?'Toplam Fatura':'Total Invoiced', val: totalInvoiced, color:'text-gray-800', bg:'bg-gray-50' },
+                            { label: tr559?'Tahsil Edilen':'Collected', val: totalPaid, color:'text-emerald-700', bg:'bg-emerald-50' },
+                            { label: tr559?'Bekleyen Alacak':'Outstanding', val: outstanding, color: outstanding>0?'text-amber-700':'text-emerald-700', bg:'bg-amber-50' },
+                            { label: tr559?'Kredi Limiti':'Credit Limit', val: creditLimit, color: creditUtil>80?'text-red-600':'text-blue-700', bg: creditUtil>80?'bg-red-50':'bg-blue-50' },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400">{k.label}</p>
+                              <p className={`text-xl font-black mt-1 ${k.color}`}>{fmtKpi(k.val,'full',0)}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Credit utilization bar */}
+                        {creditLimit > 0 && (
+                          <div className="apple-card px-5 py-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-bold text-gray-600">{tr559?'Kredi Kullanım Oranı':'Credit Utilization'}</p>
+                              <span className={`text-xs font-bold ${creditUtil>80?'text-red-600':creditUtil>60?'text-amber-600':'text-emerald-600'}`}>{creditUtil.toFixed(1)}%</span>
+                            </div>
+                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full transition-all duration-700 ${creditUtil>80?'bg-red-500':creditUtil>60?'bg-amber-400':'bg-emerald-500'}`}
+                                style={{width:`${Math.min(creditUtil,100)}%`}} />
+                            </div>
+                            {creditUtil > 80 && (
+                              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />{tr559?'Kredi limitinin %80 üzerinde!':'Over 80% of credit limit!'}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Ledger table */}
+                        <div className="apple-card p-5">
+                          <h4 className="font-bold text-gray-700 text-sm mb-3">
+                            {tr559?'Hareket Özeti':'Transaction Ledger'} — {selCustomer}
+                          </h4>
+                          {ledger.length === 0 ? (
+                            <div className="text-center py-10 space-y-2">
+                              <Users className="w-10 h-10 text-gray-200 mx-auto" />
+                              <p className="text-gray-400 text-sm">{tr559?'Bu müşteri için işlem bulunamadı.':'No transactions found for this customer.'}</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b border-gray-100">
+                                    {[tr559?'Tarih':'Date','#',tr559?'Durum':'Status',tr559?'Tutar':'Amount',tr559?'Ödeme':'Payment',tr559?'Bakiye':'Balance'].map(h => (
+                                      <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {ledger.map(row => (
+                                    <tr key={row.id} className="hover:bg-gray-50/50 transition-colors">
+                                      <td className="px-3 py-2 text-gray-500">{row.dateStr}</td>
+                                      <td className="px-3 py-2 font-mono text-gray-600">{row.id.slice(0,8)}</td>
+                                      <td className="px-3 py-2">
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                          row.status==='Delivered'?'bg-emerald-100 text-emerald-700':
+                                          row.status==='Shipped'?'bg-blue-100 text-blue-700':
+                                          row.status==='Cancelled'?'bg-gray-100 text-gray-500':
+                                          'bg-amber-100 text-amber-700'
+                                        }`}>{row.status}</span>
+                                      </td>
+                                      <td className="px-3 py-2 font-bold text-gray-800 font-mono">₺{(row.totalPrice||0).toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2">
+                                        {row.isPaid
+                                          ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ {tr559?'Ödendi':'Paid'}</span>
+                                          : <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⏳ {tr559?'Bekliyor':'Pending'}</span>
+                                        }
+                                      </td>
+                                      <td className={`px-3 py-2 font-bold font-mono ${row.runBalance>0?'text-amber-700':'text-emerald-700'}`}>
+                                        ₺{row.runBalance.toLocaleString('tr-TR')}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 560: Sipariş Onay Akışı (Order Approval Workflow) ────────── */}
+                  {muhasebeTab === 'genel' && (() => {
+                    const tr560 = currentLanguage === 'tr';
+                    const approvalOrders = orders.filter(o =>
+                      o.status === 'Pending' && (o.totalPrice || 0) >= p560ApprovalThreshold
+                    );
+                    if (approvalOrders.length === 0) return null;
+                    return (
+                      <div className="apple-card p-5 border-l-4 border-amber-400 bg-amber-50/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="w-5 h-5 text-amber-500" />
+                            <h4 className="font-bold text-amber-800 text-sm">
+                              {tr560 ? 'Onay Bekleyen Yüksek Değerli Siparişler' : 'High-Value Orders Pending Approval'}
+                            </h4>
+                            <span className="bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{approvalOrders.length}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <label>{tr560?'Limit:':'Threshold:'}</label>
+                            <input type="number" className="apple-input text-xs px-2 py-1 w-24" value={p560ApprovalThreshold}
+                              onChange={e => setP560ApprovalThreshold(Number(e.target.value))} />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          {approvalOrders.map(o => (
+                            <div key={o.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
+                                <p className="text-xs text-gray-400">#{o.id.slice(0,8)} · ₺{(o.totalPrice||0).toLocaleString('tr-TR')}</p>
+                              </div>
+                              {hasFullAccess('muhasebe') && (
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <button onClick={async () => {
+                                    await updateDoc(doc(db, 'orders', o.id), { status: 'Processing' });
+                                    toast(tr560?'Sipariş onaylandı.':'Order approved.', 'success');
+                                  }} className="text-xs font-bold text-emerald-600 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg transition-colors">
+                                    {tr560?'Onayla':'Approve'}
+                                  </button>
+                                  <button onClick={async () => {
+                                    await updateDoc(doc(db, 'orders', o.id), { status: 'Cancelled' });
+                                    toast(tr560?'Sipariş reddedildi.':'Order rejected.', 'error');
+                                  }} className="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors">
+                                    {tr560?'Reddet':'Reject'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                 </>
               )}
             </motion.div>
