@@ -18507,7 +18507,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -19311,6 +19311,10 @@ function AppContent() {
   const [p562ShowReservations, setP562ShowReservations] = useState(false);
   // ── Phase 563: Multi-Currency P&L ────────────────────────────────────────
   const [p563PnlCurrency, setP563PnlCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  // ── Phase 564: e-Fatura Takip ──────────────────────────────────────────────
+  const [p564FaturaFilter, setP564FaturaFilter] = useState<'all'|'missing'|'synced'|'pending'>('missing');
+  // ── Phase 567: Tedarikçi Değerlendirme Matrisi ────────────────────────────
+  const [p567Ratings, setP567Ratings] = useState<Record<string, Record<string,number>>>({});
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -21521,6 +21525,7 @@ function AppContent() {
                 { label: tr ? 'Ba/Bs Formu' : 'Ba/Bs Tax Form',      subId: 'babs',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('babs'); } }, // Phase 555
                 { label: tr ? 'KDV Analiz' : 'VAT Analysis',       subId: 'kdv',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv'); } }, // Phase 558
                 { label: tr ? 'Cari Hesap' : 'Account Statement',  subId: 'cari',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('cari'); } }, // Phase 559
+                { label: tr ? 'e-Fatura Takip' : 'e-Invoice Tracker', subId: 'fatura-takip', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('fatura-takip'); } }, // Phase 564
                 { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
                 { label: tr ? 'Sabit Kıymet' : 'Fixed Assets',     subId: 'sabit-kiymet',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sabit-kiymet'); } },
                 { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
@@ -25834,6 +25839,290 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 564: e-Fatura Takip ─────────────────────────────────────── */}
+                  {muhasebeTab === 'fatura-takip' && (() => {
+                    const tr564 = currentLanguage === 'tr';
+                    const allBillable = orders.filter(o => o.status !== 'Cancelled');
+                    const filtered564 = allBillable.filter(o => {
+                      if (p564FaturaFilter === 'missing') return !o.hasInvoice && !o.mikroFaturaNo && !o.lucaFaturaNo;
+                      if (p564FaturaFilter === 'synced') return o.mikroSynced || o.lucaSynced;
+                      if (p564FaturaFilter === 'pending') return o.hasInvoice && !o.mikroSynced && !o.lucaSynced;
+                      return true;
+                    });
+                    const missingCount = allBillable.filter(o => !o.hasInvoice && !o.mikroFaturaNo && !o.lucaFaturaNo).length;
+                    const syncedCount = allBillable.filter(o => o.mikroSynced || o.lucaSynced).length;
+                    const pendingCount = allBillable.filter(o => o.hasInvoice && !o.mikroSynced && !o.lucaSynced).length;
+
+                    return (
+                      <motion.div key="fatura-takip" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="space-y-4">
+                        <ModuleHeader
+                          title={tr564 ? 'e-Fatura Takip Paneli' : 'e-Invoice Tracking Panel'}
+                          subtitle={tr564 ? 'Siparişlerin fatura durumunu ve ERP senkronizasyonunu takip edin' : 'Track invoice status and ERP sync for all orders'}
+                          icon={FileText}
+                        />
+
+                        {/* KPI strip */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {[
+                            { label: tr564?'Toplam Sipariş':'Total Orders',  val: allBillable.length, color:'text-gray-700', bg:'bg-gray-50' },
+                            { label: tr564?'Fatura Eksik':'Missing Invoice', val: missingCount, color: missingCount>0?'text-red-600':'text-emerald-600', bg: missingCount>0?'bg-red-50':'bg-emerald-50' },
+                            { label: tr564?'Fatura Bekliyor':'Invoice Pending', val: pendingCount, color:'text-amber-700', bg:'bg-amber-50' },
+                            { label: tr564?'ERP Senkron':'ERP Synced', val: syncedCount, color:'text-emerald-700', bg:'bg-emerald-50' },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400">{k.label}</p>
+                              <p className={`text-2xl font-black mt-1 ${k.color}`}>{k.val}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Filter tabs */}
+                        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+                          {([
+                            { id: 'missing', label: tr564?'Fatura Eksik':'Missing', count: missingCount },
+                            { id: 'pending', label: tr564?'Bekliyor':'Pending', count: pendingCount },
+                            { id: 'synced',  label: tr564?'Senkron':'Synced', count: syncedCount },
+                            { id: 'all',     label: tr564?'Tümü':'All', count: allBillable.length },
+                          ] as const).map(f => (
+                            <button key={f.id} onClick={() => setP564FaturaFilter(f.id)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p564FaturaFilter===f.id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>
+                              {f.label}
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${p564FaturaFilter===f.id?'bg-gray-100 text-gray-600':'bg-gray-200 text-gray-500'}`}>{f.count}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Order table */}
+                        <div className="apple-card overflow-hidden">
+                          {filtered564.length === 0 ? (
+                            <div className="text-center py-12 space-y-2">
+                              <FileText className="w-10 h-10 text-gray-200 mx-auto" />
+                              <p className="text-gray-400 text-sm">{tr564?'Bu filtreyle sipariş bulunamadı.':'No orders found with this filter.'}</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="bg-gray-50 border-b border-gray-100">
+                                    {[tr564?'Tarih':'Date', tr564?'Müşteri':'Customer', tr564?'Tutar':'Amount',
+                                      tr564?'Fatura Tipi':'Invoice Type', tr564?'Fatura No':'Invoice No',
+                                      tr564?'ERP Durumu':'ERP Status', ''].map(h => (
+                                      <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {filtered564.slice(0,50).map(o => {
+                                    const invoiceNo = o.mikroFaturaNo || o.lucaFaturaNo || o.irsaliyeNo || '—';
+                                    const isSynced = o.mikroSynced || o.lucaSynced;
+                                    const hasFatura = o.hasInvoice || !!o.mikroFaturaNo || !!o.lucaFaturaNo;
+                                    const dateStr = (() => {
+                                      const raw = o.createdAt ?? o.syncedAt;
+                                      if (!raw) return '—';
+                                      const d = typeof (raw as {toDate?:()=>Date}).toDate==='function'?(raw as {toDate:()=>Date}).toDate():new Date(raw as string);
+                                      return d.toLocaleDateString('tr-TR');
+                                    })();
+                                    return (
+                                      <tr key={o.id} className={`hover:bg-gray-50/50 transition-colors ${!hasFatura?'bg-red-50/20':''}`}>
+                                        <td className="px-3 py-2.5 text-gray-400">{dateStr}</td>
+                                        <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[150px] truncate">{o.customerName}</td>
+                                        <td className="px-3 py-2.5 font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR')}</td>
+                                        <td className="px-3 py-2.5">
+                                          {o.faturaTipi ? (
+                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{o.faturaTipi}</span>
+                                          ) : (
+                                            <span className="text-[10px] text-gray-400">—</span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-2.5 font-mono text-gray-500">{invoiceNo}</td>
+                                        <td className="px-3 py-2.5">
+                                          {isSynced ? (
+                                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {o.lucaSynced?'Luca':o.mikroSynced?'Mikro':'Sync'}</span>
+                                          ) : hasFatura ? (
+                                            <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {tr564?'Bekliyor':'Pending'}</span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {tr564?'Fatura Yok':'No Invoice'}</span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-2.5">
+                                          {!hasFatura && hasFullAccess('muhasebe') && (
+                                            <button onClick={async () => {
+                                              await updateDoc(doc(db, 'orders', o.id), { hasInvoice: true });
+                                              toast(tr564?'Fatura kesildi olarak işaretlendi.':'Marked as invoiced.', 'success');
+                                            }} className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors">
+                                              {tr564?'Faturalandı':'Mark Invoiced'}
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 565: Satış Tahmini (Sales Forecast) ─────────────────────── */}
+                  {muhasebeTab === 'pnl' && (() => {
+                    const tr565 = currentLanguage === 'tr';
+                    const now = new Date();
+                    // Build 6-month history
+                    const hist: number[] = [];
+                    for (let i = 5; i >= 0; i--) {
+                      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                      const rev = orders.filter(o => {
+                        if (o.status === 'Cancelled' || !o.createdAt) return false;
+                        try {
+                          const od = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+                          return od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
+                        } catch { return false; }
+                      }).reduce((s,o) => s+(o.totalPrice||0), 0);
+                      hist.push(rev);
+                    }
+                    // Simple weighted moving average: more weight on recent months
+                    const weights = [1, 1.5, 2, 2.5, 3, 3.5];
+                    const weightSum = weights.reduce((s,w) => s+w, 0);
+                    const wma = hist.reduce((s, v, i) => s + v * weights[i], 0) / weightSum;
+                    // Trend: regression slope over 6 months
+                    const n = hist.length;
+                    const xMean = (n-1)/2;
+                    const yMean = hist.reduce((s,v) => s+v, 0) / n;
+                    const slope = hist.reduce((s,v,i) => s + (i-xMean)*(v-yMean), 0) /
+                                  hist.reduce((s,_,i) => s + (i-xMean)**2, 0);
+                    // Forecast next 3 months
+                    const forecast = [1,2,3].map(offset => {
+                      const pred = Math.max(0, wma + slope * offset);
+                      const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+                      return {
+                        label: d.toLocaleString(tr565?'tr-TR':'en-US', {month:'short', year:'2-digit'}),
+                        value: pred,
+                        low: pred * 0.85,
+                        high: pred * 1.15,
+                      };
+                    });
+                    const histLabels: string[] = [];
+                    for (let i = 5; i >= 0; i--) {
+                      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                      histLabels.push(d.toLocaleString(tr565?'tr-TR':'en-US', {month:'short', year:'2-digit'}));
+                    }
+                    const allValues = [...hist, ...forecast.map(f => f.high)].filter(v => v > 0);
+                    const maxV = Math.max(...allValues, 1);
+
+                    return (
+                      <div className="apple-card p-5 mt-4">
+                        <div className="flex items-center gap-2 mb-4">
+                          <TrendingUp className="w-4 h-4 text-emerald-500" />
+                          <h4 className="font-bold text-gray-800 text-sm">{tr565?'Satış Tahmini (Ağırlıklı Hareketli Ortalama)':'Sales Forecast (Weighted Moving Average)'}</h4>
+                        </div>
+
+                        {/* Combined chart: history + forecast */}
+                        <div className="flex items-end gap-1" style={{height:'100px'}}>
+                          {hist.map((v, i) => (
+                            <div key={`h${i}`} className="flex-1 flex flex-col items-center gap-0.5">
+                              <div className="w-full bg-blue-100 rounded-t" style={{height:`${(v/maxV)*90}px`, minHeight: v>0?'2px':'0'}} />
+                              <span className="text-[8px] text-gray-400 rotate-0 whitespace-nowrap">{histLabels[i]}</span>
+                            </div>
+                          ))}
+                          <div className="w-px bg-gray-300 self-stretch mx-1" />
+                          {forecast.map((f, i) => (
+                            <div key={`f${i}`} className="flex-1 flex flex-col items-center gap-0.5 relative">
+                              {/* High band */}
+                              <div className="w-full bg-emerald-100 rounded-t relative" style={{height:`${(f.high/maxV)*90}px`}}>
+                                <div className="absolute bottom-0 left-0 right-0 bg-emerald-400 rounded-t" style={{height:`${(f.value/f.high)*100}%`}} />
+                              </div>
+                              <span className="text-[8px] text-emerald-600 font-bold">{f.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                          <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-blue-100 inline-block" />{tr565?'Gerçekleşen':'Actual'}</span>
+                          <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-emerald-400 inline-block" />{tr565?'Tahmin':'Forecast'}</span>
+                          <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-emerald-100 inline-block" />{tr565?'±%15 Aralık':'±15% Band'}</span>
+                        </div>
+
+                        {/* Forecast table */}
+                        <div className="mt-4 space-y-2">
+                          {forecast.map(f => (
+                            <div key={f.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                              <span className="text-sm font-semibold text-gray-700">{f.label}</span>
+                              <div className="flex items-center gap-4 text-xs">
+                                <span className="text-gray-400">{fmtKpi(f.low,'K',0)} – {fmtKpi(f.high,'K',0)}</span>
+                                <span className="font-bold text-emerald-700">{fmtKpi(f.value,'K',0)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-2">* {tr565?'6 aylık geçmiş veriye dayalı ağırlıklı hareketli ortalama tahmini.':'Weighted moving average based on 6-month historical data.'}</p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 566: Kar Merkezi Raporu (Profit Center) ─────────────────── */}
+                  {muhasebeTab === 'pnl' && (() => {
+                    const tr566 = currentLanguage === 'tr';
+                    // Profit centers: B2B vs Retail by customerType
+                    const centers: Record<string, { revenue: number; cogs: number; count: number }> = {};
+                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
+                      const key = o.customerType || (tr566 ? 'Diğer' : 'Other');
+                      if (!centers[key]) centers[key] = { revenue: 0, cogs: 0, count: 0 };
+                      centers[key].revenue += o.totalPrice || 0;
+                      centers[key].cogs += (o.lineItems ?? []).reduce((s,li) => s+((li.costPrice??0)*li.quantity), 0);
+                      centers[key].count++;
+                    });
+                    const pcList = Object.entries(centers).map(([name, v]) => ({
+                      name, revenue: v.revenue, cogs: v.cogs, gross: v.revenue - v.cogs,
+                      margin: v.revenue > 0 ? ((v.revenue - v.cogs) / v.revenue) * 100 : 0,
+                      count: v.count,
+                    })).sort((a,b) => b.revenue - a.revenue);
+                    if (pcList.length === 0) return null;
+
+                    return (
+                      <div className="apple-card p-5 mt-4">
+                        <div className="flex items-center gap-2 mb-4">
+                          <BarChart3 className="w-4 h-4 text-purple-500" />
+                          <h4 className="font-bold text-gray-800 text-sm">{tr566?'Kar Merkezi Raporu':'Profit Center Report'}</h4>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-gray-100">
+                                {[tr566?'Kanal':'Channel', tr566?'Sipariş':'Orders', tr566?'Gelir':'Revenue',
+                                  'COGS', tr566?'Brüt Kâr':'Gross Profit', tr566?'Marj':'Margin'].map(h => (
+                                  <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {pcList.map(pc => (
+                                <tr key={pc.name} className="hover:bg-gray-50/50">
+                                  <td className="px-3 py-2.5 font-semibold text-gray-800">
+                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${pc.name==='B2B'?'bg-blue-100 text-blue-700':'bg-purple-100 text-purple-700'}`}>
+                                      {pc.name === 'B2B' ? '🏢' : '🛒'} {pc.name}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-gray-500">{pc.count}</td>
+                                  <td className="px-3 py-2.5 font-bold text-gray-800 font-mono">{fmtKpi(pc.revenue,'K',0)}</td>
+                                  <td className="px-3 py-2.5 text-red-500 font-mono">−{fmtKpi(pc.cogs,'K',0)}</td>
+                                  <td className="px-3 py-2.5 font-bold text-emerald-700 font-mono">{fmtKpi(pc.gross,'K',0)}</td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`font-bold ${pc.margin>=30?'text-emerald-600':pc.margin>=15?'text-amber-600':'text-red-500'}`}>%{pc.margin.toFixed(1)}</span>
+                                    <div className="w-16 h-1.5 bg-gray-100 rounded-full mt-0.5 overflow-hidden">
+                                      <div className={`h-full rounded-full ${pc.margin>=30?'bg-emerald-400':pc.margin>=15?'bg-amber-400':'bg-red-400'}`} style={{width:`${Math.min(pc.margin,100)}%`}} />
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                 </>
               )}
             </motion.div>
@@ -26324,6 +26613,85 @@ function AppContent() {
                           })}
                         </div>
                         <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Ortalama teslim günü (Oluşturma → Beklenen Tarih)' : 'Avg. lead days (Created → Expected Date)'}</p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 567: Tedarikçi Değerlendirme Matrisi ─────────────────────── */}
+                  {purchasingSubTab === 'scorecard' && suppliers.length > 0 && (() => {
+                    const tr567 = currentLanguage === 'tr';
+                    const criteria = [
+                      { key: 'price',    label: tr567?'Fiyat Rekabetçiliği':'Price Competitiveness' },
+                      { key: 'quality',  label: tr567?'Ürün Kalitesi':'Product Quality' },
+                      { key: 'delivery', label: tr567?'Teslimat Süresi':'Delivery Speed' },
+                      { key: 'communication', label: tr567?'İletişim':'Communication' },
+                    ];
+                    const weights = { price: 0.3, quality: 0.3, delivery: 0.25, communication: 0.15 };
+
+                    const getScore = (supId: string) => {
+                      const r = p567Ratings[supId] || {};
+                      return criteria.reduce((s, c) => s + (r[c.key] || 0) * (weights[c.key as keyof typeof weights] || 0), 0);
+                    };
+
+                    const supList567 = suppliers.slice(0, 10).map(s => ({
+                      ...s,
+                      score: getScore(s.id),
+                      ratings: p567Ratings[s.id] || {},
+                    })).sort((a,b) => b.score - a.score);
+
+                    return (
+                      <div className="apple-card p-5 mt-4">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Award className="w-4 h-4 text-amber-500" />
+                          <h4 className="font-bold text-gray-800 text-sm">{tr567?'Tedarikçi Değerlendirme Matrisi':'Vendor Evaluation Matrix'}</h4>
+                          <span className="text-[10px] text-gray-400">{tr567?'(1-5 puan)':'(1-5 scale)'}</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-gray-100">
+                                <th className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{tr567?'Tedarikçi':'Supplier'}</th>
+                                {criteria.map(c => (
+                                  <th key={c.key} className="py-2 px-2 text-center text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">
+                                    {c.label}<br/><span className="text-gray-300 font-normal">{tr567?`%${Math.round(weights[c.key as keyof typeof weights]*100)}`:`${Math.round(weights[c.key as keyof typeof weights]*100)}%`}</span>
+                                  </th>
+                                ))}
+                                <th className="py-2 px-3 text-center text-[10px] font-bold text-gray-400 uppercase">{tr567?'Toplam':'Total'}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {supList567.map(sup => (
+                                <tr key={sup.id} className="hover:bg-gray-50/50">
+                                  <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[120px] truncate">{sup.name}</td>
+                                  {criteria.map(c => (
+                                    <td key={c.key} className="px-2 py-2 text-center">
+                                      <div className="flex items-center justify-center gap-0.5">
+                                        {[1,2,3,4,5].map(star => (
+                                          <button key={star}
+                                            onClick={() => setP567Ratings(prev => ({
+                                              ...prev,
+                                              [sup.id]: { ...(prev[sup.id]||{}), [c.key]: star }
+                                            }))}
+                                            className={`text-sm transition-colors ${(sup.ratings[c.key]||0) >= star ? 'text-amber-400' : 'text-gray-200 hover:text-amber-300'}`}>
+                                            ★
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  ))}
+                                  <td className="px-3 py-2.5 text-center">
+                                    {sup.score > 0 ? (
+                                      <span className={`font-black text-sm ${sup.score>=4?'text-emerald-600':sup.score>=3?'text-amber-600':'text-red-500'}`}>
+                                        {sup.score.toFixed(1)}
+                                      </span>
+                                    ) : <span className="text-gray-300">—</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-3">{tr567?'Puanlar sadece bu oturumda saklanır. Kalıcı kayıt için Firestore entegrasyonu gereklidir.':'Ratings are session-only. Firestore integration needed for persistent storage.'}</p>
                       </div>
                     );
                   })()}
