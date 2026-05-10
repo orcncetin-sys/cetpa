@@ -19287,6 +19287,17 @@ function AppContent() {
   const [p555Period, setP555Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   // ── Phase 557: Senaryo Bütçesi ───────────────────────────────────────────
   const [p557Scenario, setP557Scenario] = useState<'base'|'best'|'worst'>('base');
+  // ── Phase 554: WMS Bin/Location ──────────────────────────────────────────
+  const [p554Bins, setP554Bins] = useState<Array<{
+    id: string; warehouseId: string; warehouseName: string; binCode: string;
+    productSku: string; productName: string; quantity: number; minQty?: number;
+    lastCounted?: string; notes?: string; createdAt?: unknown;
+  }>>([]);
+  const [p554AddForm, setP554AddForm] = useState(false);
+  const [p554Draft, setP554Draft] = useState({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
+  const [p554Search, setP554Search] = useState('');
+  // ── Phase 556: SGK e-Bildirge ─────────────────────────────────────────────
+  const [p556Period, setP556Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -19328,6 +19339,16 @@ function AppContent() {
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // ── Phase 554: Fetch WMS bins when on lojistik/wms tab ──────────────────
+  useEffect(() => {
+    if (activeTab !== 'lojistik' || lojistikTab !== 'wms') return;
+    const unsub = onSnapshot(collection(db, 'warehouseBins'), snap => {
+      setP554Bins(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p554Bins[number])));
+    }, () => {});
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, lojistikTab]);
 
   // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
   useEffect(() => {
@@ -21458,13 +21479,14 @@ function AppContent() {
               id: 'lojistik', label: tr ? 'Lojistik & Depo' : 'Logistics', icon: Truck,
               childIds: ['ihracat'],
               children: [
-                { label: tr ? 'Sevkiyat' : 'Shipments',          subId: 'sevkiyat',        action: () => { setActiveTab('lojistik'); setLojistikTab('sevkiyat'); } },
-                { label: tr ? 'Kargo Takip' : 'Cargo Tracking',  subId: 'kargo_takip',     action: () => { setActiveTab('lojistik'); setLojistikTab('kargo_takip'); } },
-                { label: tr ? 'Depo' : 'Warehouse',              subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
-                { label: tr ? 'Transfer' : 'Transfer',           subId: 'transfer',         action: () => { setActiveTab('lojistik'); setLojistikTab('transfer'); } },
-                { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes', subId: 'giden_irsaliye', action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
-                { label: tr ? 'Gelen İrsaliye' : 'Receiving',    subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
-                { label: tr ? 'İthalat/İhracat' : 'Import/Export', subId: 'ihracat',       action: () => setActiveTab('ihracat') },
+                { label: tr ? 'Sevkiyat' : 'Shipments',              subId: 'sevkiyat',        action: () => { setActiveTab('lojistik'); setLojistikTab('sevkiyat'); } },
+                { label: tr ? 'Kargo Takip' : 'Cargo Tracking',      subId: 'kargo_takip',     action: () => { setActiveTab('lojistik'); setLojistikTab('kargo_takip'); } },
+                { label: tr ? 'Depo' : 'Warehouse',                  subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
+                { label: tr ? 'Bin / Lokasyon' : 'Bin / Location',   subId: 'wms',              action: () => { setActiveTab('lojistik'); setLojistikTab('wms'); } }, // Phase 554
+                { label: tr ? 'Transfer' : 'Transfer',               subId: 'transfer',         action: () => { setActiveTab('lojistik'); setLojistikTab('transfer'); } },
+                { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes',   subId: 'giden_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
+                { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
+                { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
               ],
             },
             {
@@ -21506,10 +21528,11 @@ function AppContent() {
               id: 'ik', label: tr ? 'İnsan Kaynakları' : 'HR', icon: UserCheck,
               childIds: ['selfservis'],
               children: [
-                { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',     subId: 'ik-main',    action: () => setActiveTab('ik') },
-                { label: tr ? 'Mesai & Devam' : 'Time & Attendance',     subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
-                { label: tr ? 'Self-Servis Portalı' : 'Self-Service',    subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
-                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',     subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
+                { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',         subId: 'ik-main',    action: () => setActiveTab('ik') },
+                { label: tr ? 'Mesai & Devam' : 'Time & Attendance',         subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
+                { label: tr ? 'Self-Servis Portalı' : 'Self-Service',        subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
+                { label: tr ? 'SGK e-Bildirge' : 'SGK e-Declaration',        subId: 'sgk-bildirge', action: () => setActiveTab('ik') }, // Phase 556 (renders in IK tab)
+                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',         subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
               ],
             },
             { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
@@ -26658,6 +26681,172 @@ function AppContent() {
                             );
                           })}
                         </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 556: SGK e-Bildirge ────────────────────────────────────────── */}
+                  {employees.length > 0 && (() => {
+                    const tr556 = currentLanguage === 'tr';
+                    const SGK_EMP    = 0.14;
+                    const UNEMP_EMP  = 0.01;
+                    const SGK_EMPL   = 0.205;
+                    const UNEMP_EMPL = 0.02;
+                    const STAMP_RATE = 0.00759; // Damga vergisi oranı
+
+                    const activeEmps = employees.filter(e => e.status === 'Aktif');
+                    const [pYear, pMonthStr] = p556Period.split('-');
+                    const pMonth = Number(pMonthStr);
+                    const monthNames = tr556
+                      ? ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
+                      : ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                    const periodLabel = `${monthNames[pMonth-1]} ${pYear}`;
+
+                    const rows = activeEmps.map(e => {
+                      const gross = e.salary || 0;
+                      const sgkBase = gross;
+                      const sgkEmp  = Math.round(sgkBase * SGK_EMP);
+                      const unempEmp = Math.round(sgkBase * UNEMP_EMP);
+                      const sgkEmpl  = Math.round(sgkBase * SGK_EMPL);
+                      const unempEmpl = Math.round(sgkBase * UNEMP_EMPL);
+                      const taxBase = gross - sgkEmp - unempEmp;
+                      const stamp = Math.round(gross * STAMP_RATE);
+                      const totalDeductions = sgkEmp + unempEmp;
+                      const totalEmployerSgk = sgkEmpl + unempEmpl;
+                      const netSalary = gross - sgkEmp - unempEmp - stamp;
+                      return { emp: e, gross, sgkBase, sgkEmp, unempEmp, sgkEmpl, unempEmpl, taxBase, stamp, totalDeductions, totalEmployerSgk, netSalary };
+                    });
+
+                    const totals = rows.reduce((acc, r) => ({
+                      gross: acc.gross + r.gross,
+                      sgkBase: acc.sgkBase + r.sgkBase,
+                      sgkEmp: acc.sgkEmp + r.sgkEmp,
+                      unempEmp: acc.unempEmp + r.unempEmp,
+                      sgkEmpl: acc.sgkEmpl + r.sgkEmpl,
+                      unempEmpl: acc.unempEmpl + r.unempEmpl,
+                      stamp: acc.stamp + r.stamp,
+                      totalEmployerSgk: acc.totalEmployerSgk + r.totalEmployerSgk,
+                      netSalary: acc.netSalary + r.netSalary,
+                    }), { gross:0, sgkBase:0, sgkEmp:0, unempEmp:0, sgkEmpl:0, unempEmpl:0, stamp:0, totalEmployerSgk:0, netSalary:0 });
+
+                    return (
+                      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                        {/* Header */}
+                        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-teal-50 flex items-center justify-center">
+                              <Shield className="w-4 h-4 text-teal-600" />
+                            </div>
+                            <div>
+                              <h3 className="font-bold text-gray-800">{tr556 ? 'SGK e-Bildirge Raporu' : 'SGK e-Declaration Report'}</h3>
+                              <p className="text-[10px] text-gray-400">{tr556 ? 'Aylık SGK prim bildirgesi özeti' : 'Monthly SGK premium declaration summary'}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="month" value={p556Period} onChange={e => setP556Period(e.target.value)}
+                              className="apple-input text-xs px-3 py-1.5" />
+                            <button onClick={() => {
+                              const lines = [
+                                `SGK e-Bildirge — ${periodLabel}`,
+                                '',
+                                ['TC/Çalışan', 'Brüt Ücret', 'SGK Matrahı', 'SGK İşçi (%14)', 'İşsizlik İşçi (%1)', 'SGK İşveren (%20.5)', 'İşsizlik İşveren (%2)', 'Damga Vergisi', 'Net Ücret'].join('\t'),
+                                ...rows.map(r => [
+                                  r.emp.name, r.gross, r.sgkBase, r.sgkEmp, r.unempEmp, r.sgkEmpl, r.unempEmpl, r.stamp, r.netSalary
+                                ].join('\t')),
+                                '',
+                                ['TOPLAM', totals.gross, totals.sgkBase, totals.sgkEmp, totals.unempEmp, totals.sgkEmpl, totals.unempEmpl, totals.stamp, totals.netSalary].join('\t'),
+                              ].join('\n');
+                              const blob = new Blob([lines], { type: 'text/plain;charset=utf-8' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url; a.download = `sgk-bildirge-${p556Period}.txt`; a.click();
+                              URL.revokeObjectURL(url);
+                              toast(tr556 ? 'SGK raporu indirildi.' : 'SGK report downloaded.', 'success');
+                            }} className="flex items-center gap-1.5 text-xs font-semibold text-teal-600 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors">
+                              <Download className="w-3.5 h-3.5" />{tr556 ? 'TXT İndir' : 'Download TXT'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Summary cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
+                          {[
+                            { label: tr556 ? 'Toplam Brüt' : 'Total Gross',        val: totals.gross,           color: 'text-gray-800' },
+                            { label: tr556 ? 'SGK Matrahı' : 'SGK Base',           val: totals.sgkBase,         color: 'text-teal-700' },
+                            { label: tr556 ? 'İşçi SGK+İşsizlik' : 'Employee SGK', val: totals.sgkEmp + totals.unempEmp, color: 'text-red-600' },
+                            { label: tr556 ? 'İşveren SGK+İşsizlik' : 'Employer SGK', val: totals.totalEmployerSgk, color: 'text-blue-700' },
+                          ].map(k => (
+                            <div key={k.label} className="bg-white p-4">
+                              <p className="text-[10px] font-bold text-gray-400 mb-1">{k.label}</p>
+                              <p className={`text-lg font-black ${k.color}`}>{fmtKpi(k.val,'full',0)}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Period + totals info */}
+                        <div className="px-5 py-3 bg-teal-50 border-b border-teal-100 flex flex-wrap gap-4 text-xs text-teal-800">
+                          <span className="font-bold">{tr556 ? 'Dönem:' : 'Period:'} {periodLabel}</span>
+                          <span>·</span>
+                          <span>{activeEmps.length} {tr556 ? 'Aktif Çalışan' : 'Active Employees'}</span>
+                          <span>·</span>
+                          <span>{tr556 ? 'SGK İşçi: %14 | İşsizlik İşçi: %1 | SGK İşveren: %20,5 | İşsizlik İşveren: %2' : 'SGK Emp: 14% | Unemp Emp: 1% | SGK Empl: 20.5% | Unemp Empl: 2%'}</span>
+                        </div>
+
+                        {/* Detail table */}
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-gray-50 border-b border-gray-100">
+                                {[
+                                  tr556?'Çalışan':'Employee',
+                                  tr556?'Departman':'Dept',
+                                  tr556?'Brüt':'Gross',
+                                  tr556?'SGK Matrahı':'SGK Base',
+                                  tr556?'SGK İşçi':'SGK Emp',
+                                  tr556?'İşsizlik İşçi':'Unemp Emp',
+                                  tr556?'SGK İşveren':'SGK Empl',
+                                  tr556?'İşsizlik İşveren':'Unemp Empl',
+                                  tr556?'Damga':'Stamp',
+                                  tr556?'Net':'Net',
+                                ].map(h => (
+                                  <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {rows.map(r => (
+                                <tr key={r.emp.id} className="hover:bg-gray-50/50 transition-colors">
+                                  <td className="px-3 py-2.5 font-semibold text-gray-800 whitespace-nowrap">{r.emp.name}</td>
+                                  <td className="px-3 py-2.5 text-gray-500">{r.emp.department}</td>
+                                  <td className="px-3 py-2.5 font-bold text-gray-800 font-mono">{r.gross.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-teal-700 font-mono">{r.sgkBase.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-red-500 font-mono">−{r.sgkEmp.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-red-400 font-mono">−{r.unempEmp.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-blue-600 font-mono">{r.sgkEmpl.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-blue-400 font-mono">{r.unempEmpl.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-amber-600 font-mono">−{r.stamp.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 font-bold text-emerald-700 font-mono">{r.netSalary.toLocaleString('tr-TR')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                                <td className="px-3 py-2.5 text-gray-700 text-[10px] uppercase" colSpan={2}>{tr556 ? 'TOPLAM' : 'TOTAL'}</td>
+                                <td className="px-3 py-2.5 text-gray-800 font-mono">{totals.gross.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-teal-700 font-mono">{totals.sgkBase.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-red-500 font-mono">−{totals.sgkEmp.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-red-400 font-mono">−{totals.unempEmp.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-blue-600 font-mono">{totals.sgkEmpl.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-blue-400 font-mono">{totals.unempEmpl.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-amber-600 font-mono">−{totals.stamp.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-emerald-700 font-mono">{totals.netSalary.toLocaleString('tr-TR')}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <p className="px-5 py-3 text-[10px] text-gray-400 border-t border-gray-50">
+                          {tr556 ? '* Bu rapor hesaplanmış tahmini değerleri göstermektedir. Resmi SGK bildirgesini Mali Müşavirinizle birlikte hazırlayınız.' : '* This report shows calculated estimated values. Prepare the official SGK declaration with your CPA.'}
+                        </p>
                       </div>
                     );
                   })()}
@@ -33227,6 +33416,7 @@ function AppContent() {
                     { id: 'sevkiyat', label: currentLanguage === 'tr' ? 'Sevkiyatlar' : 'Shipments', icon: Truck },
                     { id: 'kargo_takip', label: currentLanguage === 'tr' ? 'Kargo Takip' : 'Tracking', icon: Navigation },
                     { id: 'depo', label: currentLanguage === 'tr' ? 'Depo' : 'Warehouse', icon: Building2 },
+                    { id: 'wms', label: currentLanguage === 'tr' ? 'Bin/Lokasyon' : 'Bin/Location', icon: MapPin },
                     { id: 'transfer', label: currentLanguage === 'tr' ? 'Depolar Arası' : 'Transfer', icon: ArrowRightLeft },
                     { id: 'giden_irsaliye', label: currentLanguage === 'tr' ? 'Giden İrsaliye' : 'Outgoing', icon: FileUp },
                     { id: 'gelen_irsaliye', label: currentLanguage === 'tr' ? 'Gelen İrsaliye' : 'Incoming', icon: FileDown },
@@ -33264,6 +33454,200 @@ function AppContent() {
               {lojistikTab === 'gelen_irsaliye' && (
                 <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
+
+              {/* ── Phase 554: WMS Bin/Location Management ─────────────────────────── */}
+              {lojistikTab === 'wms' && (() => {
+                const tr554 = currentLanguage === 'tr';
+                const filtered554 = p554Bins.filter(b =>
+                  !p554Search || b.binCode.toLowerCase().includes(p554Search.toLowerCase()) ||
+                  b.productSku.toLowerCase().includes(p554Search.toLowerCase()) ||
+                  b.productName.toLowerCase().includes(p554Search.toLowerCase())
+                );
+                const warehouseGroups = filtered554.reduce<Record<string,typeof p554Bins>>((acc, b) => {
+                  const key = b.warehouseName || b.warehouseId || tr554 ? 'Depo' : 'Warehouse';
+                  if (!acc[key]) acc[key] = [];
+                  acc[key].push(b);
+                  return acc;
+                }, {});
+                const lowStock = p554Bins.filter(b => b.minQty !== undefined && b.quantity < b.minQty).length;
+
+                return (
+                  <motion.div key="wms" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
+                    <ModuleHeader
+                      title={tr554 ? 'Bin / Lokasyon Yönetimi' : 'Bin / Location Management'}
+                      subtitle={tr554 ? 'Depo içi raf ve lokasyon bazlı stok takibi' : 'Rack and bin-level stock tracking within warehouses'}
+                      icon={MapPin}
+                      actionButton={hasFullAccess('lojistik') ? (
+                        <button onClick={() => setP554AddForm(v => !v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
+                          <Plus className="w-3.5 h-3.5" />{tr554 ? 'Lokasyon Ekle' : 'Add Location'}
+                        </button>
+                      ) : undefined}
+                    />
+
+                    {/* KPI strip */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: tr554 ? 'Toplam Bin' : 'Total Bins',          val: p554Bins.length,   color: 'text-blue-700',    bg: 'bg-blue-50',    icon: MapPin },
+                        { label: tr554 ? 'Depolar' : 'Warehouses',             val: Object.keys(warehouseGroups).length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Building2 },
+                        { label: tr554 ? 'Düşük Stok Bin' : 'Low Stock Bins',  val: lowStock,          color: lowStock>0?'text-red-600':'text-emerald-600', bg: lowStock>0?'bg-red-50':'bg-emerald-50', icon: AlertTriangle },
+                        { label: tr554 ? 'Toplam SKU' : 'Unique SKUs',         val: new Set(p554Bins.map(b => b.productSku).filter(Boolean)).size, color: 'text-amber-700', bg: 'bg-amber-50', icon: Package },
+                      ].map(k => (
+                        <div key={k.label} className={`apple-card p-4 flex items-center gap-3 ${k.bg}`}>
+                          <k.icon className={`w-5 h-5 flex-shrink-0 ${k.color}`} />
+                          <div><p className="text-xs text-gray-500">{k.label}</p><p className={`text-2xl font-bold ${k.color}`}>{k.val}</p></div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add form */}
+                    <AnimatePresence>
+                      {p554AddForm && (
+                        <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}} className="overflow-hidden">
+                          <div className="apple-card p-5 border-l-4 border-brand space-y-3">
+                            <h4 className="font-bold text-gray-800 text-sm">{tr554 ? 'Yeni Lokasyon' : 'New Bin Location'}</h4>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Depo' : 'Warehouse'}</label>
+                                <select className="apple-input text-sm w-full" value={p554Draft.warehouseId}
+                                  onChange={e => {
+                                    const wh = warehouses.find(w => w.id === e.target.value);
+                                    setP554Draft(d => ({ ...d, warehouseId: e.target.value, warehouseName: wh?.name || '' } as typeof d));
+                                  }}>
+                                  <option value="">{tr554 ? 'Depo seçin' : 'Select warehouse'}</option>
+                                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Bin Kodu' : 'Bin Code'}</label>
+                                <input className="apple-input text-sm w-full" placeholder="A1-03" value={p554Draft.binCode}
+                                  onChange={e => setP554Draft(d => ({ ...d, binCode: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">SKU</label>
+                                <input className="apple-input text-sm w-full" placeholder="SKU-001" value={p554Draft.productSku}
+                                  onChange={e => setP554Draft(d => ({ ...d, productSku: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Ürün Adı' : 'Product Name'}</label>
+                                <input className="apple-input text-sm w-full" placeholder={tr554 ? 'Ürün adı' : 'Product name'} value={p554Draft.productName}
+                                  onChange={e => setP554Draft(d => ({ ...d, productName: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Miktar' : 'Qty'}</label>
+                                <input type="number" min="0" className="apple-input text-sm w-full" placeholder="0" value={p554Draft.quantity}
+                                  onChange={e => setP554Draft(d => ({ ...d, quantity: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Min. Stok' : 'Min Stock'}</label>
+                                <input type="number" min="0" className="apple-input text-sm w-full" placeholder="0" value={p554Draft.minQty}
+                                  onChange={e => setP554Draft(d => ({ ...d, minQty: e.target.value }))} />
+                              </div>
+                            </div>
+                            <input className="apple-input text-sm w-full" placeholder={tr554 ? 'Not (opsiyonel)' : 'Notes (optional)'} value={p554Draft.notes}
+                              onChange={e => setP554Draft(d => ({ ...d, notes: e.target.value }))} />
+                            <div className="flex gap-2 justify-end">
+                              <button onClick={() => setP554AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr554 ? 'İptal' : 'Cancel'}</button>
+                              <button
+                                disabled={!p554Draft.warehouseId || !p554Draft.binCode}
+                                onClick={async () => {
+                                  const wh = warehouses.find(w => w.id === p554Draft.warehouseId);
+                                  await addDoc(collection(db, 'warehouseBins'), {
+                                    warehouseId: p554Draft.warehouseId,
+                                    warehouseName: wh?.name || '',
+                                    binCode: p554Draft.binCode,
+                                    productSku: p554Draft.productSku,
+                                    productName: p554Draft.productName,
+                                    quantity: Number(p554Draft.quantity) || 0,
+                                    minQty: p554Draft.minQty ? Number(p554Draft.minQty) : undefined,
+                                    notes: p554Draft.notes || undefined,
+                                    lastCounted: new Date().toISOString().slice(0,10),
+                                    createdAt: serverTimestamp(),
+                                  });
+                                  setP554Draft({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
+                                  setP554AddForm(false);
+                                  toast(tr554 ? 'Lokasyon eklendi.' : 'Location added.', 'success');
+                                }}
+                                className="apple-button-primary px-5 py-2 text-sm disabled:opacity-50"
+                              >{tr554 ? 'Kaydet' : 'Save'}</button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Search */}
+                    <div className="apple-card p-4">
+                      <div className="relative mb-4">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input className="apple-input pl-9 w-full text-sm" placeholder={tr554 ? 'Bin kodu, SKU veya ürün adı ara…' : 'Search bin code, SKU or product…'}
+                          value={p554Search} onChange={e => setP554Search(e.target.value)} />
+                      </div>
+
+                      {p554Bins.length === 0 ? (
+                        <div className="text-center py-12 space-y-3">
+                          <MapPin className="w-10 h-10 text-gray-200 mx-auto" />
+                          <p className="text-gray-400 text-sm">{tr554 ? '"Lokasyon Ekle" ile depo içi bin takibine başlayın.' : 'Click "Add Location" to start tracking bin locations.'}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {Object.entries(warehouseGroups).map(([whName, bins]) => (
+                            <div key={whName}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <Building2 className="w-4 h-4 text-gray-400" />
+                                <h4 className="font-bold text-gray-700 text-sm">{whName}</h4>
+                                <span className="text-xs text-gray-400">({bins.length} bin)</span>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b border-gray-100">
+                                      {[tr554?'Bin Kodu':'Bin Code', 'SKU', tr554?'Ürün':'Product', tr554?'Miktar':'Qty', tr554?'Min':'Min', tr554?'Son Sayım':'Last Count', ''].map(h => (
+                                        <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-50">
+                                    {bins.map(b => {
+                                      const isLow = b.minQty !== undefined && b.quantity < b.minQty;
+                                      return (
+                                        <tr key={b.id} className={`hover:bg-gray-50/50 transition-colors ${isLow ? 'bg-red-50/30' : ''}`}>
+                                          <td className="px-3 py-2.5">
+                                            <span className="font-mono font-bold text-gray-800 bg-gray-100 px-2 py-0.5 rounded text-xs">{b.binCode}</span>
+                                          </td>
+                                          <td className="px-3 py-2.5 font-mono text-xs text-gray-500">{b.productSku || '—'}</td>
+                                          <td className="px-3 py-2.5 text-gray-700 max-w-[180px] truncate">{b.productName || '—'}</td>
+                                          <td className="px-3 py-2.5">
+                                            <span className={`font-bold ${isLow ? 'text-red-600' : 'text-gray-800'}`}>{b.quantity}</span>
+                                            {isLow && <span className="ml-1 text-[9px] font-bold text-red-500 bg-red-100 px-1 py-0.5 rounded">LOW</span>}
+                                          </td>
+                                          <td className="px-3 py-2.5 text-gray-400 text-xs">{b.minQty ?? '—'}</td>
+                                          <td className="px-3 py-2.5 text-gray-400 text-xs">{b.lastCounted || '—'}</td>
+                                          <td className="px-3 py-2.5">
+                                            <button onClick={async () => {
+                                              const qty = window.prompt(tr554 ? 'Yeni miktar girin:' : 'Enter new quantity:', String(b.quantity));
+                                              if (qty === null) return;
+                                              const n = Number(qty);
+                                              if (isNaN(n)) return;
+                                              await updateDoc(doc(db, 'warehouseBins', b.id), { quantity: n, lastCounted: new Date().toISOString().slice(0,10) });
+                                              toast(tr554 ? 'Miktar güncellendi.' : 'Quantity updated.', 'success');
+                                            }} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors">
+                                              {tr554 ? 'Düzelt' : 'Adjust'}
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })()}
 
               {/* Lojistik sub-tab: Sevkiyatlar (existing logistics content) */}
               {lojistikTab === 'sevkiyat' && <>
