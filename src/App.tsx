@@ -19305,6 +19305,12 @@ function AppContent() {
   // ── Phase 560: Sipariş Onay Akışı ────────────────────────────────────────
   const [p560ApprovalThreshold, setP560ApprovalThreshold] = useState(50000);
   const [p560PendingOrders, setP560PendingOrders] = useState<string[]>([]);
+  // ── Phase 561: MRP Reorder Suggestions ────────────────────────────────────
+  const [p561ShowAll, setP561ShowAll] = useState(false);
+  // ── Phase 562: Stock Reservation View ─────────────────────────────────────
+  const [p562ShowReservations, setP562ShowReservations] = useState(false);
+  // ── Phase 563: Multi-Currency P&L ────────────────────────────────────────
+  const [p563PnlCurrency, setP563PnlCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -24821,6 +24827,81 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 563: Multi-Currency P&L Konsolidasyon ───────────────────── */}
+                  {muhasebeTab === 'pnl' && (() => {
+                    const tr563 = currentLanguage === 'tr';
+                    const usd = exchangeRates?.USD ?? 32;
+                    const eur = exchangeRates?.EUR ?? 35;
+                    const rate563 = p563PnlCurrency === 'USD' ? usd : p563PnlCurrency === 'EUR' ? eur : 1;
+                    const sym563 = p563PnlCurrency === 'USD' ? '$' : p563PnlCurrency === 'EUR' ? '€' : '₺';
+                    const fmt563 = (v: number) => `${sym563}${(v/rate563).toLocaleString(p563PnlCurrency==='TRY'?'tr-TR':p563PnlCurrency==='EUR'?'de-DE':'en-US',{maximumFractionDigits:0})}`;
+
+                    const totalRevTRY = orders.filter(o => o.status !== 'Cancelled').reduce((s,o) => s+(o.totalPrice||0), 0);
+                    const totalCogsTRY = orders.filter(o => o.status !== 'Cancelled').reduce((s,o) => s+(o.lineItems??[]).reduce((ls,li) => ls+((li.costPrice??0)*li.quantity),0), 0);
+                    const grossTRY = totalRevTRY - totalCogsTRY;
+                    const opexTRY = totalRevTRY * 0.12;
+                    const ebitTRY = grossTRY - opexTRY;
+
+                    const pnl563 = [
+                      { label: tr563?'Gelir':'Revenue', try: totalRevTRY },
+                      { label: 'COGS', try: -totalCogsTRY },
+                      { label: tr563?'Brüt Kâr':'Gross Profit', try: grossTRY },
+                      { label: tr563?'Faaliyet Giderleri':'Operating Expenses', try: -opexTRY },
+                      { label: 'EBIT', try: ebitTRY },
+                    ];
+
+                    // Per-currency revenue breakdown (from orders with different currencies)
+                    const currBreakdown: Record<string, number> = { TRY: 0, USD: 0, EUR: 0 };
+                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
+                      const c = 'TRY'; // Orders don't have currency; assume TRY
+                      currBreakdown[c] = (currBreakdown[c] || 0) + (o.totalPrice || 0);
+                    });
+
+                    return (
+                      <div className="apple-card p-5 mt-2">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <Globe className="w-4 h-4 text-indigo-500" />
+                            <h4 className="font-bold text-gray-800 text-sm">{tr563?'Çok Dövizli P&L Konsolidasyon':'Multi-Currency P&L Consolidation'}</h4>
+                          </div>
+                          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                            {(['TRY','USD','EUR'] as const).map(c => (
+                              <button key={c} onClick={() => setP563PnlCurrency(c)}
+                                className={`text-xs font-bold px-3 py-1 rounded-md transition-all ${p563PnlCurrency===c?'bg-white shadow-sm text-gray-800':'text-gray-400 hover:text-gray-600'}`}>
+                                {c==='TRY'?'₺ TRY':c==='USD'?'$ USD':'€ EUR'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Exchange rate notice */}
+                        {p563PnlCurrency !== 'TRY' && (
+                          <div className="mb-3 px-3 py-2 bg-indigo-50 rounded-xl text-xs text-indigo-700 flex items-center gap-2">
+                            <span>📌</span>
+                            <span>{tr563?`Kur: 1 ${p563PnlCurrency} = ₺${rate563.toLocaleString('tr-TR')}`:`Rate: 1 ${p563PnlCurrency} = ₺${rate563.toLocaleString()}`}</span>
+                          </div>
+                        )}
+
+                        <div className="space-y-0 divide-y divide-gray-100">
+                          {pnl563.map(row => (
+                            <div key={row.label} className={`flex items-center justify-between py-3 ${['Brüt Kâr','Gross Profit','EBIT'].includes(row.label)?'bg-gray-50 -mx-2 px-2 rounded-xl font-bold':''}`}>
+                              <span className="text-sm text-gray-700">{row.label}</span>
+                              <div className="flex items-center gap-4">
+                                {p563PnlCurrency !== 'TRY' && (
+                                  <span className="text-xs text-gray-400 font-mono">₺{Math.abs(row.try).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                                )}
+                                <span className={`text-sm font-bold font-mono ${row.try < 0?'text-red-500':row.try===0?'text-gray-400':'text-emerald-700'}`}>
+                                  {row.try < 0 ? '– ' : ''}{fmt563(Math.abs(row.try))}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-3">* {tr563?'Dönüşüm TCMB spot kurları üzerinden yapılmıştır.':'Conversion uses TCMB spot exchange rates.'}</p>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Nakit Akışı (Cash Flow) ── */}
                   {muhasebeTab === 'nakit-akis' && (() => {
                     // Build monthly cash flow from orders (inflows) and AP/expense records
@@ -29579,6 +29660,150 @@ function AppContent() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 561: MRP — Tedarik Öneri Raporu ─────────────────────────── */}
+              {(() => {
+                const tr561 = currentLanguage === 'tr';
+                // Build demand map from open orders (Pending / Processing)
+                const demandMap: Record<string, { name: string; demanded: number; stock: number; sku: string }> = {};
+                orders.filter(o => o.status === 'Pending' || o.status === 'Processing').forEach(o => {
+                  (o.lineItems || []).forEach(li => {
+                    const invId = li.inventoryId || li.id;
+                    if (!invId) return;
+                    if (!demandMap[invId]) {
+                      const invItem = inventory.find(i => i.id === invId || i.sku === li.sku);
+                      demandMap[invId] = { name: li.name || li.title || '?', demanded: 0, stock: invItem?.stockLevel ?? 0, sku: li.sku || '' };
+                    }
+                    demandMap[invId].demanded += li.quantity || 0;
+                  });
+                });
+                const suggestions = Object.values(demandMap).filter(d => d.demanded >= d.stock);
+                if (suggestions.length === 0) return null;
+                const visible = p561ShowAll ? suggestions : suggestions.slice(0,5);
+                return (
+                  <div className="apple-card p-5 border-l-4 border-blue-400">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-blue-500" />
+                        <h4 className="font-bold text-blue-800 text-sm">
+                          {tr561 ? `MRP — ${suggestions.length} Ürün Satın Alma Önerisi` : `MRP — ${suggestions.length} Purchase Suggestion${suggestions.length>1?'s':''}`}
+                        </h4>
+                      </div>
+                      {suggestions.length > 5 && (
+                        <button onClick={() => setP561ShowAll(v => !v)} className="text-xs text-blue-600 font-semibold hover:underline">
+                          {p561ShowAll ? (tr561?'Daha az göster':'Show less') : (tr561?'Tümünü göster':'Show all')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-blue-100">
+                            {['SKU', tr561?'Ürün':'Product', tr561?'Stok':'Stock', tr561?'Talep':'Demand', tr561?'Açık':'Shortage', tr561?'Öneri':'Suggestion'].map(h => (
+                              <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-blue-400 uppercase">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-blue-50">
+                          {visible.map((s, i) => {
+                            const shortage = s.demanded - s.stock;
+                            const suggestQty = Math.ceil(shortage * 1.2); // 20% buffer
+                            return (
+                              <tr key={i} className="hover:bg-blue-50/50">
+                                <td className="px-3 py-2 font-mono text-blue-500">{s.sku || '—'}</td>
+                                <td className="px-3 py-2 font-semibold text-gray-800 max-w-[180px] truncate">{s.name}</td>
+                                <td className="px-3 py-2 text-gray-600">{s.stock}</td>
+                                <td className="px-3 py-2 text-amber-700 font-bold">{s.demanded}</td>
+                                <td className="px-3 py-2 text-red-600 font-bold">−{shortage}</td>
+                                <td className="px-3 py-2">
+                                  <button onClick={() => { setQuickPOProduct({ name: s.name, sku: s.sku }); setActiveTab('satin-alma'); }}
+                                    className="text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
+                                    + {suggestQty} {tr561?'birim al':'units PO'}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-blue-400 mt-2">{tr561?'Sadece bekleyen ve hazırlanan siparişler dikkate alınmıştır.':'Only Pending and Processing orders included.'}</p>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 562: Stok Rezervasyon Özeti ─────────────────────────────── */}
+              {(() => {
+                const tr562 = currentLanguage === 'tr';
+                // Build reservation map: sum quantities from Pending+Processing orders per sku
+                const reservedMap: Record<string, { name: string; reserved: number; available: number; sku: string; stockLevel: number }> = {};
+                orders.filter(o => o.status === 'Pending' || o.status === 'Processing').forEach(o => {
+                  (o.lineItems || []).forEach(li => {
+                    const key = li.sku || li.id;
+                    if (!key) return;
+                    if (!reservedMap[key]) {
+                      const inv = inventory.find(i => i.sku === li.sku || i.id === li.inventoryId);
+                      const stock = inv?.stockLevel ?? 0;
+                      reservedMap[key] = { name: li.name || li.title || '?', reserved: 0, available: stock, sku: key, stockLevel: stock };
+                    }
+                    reservedMap[key].reserved += li.quantity || 0;
+                  });
+                });
+                const reservations = Object.values(reservedMap).filter(r => r.reserved > 0);
+                if (reservations.length === 0) return null;
+
+                return (
+                  <div className="apple-card overflow-hidden">
+                    <button onClick={() => setP562ShowReservations(v => !v)}
+                      className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-purple-500" />
+                        <h4 className="font-bold text-purple-800 text-sm">
+                          {tr562 ? `Stok Rezervasyonları — ${reservations.length} Ürün` : `Stock Reservations — ${reservations.length} Item${reservations.length>1?'s':''}`}
+                        </h4>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${p562ShowReservations?'rotate-180':''}`} />
+                    </button>
+                    <AnimatePresence>
+                      {p562ShowReservations && (
+                        <motion.div initial={{height:0,opacity:0}} animate={{height:'auto',opacity:1}} exit={{height:0,opacity:0}} className="overflow-hidden">
+                          <div className="overflow-x-auto border-t border-gray-100">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-purple-50 border-b border-purple-100">
+                                  {['SKU', tr562?'Ürün':'Product', tr562?'Stok':'Total Stock', tr562?'Rezerve':'Reserved', tr562?'Kullanılabilir':'Available'].map(h => (
+                                    <th key={h} className="py-2 px-4 text-left text-[10px] font-bold text-purple-400 uppercase">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {reservations.map((r, i) => {
+                                  const avail = r.stockLevel - r.reserved;
+                                  return (
+                                    <tr key={i} className={`hover:bg-gray-50/50 ${avail < 0 ? 'bg-red-50/30' : ''}`}>
+                                      <td className="px-4 py-2.5 font-mono text-gray-500">{r.sku}</td>
+                                      <td className="px-4 py-2.5 font-semibold text-gray-800 max-w-[180px] truncate">{r.name}</td>
+                                      <td className="px-4 py-2.5 text-gray-600">{r.stockLevel}</td>
+                                      <td className="px-4 py-2.5 font-bold text-purple-700">{r.reserved}</td>
+                                      <td className="px-4 py-2.5">
+                                        <span className={`font-bold ${avail < 0 ? 'text-red-600' : avail === 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
+                                          {avail}
+                                        </span>
+                                        {avail < 0 && <span className="ml-1 text-[9px] font-bold text-white bg-red-500 px-1 py-0.5 rounded">{tr562?'Açık':'OVERSOLD'}</span>}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="px-4 pb-3 pt-2 text-[10px] text-gray-400">{tr562?'Bekleyen ve hazırlanan siparişlerden rezervasyon türetilmiştir.':'Reservations derived from Pending and Processing orders.'}</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 );
               })()}
