@@ -19346,6 +19346,33 @@ function AppContent() {
   const [p579Search, setP579Search] = useState('');
   // ── Phase 580: Budget vs Actual ───────────────────────────────────────────
   const [p580Year, setP580Year] = useState(() => String(new Date().getFullYear()));
+  // ── Phase 581: Sales Rep Performance ──────────────────────────────────────
+  const [p581RepPeriod, setP581RepPeriod] = useState<'30d'|'90d'|'ytd'>('30d');
+  // ── Phase 582: Project Cost Tracking ──────────────────────────────────────
+  const [p582Projects, setP582Projects] = useState<Array<{id:string;name:string;budget:number;spent:number;status:'Aktif'|'Tamamlandı'|'Beklemede'}>>([]);
+  const [p582ShowForm, setP582ShowForm] = useState(false);
+  const [p582Draft, setP582Draft] = useState({name:'',budget:'',spent:'',status:'Aktif' as 'Aktif'|'Tamamlandı'|'Beklemede'});
+  // ── Phase 583: Warranty & Service Requests ────────────────────────────────
+  const [p583Requests, setP583Requests] = useState<Array<{id:string;customerName:string;productName:string;serialNo?:string;issueDate:string;warrantyEnd?:string;description:string;status:'Açık'|'İşlemde'|'Kapatıldı';priority:'Düşük'|'Orta'|'Yüksek'}>>([]);
+  const [p583ShowForm, setP583ShowForm] = useState(false);
+  const [p583Draft, setP583Draft] = useState({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'});
+  // ── Phase 584: Physical Inventory / Cycle Count ───────────────────────────
+  const [p584CountItems, setP584CountItems] = useState<Array<{id:string;sku:string;name:string;systemQty:number;countedQty?:number;variance?:number}>>([]);
+  const [p584Active, setP584Active] = useState(false);
+  // ── Phase 585: Customer Loyalty Score ─────────────────────────────────────
+  const [p585TopN, setP585TopN] = useState(10);
+  // ── Phase 586: Sales Target by Rep ────────────────────────────────────────
+  const [p586Targets, setP586Targets] = useState<Record<string,number>>({});
+  // ── Phase 587: Quality Inspection Checklist ───────────────────────────────
+  const [p587Checks, setP587Checks] = useState<Array<{id:string;item:string;checked:boolean;severity:'Kritik'|'Uyarı'|'Bilgi'}>>([]);
+  const [p587NewItem, setP587NewItem] = useState('');
+  // ── Phase 588: Consignment Stock ──────────────────────────────────────────
+  const [p588Consign, setP588Consign] = useState<Array<{id:string;supplierName:string;productName:string;sku:string;qty:number;agreedPrice:number;locationCode?:string;startDate:string;status:'Depoda'|'Satıldı'|'İade Edildi'}>>([]);
+  const [p588ShowForm, setP588ShowForm] = useState(false);
+  const [p588Draft, setP588Draft] = useState({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
+  // ── Phase 590: Notification Inbox ─────────────────────────────────────────
+  const [p590Notifs, setP590Notifs] = useState<Array<{id:string;type:'info'|'warning'|'success'|'error';message:string;module:string;read:boolean;createdAt:string}>>([]);
+  const [p590ShowInbox, setP590ShowInbox] = useState(false);
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -28081,6 +28108,78 @@ function AppContent() {
               {!canAccess('proje') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Proje Yönetimi':'Project Management'} /> : (
                 <>
                   {!hasFullAccess('proje') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Phase 582: Proje Maliyet Takibi ─────────────────────────── */}
+                  {(() => {
+                    const tr582 = currentLanguage === 'tr';
+                    const statusColors582: Record<string,string> = {'Aktif':'bg-green-100 text-green-700','Tamamlandı':'bg-blue-100 text-blue-700','Beklemede':'bg-gray-100 text-gray-500'};
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="font-bold text-gray-900 text-sm">{tr582?'💼 Proje Maliyet Takibi':'💼 Project Cost Tracking'}</h3>
+                          {hasFullAccess('proje') && (
+                            <button onClick={()=>setP582ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
+                              <Plus className="w-4 h-4"/>{tr582?'Proje Ekle':'Add Project'}
+                            </button>
+                          )}
+                        </div>
+                        {p582ShowForm && (
+                          <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr582?'Proje Adı':'Project Name'} value={p582Draft.name} onChange={e=>setP582Draft(d=>({...d,name:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Bütçe (₺)':'Budget (₺)'} value={p582Draft.budget} onChange={e=>setP582Draft(d=>({...d,budget:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Harcanan (₺)':'Spent (₺)'} value={p582Draft.spent} onChange={e=>setP582Draft(d=>({...d,spent:e.target.value}))} />
+                              <select className="apple-input px-3 py-2 text-sm" value={p582Draft.status} onChange={e=>setP582Draft(d=>({...d,status:e.target.value as typeof d.status}))}>
+                                <option value="Aktif">{tr582?'Aktif':'Active'}</option>
+                                <option value="Tamamlandı">{tr582?'Tamamlandı':'Completed'}</option>
+                                <option value="Beklemede">{tr582?'Beklemede':'On Hold'}</option>
+                              </select>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{
+                                if(!p582Draft.name) return;
+                                setP582Projects(prev=>[...prev,{id:Date.now().toString(),name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}]);
+                                setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
+                                setP582ShowForm(false);
+                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP582ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr582?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p582Projects.length === 0 ? (
+                          <p className="text-center py-8 text-gray-400 text-sm">{tr582?'"Proje Ekle" ile bütçe takibi başlatın.':'Click "Add Project" to start tracking project costs.'}</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {p582Projects.map(p=>{
+                              const pct = p.budget>0?Math.min(100,(p.spent/p.budget)*100):0;
+                              const isOver = p.spent>p.budget && p.budget>0;
+                              return (
+                                <div key={p.id} className={`p-4 rounded-xl border ${isOver?'border-red-200 bg-red-50/20':'border-gray-100'}`}>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-semibold text-gray-800">{p.name}</p>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors582[p.status]}`}>{p.status}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
+                                      <button onClick={()=>setP582Projects(prev=>prev.filter(x=>x.id!==p.id))} className="text-red-400 hover:text-red-600 ml-2">✕</button>
+                                    </div>
+                                  </div>
+                                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all ${isOver?'bg-red-500':pct>80?'bg-amber-500':'bg-emerald-400'}`} style={{width:`${pct}%`}} />
+                                  </div>
+                                  <p className="text-xs text-gray-400 mt-1">{pct.toFixed(0)}% {tr582?'harcandı':'spent'}{isOver?` • ⚠️ ${tr582?'Bütçe aşıldı!':'Over budget!'}`:''}</p>
+                                </div>
+                              );
+                            })}
+                            <div className="border-t border-gray-100 pt-3 flex justify-between text-xs font-semibold text-gray-600">
+                              <span>{tr582?'Toplam Bütçe:':'Total Budget:'} ₺{p582Projects.reduce((s,p)=>s+p.budget,0).toLocaleString()}</span>
+                              <span>{tr582?'Toplam Harcama:':'Total Spent:'} ₺{p582Projects.reduce((s,p)=>s+p.spent,0).toLocaleString()}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <ProjectModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('proje')} userRole={userRole} />
                 </>
               )}
@@ -28092,6 +28191,60 @@ function AppContent() {
               {!canAccess('kalite') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Kalite Yönetimi':'Quality Management'} /> : (
                 <>
                   {!hasFullAccess('kalite') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                  {/* ── Phase 587: Kalite Kontrol Çeklisti ─────────────────────── */}
+                  {(() => {
+                    const tr587 = currentLanguage === 'tr';
+                    const sevColors: Record<string,string> = {'Kritik':'text-red-600','Uyarı':'text-amber-600','Bilgi':'text-blue-600'};
+                    const criticalFailed = p587Checks.filter(c=>c.severity==='Kritik'&&!c.checked).length;
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-sm">{tr587?'✅ Kalite Kontrol Çeklisti':'✅ Quality Inspection Checklist'}</h3>
+                            {criticalFailed>0&&<p className="text-xs text-red-600 font-semibold mt-0.5">⚠️ {criticalFailed} {tr587?'kritik madde tamamlanmadı':'critical item(s) incomplete'}</p>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-emerald-600">{p587Checks.filter(c=>c.checked).length}/{p587Checks.length}</span>
+                          </div>
+                        </div>
+                        {p587Checks.length>0 && (
+                          <div className="w-full bg-gray-200 rounded-full h-2 mb-4 overflow-hidden">
+                            <div className="h-full bg-emerald-400 rounded-full transition-all" style={{width:`${p587Checks.length>0?(p587Checks.filter(c=>c.checked).length/p587Checks.length)*100:0}%`}}/>
+                          </div>
+                        )}
+                        <div className="space-y-2 mb-4">
+                          {p587Checks.map(c=>(
+                            <div key={c.id} className={`flex items-center gap-3 p-3 rounded-xl ${c.checked?'bg-green-50/50':'bg-gray-50'}`}>
+                              <button onClick={()=>setP587Checks(prev=>prev.map(x=>x.id===c.id?{...x,checked:!x.checked}:x))} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
+                                {c.checked&&<svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+                              </button>
+                              <span className={`flex-1 text-sm ${c.checked?'line-through text-gray-400':'text-gray-700'}`}>{c.item}</span>
+                              <span className={`text-[10px] font-bold shrink-0 ${sevColors[c.severity]}`}>{c.severity}</span>
+                              <button onClick={()=>setP587Checks(prev=>prev.filter(x=>x.id!==c.id))} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        {hasFullAccess('kalite') && (
+                          <div className="flex gap-2">
+                            <input className="flex-1 apple-input px-3 py-2 text-sm" placeholder={tr587?'Yeni kontrol maddesi...':'New check item...'} value={p587NewItem} onChange={e=>setP587NewItem(e.target.value)} onKeyDown={e=>{
+                              if(e.key==='Enter'&&p587NewItem.trim()){
+                                setP587Checks(prev=>[...prev,{id:Date.now().toString(),item:p587NewItem.trim(),checked:false,severity:'Bilgi'}]);
+                                setP587NewItem('');
+                              }
+                            }} />
+                            <button onClick={()=>{
+                              if(!p587NewItem.trim()) return;
+                              setP587Checks(prev=>[...prev,{id:Date.now().toString(),item:p587NewItem.trim(),checked:false,severity:'Bilgi'}]);
+                              setP587NewItem('');
+                            }} className="apple-button-primary px-3 py-2 text-sm">{tr587?'Ekle':'Add'}</button>
+                            {p587Checks.length>0&&(
+                              <button onClick={()=>setP587Checks(prev=>prev.map(c=>({...c,checked:true})))} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <QualityModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kalite')} />
                 </>
               )}
@@ -30896,6 +31049,144 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 584: Fiziksel Sayım (Cycle Count) ──────────────────── */}
+              {(() => {
+                const tr584 = currentLanguage === 'tr';
+                if (!p584Active) return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-sm">{tr584?'📊 Fiziksel Sayım (Cycle Count)':'📊 Physical Inventory / Cycle Count'}</h3>
+                        <p className="text-xs text-gray-400 mt-1">{tr584?'Sistem stoğunu gerçek sayımla karşılaştırın.':'Compare system quantities to physical count.'}</p>
+                      </div>
+                      {hasFullAccess('inventory') && (
+                        <button onClick={()=>{
+                          setP584CountItems(inventory.slice(0,50).map(i=>({id:i.id,sku:i.sku,name:i.name,systemQty:i.stockLevel||0,countedQty:undefined,variance:undefined})));
+                          setP584Active(true);
+                        }} className="apple-button-primary text-sm flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4"/>{tr584?'Sayım Başlat':'Start Count'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+                const counted = p584CountItems.filter(i=>i.countedQty!==undefined);
+                const variances = counted.filter(i=>(i.variance||0)!==0);
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-sm">{tr584?'📊 Fiziksel Sayım':'📊 Cycle Count'}</h3>
+                        <p className="text-xs text-gray-500">{counted.length}/{p584CountItems.length} {tr584?'sayıldı':'counted'} • {variances.length} {tr584?'fark':'variance(s)'}</p>
+                      </div>
+                      <button onClick={()=>{setP584Active(false);setP584CountItems([]);}} className="apple-button-secondary text-xs px-3 py-1.5">{tr584?'Sayımı Kapat':'End Count'}</button>
+                    </div>
+                    <div className="overflow-y-auto max-h-64">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-gray-100 bg-gray-50 sticky top-0">
+                          {['SKU', tr584?'Ürün':'Product', tr584?'Sistem':'System', tr584?'Sayım':'Count', tr584?'Fark':'Variance'].map(h=>(
+                            <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {p584CountItems.map(item=>{
+                            const v = item.countedQty!==undefined ? item.countedQty-item.systemQty : undefined;
+                            return (
+                              <tr key={item.id} className={`hover:bg-gray-50/50 ${v!==undefined&&v!==0?'bg-amber-50/30':''}`}>
+                                <td className="px-3 py-2 font-mono text-gray-500">{item.sku}</td>
+                                <td className="px-3 py-2 text-gray-700 max-w-[150px] truncate">{item.name}</td>
+                                <td className="px-3 py-2 font-bold text-gray-600">{item.systemQty}</td>
+                                <td className="px-3 py-2">
+                                  <input type="number" className="w-16 apple-input px-2 py-0.5 text-xs" placeholder="—" value={item.countedQty??''} onChange={e=>{
+                                    const val = e.target.value===''?undefined:Number(e.target.value);
+                                    setP584CountItems(prev=>prev.map(x=>x.id===item.id?{...x,countedQty:val,variance:val!==undefined?val-x.systemQty:undefined}:x));
+                                  }} />
+                                </td>
+                                <td className="px-3 py-2">
+                                  {v!==undefined&&<span className={`font-bold ${v>0?'text-emerald-600':v<0?'text-red-600':'text-gray-400'}`}>{v>0?'+':''}{v}</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 588: Konsinye Stok Takibi ────────────────────────────── */}
+              {(() => {
+                const tr588 = currentLanguage === 'tr';
+                const statusColors588: Record<string,string> = {'Depoda':'bg-blue-100 text-blue-700','Satıldı':'bg-green-100 text-green-700','İade Edildi':'bg-gray-100 text-gray-500'};
+                const totalConsignValue = p588Consign.filter(c=>c.status==='Depoda').reduce((s,c)=>s+c.qty*c.agreedPrice,0);
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-sm">{tr588?'🤝 Konsinye Stok':'🤝 Consignment Stock'}</h3>
+                        {p588Consign.length>0&&<p className="text-xs text-gray-500 mt-0.5">{tr588?'Depodaki değer:':'Value on hand:'} <span className="font-bold text-blue-600">₺{totalConsignValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>}
+                      </div>
+                      {hasFullAccess('inventory') && (
+                        <button onClick={()=>setP588ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
+                          <Plus className="w-4 h-4"/>{tr588?'Konsinye Ekle':'Add Consignment'}
+                        </button>
+                      )}
+                    </div>
+                    {p588ShowForm && (
+                      <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Tedarikçi':'Supplier'} value={p588Draft.supplierName} onChange={e=>setP588Draft(d=>({...d,supplierName:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Ürün Adı':'Product'} value={p588Draft.productName} onChange={e=>setP588Draft(d=>({...d,productName:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder="SKU" value={p588Draft.sku} onChange={e=>setP588Draft(d=>({...d,sku:e.target.value}))} />
+                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Miktar':'Qty'} value={p588Draft.qty} onChange={e=>setP588Draft(d=>({...d,qty:e.target.value}))} />
+                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Anlaşma Fiyatı (₺)':'Agreed Price (₺)'} value={p588Draft.agreedPrice} onChange={e=>setP588Draft(d=>({...d,agreedPrice:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Lokasyon Kodu':'Location Code'} value={p588Draft.locationCode} onChange={e=>setP588Draft(d=>({...d,locationCode:e.target.value}))} />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={()=>{
+                            if(!p588Draft.supplierName||!p588Draft.productName) return;
+                            setP588Consign(prev=>[...prev,{id:Date.now().toString(),supplierName:p588Draft.supplierName,productName:p588Draft.productName,sku:p588Draft.sku,qty:Number(p588Draft.qty)||0,agreedPrice:Number(p588Draft.agreedPrice)||0,locationCode:p588Draft.locationCode||undefined,startDate:p588Draft.startDate,status:'Depoda'}]);
+                            setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
+                            setP588ShowForm(false);
+                          }} className="apple-button-primary text-sm px-4 py-1.5">{tr588?'Kaydet':'Save'}</button>
+                          <button onClick={()=>setP588ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr588?'İptal':'Cancel'}</button>
+                        </div>
+                      </div>
+                    )}
+                    {p588Consign.length===0 ? (
+                      <p className="text-center py-6 text-gray-400 text-sm">{tr588?'Henüz konsinye kaydı yok.':'No consignment records yet.'}</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b border-gray-100 bg-gray-50">
+                            {[tr588?'Tedarikçi':'Supplier', tr588?'Ürün':'Product', 'SKU', tr588?'Miktar':'Qty', tr588?'Değer':'Value', tr588?'Durum':'Status'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {p588Consign.map(c=>(
+                              <tr key={c.id} className="hover:bg-gray-50/50">
+                                <td className="px-3 py-2.5 font-medium text-gray-800">{c.supplierName}</td>
+                                <td className="px-3 py-2.5 text-gray-600">{c.productName}</td>
+                                <td className="px-3 py-2.5 font-mono text-gray-500">{c.sku}</td>
+                                <td className="px-3 py-2.5 font-bold text-gray-700">{c.qty}</td>
+                                <td className="px-3 py-2.5 font-bold font-mono text-blue-700">₺{(c.qty*c.agreedPrice).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                                <td className="px-3 py-2.5">
+                                  <select value={c.status} onChange={e=>setP588Consign(prev=>prev.map(x=>x.id===c.id?{...x,status:e.target.value as typeof c.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
+                                    <option>Depoda</option><option>Satıldı</option><option>İade Edildi</option>
+                                  </select>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <InventoryView
                 inventory={inventory}
                 categories={inventoryCategories}
@@ -32883,6 +33174,169 @@ function AppContent() {
                   ))}
                 </div>
               )}
+              {/* ── Phase 581: Satış Temsilcisi Performans Raporu ─────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && (() => {
+                const tr581 = currentLanguage === 'tr';
+                const now581 = new Date();
+                const daysBack581 = p581RepPeriod === '30d' ? 30 : p581RepPeriod === '90d' ? 90 : now581.getFullYear() * 365; // ytd: use year start
+                const from581 = p581RepPeriod === 'ytd' ? new Date(now581.getFullYear(),0,1) : new Date(now581.getTime()-daysBack581*86400000);
+                // Per-rep lead stats
+                const repMap: Record<string,{leads:number;won:number;revenue:number}> = {};
+                leads.forEach(l => {
+                  const rep = l.assignedTo || (tr581?'Atanmamış':'Unassigned');
+                  if (!repMap[rep]) repMap[rep] = {leads:0,won:0,revenue:0};
+                  repMap[rep].leads++;
+                  if (l.status==='Closed Won'||l.status==='Closed') repMap[rep].won++;
+                });
+                // Add order revenue per assignedTo
+                orders.forEach(o => {
+                  if (o.status==='Cancelled'||!o.assignedTo) return;
+                  if (!o.createdAt) return;
+                  try {
+                    const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                    if (d<from581) return;
+                  } catch { return; }
+                  const rep = o.assignedTo;
+                  if (!repMap[rep]) repMap[rep] = {leads:0,won:0,revenue:0};
+                  repMap[rep].revenue += (o.totalPrice||0);
+                });
+                const repList = Object.entries(repMap).map(([name,v])=>({name,...v,convRate:v.leads>0?(v.won/v.leads)*100:0})).sort((a,b)=>b.revenue-a.revenue);
+                if (repList.length === 0) return null;
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">{tr581?'👤 Satış Temsilcisi Performansı':'👤 Sales Rep Performance'}</h3>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                        {([['30d',tr581?'30 Gün':'30d'],['90d',tr581?'90 Gün':'90d'],['ytd','YTD']] as const).map(([id,label])=>(
+                          <button key={id} onClick={()=>setP581RepPeriod(id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p581RepPeriod===id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-gray-100 bg-gray-50">
+                          {[tr581?'Temsilci':'Rep', tr581?'Lead':'Leads', tr581?'Kapatılan':'Won', tr581?'Dönüşüm':'Conv.', tr581?'Gelir':'Revenue'].map(h=>(
+                            <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {repList.map((r,i)=>(
+                            <tr key={r.name} className="hover:bg-gray-50/50">
+                              <td className="px-3 py-2.5 font-semibold text-gray-800">
+                                <span className="inline-flex items-center gap-1.5">
+                                  {i===0 && <span className="text-amber-500">🥇</span>}
+                                  {i===1 && <span className="text-gray-400">🥈</span>}
+                                  {i===2 && <span className="text-amber-700">🥉</span>}
+                                  {r.name}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-gray-600">{r.leads}</td>
+                              <td className="px-3 py-2.5 text-emerald-600 font-bold">{r.won}</td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full ${r.convRate>=30?'bg-emerald-400':r.convRate>=15?'bg-amber-400':'bg-gray-300'}`} style={{width:`${Math.min(r.convRate,100)}%`}}/>
+                                  </div>
+                                  <span className="font-bold">{r.convRate.toFixed(0)}%</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 font-bold font-mono text-brand">
+                                {r.revenue > 0 ? `₺${r.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}` : '—'}
+                                {p586Targets[r.name] > 0 && r.revenue > 0 && (
+                                  <span className={`ml-1 text-[9px] font-bold px-1 py-0.5 rounded-full ${r.revenue>=p586Targets[r.name]?'bg-green-100 text-green-700':'bg-red-100 text-red-500'}`}>
+                                    {Math.round((r.revenue/p586Targets[r.name])*100)}%
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Phase 586: Per-rep revenue targets */}
+                    {hasFullAccess('crm') && repList.length > 0 && (
+                      <div className="border-t border-gray-100 px-4 py-3">
+                        <p className="text-[10px] text-gray-400 uppercase font-semibold mb-2">{tr581?'Aylık Ciro Hedefleri (₺)':'Monthly Revenue Targets (₺)'}</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {repList.map(r=>(
+                            <div key={r.name} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 truncate min-w-0 flex-1">{r.name}</span>
+                              <input type="number" value={p586Targets[r.name]||''} onChange={e=>setP586Targets(prev=>({...prev,[r.name]:Number(e.target.value)||0}))} className="apple-input px-2 py-1 text-xs w-24 text-right" placeholder="0" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 585: Müşteri Sadakat Skoru ──────────────────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && (() => {
+                const tr585 = currentLanguage === 'tr';
+                // Loyalty score: frequency + recency + value
+                const customerScores: Record<string,{name:string;orders:number;revenue:number;recencyDays:number;score:number}> = {};
+                const now585 = new Date();
+                orders.filter(o=>o.status!=='Cancelled').forEach(o=>{
+                  const cn = o.customerName||'';
+                  if (!cn) return;
+                  if (!customerScores[cn]) customerScores[cn]={name:cn,orders:0,revenue:0,recencyDays:999,score:0};
+                  customerScores[cn].orders++;
+                  customerScores[cn].revenue+=(o.totalPrice||0);
+                  if (o.createdAt) {
+                    try {
+                      const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                      const days=Math.floor((now585.getTime()-d.getTime())/86400000);
+                      if (days<customerScores[cn].recencyDays) customerScores[cn].recencyDays=days;
+                    } catch {}
+                  }
+                });
+                const maxRev = Math.max(...Object.values(customerScores).map(c=>c.revenue),1);
+                const maxOrd = Math.max(...Object.values(customerScores).map(c=>c.orders),1);
+                const list585 = Object.values(customerScores).map(c=>{
+                  const recencyScore = Math.max(0,100-(c.recencyDays*0.5));
+                  const freqScore = (c.orders/maxOrd)*100;
+                  const valScore = (c.revenue/maxRev)*100;
+                  const score = Math.round(0.3*recencyScore+0.3*freqScore+0.4*valScore);
+                  return {...c,score};
+                }).sort((a,b)=>b.score-a.score).slice(0,p585TopN);
+                if (list585.length===0) return null;
+                const getTier=(s:number)=>s>=80?{label:tr585?'Platin':'Platinum',cls:'bg-purple-100 text-purple-700'}:s>=60?{label:tr585?'Altın':'Gold',cls:'bg-amber-100 text-amber-700'}:s>=40?{label:tr585?'Gümüş':'Silver',cls:'bg-gray-100 text-gray-600'}:{label:tr585?'Bronz':'Bronze',cls:'bg-orange-100 text-orange-700'};
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">{tr585?'💎 Müşteri Sadakat Analizi':'💎 Customer Loyalty Analysis'}</h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Top</span>
+                        <select value={p585TopN} onChange={e=>setP585TopN(Number(e.target.value))} className="apple-input px-2 py-1 text-xs">
+                          {[5,10,20].map(n=><option key={n}>{n}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {list585.map(c=>{
+                        const tier=getTier(c.score);
+                        return (
+                          <div key={c.name} className="flex items-center gap-3 py-1.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${tier.cls}`}>{tier.label}</span>
+                            <span className="text-xs font-medium text-gray-800 min-w-[120px] truncate">{c.name}</span>
+                            <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                              <div className="h-full bg-gradient-to-r from-brand to-orange-400 rounded-full" style={{width:`${c.score}%`}}/>
+                            </div>
+                            <span className="text-xs font-bold text-gray-700 w-8 text-right">{c.score}</span>
+                            <span className="text-[10px] text-gray-400 w-20 text-right hidden sm:block">₺{c.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-3">* {tr585?'Skor: Son alım (30%), sipariş sıklığı (30%), toplam değer (40%)':'Score: Recency 30%, Frequency 30%, Value 40%'}</p>
+                  </div>
+                );
+              })()}
+
               </>}
             </motion.div>
           )}
@@ -34559,6 +35013,72 @@ function AppContent() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Phase 583: Garanti & Servis Talepleri ─────────────────────── */}
+          {activeTab === 'orders' && !selectedOrder && (() => {
+            const tr583 = currentLanguage === 'tr';
+            const statusColors583: Record<string,string> = {'Açık':'bg-red-100 text-red-700','İşlemde':'bg-amber-100 text-amber-700','Kapatıldı':'bg-green-100 text-green-700'};
+            const prioColors583: Record<string,string> = {'Yüksek':'bg-red-50 border-l-red-400','Orta':'bg-amber-50 border-l-amber-300','Düşük':'bg-gray-50 border-l-gray-300'};
+            return (
+              <div className="apple-card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-gray-900 text-sm">{tr583?'🔧 Garanti & Servis Talepleri':'🔧 Warranty & Service Requests'}</h3>
+                  {hasFullAccess('orders') && (
+                    <button onClick={()=>setP583ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
+                      <Plus className="w-4 h-4"/>{tr583?'Talep Ekle':'New Request'}
+                    </button>
+                  )}
+                </div>
+                {p583ShowForm && (
+                  <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Müşteri':'Customer'} value={p583Draft.customerName} onChange={e=>setP583Draft(d=>({...d,customerName:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Ürün Adı':'Product'} value={p583Draft.productName} onChange={e=>setP583Draft(d=>({...d,productName:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Seri No':'Serial No'} value={p583Draft.serialNo} onChange={e=>setP583Draft(d=>({...d,serialNo:e.target.value}))} />
+                      <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Garanti Bitiş':'Warranty End'} value={p583Draft.warrantyEnd} onChange={e=>setP583Draft(d=>({...d,warrantyEnd:e.target.value}))} />
+                      <select className="apple-input px-3 py-2 text-sm" value={p583Draft.priority} onChange={e=>setP583Draft(d=>({...d,priority:e.target.value as 'Düşük'|'Orta'|'Yüksek'}))}>
+                        <option value="Düşük">{tr583?'Düşük Öncelik':'Low Priority'}</option>
+                        <option value="Orta">{tr583?'Orta Öncelik':'Medium Priority'}</option>
+                        <option value="Yüksek">{tr583?'Yüksek Öncelik':'High Priority'}</option>
+                      </select>
+                      <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={tr583?'Sorun Açıklaması':'Issue Description'} value={p583Draft.description} onChange={e=>setP583Draft(d=>({...d,description:e.target.value}))} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={()=>{
+                        if(!p583Draft.customerName||!p583Draft.description) return;
+                        setP583Requests(prev=>[...prev,{id:Date.now().toString(),customerName:p583Draft.customerName,productName:p583Draft.productName,serialNo:p583Draft.serialNo||undefined,issueDate:new Date().toISOString().slice(0,10),warrantyEnd:p583Draft.warrantyEnd||undefined,description:p583Draft.description,status:'Açık',priority:p583Draft.priority}]);
+                        setP583Draft({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta'});
+                        setP583ShowForm(false);
+                        toast(tr583?'Servis talebi oluşturuldu.':'Service request created.','success');
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr583?'Kaydet':'Save'}</button>
+                      <button onClick={()=>setP583ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr583?'İptal':'Cancel'}</button>
+                    </div>
+                  </div>
+                )}
+                {p583Requests.length === 0 ? (
+                  <p className="text-center py-6 text-gray-400 text-sm">{tr583?'Henüz servis talebi yok.':'No service requests yet.'}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {p583Requests.map(r=>(
+                      <div key={r.id} className={`flex items-start justify-between p-3 rounded-xl border border-l-4 ${prioColors583[r.priority]}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold text-gray-800 text-sm">{r.customerName}</p>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors583[r.status]}`}>{r.status}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">{r.productName} {r.serialNo?`• S/N: ${r.serialNo}`:''} • {r.issueDate}</p>
+                          <p className="text-xs text-gray-600 mt-1 line-clamp-1">{r.description}</p>
+                        </div>
+                        <select value={r.status} onChange={e=>setP583Requests(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="ml-3 text-[10px] font-bold bg-transparent border-0 cursor-pointer shrink-0">
+                          <option>Açık</option><option>İşlemde</option><option>Kapatıldı</option>
+                        </select>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
