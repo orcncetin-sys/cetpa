@@ -134,6 +134,7 @@ import {
   type QuotationItem, 
   type PriceList,
   type Employee,
+  type Payroll,
   type InventoryMovement,
   type Warehouse,
   type RouteStop,
@@ -18506,7 +18507,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -18601,6 +18602,7 @@ function AppContent() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [payrolls, setPayrolls] = useState<Payroll[]>([]);
   const [exchangeRates, setExchangeRates] = useState<Record<string, number> | null>(null);
   const [notifications, setNotifications] = useState<Record<string, unknown>[]>([]);
   const [gibConnected, setGibConnected] = useState<boolean>(false);
@@ -18642,7 +18644,7 @@ function AppContent() {
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'>('pos');
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -19269,6 +19271,22 @@ function AppContent() {
     setMonthlyTargets(updated);
     setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
   };
+  // ── Phase 551: Tedarikçi Portalı ─────────────────────────────────────────
+  const [p551SelSupplier, setP551SelSupplier] = useState<string>('');
+  // ── Phase 552: Mesai & Devam (Time & Attendance) ─────────────────────────
+  const [p552Records, setP552Records] = useState<Array<{
+    id: string; employeeName: string; employeeId?: string; date: string;
+    checkIn: string; checkOut: string; totalHours: number;
+    status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli';
+  }>>([]);
+  const [p552AddForm, setP552AddForm] = useState(false);
+  const [p552Draft, setP552Draft] = useState({ employeeName: '', date: new Date().toISOString().slice(0,10), checkIn: '09:00', checkOut: '18:00' });
+  // ── Phase 553: Çalışan Self-Servis ───────────────────────────────────────
+  // (no extra state — uses existing employees/payrolls/leaveRequests)
+  // ── Phase 555: Ba/Bs Formu ───────────────────────────────────────────────
+  const [p555Period, setP555Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  // ── Phase 557: Senaryo Bütçesi ───────────────────────────────────────────
+  const [p557Scenario, setP557Scenario] = useState<'base'|'best'|'worst'>('base');
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -19300,6 +19318,16 @@ function AppContent() {
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, muhasebeTab]);
+
+  // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
+  useEffect(() => {
+    if (activeTab !== 'ik') return;
+    const unsub = onSnapshot(query(collection(db, 'timeAttendance'), orderBy('date', 'desc')), snap => {
+      setP552Records(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number])));
+    }, () => {});
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
   useEffect(() => {
@@ -19761,6 +19789,10 @@ function AppContent() {
       setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Employee)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'employees', auth.currentUser?.uid));
 
+    const unsubPayrolls = onSnapshot(collection(db, 'payrolls'), (snapshot) => {
+      setPayrolls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payroll)));
+    }, () => { /* non-critical */ });
+
     const unsubShipments = onSnapshot(collection(db, 'shipments'), (snapshot) => {
       setShipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Shipment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'shipments', auth.currentUser?.uid));
@@ -19843,6 +19875,7 @@ function AppContent() {
       unsubWarehouses();
       unsubMovements();
       unsubEmployees();
+      unsubPayrolls();
       unsubShipments();
       unsubAuditLogs();
       unsubAPOrders();
@@ -21058,6 +21091,8 @@ function AppContent() {
                 { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service' },
                 { id: 'iade', label: currentLanguage === 'tr' ? 'İade & Değişim' : 'Returns (RMA)' }, // Phase 549
                 { id: 'orders', label: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
+                { id: 'mesai', label: currentLanguage === 'tr' ? 'Mesai & Devam' : 'Time & Attendance' }, // Phase 552
+                { id: 'selfservis', label: currentLanguage === 'tr' ? 'Self-Servis Portalı' : 'Self-Service Portal' }, // Phase 553
               ].find(t => t.id === activeTab)?.label || activeTab)}
             </span>
           </div>
@@ -21276,7 +21311,7 @@ function AppContent() {
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm' };
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
@@ -21447,7 +21482,8 @@ function AppContent() {
                 { label: tr ? 'Mutabakat' : 'Reconciliation',      subId: 'mutabakat',      action: () => { setActiveTab('muhasebe'); setMuhasebeTab('mutabakat'); } }, // Phase 550
                 { label: tr ? 'Masraf Yönetimi' : 'Expenses',      subId: 'masraf',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
                 { label: tr ? 'AR Yaşlandırma' : 'AR Aging',       subId: 'ar-aging',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ar-aging'); } },
-                { label: tr ? 'Bütçe' : 'Budget',                  subId: 'butce',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
+                { label: tr ? 'Bütçe & Senaryo' : 'Budget & Scenarios', subId: 'butce',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
+                { label: tr ? 'Ba/Bs Formu' : 'Ba/Bs Tax Form',      subId: 'babs',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('babs'); } }, // Phase 555
                 { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
                 { label: tr ? 'Sabit Kıymet' : 'Fixed Assets',     subId: 'sabit-kiymet',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sabit-kiymet'); } },
                 { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
@@ -21459,17 +21495,21 @@ function AppContent() {
             {
               id: 'satin-alma', label: tr ? 'Satın Alma' : 'Purchasing', icon: ShoppingCart,
               children: [
-                { label: tr ? 'Satın Alma Siparişleri' : 'Purchase Orders', subId: 'pos',           action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
-                { label: tr ? 'Tedarikçiler' : 'Suppliers',                  subId: 'suppliers',     action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
-                { label: tr ? 'Tedarikçi Performansı' : 'Supplier Score',   subId: 'scorecard',     action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('scorecard'); } },
-                { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
+                { label: tr ? 'Satın Alma Siparişleri' : 'Purchase Orders', subId: 'pos',              action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
+                { label: tr ? 'Tedarikçiler' : 'Suppliers',                  subId: 'suppliers',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
+                { label: tr ? 'Tedarikçi Performansı' : 'Supplier Score',   subId: 'scorecard',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('scorecard'); } },
+                { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi',    action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
+                { label: tr ? 'Tedarikçi Portalı' : 'Supplier Portal',      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
               ],
             },
             {
               id: 'ik', label: tr ? 'İnsan Kaynakları' : 'HR', icon: UserCheck,
+              childIds: ['selfservis'],
               children: [
-                { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',  subId: 'ik-main',  action: () => setActiveTab('ik') },
-                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports', subId: 'masraf',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
+                { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',     subId: 'ik-main',    action: () => setActiveTab('ik') },
+                { label: tr ? 'Mesai & Devam' : 'Time & Attendance',     subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
+                { label: tr ? 'Self-Servis Portalı' : 'Self-Service',    subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
+                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',     subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
               ],
             },
             { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
@@ -21519,7 +21559,8 @@ function AppContent() {
                   const isChildActive = (subId: string) => {
                     // check if this sub-item corresponds to current state
                     if (subId === activeTab) return true;
-                    if (subId === 'ik-main' && activeTab === 'ik') return true; // Phase 548: IK main
+                    if (subId === 'ik-main' && activeTab === 'ik') return true; // IK main
+                    if (subId === 'tedarikci-portal' && activeTab === 'satin-alma' && purchasingSubTab === 'tedarikci-portal') return true; // Phase 551
                     if (activeTab === 'crm') return subId === crmTab;
                     if (activeTab === 'muhasebe') return subId === muhasebeTab;
                     if (activeTab === 'lojistik') return subId === lojistikTab;
@@ -25152,6 +25193,198 @@ function AppContent() {
                       </motion.div>
                     );
                   })()}
+
+                  {/* ── Phase 555: Ba/Bs Formu (Turkish VAT Transaction Lists) ────────── */}
+                  {muhasebeTab === 'babs' && (() => {
+                    const tr555 = currentLanguage === 'tr';
+                    // Filter orders by selected period
+                    const [yr555, mo555] = p555Period.split('-').map(Number);
+                    const periodOrders = orders.filter(o => {
+                      const d = o.createdAt ? new Date(typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : o.createdAt as string) : null;
+                      return d && d.getFullYear()===yr555 && d.getMonth()+1===mo555 && o.status !== 'Cancelled';
+                    });
+                    const periodPOs = apPurchaseOrders.filter(po => {
+                      const d = po.createdAt ? new Date(typeof (po.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (po.createdAt as {toDate:()=>Date}).toDate() : po.createdAt as string) : null;
+                      return d && d.getFullYear()===yr555 && d.getMonth()+1===mo555;
+                    });
+                    // Ba = purchases from suppliers ≥ ₺5,000 per supplier
+                    const baMap: Record<string,number> = {};
+                    for (const po of periodPOs) { if(po.supplier) baMap[po.supplier]=(baMap[po.supplier]||0)+(po.totalAmount||0); }
+                    const baRows = Object.entries(baMap).filter(([,v])=>v>=5000).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+                    // Bs = sales to customers ≥ ₺5,000 per customer
+                    const bsMap: Record<string,number> = {};
+                    for (const o of periodOrders) { bsMap[o.customerName]=(bsMap[o.customerName]||0)+(o.totalPrice||0); }
+                    const bsRows = Object.entries(bsMap).filter(([,v])=>v>=5000).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+                    const fBabs = (v:number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    return (
+                      <motion.div key="babs" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr555?'Ba/Bs Formu':'Ba/Bs Tax Form'} subtitle={tr555?'₺5.000 ve üzeri alım (Ba) ve satış (Bs) bildirimi — Logo/Mikro uyumlu':'Purchase (Ba) and sales (Bs) declarations ≥ ₺5,000 — Logo/Mikro compatible'} icon={FileText} />
+                        {/* Period picker */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <label className="text-sm font-semibold text-gray-600">{tr555?'Dönem:':'Period:'}</label>
+                          <input type="month" value={p555Period} onChange={e=>setP555Period(e.target.value)} className="apple-input px-3 py-2 text-sm" />
+                          <div className="flex gap-3 text-sm text-gray-500">
+                            <span className="font-bold text-rose-600">{baRows.length} Ba</span>
+                            <span className="font-bold text-blue-600">{bsRows.length} Bs</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Ba formu - Alımlar */}
+                          <div className="apple-card p-5">
+                            <h4 className="font-bold text-rose-700 mb-3 flex items-center gap-2">
+                              <FileText className="w-4 h-4" />Ba {tr555?'Formu — Alımlar':'Form — Purchases'}
+                            </h4>
+                            <p className="text-xs text-gray-400 mb-3">{tr555?`${yr555}/${String(mo555).padStart(2,'0')} dönemine ait ₺5.000 ve üzeri tedarikçi alımları`:`Supplier purchases ≥ ₺5,000 for ${yr555}/${String(mo555).padStart(2,'0')}`}</p>
+                            {baRows.length > 0 ? (
+                              <table className="w-full text-sm">
+                                <thead><tr className="border-b border-gray-100">
+                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{tr555?'Tedarikçi':'Supplier'}</th>
+                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{tr555?'Tutar':'Amount'}</th>
+                                </tr></thead>
+                                <tbody>
+                                  {baRows.map((r,i)=>(
+                                    <tr key={i} className="border-b border-gray-50">
+                                      <td className="py-1.5 text-gray-700">{r.name}</td>
+                                      <td className="py-1.5 text-right font-bold text-rose-700 tabular-nums">{fBabs(r.amount)}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t-2 border-rose-200">
+                                    <td className="py-1.5 font-bold text-gray-800">{tr555?'Toplam':'Total'}</td>
+                                    <td className="py-1.5 text-right font-bold text-rose-700 tabular-nums">{fBabs(baRows.reduce((s,r)=>s+r.amount,0))}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            ) : <p className="text-sm text-gray-400 text-center py-6">{tr555?'Bu dönemde ₺5.000 üzeri alım yok.':'No purchases ≥ ₺5,000 this period.'}</p>}
+                          </div>
+                          {/* Bs formu - Satışlar */}
+                          <div className="apple-card p-5">
+                            <h4 className="font-bold text-blue-700 mb-3 flex items-center gap-2">
+                              <FileText className="w-4 h-4" />Bs {tr555?'Formu — Satışlar':'Form — Sales'}
+                            </h4>
+                            <p className="text-xs text-gray-400 mb-3">{tr555?`${yr555}/${String(mo555).padStart(2,'0')} dönemine ait ₺5.000 ve üzeri müşteri satışları`:`Customer sales ≥ ₺5,000 for ${yr555}/${String(mo555).padStart(2,'0')}`}</p>
+                            {bsRows.length > 0 ? (
+                              <table className="w-full text-sm">
+                                <thead><tr className="border-b border-gray-100">
+                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{tr555?'Müşteri':'Customer'}</th>
+                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{tr555?'Tutar':'Amount'}</th>
+                                </tr></thead>
+                                <tbody>
+                                  {bsRows.map((r,i)=>(
+                                    <tr key={i} className="border-b border-gray-50">
+                                      <td className="py-1.5 text-gray-700">{r.name}</td>
+                                      <td className="py-1.5 text-right font-bold text-blue-700 tabular-nums">{fBabs(r.amount)}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t-2 border-blue-200">
+                                    <td className="py-1.5 font-bold text-gray-800">{tr555?'Toplam':'Total'}</td>
+                                    <td className="py-1.5 text-right font-bold text-blue-700 tabular-nums">{fBabs(bsRows.reduce((s,r)=>s+r.amount,0))}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            ) : <p className="text-sm text-gray-400 text-center py-6">{tr555?'Bu dönemde ₺5.000 üzeri satış yok.':'No sales ≥ ₺5,000 this period.'}</p>}
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-center">{tr555?'Beyan limiti ₺5.000\'dir. Gerçek Ba/Bs bildirimi için mali müşavirinizle çalışın.':'Reporting threshold is ₺5,000. Work with your accountant for official submissions.'}</p>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 557: Senaryo Bütçesi (Scenario-Based Budgeting) ─────────── */}
+                  {muhasebeTab === 'butce' && (() => {
+                    const tr557 = currentLanguage === 'tr';
+                    // Get last 6 months revenue as baseline
+                    const now557 = new Date();
+                    const last6: number[] = [];
+                    for (let i = 5; i >= 0; i--) {
+                      const d = new Date(now557.getFullYear(), now557.getMonth() - i, 1);
+                      const rev = orders.filter(o => {
+                        const od = o.createdAt ? new Date(typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : o.createdAt as string) : null;
+                        return od && od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth() && o.status !== 'Cancelled';
+                      }).reduce((s,o)=>s+(o.totalPrice||0),0);
+                      last6.push(rev);
+                    }
+                    const avgRev = last6.reduce((s,v)=>s+v,0) / (last6.filter(v=>v>0).length||1);
+                    const scenarios: Record<string,{growth:number;expGrowth:number;color:string;label:string}> = {
+                      best:  { growth: 0.20, expGrowth: 0.10, color:'emerald', label: tr557?'İyimser (+%20)':'Optimistic (+20%)' },
+                      base:  { growth: 0.05, expGrowth: 0.05, color:'blue',    label: tr557?'Baz (%+5)':'Base (+5%)' },
+                      worst: { growth: -0.10, expGrowth: 0.02, color:'red',   label: tr557?'Kötümser (-%10)':'Pessimistic (-10%)' },
+                    };
+                    const sc = scenarios[p557Scenario];
+                    const months12 = Array.from({length:12},(_,i)=>{
+                      const d = new Date(now557.getFullYear(), now557.getMonth() + i + 1, 1);
+                      return {
+                        label: d.toLocaleString(tr557?'tr-TR':'en-US',{month:'short',year:'2-digit'}),
+                        revenue: Math.round(avgRev * (1 + sc.growth) ** (i+1)),
+                        expense: Math.round(avgRev * 0.65 * (1 + sc.expGrowth) ** (i+1)),
+                      };
+                    });
+                    const totalRev12 = months12.reduce((s,m)=>s+m.revenue,0);
+                    const totalExp12 = months12.reduce((s,m)=>s+m.expense,0);
+                    const totalProfit12 = totalRev12 - totalExp12;
+                    const fS = (v:number) => `₺${Math.round(v/1000)}K`;
+                    const colMap: Record<string,string> = {emerald:'text-emerald-700 bg-emerald-50',blue:'text-blue-700 bg-blue-50',red:'text-red-700 bg-red-50'};
+                    return (
+                      <motion.div key="butce-senaryo" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr557?'Bütçe & Senaryo Planlaması':'Budget & Scenario Planning'} subtitle={tr557?'12 aylık gelir/gider tahmini — iyimser, baz ve kötümser senaryolar':'12-month revenue/expense forecast — optimistic, base and pessimistic scenarios'} icon={BarChart3} />
+                        {/* Scenario selector */}
+                        <div className="flex gap-2 flex-wrap">
+                          {(Object.entries(scenarios) as Array<[string,typeof scenarios[string]]>).map(([key,s])=>(
+                            <button key={key} onClick={()=>setP557Scenario(key as typeof p557Scenario)}
+                              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border-2 ${p557Scenario===key ? `border-${s.color}-500 bg-${s.color}-50 text-${s.color}-700` : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                        {/* 12-month KPIs */}
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { label:tr557?'12 Ay Ciro':'12-Mo Revenue', v:totalRev12, color:'text-blue-700',  bg:'bg-blue-50' },
+                            { label:tr557?'12 Ay Gider':'12-Mo Expense', v:totalExp12, color:'text-red-600',   bg:'bg-red-50' },
+                            { label:tr557?'12 Ay Net':'12-Mo Net',        v:totalProfit12, color:totalProfit12>=0?'text-emerald-700':'text-red-700', bg:totalProfit12>=0?'bg-emerald-50':'bg-red-50' },
+                          ].map(k=>(
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                              <p className={`text-xl font-bold ${k.color}`}>{fS(k.v)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Month-by-month table */}
+                        <div className="apple-card p-5">
+                          <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colMap[sc.color]}`}>{sc.label}</span>
+                            {tr557?'Aylık Projeksiyon':'Monthly Projection'}
+                          </h4>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b border-gray-100">
+                                <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{tr557?'Ay':'Month'}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Ciro':'Revenue'}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Gider':'Expense'}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Net Kâr':'Net Profit'}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Marj':'Margin'}</th>
+                              </tr></thead>
+                              <tbody>
+                                {months12.map((m,i)=>{
+                                  const net = m.revenue - m.expense;
+                                  const margin = m.revenue > 0 ? Math.round((net/m.revenue)*100) : 0;
+                                  return (
+                                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                                      <td className="py-1.5 text-gray-700 font-medium">{m.label}</td>
+                                      <td className="py-1.5 text-right text-blue-700 tabular-nums font-semibold">{fS(m.revenue)}</td>
+                                      <td className="py-1.5 text-right text-red-500 tabular-nums">{fS(m.expense)}</td>
+                                      <td className={`py-1.5 text-right font-bold tabular-nums ${net>=0?'text-emerald-700':'text-red-700'}`}>{fS(net)}</td>
+                                      <td className="py-1.5 text-right text-gray-500 tabular-nums">{margin}%</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-center">{tr557?`Temel: Son 6 aylık ortalama ciro ₺${Math.round(avgRev/1000)}K · Gider tahmini cironun %65\'i varsayıldı.`:`Baseline: Last 6-month avg revenue ₺${Math.round(avgRev/1000)}K · Expenses assumed at 65% of revenue.`}</p>
+                      </motion.div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -25725,10 +25958,292 @@ function AppContent() {
                       </div>
                     );
                   })()}
+
+                  {/* ── Phase 551: Tedarikçi Portalı ──────────────────────────────────── */}
+                  {purchasingSubTab === 'tedarikci-portal' && (() => {
+                    const tr551 = currentLanguage === 'tr';
+                    // Distinct suppliers from apPurchaseOrders
+                    const suppNames = [...new Set(apPurchaseOrders.map(po => po.supplier).filter(Boolean))].sort();
+                    const selPOs = p551SelSupplier
+                      ? apPurchaseOrders.filter(po => po.supplier === p551SelSupplier)
+                      : apPurchaseOrders;
+                    const open551   = selPOs.filter(po => !['Teslim Alındı','İptal Edildi'].includes(po.status));
+                    const closed551 = selPOs.filter(po => ['Teslim Alındı','İptal Edildi'].includes(po.status));
+                    const totalOpen = open551.reduce((s,po) => s+(po.totalAmount||0),0);
+                    const fPO = (v:number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const statusBadge = (s:string) => s==='Onaylandı'?'bg-emerald-100 text-emerald-700':s==='Teslim Alındı'?'bg-blue-100 text-blue-700':s==='İptal Edildi'?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700';
+                    return (
+                      <motion.div key="tedarikci-portal" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr551?'Tedarikçi Portalı':'Supplier Portal'} subtitle={tr551?'Tedarikçi bazında PO durumları ve bildirim gönderimi':'PO status view and notification dispatch per supplier'} icon={Building2} />
+                        {/* Supplier selector */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <select value={p551SelSupplier} onChange={e=>setP551SelSupplier(e.target.value)} className="apple-input px-3 py-2 text-sm">
+                            <option value="">{tr551?'— Tüm Tedarikçiler —':'— All Suppliers —'}</option>
+                            {suppNames.map(s=><option key={s}>{s}</option>)}
+                          </select>
+                          <div className="flex gap-3 text-sm">
+                            <span className="font-bold text-orange-600">{open551.length} {tr551?'açık PO':'open PO'}</span>
+                            <span className="text-gray-400">·</span>
+                            <span className="font-bold text-gray-600">{fPO(totalOpen)} {tr551?'bakiye':'outstanding'}</span>
+                          </div>
+                        </div>
+                        {/* Per-supplier summary cards */}
+                        {!p551SelSupplier && suppNames.length > 0 && (
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            {suppNames.map(sup => {
+                              const spoPos = apPurchaseOrders.filter(po=>po.supplier===sup);
+                              const sopOpen = spoPos.filter(po=>!['Teslim Alındı','İptal Edildi'].includes(po.status));
+                              const sopTotal = sopOpen.reduce((s,po)=>s+(po.totalAmount||0),0);
+                              return (
+                                <button key={sup} onClick={()=>setP551SelSupplier(sup)} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all">
+                                  <p className="font-semibold text-gray-800 text-sm truncate">{sup}</p>
+                                  <p className="text-xs text-gray-400 mt-1">{sopOpen.length} {tr551?'açık PO':'open PO'}</p>
+                                  <p className="text-base font-bold text-orange-600 mt-0.5">{fPO(sopTotal)}</p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {/* PO table */}
+                        <div className="apple-card overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                            <h4 className="font-bold text-gray-800 text-sm">{p551SelSupplier || (tr551?'Tüm Siparişler':'All Orders')}</h4>
+                            {p551SelSupplier && <button onClick={()=>setP551SelSupplier('')} className="text-xs text-brand hover:underline">{tr551?'Tüm Tedarikçiler':'All Suppliers'}</button>}
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50/60">
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">PO #</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr551?'Tedarikçi':'Supplier'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr551?'Tutar':'Amount'}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr551?'Durum':'Status'}</th>
+                              </tr></thead>
+                              <tbody>
+                                {[...open551, ...closed551].map(po=>(
+                                  <tr key={po.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                    <td className="px-4 py-2.5 font-medium text-gray-800">#{po.orderNumber}</td>
+                                    <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{po.supplier}</td>
+                                    <td className="px-4 py-2.5 text-right font-bold tabular-nums text-gray-800">{fPO(po.totalAmount||0)}</td>
+                                    <td className="px-4 py-2.5 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadge(po.status)}`}>{po.status}</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {selPOs.length===0 && <p className="text-center py-8 text-gray-400 text-sm">{tr551?'Bu tedarikçiye ait PO bulunamadı.':'No POs found for this supplier.'}</p>}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
           )}
+
+          {/* ── Phase 552: Mesai & Devam (Time & Attendance) ──────────────────── */}
+          {activeTab === 'mesai' && (() => {
+            const tr552 = currentLanguage === 'tr';
+            const today552 = new Date().toISOString().slice(0,10);
+            // Stats
+            const totalHours = p552Records.reduce((s,r) => s + (r.totalHours||0), 0);
+            const avgHours   = p552Records.length ? (totalHours / p552Records.length).toFixed(1) : '0';
+            const lateCount  = p552Records.filter(r => r.status === 'Geç Giriş').length;
+            const absentCount = p552Records.filter(r => r.status === 'Devamsız').length;
+            const calcHours = (ci: string, co: string) => {
+              const [h1,m1] = ci.split(':').map(Number); const [h2,m2] = co.split(':').map(Number);
+              return Math.max(0, parseFloat(((h2*60+m2 - h1*60-m1)/60).toFixed(1)));
+            };
+            const statusFor = (ci: string) => {
+              const [h] = ci.split(':').map(Number);
+              if (h > 9) return 'Geç Giriş';
+              return 'Normal';
+            };
+            return (
+              <motion.div key="mesai" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
+                <ModuleHeader
+                  title={tr552?'Mesai & Devam Takibi':'Time & Attendance'}
+                  subtitle={tr552?'Çalışan giriş-çıkış kayıtları ve devam analizi':'Employee check-in/out records and attendance analysis'}
+                  icon={Clock}
+                  actionButton={hasFullAccess('ik') ? (
+                    <button onClick={()=>setP552AddForm(f=>!f)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
+                      <Plus className="w-3.5 h-3.5" />{tr552?'Kayıt Ekle':'Add Record'}
+                    </button>
+                  ) : undefined}
+                />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: tr552?'Toplam Kayıt':'Total Records',  v: String(p552Records.length), color:'text-blue-600',   bg:'bg-blue-50' },
+                    { label: tr552?'Ort. Çalışma':'Avg Hours/Day', v: `${avgHours}h`,              color:'text-emerald-600',bg:'bg-emerald-50' },
+                    { label: tr552?'Geç Giriş':'Late Arrivals',    v: String(lateCount),           color:'text-orange-600', bg:'bg-orange-50' },
+                    { label: tr552?'Devamsız':'Absent',            v: String(absentCount),         color:'text-red-600',    bg:'bg-red-50' },
+                  ].map(k=>(
+                    <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
+                      <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
+                    </div>
+                  ))}
+                </div>
+                {p552AddForm && (
+                  <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
+                    <h4 className="font-bold text-gray-800">{tr552?'Yeni Mesai Kaydı':'New Attendance Record'}</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <input value={p552Draft.employeeName} onChange={e=>setP552Draft(d=>({...d,employeeName:e.target.value}))} placeholder={tr552?'Çalışan Adı':'Employee Name'} className="apple-input px-3 py-2 text-sm" />
+                      <input type="date" value={p552Draft.date} onChange={e=>setP552Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm" />
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-500 shrink-0">{tr552?'Giriş':'In'}</label>
+                        <input type="time" value={p552Draft.checkIn} onChange={e=>setP552Draft(d=>({...d,checkIn:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-500 shrink-0">{tr552?'Çıkış':'Out'}</label>
+                        <input type="time" value={p552Draft.checkOut} onChange={e=>setP552Draft(d=>({...d,checkOut:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={async()=>{
+                        if(!p552Draft.employeeName) return;
+                        const hours = calcHours(p552Draft.checkIn, p552Draft.checkOut);
+                        const status = statusFor(p552Draft.checkIn);
+                        await addDoc(collection(db,'timeAttendance'),{...p552Draft,totalHours:hours,status,createdAt:serverTimestamp()});
+                        setP552AddForm(false); setP552Draft({employeeName:'',date:today552,checkIn:'09:00',checkOut:'18:00'});
+                      }} className="apple-button-primary px-4 py-2 text-sm">{tr552?'Kaydet':'Save'}</button>
+                      <button onClick={()=>setP552AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr552?'İptal':'Cancel'}</button>
+                    </div>
+                  </div>
+                )}
+                <div className="apple-card overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b border-gray-100 bg-gray-50/60">
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr552?'Çalışan':'Employee'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr552?'Tarih':'Date'}</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Giriş':'Check-In'}</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Çıkış':'Check-Out'}</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr552?'Saat':'Hours'}</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Durum':'Status'}</th>
+                      </tr></thead>
+                      <tbody>
+                        {p552Records.map(r=>{
+                          const sc = r.status==='Normal'?'bg-emerald-100 text-emerald-700':r.status==='Geç Giriş'?'bg-orange-100 text-orange-700':r.status==='Devamsız'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700';
+                          return (
+                            <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-2.5 font-medium text-gray-800">{r.employeeName}</td>
+                              <td className="px-4 py-2.5 text-gray-500 text-xs hidden sm:table-cell">{r.date}</td>
+                              <td className="px-4 py-2.5 text-center text-gray-700 tabular-nums">{r.checkIn}</td>
+                              <td className="px-4 py-2.5 text-center text-gray-700 tabular-nums">{r.checkOut}</td>
+                              <td className="px-4 py-2.5 text-right font-bold text-gray-800 tabular-nums">{r.totalHours}h</td>
+                              <td className="px-4 py-2.5 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sc}`}>{r.status}</span></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {p552Records.length===0 && (
+                    <div className="text-center py-12 space-y-2">
+                      <Clock className="w-10 h-10 text-gray-200 mx-auto" />
+                      <p className="text-gray-400 text-sm">{tr552?'"Kayıt Ekle" ile mesai takibine başlayın':'Click "Add Record" to start tracking attendance'}</p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })()}
+
+          {/* ── Phase 553: Çalışan Self-Servis Portalı ───────────────────────── */}
+          {activeTab === 'selfservis' && (() => {
+            const tr553 = currentLanguage === 'tr';
+            // Find current user's employee record by email
+            const myEmp = employees.find(e => e.email === user?.email);
+            const myPayrolls = payrolls.filter(p => myEmp && (p.employeeId === myEmp.id || p.employeeName === myEmp.name)).sort((a,b) => {
+              const ay = a.year*100+a.month; const by = b.year*100+b.month; return by-ay;
+            });
+            return (
+              <motion.div key="selfservis" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
+                <ModuleHeader title={tr553?'Self-Servis Portalım':'My Self-Service Portal'} subtitle={tr553?'Kişisel bilgiler, maaş bordroları ve izin bakiyeniz':'Personal info, payslips and leave balance'} icon={UserCheck} />
+                {!myEmp ? (
+                  <div className="apple-card p-8 text-center space-y-3">
+                    <Users className="w-12 h-12 text-gray-200 mx-auto" />
+                    <p className="text-gray-400">{tr553?'Hesabınıza bağlı bir çalışan kaydı bulunamadı.':'No employee record found linked to your account.'}</p>
+                    <p className="text-xs text-gray-400">{tr553?`(${user?.email})`:`(${user?.email})`}</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Employee card */}
+                    <div className="apple-card p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <div className="w-14 h-14 rounded-2xl bg-brand/10 flex items-center justify-center shrink-0">
+                        <span className="text-2xl font-black text-brand">{myEmp.name.charAt(0)}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-gray-900 text-lg">{myEmp.name}</p>
+                        <p className="text-sm text-gray-500">{myEmp.position} · {myEmp.department}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{myEmp.email} · {myEmp.phone}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs text-gray-400">{tr553?'Başlangıç':'Start Date'}</p>
+                        <p className="font-semibold text-gray-700">{myEmp.startDate}</p>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block ${myEmp.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-600'}`}>{myEmp.status}</span>
+                      </div>
+                    </div>
+                    {/* Payroll history */}
+                    <div className="apple-card p-5">
+                      <h4 className="font-bold text-gray-800 mb-3">{tr553?'Maaş Geçmişi':'Payroll History'}</h4>
+                      {myPayrolls.length === 0 ? (
+                        <p className="text-sm text-gray-400 text-center py-6">{tr553?'Bordro kaydı bulunamadı.':'No payroll records found.'}</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead><tr className="border-b border-gray-100">
+                              <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{tr553?'Dönem':'Period'}</th>
+                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Brüt':'Gross'}</th>
+                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Kesinti':'Deductions'}</th>
+                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Net':'Net'}</th>
+                              <th className="py-2 text-center text-xs font-bold text-gray-400 uppercase">{tr553?'Durum':'Status'}</th>
+                            </tr></thead>
+                            <tbody>
+                              {myPayrolls.slice(0,12).map((p,i) => (
+                                <tr key={i} className="border-b border-gray-50">
+                                  <td className="py-2 text-gray-700">{p.year}/{String(p.month).padStart(2,'0')}</td>
+                                  <td className="py-2 text-right tabular-nums text-gray-600">₺{((p.baseSalary||0)+(p.bonus||0)).toLocaleString('tr-TR')}</td>
+                                  <td className="py-2 text-right tabular-nums text-red-500">-₺{(p.deductions||0).toLocaleString('tr-TR')}</td>
+                                  <td className="py-2 text-right tabular-nums font-bold text-emerald-700">₺{(p.netSalary||0).toLocaleString('tr-TR')}</td>
+                                  <td className="py-2 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status==='Ödendi'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'}`}>{p.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                    {/* Mesai summary */}
+                    {p552Records.filter(r=>r.employeeName===myEmp.name).length > 0 && (
+                      <div className="apple-card p-5">
+                        <h4 className="font-bold text-gray-800 mb-3">{tr553?'Mesai Özeti (Son 30 Gün)':'Attendance Summary (Last 30 Days)'}</h4>
+                        {(() => {
+                          const cut = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+                          const myRecs = p552Records.filter(r=>r.employeeName===myEmp.name && r.date>=cut);
+                          const totalH = myRecs.reduce((s,r)=>s+(r.totalHours||0),0);
+                          return (
+                            <div className="grid grid-cols-3 gap-3">
+                              {[
+                                { label: tr553?'Gün':'Days', v: myRecs.length, color:'text-blue-600' },
+                                { label: tr553?'Toplam Saat':'Total Hours', v: `${totalH.toFixed(0)}h`, color:'text-emerald-600' },
+                                { label: tr553?'Geç Giriş':'Late', v: myRecs.filter(r=>r.status==='Geç Giriş').length, color:'text-orange-600' },
+                              ].map(k=>(
+                                <div key={k.label} className="text-center">
+                                  <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5">{k.label}</p>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            );
+          })()}
 
           {/* ── İnsan Kaynakları ── */}
           {activeTab === 'ik' && (
