@@ -18507,7 +18507,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -19373,6 +19373,30 @@ function AppContent() {
   // ── Phase 590: Notification Inbox ─────────────────────────────────────────
   const [p590Notifs, setP590Notifs] = useState<Array<{id:string;type:'info'|'warning'|'success'|'error';message:string;module:string;read:boolean;createdAt:string}>>([]);
   const [p590ShowInbox, setP590ShowInbox] = useState(false);
+  // ── Phase 591: Auto-Invoice Scheduler ─────────────────────────────────────
+  const [p591Schedules, setP591Schedules] = useState<Array<{id:string;customerName:string;amount:number;frequency:'monthly'|'quarterly'|'yearly';nextDate:string;description:string;active:boolean}>>([]);
+  const [p591ShowForm, setP591ShowForm] = useState(false);
+  const [p591Draft, setP591Draft] = useState({customerName:'',amount:'',frequency:'monthly' as 'monthly'|'quarterly'|'yearly',nextDate:'',description:''});
+  // ── Phase 593: Vehicle Fleet Tracking ─────────────────────────────────────
+  const [p593Vehicles, setP593Vehicles] = useState<Array<{id:string;plate:string;driver:string;model:string;status:'Müsait'|'Yolda'|'Bakımda'|'Arızalı';lastService?:string;nextService?:string;km?:number;fuel?:'Benzin'|'Dizel'|'LPG'|'Elektrik'}>>([]);
+  const [p593ShowForm, setP593ShowForm] = useState(false);
+  const [p593Draft, setP593Draft] = useState({plate:'',driver:'',model:'',status:'Müsait' as 'Müsait'|'Yolda'|'Bakımda'|'Arızalı',lastService:'',nextService:'',km:'',fuel:'Dizel' as 'Benzin'|'Dizel'|'LPG'|'Elektrik'});
+  // ── Phase 595: Task & Reminder Board ──────────────────────────────────────
+  const [p595Tasks, setP595Tasks] = useState<Array<{id:string;title:string;dueDate:string;assignedTo:string;module:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';done:boolean}>>([]);
+  const [p595ShowForm, setP595ShowForm] = useState(false);
+  const [p595Draft, setP595Draft] = useState({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik'});
+  // ── Phase 596: Smart Replenishment Advisor ────────────────────────────────
+  const [p596MinLeadDays, setP596MinLeadDays] = useState(7);
+  // ── Phase 597: Revenue Recognition Schedule ───────────────────────────────
+  const [p597Contracts, setP597Contracts] = useState<Array<{id:string;customerName:string;totalValue:number;startDate:string;endDate:string;recognized:number}>>([]);
+  const [p597ShowForm, setP597ShowForm] = useState(false);
+  const [p597Draft, setP597Draft] = useState({customerName:'',totalValue:'',startDate:'',endDate:'',recognized:''});
+  // ── Phase 598: Contract Renewal Alerts ────────────────────────────────────
+  const [p598AlertDays, setP598AlertDays] = useState(30);
+  // ── Phase 599: Employee Skill Matrix ──────────────────────────────────────
+  const [p599Skills] = useState(['Excel','ERP','Müşteri İlişkileri','Proje Yönetimi','Teknik Destek','Muhasebe','Lojistik','İngilizce','Satış']);
+  const [p599Ratings, setP599Ratings] = useState<Record<string,Record<string,number>>>({});
+  const [p599SelEmp, setP599SelEmp] = useState<string>('');
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -21562,6 +21586,7 @@ function AppContent() {
                 { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes',   subId: 'giden_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
                 { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
                 { label: tr ? 'Tedarik Zinciri KPI' : 'Supply Chain KPI', subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
+                { label: tr ? 'Araç Takip' : 'Fleet Tracking', subId: 'arac-takip',         action: () => { setActiveTab('lojistik'); setLojistikTab('arac-takip'); } }, // Phase 593
                 { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
               ],
             },
@@ -21590,6 +21615,8 @@ function AppContent() {
                 { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
                 { label: tr ? 'Fiyat Kuralları' : 'Pricing Rules', subId: 'fiyat-kural',    action: () => { setActiveTab('muhasebe'); setMuhasebeTab('fiyat-kural'); } }, // Phase 573
                 { label: tr ? 'Bütçe vs Gerçekleşen' : 'Budget vs Actual', subId: 'butce-gercek', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce-gercek'); } }, // Phase 580
+                { label: tr ? 'Oto. Fatura' : 'Auto-Invoice', subId: 'oto-fatura',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('oto-fatura'); } }, // Phase 591
+                { label: tr ? 'Gelir Tanıma' : 'Rev. Recognition', subId: 'gelir-tanima',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-tanima'); } }, // Phase 597
                 { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
                 { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
                 { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
@@ -23795,6 +23822,85 @@ function AppContent() {
                   </div>
                 </div>
               )}
+          {/* ── Phase 595: Görevler & Hatırlatıcılar ─────────────────────── */}
+          {activeTab === 'dashboard' && (() => {
+            const tr595 = currentLanguage === 'tr';
+            const today595 = new Date().toISOString().slice(0,10);
+            const overdueTasks = p595Tasks.filter(t => !t.done && t.dueDate < today595);
+            const todayTasks = p595Tasks.filter(t => !t.done && t.dueDate === today595);
+            const prioColors595: Record<string,string> = {'Kritik':'border-l-red-500 bg-red-50/30','Yüksek':'border-l-orange-400 bg-orange-50/20','Orta':'border-l-amber-300 bg-amber-50/10','Düşük':'border-l-gray-300 bg-gray-50/50'};
+            const prioBadge595: Record<string,string> = {'Kritik':'bg-red-100 text-red-700','Yüksek':'bg-orange-100 text-orange-700','Orta':'bg-amber-100 text-amber-700','Düşük':'bg-gray-100 text-gray-500'};
+            return (
+              <div className="apple-card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-sm">{tr595?'📌 Görevler & Hatırlatıcılar':'📌 Tasks & Reminders'}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {overdueTasks.length>0&&<span className="text-red-500 font-bold">{overdueTasks.length} {tr595?'gecikmiş · ':'overdue · '}</span>}
+                      {todayTasks.length>0&&<span className="text-amber-600 font-bold">{todayTasks.length} {tr595?'bugün vadeli · ':'due today · '}</span>}
+                      {p595Tasks.filter(t=>!t.done).length} {tr595?'açık görev':'open task(s)'}
+                    </p>
+                  </div>
+                  <button onClick={()=>setP595ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr595?'Görev Ekle':'Add Task'}</button>
+                </div>
+                {p595ShowForm && (
+                  <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr595?'Görev başlığı...':'Task title...'} value={p595Draft.title} onChange={e=>setP595Draft(d=>({...d,title:e.target.value}))} />
+                      <input type="date" className="apple-input px-3 py-2 text-sm" value={p595Draft.dueDate} onChange={e=>setP595Draft(d=>({...d,dueDate:e.target.value}))} />
+                      <select className="apple-input px-3 py-2 text-sm" value={p595Draft.priority} onChange={e=>setP595Draft(d=>({...d,priority:e.target.value as typeof d.priority}))}>
+                        <option value="Düşük">{tr595?'Düşük':'Low'}</option>
+                        <option value="Orta">{tr595?'Orta':'Medium'}</option>
+                        <option value="Yüksek">{tr595?'Yüksek':'High'}</option>
+                        <option value="Kritik">{tr595?'Kritik':'Critical'}</option>
+                      </select>
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Atanan kişi':'Assigned to'} value={p595Draft.assignedTo} onChange={e=>setP595Draft(d=>({...d,assignedTo:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Modül (ör. CRM, Stok)':'Module (e.g. CRM, Stock)'} value={p595Draft.module} onChange={e=>setP595Draft(d=>({...d,module:e.target.value}))} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={()=>{
+                        if(!p595Draft.title) return;
+                        setP595Tasks(prev=>[...prev,{id:Date.now().toString(),title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false}]);
+                        setP595Draft({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta'});
+                        setP595ShowForm(false);
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr595?'Kaydet':'Save'}</button>
+                      <button onClick={()=>setP595ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr595?'İptal':'Cancel'}</button>
+                    </div>
+                  </div>
+                )}
+                {p595Tasks.length===0 ? (
+                  <p className="text-center py-6 text-gray-400 text-sm">{tr595?'Henüz görev yok. "Görev Ekle" ile başlayın.':'No tasks yet. Click "Add Task" to start.'}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {p595Tasks.filter(t=>!t.done).sort((a,b)=>{
+                      const pOrder = {Kritik:0,Yüksek:1,Orta:2,Düşük:3};
+                      return (pOrder[a.priority]||3)-(pOrder[b.priority]||3) || a.dueDate.localeCompare(b.dueDate);
+                    }).map(t=>(
+                      <div key={t.id} className={`flex items-center gap-3 p-3 rounded-xl border border-l-4 ${prioColors595[t.priority]}`}>
+                        <button onClick={()=>setP595Tasks(prev=>prev.map(x=>x.id===t.id?{...x,done:true}:x))} className="w-5 h-5 rounded border-2 border-gray-300 hover:border-emerald-500 flex-shrink-0 transition-colors" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{t.title}</p>
+                          <p className="text-xs text-gray-400">
+                            {t.dueDate&&<span className={t.dueDate<today595?'text-red-500 font-bold':t.dueDate===today595?'text-amber-600 font-bold':''}>{t.dueDate} · </span>}
+                            {t.assignedTo&&<span>{t.assignedTo} · </span>}
+                            {t.module&&<span className="text-blue-500">{t.module}</span>}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${prioBadge595[t.priority]}`}>{t.priority}</span>
+                        <button onClick={()=>setP595Tasks(prev=>prev.filter(x=>x.id!==t.id))} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                      </div>
+                    ))}
+                    {p595Tasks.filter(t=>t.done).length>0&&(
+                      <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {tr595?'tamamlanan görev':'completed task(s)'} &nbsp;
+                        <button onClick={()=>setP595Tasks(prev=>prev.filter(t=>!t.done))} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
             </motion.div>
           )}
 
@@ -26437,6 +26543,158 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 591: Otomatik Fatura Takvimi ─────────────────────────── */}
+                  {muhasebeTab === 'oto-fatura' && (() => {
+                    const tr591 = currentLanguage === 'tr';
+                    const freqLabels591: Record<string,string> = {'monthly':tr591?'Aylık':'Monthly','quarterly':tr591?'3 Aylık':'Quarterly','yearly':tr591?'Yıllık':'Yearly'};
+                    const getNextDate = (freq: string, from: string) => {
+                      const d = new Date(from || new Date().toISOString().slice(0,10));
+                      if (freq==='monthly') d.setMonth(d.getMonth()+1);
+                      else if (freq==='quarterly') d.setMonth(d.getMonth()+3);
+                      else d.setFullYear(d.getFullYear()+1);
+                      return d.toISOString().slice(0,10);
+                    };
+                    const today591 = new Date().toISOString().slice(0,10);
+                    const due591 = p591Schedules.filter(s=>s.active&&s.nextDate<=new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr591?'🗓️ Otomatik Fatura Takvimi':'🗓️ Auto-Invoice Scheduler'} subtitle={tr591?'Tekrarlayan faturaları otomatik olarak planlayın.':'Schedule recurring invoice generation.'} icon={Calendar}
+                          actionButton={hasFullAccess('muhasebe')&&(<button onClick={()=>setP591ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr591?'Takvim Ekle':'Add Schedule'}</button>)} />
+                        {due591.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3"><p className="text-sm font-bold text-amber-800">🔔 {due591.length} {tr591?'fatura bu hafta kesilecek!':'invoice(s) due this week!'}</p></div>)}
+                        {p591ShowForm && (
+                          <div className="apple-card p-5 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr591?'Müşteri':'Customer'} value={p591Draft.customerName} onChange={e=>setP591Draft(d=>({...d,customerName:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr591?'Tutar (₺)':'Amount (₺)'} value={p591Draft.amount} onChange={e=>setP591Draft(d=>({...d,amount:e.target.value}))} />
+                              <select className="apple-input px-3 py-2 text-sm" value={p591Draft.frequency} onChange={e=>setP591Draft(d=>({...d,frequency:e.target.value as typeof d.frequency}))}>
+                                <option value="monthly">{freqLabels591['monthly']}</option>
+                                <option value="quarterly">{freqLabels591['quarterly']}</option>
+                                <option value="yearly">{freqLabels591['yearly']}</option>
+                              </select>
+                              <input type="date" className="apple-input px-3 py-2 text-sm" value={p591Draft.nextDate} onChange={e=>setP591Draft(d=>({...d,nextDate:e.target.value}))} />
+                              <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={tr591?'Açıklama':'Description'} value={p591Draft.description} onChange={e=>setP591Draft(d=>({...d,description:e.target.value}))} />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{
+                                if(!p591Draft.customerName||!p591Draft.amount) return;
+                                setP591Schedules(prev=>[...prev,{id:Date.now().toString(),customerName:p591Draft.customerName,amount:Number(p591Draft.amount),frequency:p591Draft.frequency,nextDate:p591Draft.nextDate||today591,description:p591Draft.description,active:true}]);
+                                setP591Draft({customerName:'',amount:'',frequency:'monthly',nextDate:'',description:''});
+                                setP591ShowForm(false);
+                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr591?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP591ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr591?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p591Schedules.length===0 ? (
+                          <div className="apple-card p-12 text-center"><Calendar className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr591?'Henüz otomatik fatura takvimi yok.':'No auto-invoice schedules yet.'}</p></div>
+                        ) : (
+                          <div className="apple-card overflow-hidden">
+                            <table className="w-full text-xs">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50">
+                                {[tr591?'Müşteri':'Customer',tr591?'Tutar':'Amount',tr591?'Sıklık':'Freq.',tr591?'Sonraki Tarih':'Next Date',tr591?'Açıklama':'Desc.',tr591?'Aktif':'Active'].map(h=>(
+                                  <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                ))}
+                              </tr></thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {p591Schedules.map(s=>{
+                                  const isDue = s.active&&s.nextDate<=today591;
+                                  return (
+                                    <tr key={s.id} className={`hover:bg-gray-50/50 ${isDue?'bg-amber-50/30':''}`}>
+                                      <td className="px-4 py-2.5 font-medium text-gray-800">{s.customerName}</td>
+                                      <td className="px-4 py-2.5 font-bold font-mono text-gray-700">₺{s.amount.toLocaleString('tr-TR')}</td>
+                                      <td className="px-4 py-2.5"><span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{freqLabels591[s.frequency]}</span></td>
+                                      <td className="px-4 py-2.5"><span className={isDue?'text-amber-600 font-bold':'text-gray-600'}>{s.nextDate}</span></td>
+                                      <td className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{s.description||'—'}</td>
+                                      <td className="px-4 py-2.5">
+                                        <div className="flex gap-1.5">
+                                          <button onClick={()=>setP591Schedules(prev=>prev.map(x=>x.id===s.id?{...x,active:!x.active}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(tr591?'Aktif':'Active'):(tr591?'Pasif':'Off')}</button>
+                                          {isDue&&s.active&&(<button onClick={()=>setP591Schedules(prev=>prev.map(x=>x.id===s.id?{...x,nextDate:getNextDate(s.frequency,s.nextDate)}:x))} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 597: Gelir Tanıma Takvimi ────────────────────────────── */}
+                  {muhasebeTab === 'gelir-tanima' && (() => {
+                    const tr597 = currentLanguage === 'tr';
+                    const today597 = new Date();
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr597?'📅 Gelir Tanıma Takvimi':'📅 Revenue Recognition Schedule'} subtitle={tr597?'Sözleşme gelirini dönemler arası otomatik olarak dağıtın.':'Spread contract revenue across periods automatically.'} icon={BarChart3}
+                          actionButton={hasFullAccess('muhasebe')&&(<button onClick={()=>setP597ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr597?'Sözleşme Ekle':'Add Contract'}</button>)} />
+                        {p597ShowForm && (
+                          <div className="apple-card p-5 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Müşteri':'Customer'} value={p597Draft.customerName} onChange={e=>setP597Draft(d=>({...d,customerName:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Toplam Değer (₺)':'Total Value (₺)'} value={p597Draft.totalValue} onChange={e=>setP597Draft(d=>({...d,totalValue:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Tanınan (₺)':'Recognized (₺)'} value={p597Draft.recognized} onChange={e=>setP597Draft(d=>({...d,recognized:e.target.value}))} />
+                              <input type="date" className="apple-input px-3 py-2 text-sm" value={p597Draft.startDate} onChange={e=>setP597Draft(d=>({...d,startDate:e.target.value}))} />
+                              <input type="date" className="apple-input px-3 py-2 text-sm" value={p597Draft.endDate} onChange={e=>setP597Draft(d=>({...d,endDate:e.target.value}))} />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{
+                                if(!p597Draft.customerName||!p597Draft.totalValue) return;
+                                setP597Contracts(prev=>[...prev,{id:Date.now().toString(),customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0}]);
+                                setP597Draft({customerName:'',totalValue:'',startDate:'',endDate:'',recognized:''});
+                                setP597ShowForm(false);
+                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr597?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP597ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr597?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p597Contracts.length===0?(
+                          <div className="apple-card p-12 text-center"><BarChart3 className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr597?'Henüz gelir tanıma kaydı yok.':'No revenue recognition records yet.'}</p></div>
+                        ):(
+                          <div className="space-y-3">
+                            {p597Contracts.map(c=>{
+                              const deferred = c.totalValue-c.recognized;
+                              const recPct = c.totalValue>0?(c.recognized/c.totalValue)*100:0;
+                              // Monthly recognition
+                              let monthlyRec = 0;
+                              if (c.startDate&&c.endDate) {
+                                const ms = new Date(c.startDate).getTime(); const me = new Date(c.endDate).getTime();
+                                const months = Math.max(1,Math.round((me-ms)/(30*86400000)));
+                                monthlyRec = c.totalValue/months;
+                              }
+                              return (
+                                <div key={c.id} className="apple-card p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="font-semibold text-gray-800">{c.customerName}</p>
+                                    <button onClick={()=>setP597Contracts(prev=>prev.filter(x=>x.id!==c.id))} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-3 text-xs mb-3">
+                                    <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">₺{c.totalValue.toLocaleString()}</p></div>
+                                    <div><p className="text-gray-400">{tr597?'Tanınan':'Recognized'}</p><p className="font-bold text-emerald-600">₺{c.recognized.toLocaleString()}</p></div>
+                                    <div><p className="text-gray-400">{tr597?'Ertelenmiş':'Deferred'}</p><p className="font-bold text-amber-600">₺{deferred.toLocaleString()}</p></div>
+                                  </div>
+                                  <div className="w-full bg-gray-200 rounded-full h-2 mb-1.5 overflow-hidden">
+                                    <div className="h-full bg-emerald-400 rounded-full" style={{width:`${recPct}%`}}/>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[10px] text-gray-400">
+                                    <span>{recPct.toFixed(0)}% {tr597?'tanındı':'recognized'}</span>
+                                    {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} ₺{monthlyRec.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>}
+                                    <button onClick={()=>setP597Contracts(prev=>prev.map(x=>x.id===c.id?{...x,recognized:Math.min(x.totalValue,x.recognized+monthlyRec)}:x))} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            <div className="apple-card p-4 bg-blue-50/30 text-sm">
+                              <p className="font-bold text-gray-700">{tr597?'Toplam Ertelenmiş Gelir:':'Total Deferred Revenue:'} <span className="text-amber-600">₺{p597Contracts.reduce((s,c)=>s+(c.totalValue-c.recognized),0).toLocaleString()}</span></p>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })()}
+
                 </>
               )}
             </motion.div>
@@ -28079,6 +28337,67 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 599: Çalışan Yetkinlik Matrisi (Skill Matrix) ─────── */}
+                  {(() => {
+                    const tr599 = currentLanguage === 'tr';
+                    if (employees.length === 0) return null;
+                    const selEmp = employees.find(e => e.id === p599SelEmp) || employees[0];
+                    const ratings = p599Ratings[selEmp?.id || ''] || {};
+                    const avgScore = p599Skills.length > 0
+                      ? p599Skills.reduce((s, sk) => s + (ratings[sk] || 0), 0) / p599Skills.length
+                      : 0;
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">{tr599 ? '🧠 Yetkinlik Matrisi' : '🧠 Employee Skill Matrix'}</h3>
+                          <select value={p599SelEmp || selEmp?.id} onChange={e => setP599SelEmp(e.target.value)} className="apple-input px-3 py-2 text-sm">
+                            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                          </select>
+                        </div>
+                        {selEmp && (
+                          <>
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-10 h-10 rounded-full bg-brand/10 flex items-center justify-center text-brand font-bold text-sm">{selEmp.name.charAt(0)}</div>
+                              <div>
+                                <p className="font-semibold text-gray-800">{selEmp.name}</p>
+                                <p className="text-xs text-gray-500">{selEmp.position} • {selEmp.department}</p>
+                              </div>
+                              <div className="ml-auto text-right">
+                                <p className="text-xs text-gray-400">{tr599 ? 'Ort. Yetkinlik' : 'Avg. Skill'}</p>
+                                <p className={`text-xl font-bold ${avgScore >= 4 ? 'text-emerald-600' : avgScore >= 2.5 ? 'text-amber-600' : 'text-red-500'}`}>{avgScore.toFixed(1)}/5</p>
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              {p599Skills.map(sk => {
+                                const score = ratings[sk] || 0;
+                                return (
+                                  <div key={sk} className="flex items-center gap-3">
+                                    <span className="text-xs text-gray-700 font-medium w-36 truncate">{sk}</span>
+                                    <div className="flex gap-1">
+                                      {[1,2,3,4,5].map(n => (
+                                        <button key={n} onClick={() => hasFullAccess('ik') && setP599Ratings(prev => ({
+                                          ...prev,
+                                          [selEmp.id]: { ...(prev[selEmp.id] || {}), [sk]: n }
+                                        }))}
+                                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${score >= n ? 'bg-brand text-white' : 'bg-gray-100 text-gray-400 hover:bg-brand/20'}`}>
+                                          {n}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                      <div className={`h-full rounded-full transition-all ${score >= 4 ? 'bg-emerald-400' : score >= 3 ? 'bg-amber-400' : 'bg-gray-300'}`} style={{ width: `${(score / 5) * 100}%` }} />
+                                    </div>
+                                    <span className={`text-xs font-bold w-6 text-right ${score >= 4 ? 'text-emerald-600' : score >= 3 ? 'text-amber-600' : 'text-gray-400'}`}>{score || '—'}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <HRModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ik')} userRole={userRole} employees={employees} exchangeRates={exchangeRates} />
                 </>
               )}
@@ -28096,6 +28415,33 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'Sözleşmeler, davalar ve KVKK uyum süreçleri' : 'Contracts, cases and GDPR compliance processes'}
                     icon={Scale}
                   />
+                  {/* ── Phase 598: Sözleşme Yenileme Uyarıları ─────────────────── */}
+                  {(() => {
+                    const tr598 = currentLanguage === 'tr';
+                    const today598 = new Date().toISOString().slice(0,10);
+                    const alertDate598 = new Date(Date.now()+p598AlertDays*86400000).toISOString().slice(0,10);
+                    // Use contracts from LegalModule's Firestore — but we don't have them directly
+                    // Instead show alert config + derive from p597Contracts as a proxy
+                    const expiringContracts = p597Contracts.filter(c=>c.endDate&&c.endDate>=today598&&c.endDate<=alertDate598);
+                    const expiredContracts = p597Contracts.filter(c=>c.endDate&&c.endDate<today598);
+                    if (expiringContracts.length===0&&expiredContracts.length===0&&p597Contracts.length===0) return null;
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-bold text-gray-900 text-sm">{tr598?'📋 Sözleşme Yenileme Uyarıları':'📋 Contract Renewal Alerts'}</h3>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{tr598?'Uyarı eşiği:':'Alert threshold:'}</span>
+                            <input type="number" value={p598AlertDays} onChange={e=>setP598AlertDays(Number(e.target.value))} className="apple-input px-2 py-1 text-xs w-14 text-right" />
+                            <span className="text-xs text-gray-500">{tr598?'gün':'days'}</span>
+                          </div>
+                        </div>
+                        {expiredContracts.length>0&&(<div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-2"><p className="text-xs text-red-700 font-bold">❌ {expiredContracts.length} {tr598?'sözleşme süresi dolmuş:':'contract(s) expired:'} {expiredContracts.map(c=>c.customerName).join(', ')}</p></div>)}
+                        {expiringContracts.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"><p className="text-xs text-amber-700 font-bold">⚠️ {expiringContracts.length} {tr598?`sözleşme ${p598AlertDays} gün içinde sona eriyor:`:`contract(s) expiring in ${p598AlertDays} days:`} {expiringContracts.map(c=>`${c.customerName} (${c.endDate})`).join(', ')}</p></div>)}
+                        {expiringContracts.length===0&&expiredContracts.length===0&&(<p className="text-center py-4 text-gray-400 text-xs">{tr598?'Yaklaşan sözleşme yenileme yok.':'No upcoming contract renewals.'}</p>)}
+                        <p className="text-[10px] text-gray-400 mt-2">* {tr598?'Gelir Tanıma modülünde kayıtlı sözleşmeler izlenmektedir.':'Contracts from Revenue Recognition module are monitored here.'}</p>
+                      </div>
+                    );
+                  })()}
                   <LegalModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('hukuk')} />
                 </>
               )}
@@ -31183,6 +31529,81 @@ function AppContent() {
                         </table>
                       </div>
                     )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 596: Akıllı Stok Yenileme Önerisi ─────────────────── */}
+              {(() => {
+                const tr596 = currentLanguage === 'tr';
+                // Items that need replenishment: stockLevel <= lowStockThreshold
+                // Smart suggestion: factor in avg daily usage from movements
+                const replenishItems = inventory
+                  .filter(item => (item.stockLevel || 0) <= item.lowStockThreshold)
+                  .map(item => {
+                    // Estimate daily usage from recent movements (last 30 days)
+                    const recentOut = inventoryMovements.filter(m => {
+                      if (m.type !== 'out' || !m.timestamp) return false;
+                      try {
+                        const d = (m.timestamp as { toDate?: () => Date }).toDate?.() ?? new Date(m.timestamp as string);
+                        return d >= new Date(Date.now() - 30 * 86400000);
+                      } catch { return false; }
+                    });
+                    const dailyUsage = recentOut.length > 0 ? recentOut.reduce((s, m) => s + (m.quantity || 0), 0) / 30 : 0;
+                    const daysOfStock = dailyUsage > 0 ? Math.floor((item.stockLevel || 0) / dailyUsage) : null;
+                    const suggestedQty = Math.max(item.lowStockThreshold * 2, Math.round(dailyUsage * p596MinLeadDays * 2));
+                    return { ...item, dailyUsage, daysOfStock, suggestedQty };
+                  })
+                  .sort((a, b) => (a.daysOfStock ?? 999) - (b.daysOfStock ?? 999))
+                  .slice(0, 15);
+                if (replenishItems.length === 0) return null;
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-sm">{tr596 ? '🤖 Akıllı Yenileme Önerileri' : '🤖 Smart Replenishment Advisor'}</h3>
+                        <p className="text-xs text-gray-400 mt-0.5">{replenishItems.length} {tr596 ? 'ürün kritik eşiğin altında' : 'items below critical threshold'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{tr596 ? 'Temin süresi:' : 'Lead time:'}</span>
+                        <input type="number" value={p596MinLeadDays} onChange={e => setP596MinLeadDays(Number(e.target.value))} className="apple-input px-2 py-1 text-xs w-12 text-center" />
+                        <span className="text-xs text-gray-500">{tr596 ? 'gün' : 'days'}</span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-gray-100 bg-gray-50">
+                          {[tr596?'Ürün':'Product', 'SKU', tr596?'Mevcut':'Stock', tr596?'Eşik':'Threshold', tr596?'Kalan Gün':'Days Left', tr596?'Öneri Miktarı':'Suggested Qty', tr596?'Tedarikçi':'Supplier'].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {replenishItems.map(item => {
+                            const urgent = item.daysOfStock !== null && item.daysOfStock <= p596MinLeadDays;
+                            return (
+                              <tr key={item.id} className={`hover:bg-gray-50/50 ${urgent ? 'bg-red-50/20' : ''}`}>
+                                <td className="px-3 py-2.5 font-medium text-gray-800 max-w-[160px] truncate">{item.name}</td>
+                                <td className="px-3 py-2.5 font-mono text-gray-500">{item.sku}</td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`font-bold ${(item.stockLevel || 0) === 0 ? 'text-red-600' : 'text-amber-600'}`}>{item.stockLevel || 0}</span>
+                                </td>
+                                <td className="px-3 py-2.5 text-gray-500">{item.lowStockThreshold}</td>
+                                <td className="px-3 py-2.5">
+                                  {item.daysOfStock !== null
+                                    ? <span className={`font-bold ${urgent ? 'text-red-600' : 'text-amber-600'}`}>{item.daysOfStock}g {urgent ? '⚠️' : ''}</span>
+                                    : <span className="text-gray-400">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{item.suggestedQty} {tr596 ? 'adet' : 'units'}</span>
+                                </td>
+                                <td className="px-3 py-2.5 text-gray-500">{item.supplier || '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-3">* {tr596 ? `Öneri miktarı: ${p596MinLeadDays} günlük temin süresine göre hesaplanmaktadır.` : `Suggested qty calculated for ${p596MinLeadDays}-day lead time coverage.`}</p>
                   </div>
                 );
               })()}
@@ -35992,6 +36413,78 @@ function AppContent() {
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })()}
+
+              {/* ── Phase 593: Araç Filosu Takibi ──────────────────────────────── */}
+              {lojistikTab === 'arac-takip' && (() => {
+                const tr593 = currentLanguage === 'tr';
+                const statusColors593: Record<string,string> = {'Müsait':'bg-green-100 text-green-700','Yolda':'bg-blue-100 text-blue-700','Bakımda':'bg-amber-100 text-amber-700','Arızalı':'bg-red-100 text-red-700'};
+                const today593 = new Date().toISOString().slice(0,10);
+                const maintenanceDue = p593Vehicles.filter(v=>v.nextService&&v.nextService<=new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+                const stats = {müsait:p593Vehicles.filter(v=>v.status==='Müsait').length, yolda:p593Vehicles.filter(v=>v.status==='Yolda').length, bakimda:p593Vehicles.filter(v=>v.status==='Bakımda'||v.status==='Arızalı').length};
+                return (
+                  <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                    <ModuleHeader title={tr593?'🚗 Araç Filosu Takibi':'🚗 Vehicle Fleet Tracking'} subtitle={tr593?'Araçların durum, sürücü ve bakım bilgilerini takip edin.':'Track vehicle status, drivers and maintenance schedules.'} icon={Truck}
+                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP593ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr593?'Araç Ekle':'Add Vehicle'}</button>)} />
+                    <div className="grid grid-cols-3 gap-4">
+                      {[{label:tr593?'Müsait':'Available',val:stats.müsait,color:'text-green-700',bg:'bg-green-50'},{label:tr593?'Yolda':'On Route',val:stats.yolda,color:'text-blue-700',bg:'bg-blue-50'},{label:tr593?'Bakım/Arıza':'Maintenance',val:stats.bakimda,color:'text-amber-700',bg:'bg-amber-50'}].map(k=>(
+                        <div key={k.label} className={`apple-card p-4 ${k.bg}`}><p className="text-xs text-gray-500">{k.label}</p><p className={`text-2xl font-bold ${k.color}`}>{k.val}</p></div>
+                      ))}
+                    </div>
+                    {maintenanceDue.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3"><p className="text-sm font-bold text-amber-800">🔧 {maintenanceDue.length} {tr593?'araç bu hafta bakıma giriyor:':'vehicle(s) due for maintenance:'} {maintenanceDue.map(v=>v.plate).join(', ')}</p></div>)}
+                    {p593ShowForm && (
+                      <div className="apple-card p-5 space-y-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Plaka':'Plate'} value={p593Draft.plate} onChange={e=>setP593Draft(d=>({...d,plate:e.target.value.toUpperCase()}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sürücü':'Driver'} value={p593Draft.driver} onChange={e=>setP593Draft(d=>({...d,driver:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Marka/Model':'Model'} value={p593Draft.model} onChange={e=>setP593Draft(d=>({...d,model:e.target.value}))} />
+                          <select className="apple-input px-3 py-2 text-sm" value={p593Draft.fuel} onChange={e=>setP593Draft(d=>({...d,fuel:e.target.value as typeof d.fuel}))}>
+                            {(['Benzin','Dizel','LPG','Elektrik'] as const).map(f=><option key={f}>{f}</option>)}
+                          </select>
+                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder="KM" value={p593Draft.km} onChange={e=>setP593Draft(d=>({...d,km:e.target.value}))} />
+                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Son Bakım':'Last Service'} value={p593Draft.lastService} onChange={e=>setP593Draft(d=>({...d,lastService:e.target.value}))} />
+                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sonraki Bakım':'Next Service'} value={p593Draft.nextService} onChange={e=>setP593Draft(d=>({...d,nextService:e.target.value}))} />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={()=>{
+                            if(!p593Draft.plate) return;
+                            setP593Vehicles(prev=>[...prev,{id:Date.now().toString(),plate:p593Draft.plate,driver:p593Draft.driver,model:p593Draft.model,status:p593Draft.status,lastService:p593Draft.lastService||undefined,nextService:p593Draft.nextService||undefined,km:Number(p593Draft.km)||undefined,fuel:p593Draft.fuel}]);
+                            setP593Draft({plate:'',driver:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
+                            setP593ShowForm(false);
+                          }} className="apple-button-primary text-sm px-4 py-1.5">{tr593?'Kaydet':'Save'}</button>
+                          <button onClick={()=>setP593ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr593?'İptal':'Cancel'}</button>
+                        </div>
+                      </div>
+                    )}
+                    {p593Vehicles.length===0?(
+                      <div className="apple-card p-12 text-center"><Truck className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr593?'"Araç Ekle" ile filo takibini başlatın.':'Click "Add Vehicle" to start fleet tracking.'}</p></div>
+                    ):(
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {p593Vehicles.map(v=>{
+                          const isDue = v.nextService&&v.nextService<=today593;
+                          return (
+                            <div key={v.id} className={`apple-card p-4 ${isDue?'border border-amber-200':''}`}>
+                              <div className="flex items-start justify-between mb-3">
+                                <div>
+                                  <p className="font-bold text-gray-900 text-sm font-mono">{v.plate}</p>
+                                  <p className="text-xs text-gray-500">{v.model} {v.fuel?`• ${v.fuel}`:''}</p>
+                                </div>
+                                <select value={v.status} onChange={e=>setP593Vehicles(prev=>prev.map(x=>x.id===v.id?{...x,status:e.target.value as typeof v.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors593[v.status]}`}>
+                                  {(['Müsait','Yolda','Bakımda','Arızalı'] as const).map(s=><option key={s}>{s}</option>)}
+                                </select>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div><p className="text-gray-400">{tr593?'Sürücü':'Driver'}</p><p className="font-medium text-gray-700">{v.driver||'—'}</p></div>
+                                <div><p className="text-gray-400">KM</p><p className="font-medium text-gray-700">{v.km?.toLocaleString()||'—'}</p></div>
+                                {v.nextService&&<div className="col-span-2"><p className="text-gray-400">{tr593?'Sonraki Bakım':'Next Service'}</p><p className={`font-medium ${isDue?'text-amber-600 font-bold':'text-gray-700'}`}>{v.nextService} {isDue?'⚠️':''}</p></div>}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </motion.div>
