@@ -196,6 +196,7 @@ import ConfirmModal from './components/ConfirmModal';
 import DealerCommissionPanel from './components/DealerCommissionPanel';
 import SabitKiymetModule from './components/SabitKiymetModule';
 import MaliyetMerkeziModule from './components/MaliyetMerkeziModule';
+import KasaModule from './components/KasaModule';
 import TahsilatModule from './components/TahsilatModule';
 import { translations, type Language } from './translations';
 import PricingPage from './components/PricingPage';
@@ -243,6 +244,8 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   integrations:  { full: [UserRole.Admin], readonly: [UserRole.Manager] },
   admin:         { full: [UserRole.Admin], readonly: [] },
   settings:      { full: [UserRole.Admin, UserRole.Manager], readonly: [] },
+  finance:       { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics, UserRole.Purchasing] },
+  analytics:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Accounting, UserRole.Sales], readonly: [UserRole.Logistics, UserRole.HR, UserRole.Purchasing] },
   // New ERP modules
   ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics] },
   bakim:         { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing] },
@@ -1272,6 +1275,9 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
 
   const [autoReorderLoading, setAutoReorderLoading] = useState(false);
   const [autoReorderResult, setAutoReorderResult]   = useState<string | null>(null);
+  // Phase 546: inline notes quick-edit
+  const [p546EditingNoteId, setP546EditingNoteId] = useState<string|null>(null);
+  const [p546NoteDraft, setP546NoteDraft] = useState('');
 
   // ── CSV Import state ────────────────────────────────────────────────────────
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -1957,6 +1963,64 @@ const InventoryView = ({ inventory, categories, selectedCategory, setSelectedCat
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
+                          {/* Phase 546: Inline notes quick-edit */}
+                          <div className="relative" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => {
+                                if (p546EditingNoteId === item.id) {
+                                  setP546EditingNoteId(null);
+                                } else {
+                                  setP546EditingNoteId(item.id);
+                                  setP546NoteDraft((item as unknown as Record<string, unknown>).notes as string ?? '');
+                                }
+                              }}
+                              className={cn(
+                                "p-2 rounded-xl transition-all",
+                                (item as unknown as Record<string, unknown>).notes
+                                  ? "text-amber-500 hover:bg-amber-50"
+                                  : "text-gray-300 hover:bg-gray-50 hover:text-gray-500"
+                              )}
+                              title={currentLanguage === 'tr' ? 'Not ekle / düzenle' : 'Add / edit note'}
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                            {p546EditingNoteId === item.id && (
+                              <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-2xl shadow-2xl p-3 w-64">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                                  {currentLanguage === 'tr' ? 'Ürün Notu' : 'Product Note'}
+                                </p>
+                                <textarea
+                                  autoFocus
+                                  value={p546NoteDraft}
+                                  onChange={e => setP546NoteDraft(e.target.value)}
+                                  rows={3}
+                                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 resize-none"
+                                  placeholder={currentLanguage === 'tr' ? 'Ürün hakkında not girin...' : 'Enter a note about this product...'}
+                                />
+                                <div className="flex gap-2 mt-2">
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        await updateDoc(doc(db, 'inventory', item.id), { notes: p546NoteDraft });
+                                        setAutoReorderResult(currentLanguage === 'tr' ? 'Not kaydedildi ✓' : 'Note saved ✓');
+                                        setTimeout(() => setAutoReorderResult(null), 2500);
+                                      } catch {}
+                                      setP546EditingNoteId(null);
+                                    }}
+                                    className="flex-1 py-1.5 text-xs font-bold bg-brand text-white rounded-xl hover:bg-brand/90 transition-colors"
+                                  >
+                                    {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                                  </button>
+                                  <button
+                                    onClick={() => setP546EditingNoteId(null)}
+                                    className="px-3 py-1.5 text-xs font-bold text-gray-500 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                                  >
+                                    {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2168,19 +2232,21 @@ const ReadOnlyBanner = ({ currentLanguage }: { currentLanguage: string }) => (
   </div>
 );
 
-const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [], recurringOrders = [] }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[], recurringOrders?: Array<{ id: string; templateName: string; customerName: string; totalPrice: number; frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean }> }) => {
+const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [], recurringOrders = [], externalTab, setExternalTab }: { orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[], recurringOrders?: Array<{ id: string; templateName: string; customerName: string; totalPrice: number; frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean }>, externalTab?: 'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler', setExternalTab?: (t: 'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler') => void }) => {
   const [timeRange, setTimeRange] = useState('30');
   const [revenueCurrency, setRevenueCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
-  const [reportsTab, setReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'>('genel');
+  const [_localReportsTab, _setLocalReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
+  const reportsTab = externalTab ?? _localReportsTab;
+  const setReportsTab = (t: 'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler') => { _setLocalReportsTab(t); setExternalTab?.(t); };
   const [invSummarySort, setInvSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'name', dir: 'asc'});
   const [logisticsSummarySort, setLogisticsSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'customerName', dir: 'asc'});
-  const [analyticsCurrency, setAnalyticsCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  // fmtAna uses revenueCurrency (same as the per-card toggle — no separate global state needed)
   const fmtAna = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
     const usd = exchangeRates?.USD ?? 32;
     const eur = exchangeRates?.EUR ?? 35;
-    const rate = analyticsCurrency === 'USD' ? usd : analyticsCurrency === 'EUR' ? eur : 1;
-    const sym = analyticsCurrency === 'USD' ? '$' : analyticsCurrency === 'EUR' ? '€' : '₺';
-    const locale = analyticsCurrency === 'USD' ? 'en-US' : analyticsCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
+    const rate = revenueCurrency === 'USD' ? usd : revenueCurrency === 'EUR' ? eur : 1;
+    const sym = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
+    const locale = revenueCurrency === 'USD' ? 'en-US' : revenueCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
     const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
@@ -2334,6 +2400,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
     { id: 'envanter', label: currentLanguage==='tr'?'Envanter':'Inventory', icon: List },
     { id: 'lojistik', label: currentLanguage==='tr'?'Lojistik':'Logistics', icon: Truck },
     { id: 'ik', label: currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources', icon: UserCheck },
+    { id: 'urunler', label: currentLanguage==='tr'?'Ürün Performansı':'Product Performance', icon: Package }, // Phase 545
   ] as const;
 
   return (
@@ -2368,18 +2435,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
               </button>
             );
           })}
-        </div>
-      </div>
-
-      {/* Analytics Currency Toggle */}
-      <div className="flex justify-end">
-        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-          {(['TRY','USD','EUR'] as const).map(c => (
-            <button key={c} onClick={() => setAnalyticsCurrency(c)}
-              className={`text-[11px] font-bold px-2 py-1 rounded-md transition-all ${analyticsCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-              {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -2863,15 +2918,27 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         <div className="space-y-6">
           {/* KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), color: 'text-orange-500', bg: 'bg-orange-50' },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: `${revenueSymbol}${formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates)}`, color: 'text-green-600', bg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), color: 'text-purple-600', bg: 'bg-purple-50' },
-            ].map((k,i) => (
+            {([
+              { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), color: 'text-blue-600', bg: 'bg-blue-50', isMoney: false },
+              { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), color: 'text-orange-500', bg: 'bg-orange-50', isMoney: false },
+              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: `${revenueSymbol}${formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates)}`, color: 'text-green-600', bg: 'bg-green-50', isMoney: true },
+              { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), color: 'text-purple-600', bg: 'bg-purple-50', isMoney: false },
+            ] as { label: string; value: string; color: string; bg: string; isMoney: boolean }[]).map((k,i) => (
               <motion.div key={i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}}
                 className={`apple-card p-5 ${k.bg}`}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{k.label}</p>
+                <div className="flex items-start justify-between mb-1">
+                  <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{k.label}</p>
+                  {k.isMoney && (
+                    <div className="flex gap-0.5 bg-white/70 rounded-md p-0.5" onClick={e => e.stopPropagation()}>
+                      {(['TRY','USD','EUR'] as const).map(c => (
+                        <button key={c} onClick={() => setRevenueCurrency(c)}
+                          className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${revenueCurrency===c ? 'bg-white shadow-sm text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>
+                          {c==='TRY'?'₺':c==='USD'?'$':'€'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
               </motion.div>
             ))}
@@ -3524,17 +3591,29 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       {reportsTab === 'ik' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count' },
-              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: revenueSymbol + formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll' },
-              { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval' },
-            ].map((k,i) => {
+            {([
+              { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
+              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: revenueSymbol + formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
+              { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
+            ] as { label: string; value: string; icon: React.ElementType; color: string; bg: string; desc: string; isMoney: boolean }[]).map((k,i) => {
               const Icon = k.icon;
               return (
                 <div key={i} className={`apple-card p-5 ${k.bg}`}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <Icon className={`w-5 h-5 ${k.color}`} />
-                    <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{k.label}</p>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <Icon className={`w-5 h-5 ${k.color}`} />
+                      <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{k.label}</p>
+                    </div>
+                    {k.isMoney && (
+                      <div className="flex gap-0.5 bg-white/70 rounded-md p-0.5">
+                        {(['TRY','USD','EUR'] as const).map(c => (
+                          <button key={c} onClick={() => setRevenueCurrency(c)}
+                            className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${revenueCurrency===c ? 'bg-white shadow-sm text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>
+                            {c==='TRY'?'₺':c==='USD'?'$':'€'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
                   <p className="text-xs text-gray-400 mt-1">{k.desc}</p>
@@ -17802,6 +17881,147 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         );
       })()}
 
+      {/* ── Phase 545: Product Revenue Performance Table ── */}
+      {reportsTab === 'urunler' && (() => {
+        // Build product revenue map from order lineItems
+        type ProdStat = { name: string; sku: string; quantity: number; revenue: number; orderCount: number; avgOrderValue: number };
+        const prodMap: Record<string, ProdStat> = {};
+        for (const o of orders) {
+          if (o.status === 'Cancelled') continue;
+          for (const li of (o.lineItems ?? [])) {
+            const liR = li as unknown as Record<string, unknown>;
+            const name = (liR.name as string | undefined) ?? (liR.productName as string | undefined) ?? (liR.title as string | undefined) ?? 'Unknown';
+            const sku  = (liR.sku as string | undefined) ?? '';
+            const qty  = Number(liR.quantity ?? 1) || 1;
+            const up   = Number(liR.unitPrice ?? liR.price ?? liR.variant_price ?? 0) || 0;
+            const rev  = qty * up;
+            const key  = sku || name;
+            if (!prodMap[key]) prodMap[key] = { name, sku, quantity: 0, revenue: 0, orderCount: 0, avgOrderValue: 0 };
+            prodMap[key].quantity  += qty;
+            prodMap[key].revenue   += rev;
+            prodMap[key].orderCount++;
+          }
+        }
+        const products = Object.values(prodMap)
+          .map(p => ({ ...p, avgOrderValue: p.orderCount > 0 ? p.revenue / p.orderCount : 0 }))
+          .sort((a, b) => b.revenue - a.revenue);
+        const totalRevenue = products.reduce((s, p) => s + p.revenue, 0);
+
+        // ABC classification
+        let cumPct = 0;
+        const classified = products.map(p => {
+          const pct = totalRevenue > 0 ? (p.revenue / totalRevenue) * 100 : 0;
+          cumPct += pct;
+          const cls: 'A' | 'B' | 'C' = cumPct <= 70 ? 'A' : cumPct <= 90 ? 'B' : 'C';
+          return { ...p, pct, cls };
+        });
+
+        const countA = classified.filter(p => p.cls === 'A').length;
+        const countB = classified.filter(p => p.cls === 'B').length;
+        const countC = classified.filter(p => p.cls === 'C').length;
+
+        if (products.length === 0) return (
+          <div className="apple-card p-12 text-center space-y-3">
+            <Package className="w-12 h-12 text-gray-200 mx-auto" />
+            <p className="text-gray-400 text-sm">
+              {currentLanguage === 'tr' ? 'Sipariş satır kalemlerinde ürün verisi yok' : 'No product data found in order line items'}
+            </p>
+          </div>
+        );
+
+        return (
+          <div className="space-y-4">
+            {/* KPI Strip */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: currentLanguage === 'tr' ? 'A Sınıfı Ürün' : 'Class A Items', value: countA, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', desc: currentLanguage === 'tr' ? 'Gelirin %70\'i' : '70% of revenue' },
+                { label: currentLanguage === 'tr' ? 'B Sınıfı Ürün' : 'Class B Items', value: countB, cls: 'bg-amber-50 text-amber-700 border-amber-200', desc: currentLanguage === 'tr' ? 'Gelirin %20\'si' : '20% of revenue' },
+                { label: currentLanguage === 'tr' ? 'C Sınıfı Ürün' : 'Class C Items', value: countC, cls: 'bg-gray-50 text-gray-600 border-gray-200', desc: currentLanguage === 'tr' ? 'Gelirin %10\'u' : '10% of revenue' },
+              ].map(k => (
+                <div key={k.label} className={`rounded-xl border px-4 py-3 ${k.cls}`}>
+                  <p className="text-2xl font-black">{k.value}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mt-0.5">{k.label}</p>
+                  <p className="text-[10px] opacity-70">{k.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Product table */}
+            <div className="apple-card overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                <Package className="w-4 h-4 text-brand" />
+                <h3 className="font-bold text-gray-800 text-sm">
+                  {currentLanguage === 'tr' ? 'Ürün Bazında Satış Performansı' : 'Product Revenue Performance'}
+                </h3>
+                <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full ml-auto">{products.length} {currentLanguage === 'tr' ? 'ürün' : 'products'}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-8">#</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        {currentLanguage === 'tr' ? 'Ürün' : 'Product'}
+                      </th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-center">ABC</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
+                        {currentLanguage === 'tr' ? 'Adet' : 'Qty'}
+                      </th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
+                        {currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}
+                      </th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
+                        {currentLanguage === 'tr' ? 'Gelir' : 'Revenue'}
+                      </th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
+                        {currentLanguage === 'tr' ? 'Pay' : 'Share'}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {classified.map((p, i) => {
+                      const barW = totalRevenue > 0 ? (p.revenue / classified[0].revenue) * 100 : 0;
+                      return (
+                        <tr key={i} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-[10px] font-bold text-gray-400">{i + 1}</td>
+                          <td className="px-4 py-3">
+                            <div>
+                              <p className="font-semibold text-gray-800 text-xs truncate max-w-[200px]">{p.name}</p>
+                              {p.sku && <p className="text-[10px] text-gray-400 font-mono">{p.sku}</p>}
+                              <div className="w-full bg-gray-100 rounded-full h-1 mt-1.5 overflow-hidden">
+                                <div className="h-full rounded-full bg-brand/60" style={{ width: `${barW}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${p.cls === 'A' ? 'bg-emerald-100 text-emerald-700' : p.cls === 'B' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {p.cls}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-xs font-semibold text-gray-700">{p.quantity.toLocaleString('tr-TR')}</td>
+                          <td className="px-4 py-3 text-right text-xs text-gray-500">{p.orderCount}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-gray-800">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[10px] font-bold text-gray-500">{p.pct.toFixed(1)}%</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t border-gray-200">
+                    <tr>
+                      <td colSpan={5} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                      <td className="px-4 py-3 text-right text-sm font-black text-gray-800">₺{totalRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Phase 494: Order Value Distribution Histogram (lojistik) ── */}
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const orderValues=orders.map(o=>{ const oR=o as unknown as Record<string,unknown>; return typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0); }).filter(v=>v>0);
@@ -18285,7 +18505,9 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'>('genel');
+  // Lifted from ReportsDashboard so sidebar can control it
+  const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
   // ── Dashboard summary (30-day KPI deltas) ─────────────────────────────────
   const [summaryData, setSummaryData] = useState<{
@@ -18998,6 +19220,9 @@ function AppContent() {
   const [reorderExpanded, setReorderExpanded] = useState(false); // Phase 541 — inventory reorder list
   const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null); // Phase 542 — AI rescore
   const [crmLeadSort, setCrmLeadSort] = useState<'default'|'score'|'activity'|'name'>('default'); // Phase 537
+  // ── Phase 543–545 ────────────────────────────────────────────────────────────
+  const [dashVergiDeadlines, setDashVergiDeadlines] = useState<{ id: string; vergiTuru: string; sonTarih: string; durum: string }[]>([]); // Phase 543
+  const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null); // Phase 544 — leadId with open status dropdown
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -19024,6 +19249,25 @@ function AppContent() {
     setMonthlyTargets(updated);
     setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
   };
+  // ── Phase 543: Subscribe to vergiTakvimi when on dashboard ───────────────
+  useEffect(() => {
+    if (activeTab !== 'dashboard') return;
+    const today543 = new Date().toISOString().slice(0, 10);
+    const unsub = onSnapshot(
+      query(collection(db, 'vergiTakvimi'), orderBy('sonTarih')),
+      snap => {
+        const upcoming = snap.docs
+          .map(d => ({ id: d.id, ...(d.data() as { vergiTuru: string; sonTarih: string; durum: string }) }))
+          .filter(d => d.sonTarih >= today543 && d.durum !== 'Tamamlandı')
+          .slice(0, 4);
+        setDashVergiDeadlines(upcoming);
+      },
+      () => setDashVergiDeadlines([])
+    );
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   // ── Phase 100: In-App Email Compose ──────────────────────────────────────
   const [emailCompose, setEmailCompose] = useState<{ open: boolean; to: string; name: string; subject: string; body: string }>({
     open: false, to: '', name: '', subject: '', body: ''
@@ -20743,7 +20987,6 @@ function AppContent() {
                 { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals' },
                 { id: 'admin', label: currentT.admin },
                 { id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings' },
-                { id: 'finance', label: currentLanguage === 'tr' ? 'Finans' : 'Finance' },
                 { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub' },
                 { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar' },
                 { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export' },
@@ -21071,7 +21314,206 @@ function AppContent() {
         )}
       </AnimatePresence>
 
-      <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
+      {/* ── Left Sidebar + Content Wrapper ── */}
+      <div className="flex">
+
+        {/* ── Persistent Left Sidebar (desktop only) ── */}
+        {(() => {
+          type SidebarItem = { label: string; subId: string; action: () => void };
+          type SidebarGroup = {
+            id: string; label: string; icon: React.ElementType;
+            childIds?: string[];
+            children?: SidebarItem[];
+          };
+          const tr = currentLanguage === 'tr';
+          const sidebarGroups: SidebarGroup[] = [
+            { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: LayoutDashboard },
+            {
+              id: 'crm', label: tr ? 'CRM & Satış' : 'CRM & Sales', icon: Users,
+              childIds: ['sube', 'servis'],
+              children: [
+                { label: tr ? 'Müşteri Adayları' : 'Leads',       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
+                { label: tr ? 'Müşteriler' : 'Customers',          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
+                { label: tr ? 'Siparişler' : 'Orders',             subId: 'orders',      action: () => setActiveTab('orders') },
+                { label: tr ? 'Pipeline' : 'Pipeline',             subId: 'pipeline',    action: () => { setActiveTab('crm'); setCrmTab('pipeline'); } },
+                { label: tr ? 'Kampanyalar' : 'Campaigns',         subId: 'kampanya',    action: () => { setActiveTab('crm'); setCrmTab('kampanya'); } },
+                { label: tr ? 'Sözleşmeler' : 'Contracts',         subId: 'sozlesmeler', action: () => { setActiveTab('crm'); setCrmTab('sozlesmeler'); } },
+                { label: tr ? 'Destek Talepleri' : 'Support',      subId: 'tickets',     action: () => { setActiveTab('crm'); setCrmTab('tickets'); } },
+                { label: tr ? 'Hedefler' : 'Targets',              subId: 'hedefler',    action: () => { setActiveTab('crm'); setCrmTab('hedefler'); } },
+                { label: tr ? 'Komisyon' : 'Commission',           subId: 'komisyon',    action: () => { setActiveTab('crm'); setCrmTab('komisyon'); } },
+                { label: tr ? 'Şubeler' : 'Branches',              subId: 'sube',        action: () => setActiveTab('sube') },
+                { label: tr ? 'Servis' : 'After-Sales',            subId: 'servis',      action: () => setActiveTab('servis') },
+              ],
+            },
+            {
+              id: 'inventory', label: tr ? 'Envanter' : 'Inventory', icon: List,
+              childIds: ['lotseri', 'bakim'],
+              children: [
+                { label: tr ? 'Stok Yönetimi' : 'Stock Mgmt',     subId: 'inventory', action: () => setActiveTab('inventory') },
+                { label: tr ? 'Lot / Seri Takip' : 'Lot/Serial',  subId: 'lotseri',   action: () => setActiveTab('lotseri') },
+                { label: tr ? 'Bakım-Onarım' : 'Maintenance',     subId: 'bakim',     action: () => setActiveTab('bakim') },
+              ],
+            },
+            {
+              id: 'lojistik', label: tr ? 'Lojistik & Depo' : 'Logistics', icon: Truck,
+              childIds: ['ihracat'],
+              children: [
+                { label: tr ? 'Sevkiyat' : 'Shipments',          subId: 'sevkiyat',        action: () => { setActiveTab('lojistik'); setLojistikTab('sevkiyat'); } },
+                { label: tr ? 'Kargo Takip' : 'Cargo Tracking',  subId: 'kargo_takip',     action: () => { setActiveTab('lojistik'); setLojistikTab('kargo_takip'); } },
+                { label: tr ? 'Depo' : 'Warehouse',              subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
+                { label: tr ? 'Transfer' : 'Transfer',           subId: 'transfer',         action: () => { setActiveTab('lojistik'); setLojistikTab('transfer'); } },
+                { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes', subId: 'giden_irsaliye', action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
+                { label: tr ? 'Gelen İrsaliye' : 'Receiving',    subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
+                { label: tr ? 'İthalat/İhracat' : 'Import/Export', subId: 'ihracat',       action: () => setActiveTab('ihracat') },
+              ],
+            },
+            {
+              id: 'muhasebe', label: tr ? 'Muhasebe & Finans' : 'Accounting', icon: BookOpen,
+              childIds: ['ebelge', 'vergi', 'finance'],
+              children: [
+                { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'genel',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); } },
+                { label: tr ? 'Kasa' : 'Cash Desk',                subId: 'kasa',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kasa'); } },
+                { label: tr ? 'Banka' : 'Banking',                 subId: 'banka',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('banka'); } },
+                { label: tr ? 'Nakit Akışı' : 'Cash Flow',         subId: 'nakit-akis',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('nakit-akis'); } },
+                { label: 'P & L',                                   subId: 'pnl',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('pnl'); } },
+                { label: tr ? 'Tahsilat' : 'Collections',          subId: 'tahsilat',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tahsilat'); } },
+                { label: tr ? 'Borç Yönetimi' : 'Payables',        subId: 'ap',             action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ap'); } },
+                { label: tr ? 'AR Yaşlandırma' : 'AR Aging',       subId: 'ar-aging',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ar-aging'); } },
+                { label: tr ? 'Bütçe' : 'Budget',                  subId: 'butce',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
+                { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
+                { label: tr ? 'Sabit Kıymet' : 'Fixed Assets',     subId: 'sabit-kiymet',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sabit-kiymet'); } },
+                { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
+                { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
+                { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
+                { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
+              ],
+            },
+            {
+              id: 'satin-alma', label: tr ? 'Satın Alma' : 'Purchasing', icon: ShoppingCart,
+              children: [
+                { label: tr ? 'Satın Alma Siparişleri' : 'Purchase Orders', subId: 'pos',           action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
+                { label: tr ? 'Tedarikçiler' : 'Suppliers',                  subId: 'suppliers',     action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
+                { label: tr ? 'Tedarikçi Performansı' : 'Supplier Score',   subId: 'scorecard',     action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('scorecard'); } },
+                { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
+              ],
+            },
+            { id: 'ik',       label: tr ? 'İnsan Kaynakları' : 'HR',              icon: UserCheck },
+            { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
+            { id: 'proje',    label: tr ? 'Proje Yönetimi' : 'Projects',           icon: TargetIcon },
+            { id: 'production', label: tr ? 'Üretim' : 'Production',              icon: Factory },
+            { id: 'kalite',   label: tr ? 'Kalite Yönetimi' : 'Quality',           icon: Award },
+            { id: 'kurumsal', label: tr ? 'Kurumsal Yönetim' : 'Governance',       icon: Building2 },
+            { id: 'b2b',      label: tr ? 'B2B Bayi Portalı' : 'B2B Portal',       icon: ShoppingBag },
+            { id: 'risk',     label: tr ? 'Risk & Uyarılar' : 'Risk',              icon: AlertTriangle },
+            {
+              id: 'reports', label: tr ? 'Raporlar' : 'Reports', icon: BarChart3,
+              children: [
+                { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'r-genel',    action: () => { setActiveTab('reports'); setAppReportsTab('genel'); } },
+                { label: tr ? 'CRM & Satış' : 'CRM & Sales',       subId: 'r-crm',      action: () => { setActiveTab('reports'); setAppReportsTab('crm'); } },
+                { label: tr ? 'Envanter' : 'Inventory',            subId: 'r-envanter', action: () => { setActiveTab('reports'); setAppReportsTab('envanter'); } },
+                { label: tr ? 'Lojistik' : 'Logistics',            subId: 'r-lojistik', action: () => { setActiveTab('reports'); setAppReportsTab('lojistik'); } },
+                { label: tr ? 'İnsan Kaynakları' : 'HR',           subId: 'r-ik',       action: () => { setActiveTab('reports'); setAppReportsTab('ik'); } },
+                { label: tr ? 'Ürün Performansı' : 'Products',     subId: 'r-urunler',  action: () => { setActiveTab('reports'); setAppReportsTab('urunler'); } },
+              ],
+            },
+            { id: 'analytics', label: tr ? 'Analitik' : 'Analytics',         icon: BarChart2 },
+            { id: 'integrations', label: tr ? 'Entegrasyonlar' : 'Integrations', icon: Link },
+            { id: 'onaylar',   label: tr ? 'Onaylar' : 'Approvals',           icon: CheckCircle2 },
+            ...(userRole === 'Admin' ? [{
+              id: 'admin', label: tr ? 'Yönetim' : 'Admin', icon: Shield,
+              children: [
+                { label: tr ? 'Genel Bakış' : 'Overview',    subId: 'a-overview', action: () => { setActiveTab('admin'); setAdminTab('overview'); } },
+                { label: tr ? 'Kullanıcılar' : 'Users',       subId: 'a-users',    action: () => { setActiveTab('admin'); setAdminTab('users'); } },
+                { label: tr ? 'Erişim Kontrolü' : 'Access',  subId: 'a-access',   action: () => { setActiveTab('admin'); setAdminTab('access'); } },
+                { label: 'Audit Log',                          subId: 'a-audit',    action: () => { setActiveTab('admin'); setAdminTab('auditlog'); } },
+                { label: tr ? 'Şirket Bilgileri' : 'Company', subId: 'a-company',  action: () => { setActiveTab('admin'); setAdminTab('company'); } },
+              ],
+            }] as SidebarGroup[] : []),
+            ...((userRole === 'Admin' || userRole === 'Manager') ? [{ id: 'settings', label: tr ? 'Ayarlar' : 'Settings', icon: Settings }] as SidebarGroup[] : []),
+          ].filter(g => canAccess(g.id));
+
+          return (
+            <aside className={cn(
+              'hidden lg:flex flex-col w-56 xl:w-60 shrink-0 sticky top-16 overflow-y-auto border-r scrollbar-thin',
+              'h-[calc(100vh-4rem)]',
+              darkMode ? 'bg-[#0a0a0a] border-white/[0.08]' : 'bg-white/90 backdrop-blur border-gray-100'
+            )}>
+              <nav className="flex-1 py-2 px-1.5 space-y-0.5 overflow-y-auto">
+                {sidebarGroups.map(group => {
+                  const Icon = group.icon;
+                  const isGroupActive = activeTab === group.id || (group.childIds ?? []).includes(activeTab);
+                  const isChildActive = (subId: string) => {
+                    // check if this sub-item corresponds to current state
+                    if (subId === activeTab) return true;
+                    if (activeTab === 'crm') return subId === crmTab;
+                    if (activeTab === 'muhasebe') return subId === muhasebeTab;
+                    if (activeTab === 'lojistik') return subId === lojistikTab;
+                    if (activeTab === 'satin-alma') return subId === purchasingSubTab;
+                    if (activeTab === 'admin') return subId === `a-${adminTab}`;
+                    if (activeTab === 'reports') return subId === `r-${appReportsTab}`;
+                    return false;
+                  };
+                  const hasChildren = group.children && group.children.length > 0;
+
+                  return (
+                    <div key={group.id}>
+                      <button
+                        onClick={() => {
+                          if (isGroupActive && !hasChildren) return;
+                          setActiveTab(group.id);
+                          if (group.id === 'crm') setCrmTab('leads');
+                          if (group.id === 'muhasebe') setMuhasebeTab('genel');
+                          if (group.id === 'lojistik') setLojistikTab('sevkiyat');
+                          if (group.id === 'satin-alma') setPurchasingSubTab('pos');
+                          if (group.id === 'admin') setAdminTab('overview');
+                          if (group.id === 'reports') setAppReportsTab('genel');
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold transition-all text-left',
+                          isGroupActive && !hasChildren
+                            ? darkMode ? 'bg-brand/20 text-brand' : 'bg-brand/10 text-brand'
+                            : isGroupActive && hasChildren
+                              ? darkMode ? 'text-white font-bold' : 'text-gray-900 font-bold'
+                              : darkMode ? 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                        )}
+                      >
+                        <Icon className={cn('w-4 h-4 shrink-0', isGroupActive ? 'text-brand' : '')} />
+                        <span className="truncate flex-1">{group.label}</span>
+                        {hasChildren && (
+                          <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform', isGroupActive ? 'rotate-180 text-brand' : darkMode ? 'text-white/30' : 'text-gray-300')} />
+                        )}
+                      </button>
+
+                      {hasChildren && isGroupActive && (
+                        <div className="mt-0.5 ml-3 pl-2.5 border-l space-y-0.5 pb-1" style={{ borderColor: darkMode ? 'rgba(255,255,255,0.08)' : '#e5e7eb' }}>
+                          {group.children!.map(child => {
+                            const active = isChildActive(child.subId);
+                            return (
+                              <button
+                                key={child.subId}
+                                onClick={() => { child.action(); setIsMobileMenuOpen(false); }}
+                                className={cn(
+                                  'w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all',
+                                  active
+                                    ? darkMode ? 'bg-brand/20 text-brand' : 'bg-brand/10 text-brand font-semibold'
+                                    : darkMode ? 'text-white/40 hover:text-white/70 hover:bg-white/[0.05]' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                                )}
+                              >
+                                {child.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </nav>
+            </aside>
+          );
+        })()}
+
+        <main className="flex-1 min-w-0 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 overflow-x-hidden">
         <AnimatePresence mode="wait">
 
           {/* ── Dashboard (Home) ── */}
@@ -21494,6 +21936,55 @@ function AppContent() {
                           <span>{ins.text}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 543: Upcoming Tax Deadlines Widget ── */}
+              {dashVergiDeadlines.length > 0 && (() => {
+                const today543 = new Date().toISOString().slice(0, 10);
+                const getDays = (sonTarih: string) => Math.ceil((new Date(sonTarih).getTime() - Date.now()) / 86400000);
+                return (
+                  <div className={cn('rounded-2xl border p-4', darkMode ? 'bg-white/5 border-white/10' : 'bg-amber-50/60 border-amber-200/60')}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className={cn('text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5', darkMode ? 'text-white/40' : 'text-amber-700')}>
+                        <Receipt className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Yaklaşan Vergi Tarihleri' : 'Upcoming Tax Deadlines'}
+                      </p>
+                      <button
+                        onClick={() => setActiveTab('vergi')}
+                        className="text-[10px] font-bold text-amber-600 hover:text-amber-800 transition-colors flex items-center gap-0.5"
+                      >
+                        {currentLanguage === 'tr' ? 'Tümü' : 'All'} <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {dashVergiDeadlines.map(d => {
+                        const days = getDays(d.sonTarih);
+                        const isUrgent = days <= 7;
+                        const isCritical = days <= 2;
+                        return (
+                          <div
+                            key={d.id}
+                            className={cn(
+                              'flex items-center justify-between px-3 py-2 rounded-xl',
+                              isCritical ? 'bg-red-100 border border-red-200' : isUrgent ? 'bg-orange-50 border border-orange-200' : 'bg-white border border-amber-100'
+                            )}
+                          >
+                            <div className="min-w-0">
+                              <p className={cn('text-xs font-bold truncate', isCritical ? 'text-red-800' : isUrgent ? 'text-orange-800' : 'text-gray-800')}>{d.vergiTuru}</p>
+                              <p className="text-[10px] text-gray-500">{new Date(d.sonTarih).toLocaleDateString('tr-TR')}</p>
+                            </div>
+                            <span className={cn(
+                              'shrink-0 ml-2 text-[10px] font-black px-2 py-0.5 rounded-full',
+                              isCritical ? 'bg-red-200 text-red-800' : isUrgent ? 'bg-orange-200 text-orange-800' : 'bg-amber-100 text-amber-700'
+                            )}>
+                              {days === 0 ? (currentLanguage === 'tr' ? 'Bugün!' : 'Today!') : `${days}g`}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -23205,7 +23696,7 @@ function AppContent() {
                     </button>
                   </div>
 
-                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} recurringOrders={recurringOrders} />
+                  <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} recurringOrders={recurringOrders} externalTab={appReportsTab} setExternalTab={setAppReportsTab} />
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <DemandForecastPanel currentLanguage={currentLanguage} />
@@ -23227,8 +23718,8 @@ function AppContent() {
                     icon={Calculator}
                   />
 
-                  {/* ── Sub-tab navigation ── */}
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
+                  {/* ── Sub-tab navigation (hidden on desktop — sidebar handles nav) ── */}
+                  <div className="lg:hidden flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
                     {([
                       { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
                       { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
@@ -23240,6 +23731,8 @@ function AppContent() {
                       { id: 'ar-aging',          label: currentLanguage === 'tr' ? 'Müşteri Yaşlandırma': 'AR Aging',         icon: Users },
                       { id: 'finansal-oranlar',  label: currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios',  icon: Activity },
                       { id: 'pnl',               label: currentLanguage === 'tr' ? 'Gelir Tablosu'    : 'P&L Statement',      icon: TrendingUp },
+                      { id: 'nakit-akis',        label: currentLanguage === 'tr' ? 'Nakit Akışı'      : 'Cash Flow',          icon: Wallet },
+                      { id: 'kasa',              label: currentLanguage === 'tr' ? 'Kasa Yönetimi'    : 'Cash Register',      icon: DollarSign },
                     ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
                       const Icon = tab.icon;
                       const isActive = muhasebeTab === tab.id;
@@ -24179,6 +24672,127 @@ function AppContent() {
                       </div>
                     );
                   })()}
+
+                  {/* ── Nakit Akışı (Cash Flow) ── */}
+                  {muhasebeTab === 'nakit-akis' && (() => {
+                    // Build monthly cash flow from orders (inflows) and AP/expense records
+                    const months: Record<string, { inflow: number; outflow: number }> = {};
+                    const now = new Date();
+                    // Last 6 months
+                    for (let i = 5; i >= 0; i--) {
+                      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      months[key] = { inflow: 0, outflow: 0 };
+                    }
+                    // Inflows: paid orders
+                    orders.filter(o => o.paid && o.status !== 'Cancelled').forEach(o => {
+                      const raw = o.createdAt ?? o.syncedAt;
+                      const d = raw ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number)) : null;
+                      if (!d) return;
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      if (months[key]) months[key].inflow += o.totalPrice || 0;
+                    });
+                    // Outflows: COGS from all orders (proxy for expenses)
+                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
+                      const raw = o.createdAt ?? o.syncedAt;
+                      const d = raw ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number)) : null;
+                      if (!d) return;
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      if (months[key]) {
+                        const cogs = (o.lineItems ?? []).reduce((s, li) => s + ((li.costPrice ?? 0) * li.quantity), 0);
+                        months[key].outflow += cogs;
+                      }
+                    });
+                    const rows = Object.entries(months).map(([key, v]) => {
+                      const [year, month] = key.split('-');
+                      const label = new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' });
+                      return { key, label, ...v, net: v.inflow - v.outflow };
+                    });
+                    const totalInflow = rows.reduce((s, r) => s + r.inflow, 0);
+                    const totalOutflow = rows.reduce((s, r) => s + r.outflow, 0);
+                    const totalNet = totalInflow - totalOutflow;
+                    const maxVal = Math.max(...rows.map(r => Math.max(r.inflow, r.outflow)), 1);
+                    const fCF = (v: number) => '₺' + Math.abs(v).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                    return (
+                      <motion.div key="muhasebe-nakit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                        <ModuleHeader
+                          title={currentLanguage === 'tr' ? 'Nakit Akışı' : 'Cash Flow Statement'}
+                          subtitle={currentLanguage === 'tr' ? 'Son 6 aylık nakit giriş/çıkış analizi' : 'Last 6 months cash inflow/outflow analysis'}
+                          icon={Wallet}
+                        />
+                        {/* Summary KPIs */}
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { label: currentLanguage === 'tr' ? 'Toplam Giriş' : 'Total Inflow', val: totalInflow, color: 'text-emerald-600', bg: 'bg-emerald-50', prefix: '+' },
+                            { label: currentLanguage === 'tr' ? 'Toplam Çıkış' : 'Total Outflow', val: totalOutflow, color: 'text-red-600', bg: 'bg-red-50', prefix: '-' },
+                            { label: currentLanguage === 'tr' ? 'Net Nakit' : 'Net Cash', val: totalNet, color: totalNet >= 0 ? 'text-blue-700' : 'text-red-700', bg: totalNet >= 0 ? 'bg-blue-50' : 'bg-red-50', prefix: totalNet >= 0 ? '+' : '-' },
+                          ].map(k => (
+                            <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">{k.label}</p>
+                              <p className={`text-xl font-bold ${k.color}`}>{k.prefix === '-' ? fCF(-k.val) : (k.val >= 0 ? '' : '-') + fCF(k.val)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Bar chart */}
+                        <div className="apple-card p-5">
+                          <h3 className="text-sm font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Aylık Nakit Akışı' : 'Monthly Cash Flow'}</h3>
+                          <div className="flex items-end gap-3 h-36">
+                            {rows.map(r => (
+                              <div key={r.key} className="flex-1 flex flex-col items-center gap-1">
+                                <div className="w-full flex items-end gap-0.5 h-28">
+                                  <div className="flex-1 rounded-t-md bg-emerald-400 transition-all" style={{ height: `${(r.inflow / maxVal) * 100}%` }} title={`Giriş: ${fCF(r.inflow)}`} />
+                                  <div className="flex-1 rounded-t-md bg-red-400 transition-all" style={{ height: `${(r.outflow / maxVal) * 100}%` }} title={`Çıkış: ${fCF(r.outflow)}`} />
+                                </div>
+                                <span className="text-[9px] text-gray-400 font-medium">{r.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-4 mt-3 text-[10px] font-semibold text-gray-500">
+                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 inline-block" />{currentLanguage === 'tr' ? 'Giriş' : 'Inflow'}</span>
+                            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />{currentLanguage === 'tr' ? 'Çıkış' : 'Outflow'}</span>
+                          </div>
+                        </div>
+                        {/* Table */}
+                        <div className="apple-card overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-gray-50 border-b border-gray-100">
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}</th>
+                                  <th className="text-right px-4 py-3 text-[10px] font-bold text-emerald-500 uppercase">{currentLanguage === 'tr' ? 'Nakit Giriş' : 'Cash In'}</th>
+                                  <th className="text-right px-4 py-3 text-[10px] font-bold text-red-500 uppercase">{currentLanguage === 'tr' ? 'Nakit Çıkış' : 'Cash Out'}</th>
+                                  <th className="text-right px-4 py-3 text-[10px] font-bold text-blue-500 uppercase">{currentLanguage === 'tr' ? 'Net' : 'Net'}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {rows.map(r => (
+                                  <tr key={r.key} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="px-4 py-3 font-semibold text-gray-800">{r.label}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-emerald-600">{fCF(r.inflow)}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-red-500">{fCF(r.outflow)}</td>
+                                    <td className={`px-4 py-3 text-right font-bold ${r.net >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{r.net >= 0 ? '+' : '-'}{fCF(Math.abs(r.net))}</td>
+                                  </tr>
+                                ))}
+                                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                                  <td className="px-4 py-3 font-bold text-gray-800 text-[11px] uppercase">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                                  <td className="px-4 py-3 text-right font-bold text-emerald-600">{fCF(totalInflow)}</td>
+                                  <td className="px-4 py-3 text-right font-bold text-red-500">{fCF(totalOutflow)}</td>
+                                  <td className={`px-4 py-3 text-right font-bold text-base ${totalNet >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{totalNet >= 0 ? '+' : '-'}{fCF(Math.abs(totalNet))}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Kasa Yönetimi ── */}
+                  {muhasebeTab === 'kasa' && (
+                    <motion.div key="muhasebe-kasa" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <KasaModule currentLanguage={currentLanguage as 'tr' | 'en'} isAuthenticated={!!user && hasFullAccess('muhasebe')} />
+                    </motion.div>
+                  )}
                 </>
               )}
             </motion.div>
@@ -24191,8 +24805,8 @@ function AppContent() {
                 <>
                   {!hasFullAccess('satin-alma') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
 
-                  {/* ── Sub-tab switcher ── */}
-                  <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+                  {/* ── Sub-tab switcher (hidden on desktop — sidebar handles nav) ── */}
+                  <div className="lg:hidden flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
                     {([
                       { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
                       { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
@@ -25690,8 +26304,8 @@ function AppContent() {
           {/* ── Admin Panel ── */}
           {activeTab === 'admin' && (
   <motion.div key="admin" initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-20}} className="space-y-4">
-    {/* Admin Sub-tab Nav */}
-    <div className="overflow-x-auto scrollbar-none">
+    {/* Admin Sub-tab Nav (hidden on desktop — sidebar handles nav) */}
+    <div className="lg:hidden overflow-x-auto scrollbar-none">
       <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
         {([
           { id: 'overview', label: currentLanguage==='tr'?'Genel Bakış':'Overview', icon: BarChart3 },
@@ -27582,8 +28196,8 @@ function AppContent() {
           {/* ── CRM Pipeline ── */}
           {activeTab === 'crm' && !selectedLead && (
             <motion.div key="crm-pipeline" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-              {/* CRM Sub-tabs */}
-              <div className="overflow-x-auto scrollbar-none -mx-3 px-3">
+              {/* CRM Sub-tabs (hidden on desktop — sidebar handles nav) */}
+              <div className="lg:hidden overflow-x-auto scrollbar-none -mx-3 px-3">
                 <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max mb-2">
                   {[
                     { id: 'leads', label: currentLanguage === 'tr' ? 'Müşteri Adayları' : 'Leads', icon: Users },
@@ -29218,12 +29832,49 @@ function AppContent() {
                           </div>
                           <div className="flex items-center gap-3 sm:gap-6 shrink-0">
                             <div className="text-right hidden sm:block">
-                              <span className={cn("text-[10px] font-bold uppercase px-2 py-0.5 rounded-full",
-                                lead.status === 'New' ? "bg-blue-50 text-blue-600" :
-                                  lead.status === 'Qualified' ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-500"
-                              )}>
-                                {currentT[lead.status.toLowerCase()] || lead.status}
-                              </span>
+                              {/* Phase 544: Quick status toggle */}
+                              <div className="relative inline-block" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={() => setP544QuickStatus(p544QuickStatus === lead.id ? null : lead.id)}
+                                  className={cn("text-[10px] font-bold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 hover:opacity-80 transition-opacity",
+                                    lead.status === 'New' ? "bg-blue-50 text-blue-600" :
+                                    lead.status === 'Qualified' ? "bg-emerald-50 text-emerald-600" :
+                                    lead.status === 'Contacted' ? "bg-purple-50 text-purple-600" :
+                                    lead.status === 'Proposal' ? "bg-indigo-50 text-indigo-600" :
+                                    lead.status === 'Negotiation' ? "bg-amber-50 text-amber-700" :
+                                    lead.status === 'Closed' ? "bg-gray-50 text-gray-500" : "bg-gray-50 text-gray-500"
+                                  )}
+                                  title={currentLanguage === 'tr' ? 'Durumu değiştir' : 'Change status'}
+                                >
+                                  {currentT[(lead.status.toLowerCase() as keyof typeof currentT)] || lead.status}
+                                  <ChevronDown className="w-2.5 h-2.5" />
+                                </button>
+                                {p544QuickStatus === lead.id && (
+                                  <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 min-w-[130px]">
+                                    {(['New', 'Contacted', 'Qualified', 'Proposal', 'Negotiation', 'Closed', 'Closed Won', 'Closed Lost'] as const).map(s => (
+                                      <button
+                                        key={s}
+                                        onClick={async () => {
+                                          try {
+                                            await updateDoc(doc(db, 'leads', lead.id), { status: s, updatedAt: serverTimestamp() });
+                                            toast(
+                                              currentLanguage === 'tr' ? `Durum "${s}" olarak güncellendi` : `Status updated to "${s}"`,
+                                              'success'
+                                            );
+                                          } catch {}
+                                          setP544QuickStatus(null);
+                                        }}
+                                        className={cn(
+                                          "w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors",
+                                          s === lead.status ? "bg-brand/10 text-brand" : "hover:bg-gray-50 text-gray-700"
+                                        )}
+                                      >
+                                        {s === lead.status ? '✓ ' : ''}{s}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                               {/* Phase 533: Activity count badge */}
                               {lead.activities && lead.activities.length > 0 && (
                                 <span
@@ -31572,8 +32223,8 @@ function AppContent() {
                 subtitle={currentLanguage === 'tr' ? 'Sevkiyatlar, depo yönetimi ve transferler' : 'Shipments, warehouse management and transfers'}
                 icon={Truck}
               />
-              {/* Lojistik Sub-tabs */}
-              <div className="overflow-x-auto scrollbar-none -mx-3 px-3">
+              {/* Lojistik Sub-tabs (hidden on desktop — sidebar handles nav) */}
+              <div className="lg:hidden overflow-x-auto scrollbar-none -mx-3 px-3">
                 <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max mb-2">
                   {[
                     { id: 'sevkiyat', label: currentLanguage === 'tr' ? 'Sevkiyatlar' : 'Shipments', icon: Truck },
@@ -32016,6 +32667,7 @@ function AppContent() {
           )}
         </AnimatePresence>
       </main>
+      </div>{/* ── /flex wrapper (sidebar + main) ── */}
 
       {/* ── Confirm Modal (replaces PIN modal + window.confirm) ── */}
       <ConfirmModal

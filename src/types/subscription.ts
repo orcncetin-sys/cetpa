@@ -81,7 +81,7 @@ export const PLANS: PlanConfig[] = [
     modulesAllowed: [
       'dashboard', 'crm', 'inventory', 'orders',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
-      'reports', 'integrations', 'finance',
+      'reports', 'integrations', 'finance', 'analytics',
     ],
   },
   {
@@ -109,7 +109,7 @@ export const PLANS: PlanConfig[] = [
     modulesAllowed: [
       'dashboard', 'crm', 'inventory', 'orders',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
-      'reports', 'integrations', 'finance',
+      'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',
       'risk', 'kurumsal',
     ],
@@ -137,7 +137,7 @@ export const PLANS: PlanConfig[] = [
     modulesAllowed: [
       'dashboard', 'crm', 'inventory', 'orders',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
-      'reports', 'integrations', 'finance',
+      'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',
       'risk', 'kurumsal', 'admin', 'settings',
     ],
@@ -157,6 +157,8 @@ export const ALL_MODULES: { id: string; label: { tr: string; en: string }; icon:
   { id: 'satin-alma',   label: { tr: 'Satın Alma', en: 'Purchasing' },          icon: '🛒' },
   { id: 'b2b',          label: { tr: 'B2B Portal', en: 'B2B Portal' },          icon: '🏪' },
   { id: 'reports',      label: { tr: 'Raporlar', en: 'Reports' },               icon: '📈' },
+  { id: 'finance',      label: { tr: 'Finans', en: 'Finance' },                 icon: '💳' },
+  { id: 'analytics',    label: { tr: 'Analitik', en: 'Analytics' },             icon: '📉' },
   { id: 'production',   label: { tr: 'Üretim', en: 'Production' },              icon: '🏭' },
   { id: 'kalite',       label: { tr: 'Kalite', en: 'Quality' },                 icon: '✅' },
   { id: 'ik',           label: { tr: 'İnsan Kaynakları', en: 'HR' },            icon: '👥' },

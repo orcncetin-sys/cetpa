@@ -1215,6 +1215,16 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                     <input type="text" value={employeeForm.city} onChange={e => setEmployeeForm({...employeeForm, city: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                   </div>
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Yetenekler (virgülle ayırın)' : 'Skills (comma-separated)'}</label>
+                  <input
+                    type="text"
+                    value={(employeeForm as Record<string, unknown>).skillList as string ?? ''}
+                    onChange={e => setEmployeeForm({...employeeForm, ...{ skillList: e.target.value }})}
+                    placeholder={currentLanguage === 'tr' ? 'ör. Excel, Muhasebe, SQL' : 'e.g. Excel, Accounting, SQL'}
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm"
+                  />
+                </div>
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
                 <button onClick={() => setShowEmployeeModal(false)} className="apple-button-secondary flex-1">{t.cancel}</button>

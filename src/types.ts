@@ -168,7 +168,7 @@ export interface Lead {
   company: string;
   email: string;
   phone: string;
-  status: 'New' | 'Contacted' | 'Qualified' | 'Closed';
+  status: 'New' | 'Contacted' | 'Qualified' | 'Proposal' | 'Negotiation' | 'Closed' | 'Closed Won' | 'Closed Lost';
   score?: number;
   notes?: string;
   assignedTo: string;
