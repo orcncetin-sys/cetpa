@@ -19397,6 +19397,32 @@ function AppContent() {
   const [p599Skills] = useState(['Excel','ERP','Müşteri İlişkileri','Proje Yönetimi','Teknik Destek','Muhasebe','Lojistik','İngilizce','Satış']);
   const [p599Ratings, setP599Ratings] = useState<Record<string,Record<string,number>>>({});
   const [p599SelEmp, setP599SelEmp] = useState<string>('');
+  // ── Phase 600: Integration Health Dashboard ────────────────────────────────
+  // (state derived from existing config — no new useState needed)
+  // ── Phase 601: Müşteri Segmentasyon Analizi ───────────────────────────────
+  const [p601Segment, setP601Segment] = useState<'rfm'|'revenue'|'type'>('rfm');
+  // ── Phase 602: Çoklu Döviz Sipariş Yönetimi ──────────────────────────────
+  const [p602OrderCurrency, setP602OrderCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  // ── Phase 603: İş Zekası Trend Analizi ───────────────────────────────────
+  const [p603TrendMetric, setP603TrendMetric] = useState<'revenue'|'orders'|'leads'|'inventory'>('revenue');
+  const [p603TrendPeriod, setP603TrendPeriod] = useState<'3m'|'6m'|'12m'>('6m');
+  // ── Phase 604: Satıcı Komisyon Takibi ─────────────────────────────────────
+  const [p604CommRate, setP604CommRate] = useState(5); // default 5%
+  // ── Phase 605: Üretim Kapasitesi Planlama ─────────────────────────────────
+  const [p605Capacity, setP605Capacity] = useState<Array<{line:string;maxCap:number;planned:number;actual:number}>>([]);
+  const [p605ShowForm, setP605ShowForm] = useState(false);
+  const [p605Draft, setP605Draft] = useState({line:'',maxCap:'',planned:'',actual:''});
+  // ── Phase 606: E-posta Kampanya Takibi ────────────────────────────────────
+  const [p606Campaigns, setP606Campaigns] = useState<Array<{id:string;name:string;sentDate:string;recipients:number;opens:number;clicks:number;conversions:number}>>([]);
+  const [p606ShowForm, setP606ShowForm] = useState(false);
+  const [p606Draft, setP606Draft] = useState({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
+  // ── Phase 607: Tahsilat Hatırlatma Otomasyonu ─────────────────────────────
+  const [p607ReminderDays, setP607ReminderDays] = useState([7, 14, 30]);
+  // ── Phase 608: Tedarikçi Fiyat Karşılaştırması ───────────────────────────
+  const [p608SelProduct, setP608SelProduct] = useState('');
+  const [p608Quotes, setP608Quotes] = useState<Array<{id:string;supplier:string;price:number;leadDays:number;minQty:number;validUntil?:string}>>([]);
+  const [p608ShowForm, setP608ShowForm] = useState(false);
+  const [p608Draft, setP608Draft] = useState({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -24077,6 +24103,92 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 603: İş Zekası Trend Analizi ─────────────────────── */}
+                  {appReportsTab === 'genel' && (() => {
+                    const tr603 = currentLanguage === 'tr';
+                    const monthsBack = p603TrendPeriod === '3m' ? 3 : p603TrendPeriod === '6m' ? 6 : 12;
+                    const now603 = new Date();
+                    const months603 = Array.from({length:monthsBack},(_,i)=>{
+                      const d = new Date(now603.getFullYear(), now603.getMonth()-monthsBack+1+i, 1);
+                      return { date: d, label: d.toLocaleString(currentLanguage==='tr'?'tr-TR':'en-US',{month:'short',year:'2-digit'}) };
+                    });
+                    const getMonthValue = (m: typeof months603[number]) => {
+                      const start = m.date;
+                      const end = new Date(start.getFullYear(), start.getMonth()+1, 0, 23, 59, 59);
+                      if (p603TrendMetric==='revenue') {
+                        return orders.filter(o=>{
+                          if (o.status==='Cancelled'||!o.createdAt) return false;
+                          try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=start&&d<=end; } catch { return false; }
+                        }).reduce((s,o)=>s+(o.totalPrice||0),0);
+                      }
+                      if (p603TrendMetric==='orders') {
+                        return orders.filter(o=>{
+                          if (!o.createdAt) return false;
+                          try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=start&&d<=end; } catch { return false; }
+                        }).length;
+                      }
+                      if (p603TrendMetric==='leads') {
+                        return leads.filter(l=>{
+                          if (!l.createdAt) return false;
+                          try { const d=(l.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(l.createdAt as string); return d>=start&&d<=end; } catch { return false; }
+                        }).length;
+                      }
+                      return 0; // inventory: static
+                    };
+                    const data603 = months603.map(m=>({...m,value:getMonthValue(m)}));
+                    const maxVal = Math.max(...data603.map(d=>d.value),1);
+                    const totalVal = data603.reduce((s,d)=>s+d.value,0);
+                    const avgVal = totalVal/data603.length;
+                    const lastVal = data603[data603.length-1]?.value||0;
+                    const prevVal = data603[data603.length-2]?.value||0;
+                    const trend = prevVal > 0 ? ((lastVal-prevVal)/prevVal)*100 : 0;
+                    const fmt603 = (v:number) => p603TrendMetric==='revenue' ? `₺${v.toLocaleString('tr-TR',{maximumFractionDigits:0})}` : String(v);
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                          <h3 className="font-bold text-gray-900 text-sm">{tr603?'📈 İş Zekası Trend Analizi':'📈 Business Intelligence Trends'}</h3>
+                          <div className="flex gap-2 flex-wrap">
+                            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                              {([['revenue',tr603?'Gelir':'Revenue'],['orders',tr603?'Sipariş':'Orders'],['leads','Leads']] as const).map(([id,lbl])=>(
+                                <button key={id} onClick={()=>setP603TrendMetric(id)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p603TrendMetric===id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{lbl}</button>
+                              ))}
+                            </div>
+                            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                              {(['3m','6m','12m'] as const).map(p=>(
+                                <button key={p} onClick={()=>setP603TrendPeriod(p)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p603TrendPeriod===p?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{p}</button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 mb-4">
+                          {[
+                            {label:tr603?'Dönem Toplamı':'Period Total', val:fmt603(totalVal), color:'text-gray-800'},
+                            {label:tr603?'Aylık Ortalama':'Monthly Avg', val:fmt603(Math.round(avgVal)), color:'text-blue-600'},
+                            {label:tr603?'Aylık Değişim':'MoM Change', val:`${trend>=0?'+':''}${trend.toFixed(1)}%`, color:trend>=0?'text-emerald-600':'text-red-500'},
+                          ].map(k=>(
+                            <div key={k.label} className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-[10px] text-gray-400 uppercase font-semibold">{k.label}</p>
+                              <p className={`text-base font-bold mt-0.5 ${k.color}`}>{k.val}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Sparkline bars */}
+                        <div className="flex items-end gap-1 h-20">
+                          {data603.map((m,i)=>{
+                            const h = maxVal > 0 ? (m.value/maxVal)*100 : 0;
+                            const isLast = i===data603.length-1;
+                            return (
+                              <div key={m.label} className="flex-1 flex flex-col items-center gap-1" title={`${m.label}: ${fmt603(m.value)}`}>
+                                <div className="w-full rounded-t-md transition-all" style={{height:`${Math.max(h,2)}%`,background:isLast?'#ff4000':'#e5e7eb'}} />
+                                <span className="text-[9px] text-gray-400 rotate-0">{m.label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <DemandForecastPanel currentLanguage={currentLanguage} />
@@ -24235,11 +24347,73 @@ function AppContent() {
 
                   {/* ── Tahsilat Takibi ── */}
                   {muhasebeTab === 'tahsilat' && (
-                    <motion.div key="muhasebe-tahsilat" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                    <motion.div key="muhasebe-tahsilat" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                       <TahsilatModule
                         currentLanguage={currentLanguage as 'tr' | 'en'}
                         isAuthenticated={!!user && hasFullAccess('muhasebe')}
                       />
+                      {/* ── Phase 607: Tahsilat Hatırlatma Otomasyonu ───────────────────── */}
+                      {(() => {
+                        const tr607 = currentLanguage === 'tr';
+                        const today607 = new Date();
+                        // Find unpaid orders sorted by createdAt
+                        const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt);
+                        const withDays = unpaidOrders.map(o => {
+                          let daysPast = 0;
+                          try {
+                            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+                            daysPast = Math.floor((today607.getTime() - d.getTime()) / 86400000);
+                          } catch { /* skip */ }
+                          return {...o, daysPast};
+                        }).sort((a,b) => b.daysPast - a.daysPast);
+                        if (withDays.length === 0) return null;
+                        const getBucket = (days: number) => {
+                          if (days >= p607ReminderDays[2]) return {label:tr607?`${p607ReminderDays[2]}+ gün`:`${p607ReminderDays[2]}+ days`,color:'text-red-600',bg:'bg-red-50 border-red-200'};
+                          if (days >= p607ReminderDays[1]) return {label:tr607?`${p607ReminderDays[1]}+ gün`:`${p607ReminderDays[1]}+ days`,color:'text-orange-600',bg:'bg-orange-50 border-orange-200'};
+                          if (days >= p607ReminderDays[0]) return {label:tr607?`${p607ReminderDays[0]}+ gün`:`${p607ReminderDays[0]}+ days`,color:'text-amber-600',bg:'bg-amber-50 border-amber-200'};
+                          return {label:tr607?'Normal':'Current',color:'text-gray-500',bg:'bg-gray-50 border-gray-100'};
+                        };
+                        const criticalCount = withDays.filter(o=>o.daysPast>=p607ReminderDays[2]).length;
+                        const totalUnpaid = withDays.reduce((s,o)=>s+(o.totalPrice||0),0);
+                        return (
+                          <div className="apple-card p-5 space-y-4">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <h3 className="font-bold text-gray-900 text-sm">🔔 {tr607?'Tahsilat Hatırlatma Otomasyonu':'Collection Reminder Automation'}</h3>
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                {tr607?'Eşikler (gün):':'Thresholds (days):'}
+                                {p607ReminderDays.map((d,i)=>(
+                                  <input key={i} type="number" value={d} onChange={e=>{
+                                    const next=[...p607ReminderDays]; next[i]=Number(e.target.value); setP607ReminderDays(next);
+                                  }} className="apple-input px-2 py-0.5 text-xs w-12 text-center"/>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Kritik':'Critical'}</p><p className="text-xl font-black text-red-600">{criticalCount}</p></div>
+                              <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Açık Fatura':'Unpaid'}</p><p className="text-xl font-black text-amber-600">{withDays.length}</p></div>
+                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Toplam Bakiye':'Total O/S'}</p><p className="text-lg font-black text-orange-600">₺{Math.round(totalUnpaid).toLocaleString('tr-TR')}</p></div>
+                            </div>
+                            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                              {withDays.slice(0,20).map(o=>{
+                                const bucket = getBucket(o.daysPast);
+                                return (
+                                  <div key={o.id} className={`flex items-center justify-between border rounded-xl px-4 py-2.5 ${bucket.bg}`}>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-semibold text-gray-800 truncate">{o.customerName}</p>
+                                      <p className="text-[10px] text-gray-400">{tr607?'Sipariş:':'Order:'} #{o.id.slice(-6)} · {o.daysPast}g</p>
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                      <span className={`text-xs font-bold ${bucket.color}`}>{bucket.label}</span>
+                                      <span className="text-xs font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[10px] text-gray-400">* {tr607?'Ödenmemiş siparişler gün sırasına göre listelenir. Eşikler yukarıdan ayarlanabilir.':'Unpaid orders listed by days outstanding. Thresholds adjustable above.'}</p>
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   )}
 
@@ -27476,6 +27650,88 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 608: Tedarikçi Fiyat Karşılaştırması ───────────────────── */}
+                  {purchasingSubTab === 'suppliers' && (() => {
+                    const tr608 = currentLanguage === 'tr';
+                    // Distinct product names from inventory for selector
+                    const prodNames = [...new Set(inventory.map(i=>i.name).filter(Boolean) as string[])].sort();
+                    const filteredQuotes = p608SelProduct ? p608Quotes.filter(q=>q) : p608Quotes;
+                    const bestQuote = filteredQuotes.length > 0 ? filteredQuotes.reduce((b,q)=>q.price<b.price?q:b, filteredQuotes[0]) : null;
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">⚖️ {tr608?'Tedarikçi Fiyat Karşılaştırması':'Supplier Price Comparison'}</h3>
+                          <button onClick={()=>setP608ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5">
+                            <Plus className="w-3.5 h-3.5"/>{tr608?'Fiyat Teklifi Ekle':'Add Quote'}
+                          </button>
+                        </div>
+                        {/* Product selector */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <select value={p608SelProduct} onChange={e=>setP608SelProduct(e.target.value)} className="apple-input px-3 py-2 text-sm">
+                            <option value="">{tr608?'— Ürün Seç —':'— Select Product —'}</option>
+                            {prodNames.map(n=><option key={n}>{n}</option>)}
+                          </select>
+                          {p608SelProduct && <span className="text-xs text-gray-500">{filteredQuotes.length} {tr608?'teklif':'quotes'}</span>}
+                        </div>
+                        {p608ShowForm && (
+                          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              <input className="apple-input" placeholder={tr608?'Tedarikçi':'Supplier'} value={p608Draft.supplier} onChange={e=>setP608Draft(d=>({...d,supplier:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={tr608?'Birim Fiyat (₺)':'Unit Price (₺)'} value={p608Draft.price} onChange={e=>setP608Draft(d=>({...d,price:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={tr608?'Teslim (gün)':'Lead (days)'} value={p608Draft.leadDays} onChange={e=>setP608Draft(d=>({...d,leadDays:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={tr608?'Min. Adet':'Min Qty'} value={p608Draft.minQty} onChange={e=>setP608Draft(d=>({...d,minQty:e.target.value}))}/>
+                              <input type="date" className="apple-input" value={p608Draft.validUntil} onChange={e=>setP608Draft(d=>({...d,validUntil:e.target.value}))}/>
+                            </div>
+                            <button onClick={()=>{
+                              if(!p608Draft.supplier||!p608Draft.price) return;
+                              setP608Quotes(prev=>[...prev,{id:Date.now().toString(),supplier:p608Draft.supplier,price:Number(p608Draft.price),leadDays:Number(p608Draft.leadDays)||0,minQty:Number(p608Draft.minQty)||1,validUntil:p608Draft.validUntil||undefined}]);
+                              setP608Draft({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
+                              setP608ShowForm(false);
+                              toast(tr608?'Teklif eklendi.':'Quote added.','success');
+                            }} className="apple-button-primary text-xs px-6">{tr608?'Kaydet':'Save'}</button>
+                          </div>
+                        )}
+                        {bestQuote && (
+                          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                            <span className="text-emerald-600 font-bold text-lg">🏆</span>
+                            <div>
+                              <p className="text-xs font-bold text-emerald-800">{tr608?'En İyi Fiyat:':'Best Price:'} {bestQuote.supplier}</p>
+                              <p className="text-sm font-black text-emerald-700">₺{bestQuote.price.toLocaleString('tr-TR')} · {bestQuote.leadDays}g {tr608?'teslim':'lead'}</p>
+                            </div>
+                          </div>
+                        )}
+                        {p608Quotes.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50">
+                                {[tr608?'Tedarikçi':'Supplier',tr608?'Fiyat':'Price',tr608?'Teslim (g)':'Lead (d)',tr608?'Min Adet':'Min Qty',tr608?'Geçerlilik':'Valid Until',''].map(h=>(
+                                  <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                ))}
+                              </tr></thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {[...p608Quotes].sort((a,b)=>a.price-b.price).map((q,idx)=>(
+                                  <tr key={q.id} className={`hover:bg-gray-50/50 ${idx===0?'bg-emerald-50/40':''}`}>
+                                    <td className="px-3 py-2.5 font-medium text-gray-800">{q.supplier}{idx===0&&<span className="ml-1.5 text-[9px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-full">BEST</span>}</td>
+                                    <td className="px-3 py-2.5 font-bold font-mono text-gray-800">₺{q.price.toLocaleString('tr-TR')}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{q.leadDays}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{q.minQty}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{q.validUntil?new Date(q.validUntil).toLocaleDateString('tr-TR'):'—'}</td>
+                                    <td className="px-3 py-2.5">
+                                      <button onClick={()=>setP608Quotes(prev=>prev.filter(x=>x.id!==q.id))} className="text-red-400 hover:text-red-600 text-[10px]">✕</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {p608Quotes.length === 0 && (
+                          <p className="text-center text-gray-400 text-xs py-4">{tr608?'Karşılaştırmak için tedarikçi teklifleri ekleyin.':'Add supplier quotes to compare pricing.'}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                 </>
               )}
             </motion.div>
@@ -28619,6 +28875,60 @@ function AppContent() {
                       </button>
                     </div>
                   </div>
+                  {/* ── Phase 605: Üretim Kapasitesi Planlama ────────────────────── */}
+                  {(() => {
+                    const tr605 = currentLanguage === 'tr';
+                    const totalUtil = p605Capacity.length > 0
+                      ? p605Capacity.reduce((s,l)=>s+(l.maxCap>0?(l.planned/l.maxCap)*100:0),0)/p605Capacity.length : 0;
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-sm">{tr605?'🏭 Üretim Kapasitesi Planlama':'🏭 Production Capacity Planning'}</h3>
+                            {p605Capacity.length>0&&<p className="text-xs text-gray-400 mt-0.5">{tr605?'Ort. Kapasite Kullanımı:':'Avg Utilization:'} <span className={`font-bold ${totalUtil>90?'text-red-600':totalUtil>70?'text-amber-600':'text-emerald-600'}`}>{totalUtil.toFixed(0)}%</span></p>}
+                          </div>
+                          {hasFullAccess('production')&&(<button onClick={()=>setP605ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr605?'Hat Ekle':'Add Line'}</button>)}
+                        </div>
+                        {p605ShowForm&&(
+                          <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Hat Adı':'Line Name'} value={p605Draft.line} onChange={e=>setP605Draft(d=>({...d,line:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Max Kapasite':'Max Capacity'} value={p605Draft.maxCap} onChange={e=>setP605Draft(d=>({...d,maxCap:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Planlanan':'Planned'} value={p605Draft.planned} onChange={e=>setP605Draft(d=>({...d,planned:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Gerçekleşen':'Actual'} value={p605Draft.actual} onChange={e=>setP605Draft(d=>({...d,actual:e.target.value}))} />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{if(!p605Draft.line) return; setP605Capacity(prev=>[...prev,{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0}]); setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP605ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr605?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p605Capacity.length===0?(
+                          <p className="text-center py-6 text-gray-400 text-sm">{tr605?'"Hat Ekle" ile üretim hatlarını ve kapasitelerini tanımlayın.':'Click "Add Line" to define production lines and their capacities.'}</p>
+                        ):(
+                          <div className="space-y-3">
+                            {p605Capacity.map((l,i)=>{
+                              const planPct = l.maxCap>0?Math.min(100,(l.planned/l.maxCap)*100):0;
+                              const actPct = l.maxCap>0?Math.min(100,(l.actual/l.maxCap)*100):0;
+                              return (
+                                <div key={i} className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-semibold text-gray-800">{l.line}</span>
+                                    <span className="text-gray-500">{l.actual}/{l.maxCap} {tr605?'birim':'units'} ({actPct.toFixed(0)}%)</span>
+                                  </div>
+                                  <div className="relative w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                                    <div className="absolute h-full bg-blue-200 rounded-full" style={{width:`${planPct}%`}}/>
+                                    <div className={`absolute h-full rounded-full ${actPct>90?'bg-red-500':actPct>70?'bg-amber-400':'bg-emerald-400'}`} style={{width:`${actPct}%`}}/>
+                                  </div>
+                                  <p className="text-[10px] text-gray-400">{tr605?'Planlanan:':'Planned:'} {planPct.toFixed(0)}% · {tr605?'Gerçekleşen:':'Actual:'} {actPct.toFixed(0)}%</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <ProductionModule currentLanguage={currentLanguage} isAuthenticated={!!user} />
                   {/* ── BOM / MRP ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
@@ -29633,6 +29943,40 @@ function AppContent() {
             {new Date(healthData.timestamp).toLocaleTimeString('tr-TR')}
           </p>
         )}
+
+        {/* ── Phase 600: Entegrasyon Sağlık Durumu ───────────────────────────── */}
+        {(() => {
+          const tr600 = currentLanguage === 'tr';
+          const integrations600 = [
+            { name: 'Shopify', connected: !!(healthData as {shopify?:boolean}|null)?.shopify, lastSync: tr600?'Entegrasyon':'Integration', icon: '🛒', desc: tr600?'E-ticaret entegrasyonu':'E-commerce integration' },
+            { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? new Date((mikroSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '💼', desc: tr600?'ERP muhasebe entegrasyonu':'ERP accounting integration' },
+            { name: 'Luca', connected: !!(lucaSettings as {connected?:boolean})?.connected, lastSync: (lucaSettings as {lastSync?:string})?.lastSync ? new Date((lucaSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '📒', desc: tr600?'Muhasebe entegrasyonu':'Accounting integration' },
+            { name: 'Gemini AI', connected: true, lastSync: tr600?'Sürekli':'Continuous', icon: '🤖', desc: tr600?'Lead skorlama yapay zekası':'Lead scoring AI' },
+            { name: 'Firebase', connected: true, lastSync: tr600?'Gerçek zamanlı':'Real-time', icon: '🔥', desc: tr600?'Veritabanı & kimlik doğrulama':'Database & auth' },
+          ];
+          const connectedCount = integrations600.filter(i=>i.connected).length;
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{tr600?'🔌 Entegrasyon Sağlık Durumu':'🔌 Integration Health'}</h3>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${connectedCount===integrations600.length?'bg-green-100 text-green-700':'bg-amber-100 text-amber-700'}`}>{connectedCount}/{integrations600.length} {tr600?'bağlı':'connected'}</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {integrations600.map(integ=>(
+                  <div key={integ.name} className={`rounded-xl border p-4 ${integ.connected?'bg-green-50/30 border-green-200':'bg-red-50/30 border-red-200'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-lg">{integ.icon}</span>
+                      <p className="font-bold text-gray-800 text-sm">{integ.name}</p>
+                      <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full ${integ.connected?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{integ.connected?(tr600?'Bağlı':'Connected'):(tr600?'Bağlı Değil':'Not Connected')}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">{integ.desc}</p>
+                    {integ.lastSync&&<p className="text-[10px] text-gray-400 mt-1">{tr600?'Son sync:':'Last sync:'} {integ.lastSync}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     )}
 
@@ -32111,6 +32455,91 @@ function AppContent() {
                 </div>
               )}
 
+              {/* ── Phase 606: E-posta Kampanya Analitik ─────────────────────────────── */}
+              {crmTab === 'kampanya' && (() => {
+                const tr606 = currentLanguage === 'tr';
+                const totalRecip = p606Campaigns.reduce((s,c)=>s+c.recipients,0);
+                const totalOpens = p606Campaigns.reduce((s,c)=>s+c.opens,0);
+                const totalClicks = p606Campaigns.reduce((s,c)=>s+c.clicks,0);
+                const totalConv = p606Campaigns.reduce((s,c)=>s+c.conversions,0);
+                const avgOr = totalRecip>0?((totalOpens/totalRecip)*100).toFixed(1):'0';
+                const avgCr = totalOpens>0?((totalClicks/totalOpens)*100).toFixed(1):'0';
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">📊 {tr606?'Kampanya Performans Analitik':'Campaign Performance Analytics'}</h3>
+                      <button onClick={()=>setP606ShowForm(v=>!v)} className="apple-button-secondary flex items-center gap-1.5 text-xs">
+                        <Plus className="w-3.5 h-3.5"/>{tr606?'Kampanya Ekle':'Add Campaign'}
+                      </button>
+                    </div>
+                    {p606ShowForm && (
+                      <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          <input className="apple-input col-span-2 sm:col-span-1" placeholder={tr606?'Kampanya adı':'Campaign name'} value={p606Draft.name} onChange={e=>setP606Draft(d=>({...d,name:e.target.value}))}/>
+                          <input type="date" className="apple-input" value={p606Draft.sentDate} onChange={e=>setP606Draft(d=>({...d,sentDate:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={tr606?'Alıcı':'Recipients'} value={p606Draft.recipients} onChange={e=>setP606Draft(d=>({...d,recipients:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={tr606?'Açma':'Opens'} value={p606Draft.opens} onChange={e=>setP606Draft(d=>({...d,opens:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={tr606?'Tıklama':'Clicks'} value={p606Draft.clicks} onChange={e=>setP606Draft(d=>({...d,clicks:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={tr606?'Dönüşüm':'Conversions'} value={p606Draft.conversions} onChange={e=>setP606Draft(d=>({...d,conversions:e.target.value}))}/>
+                        </div>
+                        <button onClick={()=>{
+                          if(!p606Draft.name||!p606Draft.sentDate) return;
+                          setP606Campaigns(prev=>[...prev,{id:Date.now().toString(),name:p606Draft.name,sentDate:p606Draft.sentDate,recipients:Number(p606Draft.recipients)||0,opens:Number(p606Draft.opens)||0,clicks:Number(p606Draft.clicks)||0,conversions:Number(p606Draft.conversions)||0}]);
+                          setP606Draft({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
+                          setP606ShowForm(false);
+                          toast(tr606?'Kampanya eklendi.':'Campaign added.','success');
+                        }} className="apple-button-primary text-xs px-6">{tr606?'Kaydet':'Save'}</button>
+                      </div>
+                    )}
+                    {p606Campaigns.length > 0 && (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {[
+                            {label:tr606?'Toplam Kampanya':'Total Campaigns',val:p606Campaigns.length,color:'text-blue-600',bg:'bg-blue-50'},
+                            {label:tr606?'Ort. Açma Oranı':'Avg Open Rate',val:`%${avgOr}`,color:'text-emerald-600',bg:'bg-emerald-50'},
+                            {label:tr606?'Ort. Tıklama Oranı':'Avg Click Rate',val:`%${avgCr}`,color:'text-amber-600',bg:'bg-amber-50'},
+                            {label:tr606?'Toplam Dönüşüm':'Total Conversions',val:totalConv,color:'text-purple-600',bg:'bg-purple-50'},
+                          ].map(k=>(
+                            <div key={k.label} className={`rounded-xl p-3 ${k.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
+                              <p className={`text-xl font-black ${k.color}`}>{k.val}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead><tr className="border-b border-gray-100 bg-gray-50">
+                              {[tr606?'Kampanya':'Campaign',tr606?'Tarih':'Date',tr606?'Alıcı':'Recip.',tr606?'Açma %':'Open %',tr606?'Tıklama %':'Click %',tr606?'Dönüşüm':'Conv.'].map(h=>(
+                                <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {[...p606Campaigns].sort((a,b)=>b.sentDate.localeCompare(a.sentDate)).map(c=>{
+                                const or = c.recipients>0?((c.opens/c.recipients)*100).toFixed(1):'0';
+                                const cr = c.opens>0?((c.clicks/c.opens)*100).toFixed(1):'0';
+                                return (
+                                  <tr key={c.id} className="hover:bg-gray-50/50">
+                                    <td className="px-3 py-2.5 font-medium text-gray-800">{c.name}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{new Date(c.sentDate).toLocaleDateString('tr-TR')}</td>
+                                    <td className="px-3 py-2.5 font-mono text-gray-600">{c.recipients.toLocaleString()}</td>
+                                    <td className="px-3 py-2.5 font-bold text-emerald-600">%{or}</td>
+                                    <td className="px-3 py-2.5 font-bold text-amber-600">%{cr}</td>
+                                    <td className="px-3 py-2.5 font-bold text-purple-600">{c.conversions}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                    {p606Campaigns.length === 0 && (
+                      <p className="text-center text-gray-400 text-xs py-6">{tr606?'"Kampanya Ekle" ile geçmiş kampanya verilerini girin.':'Add past campaign data via "Add Campaign".'}</p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 116: Contract Management ── */}
               {crmTab === 'sozlesmeler' && (
                 <div className="space-y-4">
@@ -33754,6 +34183,147 @@ function AppContent() {
                       })}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-3">* {tr585?'Skor: Son alım (30%), sipariş sıklığı (30%), toplam değer (40%)':'Score: Recency 30%, Frequency 30%, Value 40%'}</p>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 601: Müşteri Segmentasyon Analizi ──────────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && (() => {
+                const tr601 = currentLanguage === 'tr';
+                // RFM Segmentation using orders
+                const customerMap601: Record<string,{name:string;orders:number;revenue:number;recencyDays:number;type:string}> = {};
+                const now601 = new Date();
+                orders.filter(o=>o.status!=='Cancelled').forEach(o=>{
+                  const cn = o.customerName||'';
+                  if (!cn) return;
+                  if (!customerMap601[cn]) customerMap601[cn]={name:cn,orders:0,revenue:0,recencyDays:999,type:o.customerType||'Retail'};
+                  customerMap601[cn].orders++;
+                  customerMap601[cn].revenue+=(o.totalPrice||0);
+                  if (o.createdAt) {
+                    try {
+                      const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                      const days=Math.floor((now601.getTime()-d.getTime())/86400000);
+                      if (days<customerMap601[cn].recencyDays) customerMap601[cn].recencyDays=days;
+                    } catch {}
+                  }
+                });
+                const customers601 = Object.values(customerMap601);
+                if (customers601.length===0) return null;
+                // Segment by RFM
+                const getSegment = (c: typeof customers601[number]) => {
+                  if (c.revenue>50000&&c.orders>=5&&c.recencyDays<=30) return {label:tr601?'Şampiyon':'Champion', cls:'bg-emerald-100 text-emerald-700'};
+                  if (c.revenue>20000&&c.recencyDays<=60) return {label:tr601?'Sadık Müşteri':'Loyal', cls:'bg-blue-100 text-blue-700'};
+                  if (c.recencyDays>180) return {label:tr601?'Kayıp Risk':'At Risk', cls:'bg-red-100 text-red-600'};
+                  if (c.orders===1) return {label:tr601?'Yeni Müşteri':'New', cls:'bg-purple-100 text-purple-700'};
+                  return {label:tr601?'Potansiyel':'Potential', cls:'bg-amber-100 text-amber-700'};
+                };
+                const segmented = customers601.map(c=>({...c,segment:getSegment(c)}));
+                // Group by segment
+                const segGroups: Record<string,{count:number;revenue:number}> = {};
+                segmented.forEach(c=>{
+                  const s=c.segment.label;
+                  if (!segGroups[s]) segGroups[s]={count:0,revenue:0};
+                  segGroups[s].count++;
+                  segGroups[s].revenue+=c.revenue;
+                });
+                const byType601 = {B2B:customers601.filter(c=>c.type==='B2B'),Retail:customers601.filter(c=>c.type!=='B2B')};
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">{tr601?'🎯 Müşteri Segmentasyon Analizi':'🎯 Customer Segmentation'}</h3>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                        {([['rfm',tr601?'RFM Segmentler':'RFM Segments'],['revenue',tr601?'Gelir Dilimi':'Revenue Tier'],['type',tr601?'Müşteri Tipi':'Customer Type']] as const).map(([id,label])=>(
+                          <button key={id} onClick={()=>setP601Segment(id)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p601Segment===id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {p601Segment==='rfm' && (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {Object.entries(segGroups).map(([seg,v])=>(
+                          <div key={seg} className="bg-gray-50 rounded-xl p-3">
+                            <p className="text-xs text-gray-500 font-semibold">{seg}</p>
+                            <p className="text-xl font-bold text-gray-800 mt-1">{v.count}</p>
+                            <p className="text-xs text-gray-400">₺{v.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {p601Segment==='revenue' && (
+                      <div className="space-y-2">
+                        {[{label:tr601?'100K+ ₺ (Enterprise)':'100K+ ₺',min:100000},{label:tr601?'50K–100K ₺ (Mid-Market)':'50K–100K ₺',min:50000},{label:tr601?'10K–50K ₺ (SMB)':'10K–50K ₺',min:10000},{label:tr601?'<10K ₺ (Small)':'<10K ₺',min:0}].map((tier,i,arr)=>{
+                          const max=arr[i-1]?.min||Infinity;
+                          const count=customers601.filter(c=>c.revenue>=tier.min&&c.revenue<max).length;
+                          const pct=customers601.length>0?(count/customers601.length)*100:0;
+                          return (<div key={tier.label} className="flex items-center gap-3"><span className="text-xs text-gray-600 w-36 truncate">{tier.label}</span><div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-brand rounded-full" style={{width:`${pct}%`}}/></div><span className="text-xs font-bold text-gray-700 w-8 text-right">{count}</span></div>);
+                        })}
+                      </div>
+                    )}
+                    {p601Segment==='type' && (
+                      <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(byType601).map(([type,list])=>(
+                          <div key={type} className={`rounded-xl p-4 ${type==='B2B'?'bg-blue-50':'bg-purple-50'}`}>
+                            <p className={`text-sm font-bold ${type==='B2B'?'text-blue-700':'text-purple-700'}`}>{type==='B2B'?'🏢 B2B':'🛒 Retail'}</p>
+                            <p className="text-2xl font-bold text-gray-800 mt-1">{list.length}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{tr601?'Toplam gelir:':'Total revenue:'} ₺{list.reduce((s,c)=>s+c.revenue,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 604: Satış Temsilcisi Komisyon Takibi ───────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && (() => {
+                const tr604 = currentLanguage === 'tr';
+                const now604 = new Date();
+                const monthStart604 = new Date(now604.getFullYear(), now604.getMonth(), 1);
+                const repRevMap: Record<string,number> = {};
+                orders.filter(o => {
+                  if (o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
+                  try {
+                    const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                    return d>=monthStart604;
+                  } catch { return false; }
+                }).forEach(o => {
+                  const rep = o.assignedTo!;
+                  repRevMap[rep] = (repRevMap[rep]||0) + (o.totalPrice||0);
+                });
+                const commList = Object.entries(repRevMap).map(([rep,rev])=>({rep,rev,comm:rev*(p604CommRate/100)})).sort((a,b)=>b.comm-a.comm);
+                if (commList.length===0) return null;
+                return (
+                  <div className="apple-card p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">{tr604?'💰 Satış Komisyon Takibi (Bu Ay)':'💰 Sales Commission Tracker (This Month)'}</h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{tr604?'Oran:':'Rate:'}</span>
+                        <input type="number" value={p604CommRate} onChange={e=>setP604CommRate(Number(e.target.value))} className="apple-input px-2 py-1 text-xs w-14 text-right" />
+                        <span className="text-xs text-gray-500">%</span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-gray-100 bg-gray-50">
+                          {[tr604?'Temsilci':'Rep', tr604?'Ciro':'Revenue', tr604?'Komisyon':'Commission'].map(h=>(
+                            <th key={h} className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {commList.map(r=>(
+                            <tr key={r.rep} className="hover:bg-gray-50/50">
+                              <td className="px-4 py-2.5 font-medium text-gray-800">{r.rep}</td>
+                              <td className="px-4 py-2.5 font-mono text-gray-600">₺{r.rev.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                              <td className="px-4 py-2.5 font-bold font-mono text-emerald-600">₺{r.comm.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                            </tr>
+                          ))}
+                          <tr className="border-t-2 border-gray-200 bg-gray-50">
+                            <td className="px-4 py-2 font-bold text-gray-700">{tr604?'Toplam':'Total'}</td>
+                            <td className="px-4 py-2 font-bold font-mono text-gray-700">₺{commList.reduce((s,r)=>s+r.rev,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                            <td className="px-4 py-2 font-bold font-mono text-emerald-700">₺{commList.reduce((s,r)=>s+r.comm,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 );
               })()}
