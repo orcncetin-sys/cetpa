@@ -19315,6 +19315,16 @@ function AppContent() {
   const [p564FaturaFilter, setP564FaturaFilter] = useState<'all'|'missing'|'synced'|'pending'>('missing');
   // ── Phase 567: Tedarikçi Değerlendirme Matrisi ────────────────────────────
   const [p567Ratings, setP567Ratings] = useState<Record<string, Record<string,number>>>({});
+  // ── Phase 568: Ürün Maliyet Kartı ────────────────────────────────────────
+  const [p568Overhead, setP568Overhead] = useState(15); // overhead %
+  const [p568SortBy, setP568SortBy] = useState<'margin'|'cost'|'name'>('margin');
+  // ── Phase 570: KPI Hedef Takibi ───────────────────────────────────────────
+  const [p570Targets, setP570Targets] = useState({ revenue: 500000, orders: 100, avgOrderVal: 5000, leadConv: 30 });
+  // ── Phase 571: Audit Trail Filter ────────────────────────────────────────
+  const [p571AuditFilter, setP571AuditFilter] = useState('');
+  const [p571AuditAction, setP571AuditAction] = useState<string>('all');
+  // ── Phase 572: Employee Performance Scorecard ─────────────────────────────
+  const [p572SelEmpId, setP572SelEmpId] = useState<string>('');
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -23856,6 +23866,60 @@ function AppContent() {
                   </div>
 
                   <ReportsDashboard orders={orders} inventory={inventory} exchangeRates={exchangeRates} currentT={currentT} currentLanguage={currentLanguage} userRole={userRole} onNavigate={setActiveTab} employees={employees} quotations={appQuotations} inventoryMovements={inventoryMovements} recurringOrders={recurringOrders} externalTab={appReportsTab} setExternalTab={setAppReportsTab} />
+
+                  {/* ── Phase 570: KPI Hedef Takibi ─────────────────────────────────────── */}
+                  {appReportsTab === 'genel' && (() => {
+                    const tr570 = currentLanguage === 'tr';
+                    const now570 = new Date();
+                    const monthStart570 = new Date(now570.getFullYear(), now570.getMonth(), 1);
+                    const monthOrders570 = orders.filter(o => {
+                      const d = o.createdAt ? new Date(o.createdAt as string) : null;
+                      return d && d >= monthStart570;
+                    });
+                    const actRevenue570 = monthOrders570.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                    const actOrders570 = monthOrders570.length;
+                    const actAvgOrder570 = actOrders570 > 0 ? actRevenue570 / actOrders570 : 0;
+                    const totalLeads570 = leads.length;
+                    const closedLeads570 = leads.filter(l => l.status === 'Closed Won' || l.status === 'Closed').length;
+                    const actLeadConv570 = totalLeads570 > 0 ? (closedLeads570 / totalLeads570) * 100 : 0;
+                    const kpis570 = [
+                      { label: tr570 ? 'Aylık Ciro' : 'Monthly Revenue', actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1) + (tr570 ? ' ₺' : ' ₺'), key: 'revenue' as const, color: 'blue' },
+                      { label: tr570 ? 'Sipariş Adedi' : 'Order Count', actual: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
+                      { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0) + ' ₺', key: 'avgOrderVal' as const, color: 'purple' },
+                      { label: tr570 ? 'Lead Dönüşüm %' : 'Lead Conv. %', actual: actLeadConv570, target: p570Targets.leadConv, fmt: (v: number) => v.toFixed(1) + '%', key: 'leadConv' as const, color: 'orange' },
+                    ];
+                    const colorMap570: Record<string, string> = { blue: 'bg-blue-500', green: 'bg-green-500', purple: 'bg-purple-500', orange: 'bg-orange-500' };
+                    const colorText570: Record<string, string> = { blue: 'text-blue-600', green: 'text-green-600', purple: 'text-purple-600', orange: 'text-orange-600' };
+                    return (
+                      <div className="apple-card p-5">
+                        <h3 className="text-base font-bold text-gray-900 mb-4">{tr570 ? '🎯 KPI Hedef Takibi (Bu Ay)' : '🎯 KPI Target Tracking (This Month)'}</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                          {kpis570.map(kpi => {
+                            const pct = kpi.target > 0 ? Math.min(100, (kpi.actual / kpi.target) * 100) : 0;
+                            const isGood = pct >= 80;
+                            return (
+                              <div key={kpi.key} className="bg-gray-50 rounded-xl p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{kpi.label}</p>
+                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isGood ? 'bg-green-100 text-green-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{pct.toFixed(0)}%</span>
+                                </div>
+                                <div>
+                                  <p className={`text-xl font-bold ${colorText570[kpi.color]}`}>{kpi.fmt(kpi.actual)}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5">{tr570 ? 'Hedef:' : 'Target:'} {kpi.fmt(kpi.target)}</p>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                  <div className={`h-1.5 rounded-full transition-all ${colorMap570[kpi.color]}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <input type="number" value={p570Targets[kpi.key]} onChange={e => setP570Targets(prev => ({ ...prev, [kpi.key]: Number(e.target.value) }))}
+                                  className="w-full text-xs apple-input py-1 px-2" placeholder={tr570 ? 'Hedef girin...' : 'Set target...'} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── AI Demand Forecast ── */}
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <DemandForecastPanel currentLanguage={currentLanguage} />
@@ -27479,6 +27543,74 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 572: Çalışan Performans Skorkartı ─────────────────────────── */}
+                  {employees.length > 0 && (() => {
+                    const tr572 = currentLanguage === 'tr';
+                    const selEmp = p572SelEmpId ? employees.find(e => e.id === p572SelEmpId) : employees[0];
+                    if (!selEmp) return null;
+
+                    // Derive metrics from available data
+                    const empOrders = orders.filter(o => o.assignedTo === selEmp.id || o.assignedTo === selEmp.email).length;
+                    const empLeads = leads.filter(l => l.assignedTo === selEmp.email || l.assignedTo === selEmp.name).length;
+                    const empClosedLeads = leads.filter(l => (l.assignedTo === selEmp.email || l.assignedTo === selEmp.name) && (l.status === 'Closed Won' || l.status === 'Closed')).length;
+                    const convRate = empLeads > 0 ? (empClosedLeads / empLeads) * 100 : 0;
+                    const attendance = p552Records.filter(r => r.employeeName === selEmp.name && r.status === 'Normal').length;
+                    const totalDays = p552Records.filter(r => r.employeeName === selEmp.name).length;
+                    const attendancePct = totalDays > 0 ? (attendance / totalDays) * 100 : 0;
+
+                    const kpis572 = [
+                      { label: tr572?'Atanan Sipariş':'Assigned Orders', val: empOrders, max: Math.max(...employees.map(e => orders.filter(o => o.assignedTo===e.id||o.assignedTo===e.email).length), 1), unit: '', color: 'blue' },
+                      { label: tr572?'Müşteri Adayı':'Assigned Leads', val: empLeads, max: Math.max(...employees.map(e => leads.filter(l => l.assignedTo===e.email||l.assignedTo===e.name).length), 1), unit: '', color: 'purple' },
+                      { label: tr572?'Dönüşüm Oranı':'Conversion Rate', val: convRate, max: 100, unit: '%', color: 'emerald' },
+                      { label: tr572?'Devam Oranı':'Attendance Rate', val: attendancePct || 100, max: 100, unit: '%', color: 'amber' },
+                    ];
+
+                    return (
+                      <div className="apple-card p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                          <div className="flex items-center gap-2">
+                            <UserCheck className="w-4 h-4 text-brand" />
+                            <h4 className="font-bold text-gray-800 text-sm">{tr572?'Çalışan Performans Skorkartı':'Employee Performance Scorecard'}</h4>
+                          </div>
+                          <select className="apple-input text-sm px-3 py-1.5 max-w-xs" value={p572SelEmpId || (employees[0]?.id || '')}
+                            onChange={e => setP572SelEmpId(e.target.value)}>
+                            {employees.map(e => <option key={e.id} value={e.id}>{e.name} — {e.department}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Employee card */}
+                        <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-xl">
+                          <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center font-black text-brand text-lg flex-shrink-0">
+                            {selEmp.name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="font-bold text-gray-800">{selEmp.name}</p>
+                            <p className="text-xs text-gray-500">{selEmp.position} · {selEmp.department}</p>
+                          </div>
+                          <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${selEmp.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-600'}`}>{selEmp.status}</span>
+                        </div>
+
+                        {/* KPI grid */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {kpis572.map(k => {
+                            const pct = k.max > 0 ? Math.min((k.val / k.max) * 100, 100) : 0;
+                            const colorMap = { blue:'text-blue-700 bg-blue-50 bg-blue-500', purple:'text-purple-700 bg-purple-50 bg-purple-500', emerald:'text-emerald-700 bg-emerald-50 bg-emerald-500', amber:'text-amber-700 bg-amber-50 bg-amber-400' };
+                            const [tc, bg, bar] = (colorMap[k.color as keyof typeof colorMap] || colorMap.blue).split(' ');
+                            return (
+                              <div key={k.label} className={`rounded-xl p-3 ${bg}`}>
+                                <p className="text-[10px] font-bold text-gray-400 mb-1">{k.label}</p>
+                                <p className={`text-xl font-black ${tc}`}>{k.unit === '%' ? `${k.val.toFixed(1)}%` : k.val}</p>
+                                <div className="h-1.5 bg-white/50 rounded-full overflow-hidden mt-1.5">
+                                  <div className={`h-full ${bar} rounded-full`} style={{width:`${pct}%`}} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Phase 556: SGK e-Bildirge ────────────────────────────────────────── */}
                   {employees.length > 0 && (() => {
                     const tr556 = currentLanguage === 'tr';
@@ -28537,44 +28669,87 @@ function AppContent() {
       </div>
     )}
 
-    {/* AUDIT LOG */}
-    {adminTab === 'auditlog' && (
-      <div className="space-y-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Sistem Audit Logu':'System Audit Log'}</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Zaman':'Time'}</th>
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium hidden sm:table-cell">{currentLanguage==='tr'?'Kullanıcı':'User'}</th>
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Aksiyon':'Action'}</th>
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium hidden md:table-cell">{currentLanguage==='tr'?'Detay':'Detail'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditLogs.length === 0 ? (
-                  <tr><td colSpan={4} className="text-center py-8 text-gray-400">{currentLanguage==='tr'?'Henüz audit logu yok.':'No audit logs yet.'}</td></tr>
-                ) : (
-                  auditLogs.map((log: Record<string, unknown>, i: number) => (
-                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 text-xs text-gray-500 whitespace-nowrap">
-                        {(log.createdAt as { toDate?: () => Date })?.toDate ? (log.createdAt as { toDate: () => Date }).toDate().toLocaleString('tr-TR') : (log.timestamp as { toDate?: () => Date })?.toDate ? (log.timestamp as { toDate: () => Date }).toDate().toLocaleString('tr-TR') : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-xs text-gray-600 hidden sm:table-cell">{(log.userEmail as string)||(log.userName as string)||'—'}</td>
-                      <td className="py-2.5 px-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand">{(log.action as string)||'—'}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell max-w-[200px] truncate">{(log.details as string)||'—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+    {/* AUDIT LOG — Phase 571: Enhanced with search + action filter */}
+    {adminTab === 'auditlog' && (() => {
+      const tr571 = currentLanguage === 'tr';
+      // Derive unique actions
+      const uniqueActions = Array.from(new Set(auditLogs.map(l => (l.action as string) || '').filter(Boolean)));
+      const filtered571 = auditLogs.filter(log => {
+        const matchSearch = !p571AuditFilter ||
+          ((log.userEmail as string)||'').toLowerCase().includes(p571AuditFilter.toLowerCase()) ||
+          ((log.details as string)||'').toLowerCase().includes(p571AuditFilter.toLowerCase()) ||
+          ((log.action as string)||'').toLowerCase().includes(p571AuditFilter.toLowerCase());
+        const matchAction = p571AuditAction === 'all' || (log.action as string) === p571AuditAction;
+        return matchSearch && matchAction;
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-gray-400" />
+                <h3 className="font-bold text-gray-800">{tr571?'Sistem Denetim İzi':'System Audit Trail'}</h3>
+                <span className="text-[10px] text-gray-400">({filtered571.length}/{auditLogs.length})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input className="apple-input pl-8 text-xs py-1.5 w-48" placeholder={tr571?'Kullanıcı, aksiyon, detay…':'User, action, detail…'}
+                    value={p571AuditFilter} onChange={e => setP571AuditFilter(e.target.value)} />
+                </div>
+                <select className="apple-input text-xs py-1.5 px-2" value={p571AuditAction} onChange={e => setP571AuditAction(e.target.value)}>
+                  <option value="all">{tr571?'Tüm Aksiyonlar':'All Actions'}</option>
+                  {uniqueActions.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase">{tr571?'Zaman':'Time'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{tr571?'Kullanıcı':'User'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase">{tr571?'Aksiyon':'Action'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{tr571?'Detay':'Detail'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden lg:table-cell">{tr571?'IP / Cihaz':'IP / Device'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered571.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-8 text-gray-400 text-xs">{tr571?'Sonuç bulunamadı.':'No results found.'}</td></tr>
+                  ) : (
+                    filtered571.map((log: Record<string, unknown>, i: number) => {
+                      const ts = (log.createdAt as {toDate?:()=>Date})?.toDate?.()
+                        ?? ((log.timestamp as {toDate?:()=>Date})?.toDate?.())
+                        ?? (log.createdAt ? new Date(log.createdAt as string) : null);
+                      const action = (log.action as string) || '—';
+                      const actionColor = action.includes('DELETE') || action.includes('Sil') ? 'bg-red-100 text-red-700'
+                        : action.includes('CREATE') || action.includes('Oluştur') ? 'bg-emerald-100 text-emerald-700'
+                        : action.includes('UPDATE') || action.includes('Güncelle') ? 'bg-blue-100 text-blue-700'
+                        : 'bg-brand/10 text-brand';
+                      return (
+                        <tr key={i} className="hover:bg-gray-50 transition-colors">
+                          <td className="py-2.5 px-3 text-xs text-gray-500 whitespace-nowrap font-mono">
+                            {ts ? ts.toLocaleString(tr571?'tr-TR':'en-US') : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-gray-600 hidden sm:table-cell">{(log.userEmail as string)||(log.userName as string)||'—'}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${actionColor}`}>{action}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell max-w-[220px] truncate">{(log.details as string)||(log.description as string)||'—'}</td>
+                          <td className="py-2.5 px-3 text-xs text-gray-400 hidden lg:table-cell font-mono">{(log.ip as string)||'—'}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
-    )}
+      );
+    })()}
 
     {/* SYSTEM STATUS */}
     {adminTab === 'system' && (
@@ -30172,6 +30347,107 @@ function AppContent() {
                         </motion.div>
                       )}
                     </AnimatePresence>
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 568: Ürün Maliyet Kartı ────────────────────────────────── */}
+              {inventory.length > 0 && (() => {
+                const tr568 = currentLanguage === 'tr';
+                const itemsWithCost = inventory
+                  .filter(i => (i.costPrice || i.cost || 0) > 0)
+                  .map(i => {
+                    const cost = i.costPrice || i.cost || 0;
+                    const overhead = cost * (p568Overhead / 100);
+                    const totalCost = cost + overhead;
+                    const price = i.prices?.['Retail'] ?? i.price ?? 0;
+                    const margin = price > 0 ? ((price - totalCost) / price) * 100 : 0;
+                    const markupPct = totalCost > 0 ? ((price - totalCost) / totalCost) * 100 : 0;
+                    return { ...i, cost, overhead, totalCost, price, margin, markupPct };
+                  })
+                  .sort((a,b) => {
+                    if (p568SortBy === 'margin') return a.margin - b.margin;
+                    if (p568SortBy === 'cost') return b.totalCost - a.totalCost;
+                    return a.name.localeCompare(b.name);
+                  });
+
+                if (itemsWithCost.length === 0) return null;
+                const avgMargin = itemsWithCost.reduce((s,i) => s+i.margin, 0) / itemsWithCost.length;
+                const negativeMargin = itemsWithCost.filter(i => i.margin < 0).length;
+
+                return (
+                  <div className="apple-card overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-amber-500" />
+                        <h4 className="font-bold text-gray-800 text-sm">{tr568?'Ürün Maliyet Analizi':'Product Cost Analysis'}</h4>
+                        {negativeMargin > 0 && (
+                          <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                            {negativeMargin} {tr568?'ürün negatif marj!':'items negative margin!'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <label>{tr568?'Genel Gider %:':'Overhead %:'}</label>
+                          <input type="number" min="0" max="100" value={p568Overhead}
+                            onChange={e => setP568Overhead(Number(e.target.value))}
+                            className="apple-input text-xs px-2 py-1 w-14" />
+                        </div>
+                        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                          {(['margin','cost','name'] as const).map(s => (
+                            <button key={s} onClick={() => setP568SortBy(s)}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${p568SortBy===s?'bg-white shadow-sm text-gray-800':'text-gray-400'}`}>
+                              {s==='margin'?'%'+tr568?'Marj':'Margin':s==='cost'?(tr568?'Maliyet':'Cost'):(tr568?'İsim':'Name')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Avg margin banner */}
+                    <div className={`px-5 py-2 text-xs font-semibold flex items-center gap-2 ${avgMargin>=30?'bg-emerald-50 text-emerald-700':avgMargin>=15?'bg-amber-50 text-amber-700':'bg-red-50 text-red-700'}`}>
+                      <span>{tr568?'Ortalama Brüt Marj:':'Avg Gross Margin:'}</span>
+                      <span className="font-black">%{avgMargin.toFixed(1)}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-100 bg-gray-50">
+                            {[tr568?'Ürün':'Product', 'SKU', tr568?'Alış Maliyeti':'Purchase Cost',
+                              `${tr568?'Genel Gider':'Overhead'} (%${p568Overhead})`,
+                              tr568?'Toplam Maliyet':'Total Cost', tr568?'Satış Fiyatı':'Sell Price',
+                              tr568?'Brüt Marj':'Gross Margin', tr568?'Markup':'Markup'].map(h => (
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {itemsWithCost.slice(0,20).map(item => (
+                            <tr key={item.id} className={`hover:bg-gray-50/50 transition-colors ${item.margin<0?'bg-red-50/20':item.margin<15?'bg-amber-50/20':''}`}>
+                              <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[160px] truncate">{item.name}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-400">{item.sku}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-600">₺{item.cost.toLocaleString('tr-TR')}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-500">₺{item.overhead.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                              <td className="px-3 py-2.5 font-mono font-bold text-gray-700">₺{item.totalCost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-700">{item.price > 0 ? `₺${item.price.toLocaleString('tr-TR')}` : '—'}</td>
+                              <td className="px-3 py-2.5">
+                                <span className={`font-black text-sm ${item.margin>=30?'text-emerald-600':item.margin>=15?'text-amber-600':item.margin>=0?'text-orange-500':'text-red-600'}`}>
+                                  {item.margin.toFixed(1)}%
+                                </span>
+                                <div className="w-16 h-1 bg-gray-100 rounded-full mt-0.5 overflow-hidden">
+                                  <div className={`h-full rounded-full ${item.margin>=30?'bg-emerald-400':item.margin>=15?'bg-amber-400':'bg-red-400'}`}
+                                    style={{width:`${Math.max(0,Math.min(100,item.margin))}%`}} />
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 font-mono text-gray-500">{item.price>0?`+${item.markupPct.toFixed(0)}%`:'—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {itemsWithCost.length > 20 && (
+                      <p className="px-5 py-2 text-[10px] text-gray-400 border-t border-gray-50">{tr568?`${itemsWithCost.length-20} ürün daha var.`:`${itemsWithCost.length-20} more items.`}</p>
+                    )}
                   </div>
                 );
               })()}
