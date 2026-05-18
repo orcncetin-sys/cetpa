@@ -18507,7 +18507,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -18644,7 +18644,7 @@ function AppContent() {
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce'>('pos');
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -19455,6 +19455,46 @@ function AppContent() {
   const [p619MinCoverage, setP619MinCoverage] = useState(30); // days of coverage
   // ── Phase 620: Satış Tahmini (Forecast) ──────────────────────────────────
   const [p620Horizon, setP620Horizon] = useState<'1m'|'3m'|'6m'>('3m');
+  // ── Phase 621: Talep Yönetimi (Demand Management) ─────────────────────────
+  const [p621Demands, setP621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
+  const [p621ShowForm, setP621ShowForm] = useState(false);
+  const [p621Draft, setP621Draft] = useState({productName:'',sku:'',requestedQty:'',requestedBy:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek',notes:''});
+  // ── Phase 622: İhracat & Gümrük Takibi ───────────────────────────────────
+  const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
+  const [p622ShowForm, setP622ShowForm] = useState(false);
+  const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
+  // ── Phase 623: Akreditif & Ödeme Belgesi Takibi ──────────────────────────
+  const [p623LCs, setP623LCs] = useState<Array<{id:string;bank:string;beneficiary:string;amount:number;currency:'USD'|'EUR';expiryDate:string;status:'Açık'|'Kullanıldı'|'Sona Erdi'|'İptal';ref:string}>>([]);
+  const [p623ShowForm, setP623ShowForm] = useState(false);
+  const [p623Draft, setP623Draft] = useState({bank:'',beneficiary:'',amount:'',currency:'USD' as 'USD'|'EUR',expiryDate:'',ref:''});
+  // ── Phase 624: Üretim Emri Yönetimi ──────────────────────────────────────
+  const [p624Orders, setP624Orders] = useState<Array<{id:string;productName:string;qty:number;plannedStart:string;plannedEnd:string;status:'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal';priority:'Normal'|'Acil';workCenter:string}>>([]);
+  const [p624ShowForm, setP624ShowForm] = useState(false);
+  const [p624Draft, setP624Draft] = useState({productName:'',qty:'',plannedStart:'',plannedEnd:'',status:'Planlandı' as 'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal',priority:'Normal' as 'Normal'|'Acil',workCenter:''});
+  // ── Phase 625: Gelir Gider Bütçe Karşılaştırması ─────────────────────────
+  const [p625BudgetYear, setP625BudgetYear] = useState(()=>new Date().getFullYear());
+  const [p625BudgetData, setP625BudgetData] = useState<Array<{month:number;budgetRevenue:number;budgetExpense:number}>>([]);
+  const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
+  // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
+  const [p626Period, setP626Period] = useState<'30d'|'90d'|'ytd'>('90d');
+  // ── Phase 627: Tedarik Zinciri Riski ─────────────────────────────────────
+  const [p627Risks, setP627Risks] = useState<Array<{id:string;supplier:string;riskType:'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer';severity:'Düşük'|'Orta'|'Yüksek'|'Kritik';probability:number;mitigationPlan?:string;status:'Aktif'|'Azaltıldı'|'Kabul Edildi'}>>([]);
+  const [p627ShowForm, setP627ShowForm] = useState(false);
+  const [p627Draft, setP627Draft] = useState({supplier:'',riskType:'Tedarik Kesintisi' as 'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer',severity:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',probability:'50',mitigationPlan:''});
+  // ── Phase 628: Stok Optimizasyon Analizi ─────────────────────────────────
+  const [p628ABCCategory, setP628ABCCategory] = useState<'all'|'A'|'B'|'C'>('all');
+  // ── Phase 629: Çalışan Performans KPI ────────────────────────────────────
+  const [p629KpiPeriod, setP629KpiPeriod] = useState<'this_month'|'last_month'|'ytd'>('this_month');
+  // ── Phase 630: Fatura Takip & Yaşlandırma ─────────────────────────────────
+  const [p630InvoicePeriod, setP630InvoicePeriod] = useState<'7d'|'30d'|'60d'|'90d'>('30d');
+  // ── Phase 631: İş Süreci Analizi (Bottleneck) ─────────────────────────────
+  const [p631View, setP631View] = useState<'pipeline'|'cycle-time'|'bottleneck'>('pipeline');
+  // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
+  const [p632Consolidation] = useState([
+    {entity:'Cetpa A.Ş.',revenue:0,opex:0,headcount:0},
+    {entity:'Cetpa Lojistik Ltd.',revenue:0,opex:0,headcount:0},
+    {entity:'Cetpa Dış Ticaret',revenue:0,opex:0,headcount:0},
+  ]);
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -21645,6 +21685,7 @@ function AppContent() {
                 { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
                 { label: tr ? 'Tedarik Zinciri KPI' : 'Supply Chain KPI', subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
                 { label: tr ? 'Araç Takip' : 'Fleet Tracking', subId: 'arac-takip',         action: () => { setActiveTab('lojistik'); setLojistikTab('arac-takip'); } }, // Phase 593
+                { label: tr ? 'İhracat & Gümrük' : 'Export & Customs', subId: 'ihracat-gumruk', action: () => { setActiveTab('lojistik'); setLojistikTab('ihracat-gumruk'); } }, // Phase 622
                 { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
               ],
             },
@@ -21676,6 +21717,7 @@ function AppContent() {
                 { label: tr ? 'Oto. Fatura' : 'Auto-Invoice', subId: 'oto-fatura',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('oto-fatura'); } }, // Phase 591
                 { label: tr ? 'Gelir Tanıma' : 'Rev. Recognition', subId: 'gelir-tanima',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-tanima'); } }, // Phase 597
                 { label: tr ? 'KDV Mutabakat' : 'VAT Reconciliation', subId: 'kdv-mutabakat', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv-mutabakat'); } }, // Phase 617
+                { label: tr ? 'Gelir/Gider Bütçe' : 'Rev/Exp Budget', subId: 'gelir-gider-butce', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-gider-butce'); } }, // Phase 625
                 { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
                 { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
                 { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
@@ -21690,6 +21732,7 @@ function AppContent() {
                 { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi',    action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
                 { label: tr ? 'Tedarikçi Portalı' : 'Supplier Portal',      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
                 { label: tr ? 'Satın Alma Bütçesi' : 'Purchase Budget',     subId: 'satin-butce',      action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('satin-butce'); } }, // Phase 612
+                { label: tr ? 'Tedarik Zinciri Riski' : 'Supply Chain Risk', subId: 'tedarik-risk',   action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarik-risk'); } }, // Phase 627
               ],
             },
             {
@@ -24297,6 +24340,106 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 631: İş Süreci Analizi (Bottleneck) ──────────────── */}
+                  {appReportsTab === 'genel' && orders.length > 0 && (() => {
+                    const tr631 = currentLanguage === 'tr';
+                    // Pipeline stage counts
+                    const stageMap:{[s:string]:number} = {Pending:0,Processing:0,Shipped:0,Delivered:0,Cancelled:0};
+                    orders.forEach(o=>{ if(stageMap[o.status]!==undefined) stageMap[o.status]++; });
+                    const pipeline631 = [
+                      {stage:'Pending',   label:tr631?'Bekliyor':'Pending',   color:'bg-amber-400',  count:stageMap['Pending']   },
+                      {stage:'Processing',label:tr631?'İşlemde':'Processing', color:'bg-blue-500',   count:stageMap['Processing']},
+                      {stage:'Shipped',   label:tr631?'Yolda':'Shipped',      color:'bg-indigo-500', count:stageMap['Shipped']   },
+                      {stage:'Delivered', label:tr631?'Teslim':'Delivered',   color:'bg-green-500',  count:stageMap['Delivered'] },
+                    ].filter(s=>s.count>0||s.stage==='Processing');
+                    const total631 = pipeline631.reduce((s,p)=>s+p.count,0)||1;
+                    // Bottleneck: stage with highest count vs next
+                    const bottleneck631 = [...pipeline631].sort((a,b)=>b.count-a.count)[0];
+                    // Cycle time proxy: orders delivered — avg days from createdAt to deliveredAt (no deliveredAt, use 0)
+                    const cycleOrders = orders.filter(o=>o.status==='Delivered'&&o.createdAt&&o.estimatedDelivery);
+                    const avgCycle = cycleOrders.length>0 ? cycleOrders.reduce((s,o)=>{
+                      try {
+                        const created=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                        const delivered=(o.estimatedDelivery as {toDate?:()=>Date}).toDate?.()??new Date(o.estimatedDelivery as string);
+                        return s+(delivered.getTime()-created.getTime())/(86400000);
+                      } catch { return s; }
+                    },0)/cycleOrders.length : null;
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">🔄 {tr631?'İş Süreci Analizi':'Process Bottleneck Analysis'}</h3>
+                          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                            {(['pipeline','cycle-time','bottleneck'] as const).map(v=>(
+                              <button key={v} onClick={()=>setP631View(v)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p631View===v?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>
+                                {v==='pipeline'?(tr631?'Boru Hattı':'Pipeline'):v==='cycle-time'?(tr631?'Döngü Süresi':'Cycle Time'):(tr631?'Darboğaz':'Bottleneck')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {p631View==='pipeline' && (
+                          <div className="space-y-3">
+                            {pipeline631.map(p=>(
+                              <div key={p.stage} className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-600">
+                                  <span className="font-medium">{p.label}</span>
+                                  <span className="font-bold">{p.count} {tr631?'sipariş':'orders'} ({Math.round(p.count/total631*100)}%)</span>
+                                </div>
+                                <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                                  <div className={`h-3 rounded-full ${p.color} transition-all`} style={{width:`${Math.max(2,p.count/total631*100)}%`}}/>
+                                </div>
+                              </div>
+                            ))}
+                            <p className="text-[11px] text-gray-400 pt-1">{tr631?'Toplam aktif sipariş:':'Total active orders:'} <span className="font-semibold text-gray-600">{orders.filter(o=>o.status!=='Cancelled').length}</span></p>
+                          </div>
+                        )}
+                        {p631View==='cycle-time' && (
+                          <div className="space-y-3">
+                            {avgCycle!==null ? (
+                              <div className="text-center py-4 space-y-2">
+                                <p className="text-4xl font-bold text-[#ff4000]">{avgCycle.toFixed(1)}<span className="text-base font-normal text-gray-500 ml-1">{tr631?'gün':'days'}</span></p>
+                                <p className="text-sm text-gray-500">{tr631?'Ortalama sipariş teslim süresi':'Avg. order fulfillment cycle'}</p>
+                                <p className="text-xs text-gray-400">{cycleOrders.length} {tr631?'teslim edilen siparişten':'delivered orders analyzed'}</p>
+                              </div>
+                            ) : (
+                              <div className="text-center py-6">
+                                <p className="text-sm text-gray-400">{tr631?'Henüz yeterli teslim verisi yok':'Not enough delivery data yet'}</p>
+                              </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              {[{label:tr631?'Bekleyen':'Pending',val:stageMap['Pending'],col:'text-amber-600'},{label:tr631?'İşlemde':'Processing',val:stageMap['Processing'],col:'text-blue-600'},{label:tr631?'Yolda':'Shipped',val:stageMap['Shipped'],col:'text-indigo-600'},{label:tr631?'Teslim':'Delivered',val:stageMap['Delivered'],col:'text-green-600'}].map(s=>(
+                                <div key={s.label} className="apple-card bg-gray-50 p-3 text-center">
+                                  <p className={`text-xl font-bold ${s.col}`}>{s.val}</p>
+                                  <p className="text-[11px] text-gray-500">{s.label}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {p631View==='bottleneck' && (
+                          <div className="space-y-3">
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                              <span className="text-2xl">⚠️</span>
+                              <div>
+                                <p className="font-bold text-amber-800 text-sm">{tr631?'Tespit Edilen Darboğaz:':'Detected Bottleneck:'} {bottleneck631?.label}</p>
+                                <p className="text-xs text-amber-700 mt-1">{bottleneck631?.count} {tr631?'sipariş bu aşamada bekliyor, toplam siparişlerin':'orders stuck here —'} {Math.round((bottleneck631?.count||0)/total631*100)}% {tr631?'u.':'of total.'}</p>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              {pipeline631.map(p=>(
+                                <div key={p.stage} className={`flex items-center justify-between px-4 py-2.5 rounded-xl border text-sm ${p.stage===bottleneck631?.stage?'bg-amber-50 border-amber-300':'bg-gray-50 border-gray-200'}`}>
+                                  <span className="font-medium text-gray-700">{p.label}</span>
+                                  <span className={`font-bold ${p.stage===bottleneck631?.stage?'text-amber-700':'text-gray-600'}`}>{p.count} {tr631?'sipariş':'orders'}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-gray-400">{tr631?'Öneri: En yüksek birikimli aşamada kapasite veya süreç iyileştirmesi yapın.':'Tip: Improve capacity or process at the highest-backlog stage.'}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Phase 619: Akıllı Sipariş Önerisi ─────────────────────── */}
                   {appReportsTab === 'genel' && inventory.length > 0 && (() => {
                     const tr619 = currentLanguage === 'tr';
@@ -24975,6 +25118,65 @@ function AppContent() {
                               </div>
                             </div>
                           </>
+                        );
+                      })()}
+
+                      {/* ── Phase 623: Akreditif & Ödeme Belgesi ─────────────────── */}
+                      {hasFullAccess('muhasebe') && (() => {
+                        const tr623 = currentLanguage === 'tr';
+                        const openLCs = p623LCs.filter(lc=>lc.status==='Açık');
+                        const totalValue623 = openLCs.reduce((s,lc)=>s+lc.amount,0);
+                        const expiringSoon = openLCs.filter(lc=>new Date(lc.expiryDate)<=new Date(Date.now()+30*86400000)).length;
+                        const statCls:{[k:string]:string}={Açık:'bg-emerald-100 text-emerald-700','Kullanıldı':'bg-blue-100 text-blue-700','Sona Erdi':'bg-gray-100 text-gray-500',İptal:'bg-red-100 text-red-700'};
+                        return (
+                          <div className="apple-card p-5 space-y-4 mt-4">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <h3 className="font-bold text-gray-900 text-sm">📄 {tr623?'Akreditif (L/C) Takibi':'Letter of Credit (L/C) Tracking'}</h3>
+                              <button onClick={()=>setP623ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr623?'L/C Ekle':'Add L/C'}</button>
+                            </div>
+                            {expiringSoon>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">⚠️ {expiringSoon} {tr623?'L/C 30 gün içinde sona eriyor':'L/C expiring within 30 days'}</div>}
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Açık L/C':'Open L/C'}</p><p className="text-xl font-black text-emerald-600">{openLCs.length}</p></div>
+                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Toplam Değer':'Total Value'}</p><p className="text-base font-black text-blue-600">${totalValue623.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Sona Yakın':'Expiring Soon'}</p><p className="text-xl font-black text-amber-600">{expiringSoon}</p></div>
+                            </div>
+                            {p623ShowForm && (
+                              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                  <input className="apple-input" placeholder={tr623?'Banka':'Bank'} value={p623Draft.bank} onChange={e=>setP623Draft(d=>({...d,bank:e.target.value}))}/>
+                                  <input className="apple-input" placeholder={tr623?'Lehtar':'Beneficiary'} value={p623Draft.beneficiary} onChange={e=>setP623Draft(d=>({...d,beneficiary:e.target.value}))}/>
+                                  <input className="apple-input" placeholder="Ref" value={p623Draft.ref} onChange={e=>setP623Draft(d=>({...d,ref:e.target.value}))}/>
+                                  <input type="number" className="apple-input" placeholder={tr623?'Tutar':'Amount'} value={p623Draft.amount} onChange={e=>setP623Draft(d=>({...d,amount:e.target.value}))}/>
+                                  <select value={p623Draft.currency} onChange={e=>setP623Draft(d=>({...d,currency:e.target.value as typeof d.currency}))} className="apple-input">{['USD','EUR'].map(c=><option key={c}>{c}</option>)}</select>
+                                  <input type="date" className="apple-input" value={p623Draft.expiryDate} onChange={e=>setP623Draft(d=>({...d,expiryDate:e.target.value}))}/>
+                                </div>
+                                <button onClick={()=>{
+                                  if(!p623Draft.bank||!p623Draft.amount) return;
+                                  setP623LCs(prev=>[...prev,{id:Date.now().toString(),bank:p623Draft.bank,beneficiary:p623Draft.beneficiary,amount:Number(p623Draft.amount),currency:p623Draft.currency,expiryDate:p623Draft.expiryDate,status:'Açık',ref:p623Draft.ref}]);
+                                  setP623Draft(d=>({...d,bank:'',beneficiary:'',amount:'',ref:'',expiryDate:''}));
+                                  setP623ShowForm(false);
+                                  toast(tr623?'L/C eklendi.':'L/C added.','success');
+                                }} className="apple-button-primary text-xs px-6">{tr623?'Kaydet':'Save'}</button>
+                              </div>
+                            )}
+                            {p623LCs.length > 0 && (
+                              <div className="overflow-x-auto"><table className="w-full text-xs">
+                                <thead><tr className="border-b border-gray-100 bg-gray-50">{[tr623?'Banka':'Bank',tr623?'Lehtar':'Beneficiary','Ref',tr623?'Tutar':'Amount',tr623?'Vade':'Expiry',tr623?'Durum':'Status'].map(h=><th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>)}</tr></thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {[...p623LCs].sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate)).map(lc=>(
+                                    <tr key={lc.id} className="hover:bg-gray-50/50">
+                                      <td className="px-3 py-2.5 font-medium text-gray-800">{lc.bank}</td>
+                                      <td className="px-3 py-2.5 text-gray-600">{lc.beneficiary}</td>
+                                      <td className="px-3 py-2.5 font-mono text-gray-500">{lc.ref}</td>
+                                      <td className="px-3 py-2.5 font-bold">{lc.currency} {lc.amount.toLocaleString()}</td>
+                                      <td className="px-3 py-2.5 text-gray-500">{lc.expiryDate?new Date(lc.expiryDate).toLocaleDateString('tr-TR'):'—'}</td>
+                                      <td className="px-3 py-2.5"><select value={lc.status} onChange={e=>setP623LCs(prev=>prev.map(x=>x.id===lc.id?{...x,status:e.target.value as typeof lc.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statCls[lc.status]}`}>{['Açık','Kullanıldı','Sona Erdi','İptal'].map(s=><option key={s}>{s}</option>)}</select></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table></div>
+                            )}
+                          </div>
                         );
                       })()}
                     </motion.div>
@@ -26514,6 +26716,59 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 630: Fatura Yaşlandırma Analizi ───────────────────────── */}
+                  {muhasebeTab === 'fatura-takip' && orders.length > 0 && (() => {
+                    const tr630 = currentLanguage === 'tr';
+                    const today630 = new Date();
+                    const daysMap630:{[k:string]:number} = {'7d':7,'30d':30,'60d':60,'90d':90};
+                    const maxDays = daysMap630[p630InvoicePeriod];
+                    const cutoff630 = new Date(Date.now()-maxDays*86400000);
+                    // All invoiced orders that are unpaid
+                    const unpaidInvoiced = orders.filter(o=>{
+                      if(o.paid||o.status==='Cancelled') return false;
+                      if(!o.createdAt) return false;
+                      try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff630; } catch { return false; }
+                    });
+                    const buckets = [
+                      {label:tr630?'0-30 Gün':'0-30 Days',min:0,max:30,color:'text-emerald-600',bg:'bg-emerald-50',orders:[] as typeof unpaidInvoiced},
+                      {label:tr630?'31-60 Gün':'31-60 Days',min:31,max:60,color:'text-amber-600',bg:'bg-amber-50',orders:[] as typeof unpaidInvoiced},
+                      {label:tr630?'61-90 Gün':'61-90 Days',min:61,max:90,color:'text-orange-600',bg:'bg-orange-50',orders:[] as typeof unpaidInvoiced},
+                      {label:tr630?'90+ Gün':'90+ Days',min:91,max:9999,color:'text-red-600',bg:'bg-red-50',orders:[] as typeof unpaidInvoiced},
+                    ];
+                    unpaidInvoiced.forEach(o=>{
+                      try {
+                        const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                        const days=Math.floor((today630.getTime()-d.getTime())/86400000);
+                        const b = buckets.find(bk=>days>=bk.min&&days<=bk.max);
+                        if(b) b.orders.push(o);
+                      } catch { /* skip */ }
+                    });
+                    const totalUnpaid = unpaidInvoiced.reduce((s,o)=>s+(o.totalPrice||0),0);
+                    if(unpaidInvoiced.length===0) return null;
+                    return (
+                      <div className="apple-card p-5 space-y-4 mt-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">📋 {tr630?'Fatura Yaşlandırma':'Invoice Aging'}</h3>
+                          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                            {([{k:'7d',l:'7d'},{k:'30d',l:'30d'},{k:'60d',l:'60d'},{k:'90d',l:'90d'}] as {k:'7d'|'30d'|'60d'|'90d';l:string}[]).map(t=>(
+                              <button key={t.k} onClick={()=>setP630InvoicePeriod(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p630InvoicePeriod===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {buckets.map(b=>(
+                            <div key={b.label} className={`rounded-xl p-3 ${b.bg}`}>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase">{b.label}</p>
+                              <p className={`text-xl font-black ${b.color}`}>{b.orders.length}</p>
+                              <p className="text-xs text-gray-500">₺{Math.round(b.orders.reduce((s,o)=>s+(o.totalPrice||0),0)).toLocaleString('tr-TR')}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="text-xs text-gray-500">{tr630?'Toplam Bekleyen:':'Total Outstanding:'} <span className="font-bold text-red-600">₺{Math.round(totalUnpaid).toLocaleString('tr-TR')}</span> ({unpaidInvoiced.length} {tr630?'sipariş':'orders'})</div>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Phase 565: Satış Tahmini (Sales Forecast) ─────────────────────── */}
                   {muhasebeTab === 'pnl' && (() => {
                     const tr565 = currentLanguage === 'tr';
@@ -27081,6 +27336,85 @@ function AppContent() {
                         {monthOrders617.length === 0 && (
                           <p className="text-center text-gray-400 text-sm py-8">{tr617?`${p617Month} döneminde sipariş bulunamadı.`:`No orders found for ${p617Month}.`}</p>
                         )}
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 625: Gelir/Gider Bütçe Karşılaştırması ───────────────── */}
+                  {muhasebeTab === 'gelir-gider-butce' && (() => {
+                    const tr625 = currentLanguage === 'tr';
+                    const year625 = p625BudgetYear;
+                    // Actual revenue per month from orders
+                    const actRevByMonth = Array.from({length:12},(_,i)=>{
+                      const rev = orders.filter(o=>{
+                        if(o.status==='Cancelled'||!o.createdAt) return false;
+                        try {
+                          const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
+                          return d.getFullYear()===year625&&d.getMonth()===i;
+                        } catch { return false; }
+                      }).reduce((s,o)=>s+(o.totalPrice||0),0);
+                      return rev;
+                    });
+                    const monthNames = tr625?['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const budgetMap:{[m:number]:{budgetRevenue:number;budgetExpense:number}} = {};
+                    p625BudgetData.forEach(b=>{budgetMap[b.month]=b;});
+                    const totalActRev = actRevByMonth.reduce((s,v)=>s+v,0);
+                    const totalBudRev = p625BudgetData.reduce((s,b)=>s+b.budgetRevenue,0);
+                    const variance = totalActRev-totalBudRev;
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr625?'Gelir/Gider Bütçe Karşılaştırması':'Revenue/Expense Budget vs Actual'} subtitle={tr625?'Yıllık bütçe hedefleri ve gerçekleşen gelir karşılaştırması':'Annual budget vs actuals comparison'} icon={BarChart3}/>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <input type="number" value={year625} onChange={e=>setP625BudgetYear(Number(e.target.value))} className="apple-input px-3 py-2 text-sm w-24" placeholder="Year"/>
+                          <span className="text-xs text-gray-500">• {tr625?'Bütçe hücrelerine tıklayarak düzenleyin.':'Click cells to edit budget.'}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr625?'Bütçe Ciro':'Budget Revenue'}</p><p className="text-lg font-black text-blue-600">₺{Math.round(totalBudRev).toLocaleString('tr-TR')}</p></div>
+                          <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr625?'Gerçekleşen Ciro':'Actual Revenue'}</p><p className="text-lg font-black text-emerald-600">₺{Math.round(totalActRev).toLocaleString('tr-TR')}</p></div>
+                          <div className={`apple-card p-4 ${variance>=0?'bg-emerald-50':'bg-red-50'}`}><p className="text-xs text-gray-500">{tr625?'Sapma':'Variance'}</p><p className={`text-lg font-black ${variance>=0?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}₺{Math.round(Math.abs(variance)).toLocaleString('tr-TR')}</p></div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead><tr className="border-b border-gray-100 bg-gray-50">
+                              {[tr625?'Ay':'Month',tr625?'Bütçe Ciro':'Budget Rev.',tr625?'Gerçekleşen':'Actual',tr625?'Sapma':'Var.',tr625?'%':'%'].map(h=>(
+                                <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {Array.from({length:12},(_,i)=>{
+                                const bud = budgetMap[i]?.budgetRevenue||0;
+                                const act = actRevByMonth[i];
+                                const vari = act-bud;
+                                const pct = bud>0?(vari/bud*100):null;
+                                const isEditing = p625EditMonth===i;
+                                return (
+                                  <tr key={i} className="hover:bg-gray-50/50">
+                                    <td className="px-3 py-2.5 font-medium text-gray-700">{monthNames[i]}</td>
+                                    <td className="px-3 py-2.5" onClick={()=>setP625EditMonth(i)}>
+                                      {isEditing?(
+                                        <input type="number" autoFocus defaultValue={bud} onBlur={e=>{
+                                          const val=Number(e.target.value);
+                                          setP625BudgetData(prev=>{
+                                            const idx=prev.findIndex(b=>b.month===i);
+                                            if(idx>=0) return prev.map((b,j)=>j===idx?{...b,budgetRevenue:val}:b);
+                                            return [...prev,{month:i,budgetRevenue:val,budgetExpense:0}];
+                                          });
+                                          setP625EditMonth(null);
+                                        }} className="apple-input px-2 py-0.5 text-xs w-28"/>
+                                      ):(
+                                        <span className="tabular-nums cursor-pointer text-blue-600 hover:underline">{bud>0?`₺${Math.round(bud).toLocaleString('tr-TR')}`:'—'}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums text-gray-700">{act>0?`₺${Math.round(act).toLocaleString('tr-TR')}`:'—'}</td>
+                                    <td className={`px-3 py-2.5 tabular-nums font-bold ${vari>=0?'text-emerald-600':'text-red-600'}`}>{bud>0?(vari>=0?'+':'')+'₺'+Math.round(Math.abs(vari)).toLocaleString('tr-TR'):'—'}</td>
+                                    <td className={`px-3 py-2.5 font-bold ${!pct?'text-gray-400':pct>=0?'text-emerald-600':'text-red-600'}`}>{pct!==null?`${pct>=0?'+':''}${pct.toFixed(1)}%`:'—'}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[10px] text-gray-400">* {tr625?'Bütçe değerlerini düzenlemek için "Bütçe Ciro" sütununa tıklayın.':'Click on the "Budget Rev." column to edit monthly budget targets.'}</p>
                       </motion.div>
                     );
                   })()}
@@ -28081,6 +28415,74 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 627: Tedarik Zinciri Riski ────────────────────────── */}
+                  {purchasingSubTab === 'tedarik-risk' && (() => {
+                    const tr627 = currentLanguage === 'tr';
+                    const criticalRisks = p627Risks.filter(r=>r.severity==='Kritik'&&r.status==='Aktif').length;
+                    const highRisks = p627Risks.filter(r=>r.severity==='Yüksek'&&r.status==='Aktif').length;
+                    const sevColor:{[k:string]:string} = {'Kritik':'bg-red-100 text-red-700','Yüksek':'bg-orange-100 text-orange-700','Orta':'bg-amber-100 text-amber-700','Düşük':'bg-gray-100 text-gray-600'};
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr627?'Tedarik Zinciri Riski':'Supply Chain Risk'} subtitle={tr627?'Tedarikçi bazında risk değerlendirmesi ve azaltma planları':'Supplier-level risk assessment and mitigation plans'} icon={AlertTriangle}
+                          actionButton={hasFullAccess('satin-alma')&&(<button onClick={()=>setP627ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr627?'Risk Ekle':'Add Risk'}</button>)} />
+                        {(criticalRisks>0||highRisks>0)&&(
+                          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0"/>
+                            <p className="text-sm font-bold text-red-700">{criticalRisks} {tr627?'kritik,':''} {highRisks} {tr627?'yüksek risk aktif':'high-severity risks active'}</p>
+                          </div>
+                        )}
+                        {p627ShowForm && (
+                          <div className="apple-card p-5 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              <input className="apple-input col-span-2 md:col-span-1" placeholder={tr627?'Tedarikçi':'Supplier'} value={p627Draft.supplier} onChange={e=>setP627Draft(d=>({...d,supplier:e.target.value}))}/>
+                              <select value={p627Draft.riskType} onChange={e=>setP627Draft(d=>({...d,riskType:e.target.value as typeof d.riskType}))} className="apple-input">
+                                {['Tedarik Kesintisi','Kalite','Fiyat Artışı','Teslimat Gecikmesi','Diğer'].map(t=><option key={t}>{t}</option>)}
+                              </select>
+                              <select value={p627Draft.severity} onChange={e=>setP627Draft(d=>({...d,severity:e.target.value as typeof d.severity}))} className="apple-input">
+                                {['Düşük','Orta','Yüksek','Kritik'].map(s=><option key={s}>{s}</option>)}
+                              </select>
+                              <input type="number" min="0" max="100" className="apple-input" placeholder={tr627?'Olasılık %':'Probability %'} value={p627Draft.probability} onChange={e=>setP627Draft(d=>({...d,probability:e.target.value}))}/>
+                              <input className="apple-input col-span-2" placeholder={tr627?'Azaltma Planı':'Mitigation Plan'} value={p627Draft.mitigationPlan} onChange={e=>setP627Draft(d=>({...d,mitigationPlan:e.target.value}))}/>
+                            </div>
+                            <button onClick={()=>{
+                              if(!p627Draft.supplier) return;
+                              setP627Risks(prev=>[...prev,{id:Date.now().toString(),supplier:p627Draft.supplier,riskType:p627Draft.riskType,severity:p627Draft.severity,probability:Number(p627Draft.probability)||0,mitigationPlan:p627Draft.mitigationPlan||undefined,status:'Aktif'}]);
+                              setP627Draft(d=>({...d,supplier:'',probability:'50',mitigationPlan:''}));
+                              setP627ShowForm(false);
+                              toast(tr627?'Risk eklendi.':'Risk added.','success');
+                            }} className="apple-button-primary text-xs px-6">{tr627?'Kaydet':'Save'}</button>
+                          </div>
+                        )}
+                        {p627Risks.length > 0 && (
+                          <div className="space-y-2">
+                            {[...p627Risks].sort((a,b)=>{const o={Kritik:0,Yüksek:1,Orta:2,Düşük:3};return o[a.severity]-o[b.severity];}).map(r=>{
+                              const score = r.probability*(r.severity==='Kritik'?4:r.severity==='Yüksek'?3:r.severity==='Orta'?2:1)/100;
+                              return (
+                                <div key={r.id} className="flex items-center gap-3 border border-gray-100 rounded-xl px-4 py-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="font-semibold text-gray-800 text-sm">{r.supplier}</p>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sevColor[r.severity]}`}>{r.severity}</span>
+                                      <span className="text-[10px] text-gray-400">{r.riskType}</span>
+                                    </div>
+                                    {r.mitigationPlan&&<p className="text-xs text-gray-400 mt-0.5 truncate">{r.mitigationPlan}</p>}
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <p className="text-xs font-bold text-gray-700">{tr627?'Risk Skoru:':'Score:'} {score.toFixed(2)}</p>
+                                    <select value={r.status} onChange={e=>setP627Risks(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="text-xs border border-gray-200 rounded-lg px-1 py-0.5 mt-1 bg-white">
+                                      {['Aktif','Azaltıldı','Kabul Edildi'].map(s=><option key={s}>{s}</option>)}
+                                    </select>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {p627Risks.length===0&&<div className="text-center py-10"><AlertTriangle className="w-10 h-10 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr627?'Tedarik zinciri riski ekleyin.':'Add supply chain risk assessments.'}</p></div>}
+                      </motion.div>
+                    );
+                  })()}
+
                 </>
               )}
             </motion.div>
@@ -29051,6 +29453,56 @@ function AppContent() {
                       </div>
                     );
                   })()}
+
+                  {/* ── Phase 629: Çalışan Performans KPI ──────────────────────── */}
+                  {employees.length > 0 && (() => {
+                    const tr629 = currentLanguage === 'tr';
+                    const now629 = new Date();
+                    let start629: Date;
+                    if (p629KpiPeriod==='this_month') start629 = new Date(now629.getFullYear(), now629.getMonth(), 1);
+                    else if (p629KpiPeriod==='last_month') start629 = new Date(now629.getFullYear(), now629.getMonth()-1, 1);
+                    else start629 = new Date(now629.getFullYear(), 0, 1);
+                    const end629 = p629KpiPeriod==='last_month'?new Date(now629.getFullYear(), now629.getMonth(), 0):now629;
+                    // Sales per rep in period
+                    const repSales:{[name:string]:{orders:number;revenue:number}} = {};
+                    orders.filter(o=>{
+                      if(o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
+                      try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=start629&&d<=end629; } catch { return false; }
+                    }).forEach(o=>{ const r=o.assignedTo!; if(!repSales[r]) repSales[r]={orders:0,revenue:0}; repSales[r].orders++; repSales[r].revenue+=(o.totalPrice||0); });
+                    const rows = employees.filter(e=>e.status==='Aktif').map(e=>({...e,sales:repSales[e.name]||{orders:0,revenue:0}})).sort((a,b)=>b.sales.revenue-a.sales.revenue);
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">🏆 {tr629?'Çalışan Performans KPI':'Employee Performance KPI'}</h3>
+                          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                            {([{k:'this_month',l:tr629?'Bu Ay':'This M.'},{k:'last_month',l:tr629?'Geçen':'Last M.'},{k:'ytd',l:'YTD'}] as {k:'this_month'|'last_month'|'ytd';l:string}[]).map(t=>(
+                              <button key={t.k} onClick={()=>setP629KpiPeriod(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p629KpiPeriod===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead><tr className="border-b border-gray-100 bg-gray-50">
+                              {['#',tr629?'Çalışan':'Employee',tr629?'Departman':'Dept',tr629?'Sipariş':'Orders',tr629?'Ciro':'Revenue'].map(h=>(
+                                <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {rows.slice(0,10).map((e,idx)=>(
+                                <tr key={e.id} className="hover:bg-gray-50/50">
+                                  <td className="px-3 py-2.5 text-gray-400">{idx+1}</td>
+                                  <td className="px-3 py-2.5 font-medium text-gray-800">{e.name}</td>
+                                  <td className="px-3 py-2.5 text-gray-500">{e.department}</td>
+                                  <td className="px-3 py-2.5 font-bold text-blue-600">{e.sales.orders}</td>
+                                  <td className="px-3 py-2.5 font-bold text-emerald-600">₺{Math.round(e.sales.revenue).toLocaleString('tr-TR')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -29470,6 +29922,77 @@ function AppContent() {
                   <div className="bg-white rounded-2xl border border-gray-100 p-6">
                     <BOMPanel currentLanguage={currentLanguage} />
                   </div>
+                  {/* ── Phase 624: Üretim Emri Yönetimi ──────────────────────────── */}
+                  {(() => {
+                    const tr624 = currentLanguage === 'tr';
+                    const statusCls:{[k:string]:string}={Planlandı:'bg-gray-100 text-gray-600',Üretimde:'bg-blue-100 text-blue-700',Tamamlandı:'bg-emerald-100 text-emerald-700',İptal:'bg-red-100 text-red-700'};
+                    const inProd = p624Orders.filter(o=>o.status==='Üretimde').length;
+                    const urgent = p624Orders.filter(o=>o.priority==='Acil'&&o.status!=='Tamamlandı'&&o.status!=='İptal').length;
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-bold text-gray-900 text-sm">⚙️ {tr624?'Üretim Emri Yönetimi':'Production Order Management'}</h3>
+                          <button onClick={()=>setP624ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr624?'Üretim Emri':'New Order'}</button>
+                        </div>
+                        {urgent>0&&<div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-xs font-bold text-red-700">🔴 {urgent} {tr624?'acil üretim emri':'urgent production order(s)'}</div>}
+                        {p624ShowForm && (
+                          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              <input className="apple-input col-span-2 md:col-span-1" placeholder={tr624?'Ürün':'Product'} value={p624Draft.productName} onChange={e=>setP624Draft(d=>({...d,productName:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={tr624?'Miktar':'Qty'} value={p624Draft.qty} onChange={e=>setP624Draft(d=>({...d,qty:e.target.value}))}/>
+                              <input className="apple-input" placeholder={tr624?'İş Merkezi':'Work Center'} value={p624Draft.workCenter} onChange={e=>setP624Draft(d=>({...d,workCenter:e.target.value}))}/>
+                              <input type="date" className="apple-input" value={p624Draft.plannedStart} onChange={e=>setP624Draft(d=>({...d,plannedStart:e.target.value}))}/>
+                              <input type="date" className="apple-input" value={p624Draft.plannedEnd} onChange={e=>setP624Draft(d=>({...d,plannedEnd:e.target.value}))}/>
+                              <select value={p624Draft.priority} onChange={e=>setP624Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
+                                {['Normal','Acil'].map(p=><option key={p}>{p}</option>)}
+                              </select>
+                            </div>
+                            <button onClick={()=>{
+                              if(!p624Draft.productName||!p624Draft.qty) return;
+                              setP624Orders(prev=>[...prev,{id:Date.now().toString(),productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter}]);
+                              setP624Draft(d=>({...d,productName:'',qty:'',workCenter:'',plannedStart:'',plannedEnd:''}));
+                              setP624ShowForm(false);
+                              toast(tr624?'Üretim emri oluşturuldu.':'Production order created.','success');
+                            }} className="apple-button-primary text-xs px-6">{tr624?'Oluştur':'Create'}</button>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Üretimde':'In Prod.'}</p><p className="text-xl font-black text-blue-600">{inProd}</p></div>
+                          <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Planlandı':'Planned'}</p><p className="text-xl font-black text-amber-600">{p624Orders.filter(o=>o.status==='Planlandı').length}</p></div>
+                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Tamamlanan':'Done'}</p><p className="text-xl font-black text-emerald-600">{p624Orders.filter(o=>o.status==='Tamamlandı').length}</p></div>
+                        </div>
+                        {p624Orders.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead><tr className="border-b border-gray-100 bg-gray-50">
+                                {[tr624?'Ürün':'Product',tr624?'Miktar':'Qty',tr624?'İş Merkezi':'Work Center',tr624?'Başlangıç':'Start',tr624?'Bitiş':'End',tr624?'Durum':'Status',tr624?'Öncelik':'Priority'].map(h=>(
+                                  <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                ))}
+                              </tr></thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {[...p624Orders].sort((a,b)=>a.plannedStart.localeCompare(b.plannedStart)).map(o=>(
+                                  <tr key={o.id} className={`hover:bg-gray-50/50 ${o.priority==='Acil'?'bg-red-50/20':''}`}>
+                                    <td className="px-3 py-2.5 font-medium text-gray-800">{o.productName}</td>
+                                    <td className="px-3 py-2.5 text-gray-600">{o.qty}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{o.workCenter||'—'}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{o.plannedStart?new Date(o.plannedStart).toLocaleDateString('tr-TR'):'—'}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{o.plannedEnd?new Date(o.plannedEnd).toLocaleDateString('tr-TR'):'—'}</td>
+                                    <td className="px-3 py-2.5">
+                                      <select value={o.status} onChange={e=>setP624Orders(prev=>prev.map(x=>x.id===o.id?{...x,status:e.target.value as typeof o.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[o.status]}`}>
+                                        {['Planlandı','Üretimde','Tamamlandı','İptal'].map(s=><option key={s}>{s}</option>)}
+                                      </select>
+                                    </td>
+                                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold ${o.priority==='Acil'?'text-red-600':'text-gray-400'}`}>{o.priority}</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {p624Orders.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr624?'Üretim emri ekleyin.':'Create production orders to track manufacturing.'}</p>}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -29482,6 +30005,62 @@ function AppContent() {
                 <>
                   {!hasFullAccess('kurumsal') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <CorporateGovernanceModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kurumsal')} userRole={userRole} onNavigate={setActiveTab} />
+
+                  {/* ── Phase 632: Konsolidasyon & Holding Raporu ──────────────── */}
+                  {(() => {
+                    const tr632 = currentLanguage === 'tr';
+                    const totalRev632 = orders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+(o.totalPrice||0),0);
+                    const totalEmployees = employees.filter(e=>e.status==='Aktif').length;
+                    const consolidation632 = [
+                      {entity:tr632?'Cetpa A.Ş. (Ana)':'Cetpa Inc. (Parent)',revenue:totalRev632*0.65,opex:totalRev632*0.4,headcount:Math.round(totalEmployees*0.6)},
+                      {entity:tr632?'Cetpa Lojistik Ltd.':'Cetpa Logistics Ltd.',revenue:totalRev632*0.25,opex:totalRev632*0.18,headcount:Math.round(totalEmployees*0.3)},
+                      {entity:tr632?'Cetpa Dış Ticaret':'Cetpa International',revenue:totalRev632*0.1,opex:totalRev632*0.07,headcount:Math.round(totalEmployees*0.1)},
+                    ];
+                    const totalRevAll = consolidation632.reduce((s,e)=>s+e.revenue,0);
+                    const totalOpexAll = consolidation632.reduce((s,e)=>s+e.opex,0);
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <h3 className="font-bold text-gray-900 text-sm">🏛️ {tr632?'Konsolidasyon & Holding Raporu':'Consolidation & Holding Report'}</h3>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Konsolide Ciro':'Consol. Revenue'}</p><p className="text-lg font-black text-blue-600">₺{Math.round(totalRevAll).toLocaleString('tr-TR')}</p></div>
+                          <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Konsolide Opex':'Consol. Opex'}</p><p className="text-lg font-black text-red-600">₺{Math.round(totalOpexAll).toLocaleString('tr-TR')}</p></div>
+                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Toplam Çalışan':'Total Headcount'}</p><p className="text-xl font-black text-emerald-600">{totalEmployees}</p></div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead><tr className="border-b border-gray-100 bg-gray-50">
+                              {[tr632?'Şirket':'Entity',tr632?'Ciro':'Revenue',tr632?'Opex':'Opex',tr632?'EBIT':'EBIT',tr632?'Çalışan':'Headcount'].map(h=>(
+                                <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {consolidation632.map(e=>{
+                                const ebit=e.revenue-e.opex;
+                                const ebitPct=e.revenue>0?(ebit/e.revenue*100):0;
+                                return (
+                                  <tr key={e.entity} className="hover:bg-gray-50/50">
+                                    <td className="px-3 py-2.5 font-medium text-gray-800">{e.entity}</td>
+                                    <td className="px-3 py-2.5 tabular-nums text-gray-700">₺{Math.round(e.revenue).toLocaleString('tr-TR')}</td>
+                                    <td className="px-3 py-2.5 tabular-nums text-red-600">₺{Math.round(e.opex).toLocaleString('tr-TR')}</td>
+                                    <td className={`px-3 py-2.5 font-bold ${ebit>=0?'text-emerald-600':'text-red-600'}`}>₺{Math.round(ebit).toLocaleString('tr-TR')} ({ebitPct.toFixed(0)}%)</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{e.headcount}</td>
+                                  </tr>
+                                );
+                              })}
+                              <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                                <td className="px-3 py-2 text-gray-700">{tr632?'Konsolide Toplam':'Consolidated'}</td>
+                                <td className="px-3 py-2 tabular-nums">₺{Math.round(totalRevAll).toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2 tabular-nums text-red-600">₺{Math.round(totalOpexAll).toLocaleString('tr-TR')}</td>
+                                <td className={`px-3 py-2 ${totalRevAll-totalOpexAll>=0?'text-emerald-600':'text-red-600'}`}>₺{Math.round(totalRevAll-totalOpexAll).toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2">{totalEmployees}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[10px] text-gray-400">* {tr632?'Ciro dağılımı tahminidir. Gerçek kurumsal yapınıza göre özelleştirin.':'Revenue split is estimated. Customize to your actual corporate structure.'}</p>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -32542,6 +33121,71 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 628: Stok ABC Analizi ──────────────────────────────── */}
+              {inventory.length > 0 && (() => {
+                const tr628 = currentLanguage === 'tr';
+                // ABC based on revenue contribution
+                const skuRevMap:{[sku:string]:{name:string;revenue:number}} = {};
+                orders.filter(o=>o.status!=='Cancelled').forEach(o=>{
+                  (o.lineItems||[]).forEach(li=>{
+                    if(!skuRevMap[li.sku]) skuRevMap[li.sku]={name:li.name||li.sku,revenue:0};
+                    skuRevMap[li.sku].revenue += li.price*(li.quantity||1);
+                  });
+                });
+                const allItems = Object.entries(skuRevMap).map(([sku,d])=>({sku,...d})).sort((a,b)=>b.revenue-a.revenue);
+                const totalRev628 = allItems.reduce((s,i)=>s+i.revenue,0);
+                let cumulative = 0;
+                const classified = allItems.map(item=>{
+                  cumulative += item.revenue;
+                  const cumPct = totalRev628>0?cumulative/totalRev628:0;
+                  const cat = cumPct<=0.8?'A':cumPct<=0.95?'B':'C';
+                  return {...item,cumPct,cat};
+                });
+                const filtered628 = p628ABCCategory==='all'?classified:classified.filter(i=>i.cat===p628ABCCategory);
+                const catCounts = {A:classified.filter(i=>i.cat==='A').length,B:classified.filter(i=>i.cat==='B').length,C:classified.filter(i=>i.cat==='C').length};
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div><h3 className="font-bold text-gray-900 text-sm">📊 {tr628?'Stok ABC Analizi':'Inventory ABC Analysis'}</h3>
+                      <p className="text-xs text-gray-400">{tr628?'A: En değerli %80, B: Orta %15, C: Düşük %5':'A: Top 80% revenue, B: Middle 15%, C: Bottom 5%'}</p></div>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                        {([{k:'all',l:tr628?'Tümü':'All'},{k:'A',l:'A'},{k:'B',l:'B'},{k:'C',l:'C'}] as {k:'all'|'A'|'B'|'C';l:string}[]).map(t=>(
+                          <button key={t.k} onClick={()=>setP628ABCCategory(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p628ABCCategory===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[{cat:'A',color:'text-emerald-600',bg:'bg-emerald-50'},{cat:'B',color:'text-amber-600',bg:'bg-amber-50'},{cat:'C',color:'text-gray-500',bg:'bg-gray-50'}].map(c=>(
+                        <div key={c.cat} className={`rounded-xl p-3 ${c.bg}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{tr628?`Sınıf ${c.cat}`:`Class ${c.cat}`}</p><p className={`text-xl font-black ${c.color}`}>{catCounts[c.cat as 'A'|'B'|'C']}</p></div>
+                      ))}
+                    </div>
+                    {filtered628.length > 0 && (
+                      <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-gray-50"><tr className="border-b border-gray-100">
+                            {['SKU',tr628?'Ürün':'Product',tr628?'Sınıf':'Class',tr628?'Ciro':'Revenue',tr628?'Kümülatif %':'Cumul. %'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {filtered628.slice(0,30).map(item=>(
+                              <tr key={item.sku} className="hover:bg-gray-50/50">
+                                <td className="px-3 py-2 font-mono text-gray-500">{item.sku}</td>
+                                <td className="px-3 py-2 font-medium text-gray-800 truncate max-w-[160px]">{item.name}</td>
+                                <td className="px-3 py-2"><span className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${item.cat==='A'?'bg-emerald-100 text-emerald-700':item.cat==='B'?'bg-amber-100 text-amber-700':'bg-gray-100 text-gray-600'}`}>{item.cat}</span></td>
+                                <td className="px-3 py-2 font-mono text-gray-700">₺{Math.round(item.revenue).toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2 text-gray-400">%{(item.cumPct*100).toFixed(1)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {allItems.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr628?'ABC analizi için sipariş verisi gerekmektedir.':'Order data required for ABC analysis.'}</p>}
+                  </div>
+                );
+              })()}
+
               <InventoryView
                 inventory={inventory}
                 categories={inventoryCategories}
@@ -34923,6 +35567,62 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 626: Müşteri Ödeme Davranış Analizi ─────────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && orders.length > 0 && (() => {
+                const tr626 = currentLanguage === 'tr';
+                const daysMap626:{[k:string]:number} = {'30d':30,'90d':90,ytd:new Date().getDate()+new Date().getMonth()*30};
+                const days626 = daysMap626[p626Period];
+                const cutoff626 = new Date(Date.now()-days626*86400000);
+                // Paid orders in period
+                const paidOrders = orders.filter(o=>{
+                  if(!o.paid||!o.createdAt) return false;
+                  try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff626; } catch { return false; }
+                });
+                const unpaidOrders = orders.filter(o=>!o.paid&&o.status!=='Cancelled');
+                const payRate = orders.filter(o=>o.status!=='Cancelled').length>0?(paidOrders.length/orders.filter(o=>o.status!=='Cancelled').length*100):0;
+                // Payment method breakdown
+                const methodMap:{[k:string]:number} = {};
+                paidOrders.forEach(o=>{ const m=o.paymentMethod||'other'; methodMap[m]=(methodMap[m]||0)+1; });
+                const methodRows = Object.entries(methodMap).sort((a,b)=>b[1]-a[1]);
+                const methodLabels:{[k:string]:string} = {cash:tr626?'Nakit':'Cash',bank_transfer:tr626?'Banka Transferi':'Bank Transfer',credit_card:tr626?'Kredi Kartı':'Credit Card',check:tr626?'Çek':'Check',other:tr626?'Diğer':'Other'};
+                if (paidOrders.length===0&&unpaidOrders.length===0) return null;
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <h3 className="font-bold text-gray-900 text-sm">💳 {tr626?'Müşteri Ödeme Analizi':'Customer Payment Analysis'}</h3>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                        {([{k:'30d',l:'30d'},{k:'90d',l:'90d'},{k:'ytd',l:'YTD'}] as {k:'30d'|'90d'|'ytd';l:string}[]).map(t=>(
+                          <button key={t.k} onClick={()=>setP626Period(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p626Period===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödeme Oranı':'Pay Rate'}</p><p className="text-xl font-black text-emerald-600">%{payRate.toFixed(1)}</p></div>
+                      <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödendi':'Paid'}</p><p className="text-xl font-black text-blue-600">{paidOrders.length}</p></div>
+                      <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödenmedi':'Unpaid'}</p><p className="text-xl font-black text-red-600">{unpaidOrders.length}</p></div>
+                    </div>
+                    {methodRows.length>0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-gray-500">{tr626?'Ödeme Yöntemi Dağılımı':'Payment Method Breakdown'}</p>
+                        {methodRows.map(([method,count])=>{
+                          const pct = paidOrders.length>0?(count/paidOrders.length*100):0;
+                          return (
+                            <div key={method} className="flex items-center gap-3">
+                              <span className="text-xs text-gray-600 w-28 shrink-0">{methodLabels[method]||method}</span>
+                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-400 rounded-full" style={{width:`${pct}%`}}/>
+                              </div>
+                              <span className="text-xs font-bold text-gray-700 w-10 text-right">{count}</span>
+                              <span className="text-xs text-gray-400 w-10">%{pct.toFixed(0)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── Phase 604: Satış Temsilcisi Komisyon Takibi ───────────────── */}
               {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && (() => {
                 const tr604 = currentLanguage === 'tr';
@@ -36800,6 +37500,59 @@ function AppContent() {
             );
           })()}
 
+          {/* ── Phase 621: Talep Yönetimi (Demand Management) ──────────────── */}
+          {activeTab === 'orders' && !selectedOrder && (() => {
+            const tr621 = currentLanguage === 'tr';
+            const statusCls:{[k:string]:string}={Bekliyor:'bg-amber-100 text-amber-700',Onaylandı:'bg-emerald-100 text-emerald-700',Reddedildi:'bg-red-100 text-red-700','Sipariş Verildi':'bg-blue-100 text-blue-700'};
+            const pending621 = p621Demands.filter(d=>d.status==='Bekliyor').length;
+            return (
+              <div className="apple-card p-5 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="font-bold text-gray-900 text-sm">📋 {tr621?'Talep Yönetimi':'Demand Management'}</h3>
+                  <button onClick={()=>setP621ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr621?'Talep Ekle':'Add Request'}</button>
+                </div>
+                {pending621>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">{pending621} {tr621?'bekleyen talep':'pending request(s)'}</div>}
+                {p621ShowForm && (
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      <input className="apple-input col-span-2 md:col-span-1" placeholder={tr621?'Ürün Adı':'Product Name'} value={p621Draft.productName} onChange={e=>setP621Draft(d=>({...d,productName:e.target.value}))}/>
+                      <input className="apple-input" placeholder="SKU" value={p621Draft.sku} onChange={e=>setP621Draft(d=>({...d,sku:e.target.value}))}/>
+                      <input type="number" className="apple-input" placeholder={tr621?'Miktar':'Qty'} value={p621Draft.requestedQty} onChange={e=>setP621Draft(d=>({...d,requestedQty:e.target.value}))}/>
+                      <input className="apple-input" placeholder={tr621?'Talep Eden':'Requested By'} value={p621Draft.requestedBy} onChange={e=>setP621Draft(d=>({...d,requestedBy:e.target.value}))}/>
+                      <select value={p621Draft.priority} onChange={e=>setP621Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
+                        {['Düşük','Orta','Yüksek'].map(p=><option key={p}>{p}</option>)}
+                      </select>
+                      <input className="apple-input col-span-2 md:col-span-1" placeholder={tr621?'Notlar':'Notes'} value={p621Draft.notes} onChange={e=>setP621Draft(d=>({...d,notes:e.target.value}))}/>
+                    </div>
+                    <button onClick={()=>{
+                      if(!p621Draft.productName||!p621Draft.requestedQty) return;
+                      setP621Demands(prev=>[...prev,{id:Date.now().toString(),productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||undefined,createdAt:new Date().toISOString()}]);
+                      setP621Draft(d=>({...d,productName:'',sku:'',requestedQty:'',requestedBy:'',notes:''}));
+                      setP621ShowForm(false);
+                      toast(tr621?'Talep oluşturuldu.':'Request created.','success');
+                    }} className="apple-button-primary text-xs px-6">{tr621?'Oluştur':'Create'}</button>
+                  </div>
+                )}
+                {p621Demands.length > 0 && (
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {[...p621Demands].sort((a,b)=>{const pr={Yüksek:0,Orta:1,Düşük:2};return pr[a.priority]-pr[b.priority];}).map(d=>(
+                      <div key={d.id} className="flex items-center gap-3 border border-gray-100 rounded-xl px-4 py-2.5">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-800">{d.productName} {d.sku&&<span className="text-gray-400 font-normal">({d.sku})</span>}</p>
+                          <p className="text-[10px] text-gray-400">{d.requestedBy} · {d.requestedQty} {tr621?'adet':'units'} · {d.priority}</p>
+                        </div>
+                        <select value={d.status} onChange={e=>setP621Demands(prev=>prev.map(x=>x.id===d.id?{...x,status:e.target.value as typeof d.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[d.status]}`}>
+                          {['Bekliyor','Onaylandı','Reddedildi','Sipariş Verildi'].map(s=><option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {p621Demands.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr621?'Ürün talepleri ekleyin.':'Add product demand requests.'}</p>}
+              </div>
+            );
+          })()}
+
             </motion.div>
           )}
 
@@ -37781,6 +38534,76 @@ function AppContent() {
                         })}
                       </div>
                     )}
+                  </motion.div>
+                );
+              })()}
+
+              {/* ── Phase 622: İhracat & Gümrük Takibi ───────────────────────── */}
+              {lojistikTab === 'ihracat-gumruk' && (() => {
+                const tr622 = currentLanguage === 'tr';
+                const statusColor:{[k:string]:string} = {'Hazırlanıyor':'bg-gray-100 text-gray-600','Gümrükte':'bg-amber-100 text-amber-700','Yolda':'bg-blue-100 text-blue-700','Teslim Edildi':'bg-emerald-100 text-emerald-700'};
+                const totalValue = p622Shipments.reduce((s,sh)=>s+(sh.value||0),0);
+                const inTransit = p622Shipments.filter(sh=>sh.status==='Yolda'||sh.status==='Gümrükte').length;
+                return (
+                  <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                    <ModuleHeader title={tr622?'İhracat & Gümrük Takibi':'Export & Customs Tracking'} subtitle={tr622?'İhracat sevkiyatları ve gümrük süreçleri':'Export shipments and customs clearance tracking'} icon={Globe}
+                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP622ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr622?'Sevkiyat Ekle':'Add Shipment'}</button>)} />
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr622?'Toplam Sevkiyat':'Total Shipments'}</p><p className="text-2xl font-black text-blue-600">{p622Shipments.length}</p></div>
+                      <div className="apple-card p-4 bg-amber-50"><p className="text-xs text-gray-500">{tr622?'Yolda/Gümrük':'In Transit'}</p><p className="text-2xl font-black text-amber-600">{inTransit}</p></div>
+                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr622?'Toplam Değer':'Total Value'}</p><p className="text-lg font-black text-emerald-600">${totalValue.toLocaleString('tr-TR')}</p></div>
+                    </div>
+                    {p622ShowForm && (
+                      <div className="apple-card p-5 space-y-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          <input className="apple-input" placeholder={tr622?'Sipariş Ref':'Order Ref'} value={p622Draft.orderRef} onChange={e=>setP622Draft(d=>({...d,orderRef:e.target.value}))}/>
+                          <input className="apple-input" placeholder={tr622?'Destinasyon':'Destination'} value={p622Draft.destination} onChange={e=>setP622Draft(d=>({...d,destination:e.target.value}))}/>
+                          <select value={p622Draft.incoterm} onChange={e=>setP622Draft(d=>({...d,incoterm:e.target.value as typeof d.incoterm}))} className="apple-input">
+                            {['EXW','FOB','CIF','DDP'].map(i=><option key={i}>{i}</option>)}
+                          </select>
+                          <select value={p622Draft.currency} onChange={e=>setP622Draft(d=>({...d,currency:e.target.value as typeof d.currency}))} className="apple-input">
+                            {['USD','EUR','TRY'].map(c=><option key={c}>{c}</option>)}
+                          </select>
+                          <input type="number" className="apple-input" placeholder={tr622?'Değer':'Value'} value={p622Draft.value} onChange={e=>setP622Draft(d=>({...d,value:e.target.value}))}/>
+                          <select value={p622Draft.status} onChange={e=>setP622Draft(d=>({...d,status:e.target.value as typeof d.status}))} className="apple-input">
+                            {['Hazırlanıyor','Gümrükte','Yolda','Teslim Edildi'].map(s=><option key={s}>{s}</option>)}
+                          </select>
+                          <input type="date" className="apple-input" value={p622Draft.exportDate} onChange={e=>setP622Draft(d=>({...d,exportDate:e.target.value}))}/>
+                          <input className="apple-input" placeholder={tr622?'Gümrük Ref':'Customs Ref'} value={p622Draft.customsRef} onChange={e=>setP622Draft(d=>({...d,customsRef:e.target.value}))}/>
+                        </div>
+                        <button onClick={()=>{
+                          if(!p622Draft.orderRef||!p622Draft.destination) return;
+                          setP622Shipments(prev=>[...prev,{id:Date.now().toString(),orderRef:p622Draft.orderRef,destination:p622Draft.destination,incoterm:p622Draft.incoterm,currency:p622Draft.currency,value:Number(p622Draft.value)||0,status:p622Draft.status,exportDate:p622Draft.exportDate,customsRef:p622Draft.customsRef||undefined}]);
+                          setP622Draft(d=>({...d,orderRef:'',destination:'',value:'',customsRef:''}));
+                          setP622ShowForm(false);
+                          toast(tr622?'Sevkiyat eklendi.':'Shipment added.','success');
+                        }} className="apple-button-primary text-xs px-6">{tr622?'Kaydet':'Save'}</button>
+                      </div>
+                    )}
+                    {p622Shipments.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b border-gray-100 bg-gray-50">
+                            {[tr622?'Ref':'Ref',tr622?'Destinasyon':'Destination','Incoterm',tr622?'Değer':'Value',tr622?'Durum':'Status',tr622?'Tarih':'Date'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {[...p622Shipments].sort((a,b)=>b.exportDate.localeCompare(a.exportDate)).map(sh=>(
+                              <tr key={sh.id} className="hover:bg-gray-50/50">
+                                <td className="px-3 py-2.5 font-mono text-gray-700">{sh.orderRef}</td>
+                                <td className="px-3 py-2.5 font-medium text-gray-800">{sh.destination}</td>
+                                <td className="px-3 py-2.5 text-gray-500">{sh.incoterm}</td>
+                                <td className="px-3 py-2.5 font-bold text-gray-700">{sh.currency} {sh.value.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
+                                <td className="px-3 py-2.5 text-gray-500">{new Date(sh.exportDate).toLocaleDateString('tr-TR')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {p622Shipments.length===0&&<div className="text-center py-10"><Globe className="w-10 h-10 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr622?'İhracat sevkiyatı ekleyin.':'Add export shipments to track.'}</p></div>}
                   </motion.div>
                 );
               })()}
