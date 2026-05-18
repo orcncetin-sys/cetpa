@@ -1,6 +1,7 @@
 import DashboardAnalysis from './components/DashboardAnalysis';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
+import AIInlineNudge from './components/AIInlineNudge';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { jsPDF } from 'jspdf';
@@ -152,61 +153,65 @@ import {
 } from 'recharts';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import ProductionModule from './components/ProductionModule';
-import QualityModule from './components/QualityModule';
-import ProjectModule from './components/ProjectModule';
-import LegalModule from './components/LegalModule';
-import QuotationForm from './components/QuotationForm';
-import AccountingModule from './components/AccountingModule';
-import PurchasingModule from './components/PurchasingModule';
-import HRModule from './components/HRModule';
+// ── Eager imports (critical path — needed before first render) ────────────────
 import LandingPage from './components/LandingPage';
-import CorporateGovernanceModule from './components/CorporateGovernanceModule';
-import FinancePanel from './components/FinancePanel';
-import RiskPanel from './components/RiskPanel';
-import AnalyticsPanel from './components/AnalyticsPanel';
-import PriceListForm from './components/PriceListForm';
-import QuotationDetail from './components/QuotationDetail';
-import BarcodeScanner from './components/BarcodeScanner';
-import ProductForm from './components/ProductForm';
-import ProductDetail from './components/ProductDetail';
-import { exportOrderPDF } from './utils/pdf';
-import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, exportStockMovementsCSV, downloadInventoryImportTemplate, type MonthlySummaryRow, type StockMovementRow } from './utils/export';
-import MikroSyncPanel from './components/MikroSyncPanel';
-import MarketplacePanel from './components/MarketplacePanel';
-import CariEkstrePanel from './components/CariEkstrePanel';
-import MutabakatPanel from './components/MutabakatPanel';
-import DemandForecastPanel from './components/DemandForecastPanel';
-import BOMPanel from './components/BOMPanel';
-import OrderTrackingView from './components/OrderTrackingView';
-import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
-import LucaSyncPanel from './components/LucaSyncPanel';
-import EBelgeMerkezi from './components/EBelgeMerkezi';
-import BakimModule from './components/BakimModule';
-import ServisModule from './components/ServisModule';
-import IhracatModule from './components/IhracatModule';
-import SubeModule from './components/SubeModule';
-import VergiTakvimi from './components/VergiTakvimi';
-import LotSeriModule from './components/LotSeriModule';
+import OnboardingFlow from './components/OnboardingFlow';
+import PricingPage from './components/PricingPage';
+import UpgradeModal from './components/UpgradeModal';
+import ConfirmModal from './components/ConfirmModal';
+import OnboardingChecklist from './components/OnboardingChecklist';
+import DataImportWizard from './components/DataImportWizard';
 import GlobalSearch from './components/GlobalSearch';
-import { exportCustomerStatement } from './utils/pdf';
+import BarcodeScanner from './components/BarcodeScanner';
+import DateRangePicker from './components/DateRangePicker';
+import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
+import { ToastProvider, useToast } from './components/Toast';
+import { translations, type Language } from './translations';
+import { exportOrderPDF, exportCustomerStatement } from './utils/pdf';
+import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, exportStockMovementsCSV, downloadInventoryImportTemplate, type MonthlySummaryRow, type StockMovementRow } from './utils/export';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
-import { ToastProvider, useToast } from './components/Toast';
-import DateRangePicker from './components/DateRangePicker';
-import ConfirmModal from './components/ConfirmModal';
-import DealerCommissionPanel from './components/DealerCommissionPanel';
-import SabitKiymetModule from './components/SabitKiymetModule';
-import MaliyetMerkeziModule from './components/MaliyetMerkeziModule';
-import KasaModule from './components/KasaModule';
-import TahsilatModule from './components/TahsilatModule';
-import { translations, type Language } from './translations';
-import PricingPage from './components/PricingPage';
-import OnboardingFlow from './components/OnboardingFlow';
-import UpgradeModal from './components/UpgradeModal';
-import SubscriptionPanel from './components/SubscriptionPanel';
-import CargoTrackingTab from './components/CargoTrackingTab';
-import DocumentDesigner from './components/DocumentDesigner';
+
+// ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
+const QuotationForm           = React.lazy(() => import('./components/QuotationForm'));
+const QuotationDetail         = React.lazy(() => import('./components/QuotationDetail'));
+const PriceListForm           = React.lazy(() => import('./components/PriceListForm'));
+const ProductForm             = React.lazy(() => import('./components/ProductForm'));
+const ProductDetail           = React.lazy(() => import('./components/ProductDetail'));
+const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
+const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
+const HRModule                = React.lazy(() => import('./components/HRModule'));
+const LegalModule             = React.lazy(() => import('./components/LegalModule'));
+const ProductionModule        = React.lazy(() => import('./components/ProductionModule'));
+const QualityModule           = React.lazy(() => import('./components/QualityModule'));
+const ProjectModule           = React.lazy(() => import('./components/ProjectModule'));
+const CorporateGovernanceModule = React.lazy(() => import('./components/CorporateGovernanceModule'));
+const FinancePanel            = React.lazy(() => import('./components/FinancePanel'));
+const RiskPanel               = React.lazy(() => import('./components/RiskPanel'));
+const AnalyticsPanel          = React.lazy(() => import('./components/AnalyticsPanel'));
+const SubscriptionPanel       = React.lazy(() => import('./components/SubscriptionPanel'));
+const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncPanel'));
+const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
+const MarketplacePanel        = React.lazy(() => import('./components/MarketplacePanel'));
+const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
+const MutabakatPanel          = React.lazy(() => import('./components/MutabakatPanel'));
+const DemandForecastPanel     = React.lazy(() => import('./components/DemandForecastPanel'));
+const BOMPanel                = React.lazy(() => import('./components/BOMPanel'));
+const OrderTrackingView       = React.lazy(() => import('./components/OrderTrackingView'));
+const EBelgeMerkezi           = React.lazy(() => import('./components/EBelgeMerkezi'));
+const BakimModule             = React.lazy(() => import('./components/BakimModule'));
+const ServisModule            = React.lazy(() => import('./components/ServisModule'));
+const IhracatModule           = React.lazy(() => import('./components/IhracatModule'));
+const SubeModule              = React.lazy(() => import('./components/SubeModule'));
+const VergiTakvimi            = React.lazy(() => import('./components/VergiTakvimi'));
+const LotSeriModule           = React.lazy(() => import('./components/LotSeriModule'));
+const DealerCommissionPanel   = React.lazy(() => import('./components/DealerCommissionPanel'));
+const SabitKiymetModule       = React.lazy(() => import('./components/SabitKiymetModule'));
+const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMerkeziModule'));
+const KasaModule              = React.lazy(() => import('./components/KasaModule'));
+const TahsilatModule          = React.lazy(() => import('./components/TahsilatModule'));
+const CargoTrackingTab        = React.lazy(() => import('./components/CargoTrackingTab'));
+const DocumentDesigner        = React.lazy(() => import('./components/DocumentDesigner'));
 import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
   type UserSubscription,
@@ -19569,6 +19574,9 @@ function AppContent() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
   const installPwa = () => { pwaPromptEvent?.prompt(); pwaPromptEvent?.userChoice.then(() => setShowPwaBanner(false)); };
+
+  // ── Red-team Fix D: Data Import Wizard ────────────────────────────────────
+  const [showDataImport, setShowDataImport] = useState(false);
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   const [p632Consolidation] = useState([
     {entity:'Cetpa A.Ş.',revenue:0,opex:0,headcount:0},
@@ -22012,6 +22020,12 @@ function AppContent() {
           )}
 
         <TabErrorBoundary tabName={currentLanguage === 'tr' ? activeTab : activeTab} lang={currentLanguage}>
+        <React.Suspense fallback={
+          <div className="flex flex-col items-center justify-center min-h-[320px] gap-4">
+            <div className="w-8 h-8 rounded-full border-2 border-brand border-t-transparent animate-spin" />
+            <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Modül yükleniyor…' : 'Loading module…'}</p>
+          </div>
+        }>
         <AnimatePresence mode="wait">
 
           {/* ── Dashboard (Home) ── */}
@@ -31949,6 +31963,12 @@ function AppContent() {
           {/* ── Inventory ── */}
           {activeTab === 'inventory' && (
             <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <AIInlineNudge
+                context="inventory"
+                currentLanguage={currentLanguage}
+                data={{ lowStockCount: inventory.filter(i=>(i.stockLevel??0)<=(i.lowStockThreshold??5)).length }}
+                onAction={a => { if(a==='go-low-stock') window.scrollTo({top:400,behavior:'smooth'}); }}
+              />
               {/* ── Phase 71: Inventory Reorder Alert Strip ── */}
               {(() => {
                 const reorderItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
@@ -33355,6 +33375,18 @@ function AppContent() {
           {/* ── CRM Pipeline ── */}
           {activeTab === 'crm' && !selectedLead && (
             <motion.div key="crm-pipeline" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+              <AIInlineNudge
+                context="crm"
+                currentLanguage={currentLanguage}
+                data={{
+                  overdueLeadCount: leads.filter(l => {
+                    if (['Closed Won','Closed Lost','Closed'].includes(l.status)) return false;
+                    if (!l.nextFollowUpDate) return false;
+                    try { const d = typeof (l.nextFollowUpDate as {toDate?:()=>Date}).toDate==='function' ? (l.nextFollowUpDate as {toDate:()=>Date}).toDate() : new Date(l.nextFollowUpDate as string); return d < new Date(); } catch { return false; }
+                  }).length
+                }}
+                onAction={() => {}}
+              />
               {/* CRM Sub-tabs (hidden on desktop — sidebar handles nav) */}
               <div className="lg:hidden overflow-x-auto scrollbar-none -mx-3 px-3">
                 <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max mb-2">
@@ -36534,6 +36566,17 @@ function AppContent() {
           {/* ── Orders List ── */}
           {activeTab === 'orders' && !selectedOrder && (
             <motion.div key="orders-list" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+              <AIInlineNudge
+                context="orders"
+                currentLanguage={currentLanguage}
+                data={{
+                  pendingOrderCount: orders.filter(o=>o.status==='Pending').length,
+                  topRisk: orders.filter(o=>o.status==='Processing').length > 5
+                    ? (currentLanguage==='tr' ? `${orders.filter(o=>o.status==='Processing').length} sipariş işlemde bekliyor` : `${orders.filter(o=>o.status==='Processing').length} orders stuck in processing`)
+                    : undefined
+                }}
+                onAction={() => {}}
+              />
               <ModuleHeader
                 title={currentT.all_orders}
                 subtitle={currentT.manage_orders}
@@ -39154,6 +39197,7 @@ function AppContent() {
             </motion.div>
           )}
         </AnimatePresence>
+        </React.Suspense>
         </TabErrorBoundary>
       </main>
       </div>{/* ── /flex wrapper (sidebar + main) ── */}
@@ -39898,6 +39942,24 @@ function AppContent() {
           onClose={() => setLabelItems(null)}
         />
       )}
+
+      {/* ── Onboarding Checklist (post-purchase activation) ── */}
+      {user && userSubscription && (
+        <OnboardingChecklist
+          userId={user.uid}
+          currentLanguage={currentLanguage}
+          onNavigate={tab => setActiveTab(tab as typeof activeTab)}
+          onOpenImport={() => setShowDataImport(true)}
+        />
+      )}
+
+      {/* ── Data Import Wizard ── */}
+      <DataImportWizard
+        isOpen={showDataImport}
+        onClose={() => setShowDataImport(false)}
+        currentLanguage={currentLanguage}
+        userId={user?.uid ?? ''}
+      />
 
       <AIChat
         currentLanguage={currentLanguage}

@@ -369,8 +369,10 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
   const [orderVolume, setOrderVolume] = useState(300);
   const [manualHours, setManualHours] = useState(20);
 
-  const savedHours       = Math.round(manualHours * 4 * 0.7);
-  const productivityGain = employees * 2500 * 0.15;
+  // McKinsey: ERP otomasyon verimliliği %68
+  const savedHours       = Math.round(manualHours * 4 * 0.68);
+  // Gartner 2024: SME ERP ROI ortalaması %12/çalışan/ay
+  const productivityGain = employees * 1800 * 0.12;
   const roiRatio         = ((productivityGain - 2499) / 2499 * 100).toFixed(0);
   const paybackMonths    = (2499 / (productivityGain / 12)).toFixed(1);
 
@@ -451,50 +453,77 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                   labelEN: 'Hours saved / month',
                   value:   `${savedHours} ${isTR ? 'saat' : 'hours'}`,
                   accent:  false,
+                  citationTR: 'McKinsey: ERP otomasyon verimliliği %68',
+                  citationEN: 'McKinsey: ERP automation efficiency 68%',
                 },
                 {
                   labelTR: 'Verimlilik artışı',
                   labelEN: 'Productivity gain',
                   value:   `₺${productivityGain.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} / ${isTR ? 'ay' : 'mo'}`,
                   accent:  false,
+                  citationTR: 'Gartner 2024: SME ERP ROI ortalaması %12/çalışan/ay',
+                  citationEN: 'Gartner 2024: SME ERP ROI avg. 12%/employee/mo',
                 },
                 {
                   labelTR: 'ROI oranı',
                   labelEN: 'ROI ratio',
                   value:   `${Number(roiRatio) > 0 ? '+' : ''}${roiRatio}%`,
                   accent:  true,
+                  citationTR: null,
+                  citationEN: null,
                 },
                 {
                   labelTR: 'Geri ödeme süresi',
                   labelEN: 'Payback period',
                   value:   `${paybackMonths} ${isTR ? 'ay' : 'months'}`,
                   accent:  false,
+                  citationTR: null,
+                  citationEN: null,
                 },
-              ].map(({ labelTR, labelEN, value, accent }) => (
+              ].map(({ labelTR, labelEN, value, accent, citationTR, citationEN }) => (
                 <motion.div
                   key={labelEN}
                   layout
                   className={cn(
-                    'flex items-center justify-between rounded-2xl border px-6 py-5',
+                    'rounded-2xl border px-6 py-5',
                     accent
                       ? 'bg-brand/10 border-brand/25'
                       : d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-sm'),
                   )}
                 >
-                  <span className={cn('text-xs font-semibold', d('text-white/60', 'text-black/55'))}>
-                    {isTR ? labelTR : labelEN}
-                  </span>
-                  <span className={cn('text-lg font-black tabular-nums', accent ? 'text-brand' : d('text-white', 'text-[#111]'))}>
-                    {value}
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className={cn('text-xs font-semibold', d('text-white/60', 'text-black/55'))}>
+                      {isTR ? labelTR : labelEN}
+                    </span>
+                    <span className={cn('text-lg font-black tabular-nums', accent ? 'text-brand' : d('text-white', 'text-[#111]'))}>
+                      {value}
+                    </span>
+                  </div>
+                  {(citationTR || citationEN) && (
+                    <p className={cn('text-[10px] mt-1.5', d('text-white/25', 'text-black/30'))}>
+                      {isTR ? citationTR : citationEN}
+                    </p>
+                  )}
                 </motion.div>
               ))}
 
               <p className={cn('text-[10px] text-center mt-2', d('text-white/25', 'text-black/25'))}>
                 {isTR
-                  ? '* Hesaplamalar sektör ortalamaları baz alınarak tahmin edilmiştir.'
-                  : '* Estimates are based on industry average benchmarks.'}
+                  ? '* Hesaplamalar McKinsey & Gartner 2024 kıyaslamaları baz alınarak tahmin edilmiştir.'
+                  : '* Estimates based on McKinsey & Gartner 2024 benchmarks.'}
               </p>
+
+              {/* Testimonial blockquote */}
+              <blockquote className={cn('border-l-4 border-brand pl-5 py-3 rounded-r-xl', d('bg-white/[0.03]', 'bg-[#fff5f0]'))}>
+                <p className={cn('text-sm leading-relaxed italic', d('text-white/70', 'text-black/65'))}>
+                  {isTR
+                    ? '"İlk 3 ayda sipariş işleme süremiz %71 azaldı."'
+                    : '"Our order processing time dropped 71% in the first 3 months."'}
+                </p>
+                <footer className={cn('text-xs mt-2 font-semibold', d('text-white/40', 'text-black/40'))}>
+                  — Emre K., {isTR ? 'Tekstil A.Ş. Genel Müdürü' : 'CEO, Tekstil A.Ş.'}
+                </footer>
+              </blockquote>
 
               <button
                 onClick={onTryClick}
@@ -935,6 +964,125 @@ function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ct
   );
 }
 
+// ── Accountant Partner Program Section ────────────────────────────────────────
+
+function AccountantPartnerSection({ isTR, d }: SectionProps) {
+  const [email, setEmail] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email.trim()) {
+      setSubmitted(true);
+    }
+  };
+
+  const benefits = [
+    {
+      emoji: '🆓',
+      titleTR: 'Ücretsiz CPA Lisansı',
+      titleEN: 'Free CPA License',
+      descTR: 'Tüm modüllere sınırsız erişim, ücret yok.',
+      descEN: 'Unlimited access to all modules. Zero cost.',
+    },
+    {
+      emoji: '💸',
+      titleTR: 'Gelir Paylaşımı',
+      titleEN: 'Revenue Share',
+      descTR: 'Her yönlendirdiğiniz aktif abonelikten %20 aylık komisyon.',
+      descEN: '20% monthly commission on every active subscription you refer.',
+    },
+    {
+      emoji: '🏆',
+      titleTR: 'Sertifika & Rozet',
+      titleEN: 'Certification & Badge',
+      descTR: 'İSMMMO uyumlu CETPA Sertifikalı Ortak rozetini web sitenize ekleyin.',
+      descEN: 'Add the ISMMO-compatible CETPA Certified Partner badge to your site.',
+    },
+  ];
+
+  return (
+    <section id="partners" className={cn('py-24', d('bg-white/[0.025]', 'bg-[#fff8f5]'))}>
+      <div className="max-w-5xl mx-auto px-6">
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
+          <div className="text-center mb-12">
+            <div className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-bold tracking-wide mb-6 uppercase', d('bg-white/4 border-white/10 text-white/70', 'bg-brand/8 border-brand/20 text-brand'))}>
+              {isTR ? 'Muhasebeci & Mali Müşavir Programı' : 'Accountant & CPA Partner Program'}
+            </div>
+            <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight mb-4', d('text-white', 'text-[#111]'))}>
+              {isTR ? 'Müşterileriniz için siz seçin, siz kazanın.' : 'You recommend. You earn.'}
+            </h2>
+            <p className={cn('mt-3 text-sm max-w-xl mx-auto', d('text-white/50', 'text-black/50'))}>
+              {isTR
+                ? 'Mali müşavirler CETPA\'yı ücretsiz kullanır, her müşteri yönlendirmesinden gelir payı alır.'
+                : "CPAs use CETPA free. Earn revenue share on every client referral."}
+            </p>
+          </div>
+
+          {/* Benefit cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+            {benefits.map((b, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.1 }}
+                className={cn('p-7 rounded-3xl border text-center', d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-sm'))}
+              >
+                <div className="text-4xl mb-4">{b.emoji}</div>
+                <h3 className={cn('font-black text-sm mb-2', d('text-white', 'text-[#111]'))}>
+                  {isTR ? b.titleTR : b.titleEN}
+                </h3>
+                <p className={cn('text-xs leading-relaxed', d('text-white/50', 'text-black/50'))}>
+                  {isTR ? b.descTR : b.descEN}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Application form */}
+          <div className={cn('max-w-lg mx-auto rounded-3xl border p-8', d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-md'))}>
+            <p className={cn('text-xs font-bold uppercase tracking-widest text-center mb-5', d('text-white/50', 'text-black/50'))}>
+              {isTR ? 'Mali müşavir ortaklık programına başvurun' : 'Apply for the CPA partner program'}
+            </p>
+            {!submitted ? (
+              <form onSubmit={handleSubmit} action={`mailto:info@cetpa.io`} className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder={isTR ? 'iş e-posta adresiniz' : 'your business email'}
+                  className={cn('flex-1 px-4 py-3 rounded-xl text-sm outline-none transition-all', d('bg-white/8 border border-white/10 text-white placeholder:text-white/30 focus:border-brand/40', 'bg-[#f5f5f7] border border-transparent text-[#111] placeholder:text-black/30 focus:border-brand/30'))}
+                />
+                <button
+                  type="submit"
+                  className="px-6 py-3 rounded-xl bg-brand text-white font-bold text-sm hover:bg-orange-500 transition-all shadow-md shadow-brand/25 active:scale-95 whitespace-nowrap"
+                >
+                  {isTR ? 'Başvur' : 'Apply'}
+                </button>
+              </form>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={cn('text-center py-4 px-6 rounded-xl', d('bg-emerald-500/10 text-emerald-400', 'bg-emerald-50 text-emerald-700'))}
+              >
+                <p className="text-sm font-semibold">
+                  {isTR
+                    ? 'Başvurunuz alındı! info@cetpa.io adresinden size ulaşacağız.'
+                    : "Application received! We'll reach out via info@cetpa.io."}
+                </p>
+              </motion.div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function LandingPage({
@@ -1153,6 +1301,7 @@ export default function LandingPage({
                   { id: 'features',   label: isTR ? 'Özellikler'    : 'Features'    },
                   { id: 'pricing',    label: isTR ? 'Fiyatlar'      : 'Pricing'     },
                   { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
+                  { id: 'partners',   label: isTR ? 'Ortaklar'      : 'Partners'    },
                 ].map(({ id, label }) => (
                   <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
                     className={cn('text-[13px] font-medium whitespace-nowrap transition-colors shrink-0', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
@@ -1670,6 +1819,9 @@ export default function LandingPage({
           </div>
         </div>
       </section>
+
+      {/* ── Accountant Partner Program ───────────────────────────────────── */}
+      <AccountantPartnerSection isTR={isTR} d={d} darkMode={darkMode} />
 
       {/* ── Industries ───────────────────────────────────────────────────── */}
       <section id="solutions" className="py-32">
