@@ -1325,6 +1325,100 @@ export default function LandingPage({
         </div>
       </section>
 
+      {/* ── Bold Statement (Zera-inspired) ───────────────────────────── */}
+      <section className="py-24 overflow-hidden">
+        <div className="max-w-6xl mx-auto px-6">
+          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+            className={cn('relative rounded-[2.5rem] overflow-hidden p-14 md:p-20 cetpa-noise cetpa-grid-bg', d('bg-[#0b0b14]','bg-white border border-black/8 shadow-xl'))}>
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 20% 50%, rgba(255,64,0,0.12) 0%, transparent 65%)' }} />
+            <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
+              {/* Left: statement */}
+              <div className="flex-1 max-w-2xl">
+                <p className={cn('text-xs font-black uppercase tracking-widest mb-6', 'text-brand')}>{isTR ? 'Gerçek şu ki' : 'The truth is'}</p>
+                <h2 className={cn('text-3xl md:text-5xl font-black tracking-tight leading-[1.1]', d('text-white','text-[#111]'))}>
+                  {isTR
+                    ? <>"Operasyonlarınız bağlı değilse,<br /><span className="cetpa-gradient-text">fiyat yarışında</span> her zaman geride kalırsınız."</>
+                    : <>"If your operations aren't connected, you'll always<br /><span className="cetpa-gradient-text">compete on price alone."</span></>
+                  }
+                </h2>
+                <p className={cn('mt-6 text-sm leading-relaxed max-w-lg', d('text-white/45','text-black/45'))}>
+                  {isTR
+                    ? 'Veriyi silolarda tutmak, müşteri deneyimini ve marjları ezer. CETPA tüm departmanları tek bir gerçek kaynağında birleştirir.'
+                    : 'Siloed data crushes customer experience and margins. CETPA unifies every department into one source of truth.'
+                  }
+                </p>
+              </div>
+              {/* Right: KPI badges */}
+              <div className="flex flex-col gap-4 shrink-0">
+                {[
+                  { val: '98', label: isTR ? 'Performans Puanı' : 'Performance Score', sub: 'Lighthouse' },
+                  { val: '4.9★', label: isTR ? 'Müşteri Puanı' : 'Customer Rating', sub: isTR ? '200+ inceleme' : '200+ reviews' },
+                  { val: '99.9%', label: 'Uptime SLA', sub: isTR ? 'Garanti' : 'Guaranteed' },
+                ].map((kpi, i) => (
+                  <motion.div key={i} initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1 }}
+                    className={cn('flex items-center gap-4 px-6 py-4 rounded-2xl border', d('bg-white/[0.04] border-white/10','bg-black/[0.03] border-black/8'))}>
+                    <span className="text-2xl font-black text-brand leading-none">{kpi.val}</span>
+                    <div>
+                      <p className={cn('text-xs font-bold', d('text-white/80','text-black/80'))}>{kpi.label}</p>
+                      <p className={cn('text-[10px]', d('text-white/30','text-black/30'))}>{kpi.sub}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── What's Inside: Numbered Modules ──────────────────────────── */}
+      <section className="py-24 px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <p className="text-xs font-black uppercase tracking-widest text-brand mb-3">{isTR ? 'Modüller' : "What's Inside"}</p>
+            <h2 className={cn('text-3xl md:text-5xl font-black tracking-tight', d('text-white','text-[#111]'))}>
+              {isTR ? '18 entegre modül, sıfır silo' : '18 integrated modules. Zero silos.'}
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {([
+              { n:'01', label: isTR ? 'Dashboard & Analitik'         : 'Dashboard & Analytics',      icon:'📊' },
+              { n:'02', label: isTR ? 'CRM & Satış Yönetimi'         : 'CRM & Sales Management',     icon:'🤝' },
+              { n:'03', label: isTR ? 'Sipariş & Fatura Yönetimi'    : 'Order & Invoice Management',  icon:'📦' },
+              { n:'04', label: isTR ? 'Envanter & Depo'              : 'Inventory & Warehouse',       icon:'📋' },
+              { n:'05', label: isTR ? 'Muhasebe & Finans'            : 'Accounting & Finance',        icon:'💰' },
+              { n:'06', label: isTR ? 'Lojistik & Kargo'             : 'Logistics & Cargo',           icon:'🚛' },
+              { n:'07', label: isTR ? 'Satın Alma & Tedarik'         : 'Purchasing & Procurement',    icon:'🛒' },
+              { n:'08', label: isTR ? 'B2B & Bayi Portalı'           : 'B2B & Dealer Portal',         icon:'🏪' },
+              { n:'09', label: isTR ? 'Üretim & BOM'                 : 'Production & BOM',            icon:'🏭' },
+              { n:'10', label: isTR ? 'İnsan Kaynakları'             : 'Human Resources',             icon:'👥' },
+              { n:'11', label: isTR ? 'Hukuk & Uyum'                 : 'Legal & Compliance',          icon:'⚖️' },
+              { n:'12', label: isTR ? 'Kalite Kontrol'               : 'Quality Control',             icon:'✅' },
+              { n:'13', label: isTR ? 'Proje Yönetimi'               : 'Project Management',          icon:'📐' },
+              { n:'14', label: isTR ? 'Risk Yönetimi'                : 'Risk Management',             icon:'🛡️' },
+              { n:'15', label: isTR ? 'Kurumsal Yönetişim'           : 'Corporate Governance',        icon:'🏛️' },
+              { n:'16', label: isTR ? 'Raporlar & BI'                : 'Reports & BI',                icon:'📈' },
+              { n:'17', label: isTR ? 'Entegrasyonlar (Shopify, Mikro, Luca)' : 'Integrations (Shopify, Mikro, Luca)', icon:'🔌' },
+              { n:'18', label: isTR ? 'AI Asistan & Otomasyon'       : 'AI Assistant & Automation',   icon:'🤖' },
+            ] as {n:string;label:string;icon:string}[]).map((mod, i) => (
+              <motion.div key={mod.n} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: (i % 3) * 0.06 }}
+                className={cn('group flex items-center gap-4 p-4 rounded-2xl border transition-all cetpa-card-glow cursor-default',
+                  d('bg-white/[0.025] border-white/8 hover:bg-white/[0.05]','bg-white border-black/8 hover:border-brand/20 shadow-sm'))}>
+                <span className="text-xl flex-shrink-0">{mod.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className={cn('text-xs font-black', d('text-white/80','text-[#111]'))}>{mod.label}</p>
+                </div>
+                <span className={cn('text-[10px] font-black tabular-nums shrink-0', d('text-white/15','text-black/15'))}>{mod.n}</span>
+              </motion.div>
+            ))}
+          </div>
+          <div className="text-center mt-10">
+            <div className={cn('inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold border', d('border-white/10 text-white/40','border-black/10 text-black/40'))}>
+              {isTR ? '🔒 Enterprise planında tüm modüller açık + özel geliştirme' : '🔒 Enterprise plan unlocks all modules + custom development'}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Final CTA ────────────────────────────────────────────────────── */}
       <section className="py-32 px-4">
         <div className="max-w-5xl mx-auto">
