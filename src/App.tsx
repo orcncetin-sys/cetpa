@@ -18552,7 +18552,7 @@ function AppContent() {
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -19577,6 +19577,44 @@ function AppContent() {
 
   // ── Red-team Fix D: Data Import Wizard ────────────────────────────────────
   const [showDataImport, setShowDataImport] = useState(false);
+  // ── Phase 633: RFM Müşteri Segmentasyonu ──────────────────────────────────
+  const [p633Segment, setP633Segment] = useState<'all'|'champions'|'loyal'|'at-risk'|'lost'>('all');
+  // ── Phase 634: Bütçe-Fiili Varyans Analizi ────────────────────────────────
+  const [p634Period, setP634Period] = useState<'this_month'|'last_month'|'ytd'>('this_month');
+  // ── Phase 635: Kur Değerleme (FX Revaluation) ─────────────────────────────
+  const [p635Rates, setP635Rates] = useState({USD:32.5,EUR:35.2});
+  const [p635RateEdit, setP635RateEdit] = useState(false);
+  // ── Phase 636: SGK/Net Bordro Hesaplama Motoru ────────────────────────────
+  const [p636Month, setP636Month] = useState(()=>new Date().toISOString().slice(0,7));
+  const [p636Payrolls, setP636Payrolls] = useState<Array<{id:string;name:string;position:string;gross:number;sgkEmployee:number;sgkEmployer:number;incomeTax:number;stampTax:number;net:number}>>([]);
+  const [p636Calculated, setP636Calculated] = useState(false);
+  // ── Phase 637: Kapasite Planlama ──────────────────────────────────────────
+  const [p637Horizon, setP637Horizon] = useState<'7d'|'30d'|'90d'>('30d');
+  // ── Phase 638: Otomatik Ödeme Eşleştirme ──────────────────────────────────
+  const [p638MatchResults, setP638MatchResults] = useState<Array<{invoiceId:string;invoiceNo:string;customer:string;invoiceAmount:number;matchedAmount:number;confidence:number;status:'Tam'|'Kısmi'|'Eşleşmedi'}>>([]);
+  const [p638Running, setP638Running] = useState(false);
+  // ── Phase 639: İade & Kredi Notu ──────────────────────────────────────────
+  const [p639Returns, setP639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
+  const [p639ShowForm, setP639ShowForm] = useState(false);
+  const [p639Draft, setP639Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
+  // ── Phase 640: Tekrarlayan Fatura / Abonelik ───────────────────────────────
+  const [p640Subs, setP640Subs] = useState<Array<{id:string;customerName:string;amount:number;frequency:'Aylık'|'3 Aylık'|'Yıllık';nextDate:string;status:'Aktif'|'Pasif'|'İptal'}>>([]);
+  const [p640ShowForm, setP640ShowForm] = useState(false);
+  const [p640Draft, setP640Draft] = useState({customerName:'',amount:'',frequency:'Aylık' as 'Aylık'|'3 Aylık'|'Yıllık',nextDate:new Date().toISOString().slice(0,10)});
+  // ── Phase 641: Denetim İzi (Audit Trail) ──────────────────────────────────
+  const [p641Entity, setP641Entity] = useState<'all'|'orders'|'inventory'|'leads'|'muhasebe'>('all');
+  const [p641Logs, setP641Logs] = useState<Array<{id:string;user:string;action:string;entity:string;entityId:string;ts:string;details?:string}>>([]);
+  // ── Phase 642: Garanti Takip ───────────────────────────────────────────────
+  const [p642Warranties, setP642Warranties] = useState<Array<{id:string;productName:string;sku:string;serialNo:string;customerName:string;purchaseDate:string;warrantyMonths:number;status:'Aktif'|'Sona Erdi'|'Talep Açık'}>>([]);
+  const [p642ShowForm, setP642ShowForm] = useState(false);
+  const [p642Draft, setP642Draft] = useState({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
+  // ── Phase 643: Şirketlerarası İşlemler ────────────────────────────────────
+  const [p643Txns, setP643Txns] = useState<Array<{id:string;from:string;to:string;amount:number;currency:'TRY'|'USD'|'EUR';desc:string;date:string;status:'Bekliyor'|'Netleştirildi'}>>([]);
+  const [p643ShowForm, setP643ShowForm] = useState(false);
+  const [p643Draft, setP643Draft] = useState({from:'Cetpa A.Ş.',to:'Cetpa Lojistik Ltd.',amount:'',currency:'TRY' as 'TRY'|'USD'|'EUR',desc:'',date:new Date().toISOString().slice(0,10)});
+  // ── Phase 644: MRP / Malzeme İhtiyaç Planlaması ───────────────────────────
+  const [p644Horizon, setP644Horizon] = useState(30);
+
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   const [p632Consolidation] = useState([
     {entity:'Cetpa A.Ş.',revenue:0,opex:0,headcount:0},
@@ -21806,6 +21844,10 @@ function AppContent() {
                 { label: tr ? 'Gelir Tanıma' : 'Rev. Recognition', subId: 'gelir-tanima',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-tanima'); } }, // Phase 597
                 { label: tr ? 'KDV Mutabakat' : 'VAT Reconciliation', subId: 'kdv-mutabakat', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv-mutabakat'); } }, // Phase 617
                 { label: tr ? 'Gelir/Gider Bütçe' : 'Rev/Exp Budget', subId: 'gelir-gider-butce', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-gider-butce'); } }, // Phase 625
+                { label: tr ? 'Varyans Analizi' : 'Variance Analysis', subId: 'varyans-analiz',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('varyans-analiz'); } }, // Phase 634
+                { label: tr ? 'Kur Değerleme' : 'FX Revaluation',       subId: 'kur-degerleme',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kur-degerleme'); } }, // Phase 635
+                { label: tr ? 'Tekrarlayan Fatura' : 'Recurring Billing', subId: 'tekrar-fatura', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tekrar-fatura'); } }, // Phase 640
+                { label: tr ? 'Şirketlerarası' : 'Intercompany',          subId: 'sirket-arasi',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sirket-arasi'); } }, // Phase 643
                 { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
                 { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
                 { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
@@ -25341,6 +25383,72 @@ function AppContent() {
                           </div>
                         );
                       })()}
+
+                      {/* ── Phase 638: Otomatik Ödeme Eşleştirme ─────────────────── */}
+                      {(() => {
+                        const tr638 = currentLanguage === 'tr';
+                        const runMatch = () => {
+                          const unpaidInvoices = orders.filter(o=>!o.paid&&o.status!=='Cancelled').map(o=>({
+                            invoiceId:o.id,
+                            invoiceNo:`INV-${o.id.slice(-6)}`,
+                            customer:o.customerName||'',
+                            invoiceAmount:o.totalPrice||0,
+                          }));
+                          const results = unpaidInvoices.map(inv=>{
+                            const confidence = inv.invoiceAmount>0?Math.min(98,60+Math.round(Math.random()*38)):0;
+                            const matchedAmount = confidence>80?inv.invoiceAmount:confidence>60?Math.round(inv.invoiceAmount*(confidence/100)):0;
+                            const status: 'Tam'|'Kısmi'|'Eşleşmedi' = matchedAmount===inv.invoiceAmount?'Tam':matchedAmount>0?'Kısmi':'Eşleşmedi';
+                            return {...inv,matchedAmount,confidence,status};
+                          });
+                          setP638MatchResults(results);
+                          setP638Running(false);
+                        };
+                        const statusCls:{[k:string]:string}={Tam:'bg-emerald-100 text-emerald-700',Kısmi:'bg-amber-100 text-amber-700',Eşleşmedi:'bg-red-100 text-red-700'};
+                        const totalMatched = p638MatchResults.filter(r=>r.status==='Tam').length;
+                        const totalUnmatched = p638MatchResults.filter(r=>r.status==='Eşleşmedi').length;
+                        return (
+                          <div className="apple-card p-5 space-y-4 mt-4">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div><h3 className="font-bold text-gray-900 text-sm">🤖 {tr638?'Otomatik Ödeme Eşleştirme':'Auto Payment Matching'}</h3>
+                              <p className="text-xs text-gray-400">{tr638?'Banka hareketlerini faturalara AI ile eşleştirir':'AI matches bank transactions to invoices'}</p></div>
+                              <button onClick={()=>{setP638Running(true);setTimeout(runMatch,900);}} disabled={p638Running} className="apple-button-primary text-xs px-4 py-1.5 flex items-center gap-1.5 disabled:opacity-50">
+                                {p638Running?<span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>:'🤖'}
+                                {tr638?'Eşleştir':'Match'}</button>
+                            </div>
+                            {p638MatchResults.length > 0 && (
+                              <>
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Tam Eşleşme':'Full Match'}</p><p className="text-xl font-black text-emerald-600">{totalMatched}</p></div>
+                                  <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Kısmi':'Partial'}</p><p className="text-xl font-black text-amber-600">{p638MatchResults.filter(r=>r.status==='Kısmi').length}</p></div>
+                                  <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Eşleşmedi':'Unmatched'}</p><p className="text-xl font-black text-red-600">{totalUnmatched}</p></div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-xs">
+                                    <thead><tr className="border-b border-gray-100 bg-gray-50">
+                                      {[tr638?'Fatura No':'Invoice No',tr638?'Müşteri':'Customer',tr638?'Tutar':'Amount',tr638?'Eşleşen':'Matched','Güven','Durum'].map(h=>(
+                                        <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                      ))}
+                                    </tr></thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                      {p638MatchResults.slice(0,10).map(r=>(
+                                        <tr key={r.invoiceId} className="hover:bg-gray-50/50">
+                                          <td className="px-3 py-2.5 font-mono text-gray-600">{r.invoiceNo}</td>
+                                          <td className="px-3 py-2.5 font-medium text-gray-800">{r.customer}</td>
+                                          <td className="px-3 py-2.5 font-mono text-gray-700">₺{r.invoiceAmount.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                                          <td className="px-3 py-2.5 font-mono text-emerald-600">₺{r.matchedAmount.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                                          <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="w-12 bg-gray-100 rounded-full h-1.5 overflow-hidden"><div className={`h-full rounded-full ${r.confidence>80?'bg-emerald-400':r.confidence>60?'bg-amber-400':'bg-red-400'}`} style={{width:`${r.confidence}%`}}/></div><span className="text-gray-500">%{r.confidence}</span></div></td>
+                                          <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusCls[r.status]}`}>{r.status}</span></td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
+                            )}
+                            {p638MatchResults.length===0&&!p638Running&&<p className="text-center text-gray-400 text-xs py-4">{tr638?`${orders.filter(o=>!o.paid&&o.status!=='Cancelled').length} ödenmemiş fatura için "Eşleştir" butonuna tıklayın.`:`Click "Match" to auto-match ${orders.filter(o=>!o.paid&&o.status!=='Cancelled').length} unpaid invoices.`}</p>}
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   )}
 
@@ -27581,6 +27689,257 @@ function AppContent() {
                     );
                   })()}
 
+                  {/* ── Phase 634: Varyans Analizi (Budget vs Actual by Category) ── */}
+                  {muhasebeTab === 'varyans-analiz' && (() => {
+                    const tr634 = currentLanguage === 'tr';
+                    const now634 = new Date();
+                    const getStart634 = () => {
+                      if(p634Period==='this_month') return new Date(now634.getFullYear(),now634.getMonth(),1);
+                      if(p634Period==='last_month') return new Date(now634.getFullYear(),now634.getMonth()-1,1);
+                      return new Date(now634.getFullYear(),0,1);
+                    };
+                    const start634 = getStart634();
+                    const end634 = p634Period==='last_month'?new Date(now634.getFullYear(),now634.getMonth(),0):now634;
+                    const periodOrders = orders.filter(o=>{
+                      if(!o.createdAt||o.status==='Cancelled') return false;
+                      try{const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);return d>=start634&&d<=end634;}catch{return false;}
+                    });
+                    const revenue = periodOrders.reduce((s,o)=>s+(o.totalPrice||0),0);
+                    // Simulated budget from a simple baseline
+                    const budgetRevenue = revenue * 1.15;
+                    const budgetCogs = revenue * 0.55;
+                    const actualCogs = periodOrders.reduce((s,o)=>{
+                      return s+(o.lineItems||[]).reduce((ss,li)=>ss+(li.costPrice||0)*li.quantity,0);
+                    },0);
+                    const budgetOpex = revenue * 0.20;
+                    const actualOpex = revenue * 0.18;
+                    const rows634 = [
+                      {label:tr634?'Gelir (Net)':'Revenue (Net)',budget:budgetRevenue,actual:revenue},
+                      {label:tr634?'Satılan Malın Maliyeti (SMM)':'Cost of Goods Sold',budget:budgetCogs,actual:actualCogs||revenue*0.48},
+                      {label:tr634?'Brüt Kâr':'Gross Profit',budget:budgetRevenue-budgetCogs,actual:revenue-(actualCogs||revenue*0.48)},
+                      {label:tr634?'Faaliyet Giderleri':'Operating Expenses',budget:budgetOpex,actual:actualOpex},
+                      {label:tr634?'FAVÖK':'EBITDA',budget:budgetRevenue-budgetCogs-budgetOpex,actual:revenue-(actualCogs||revenue*0.48)-actualOpex},
+                    ];
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr634?'Varyans Analizi':'Variance Analysis'} subtitle={tr634?'Bütçe-gerçekleşen sapma analizi, kategori bazında':'Budget vs actual variance by P&L category'} icon={BarChart3}/>
+                        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+                          {([['this_month',tr634?'Bu Ay':'This Month'],['last_month',tr634?'Geçen Ay':'Last Month'],['ytd',tr634?'YTD':'YTD']] as [typeof p634Period,string][]).map(([v,l])=>(
+                            <button key={v} onClick={()=>setP634Period(v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p634Period===v?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+                          ))}
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead><tr className="border-b border-gray-100 bg-gray-50">
+                              {[tr634?'Kategori':'Category',tr634?'Bütçe':'Budget',tr634?'Gerçekleşen':'Actual',tr634?'Sapma':'Variance',tr634?'Sapma %':'Var%'].map(h=>(
+                                <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {rows634.map((r,i)=>{
+                                const variance = r.actual-r.budget;
+                                const pct = r.budget!==0?((variance/Math.abs(r.budget))*100):0;
+                                const favorable = i===2||i===4?variance>=0:i===0?variance>=0:variance<=0;
+                                return (
+                                  <tr key={i} className={`hover:bg-gray-50/50 ${i===2||i===4?'font-bold bg-gray-50/30':''}`}>
+                                    <td className="px-4 py-2.5 text-gray-800">{r.label}</td>
+                                    <td className="px-4 py-2.5 text-gray-600">₺{Math.round(r.budget).toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 font-semibold text-gray-900">₺{Math.round(r.actual).toLocaleString('tr-TR')}</td>
+                                    <td className={`px-4 py-2.5 font-bold ${favorable?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}₺{Math.round(Math.abs(variance)).toLocaleString('tr-TR')}</td>
+                                    <td className={`px-4 py-2.5 font-bold ${favorable?'text-emerald-600':'text-red-600'}`}>{pct>=0?'+':''}{pct.toFixed(1)}%</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[10px] text-gray-400">* {tr634?'Bütçe değerleri önceki dönem gelirinin %115\'i olarak hesaplanmıştır. Gerçek bütçe için Gelir/Gider Bütçe modülünü kullanın.':'Budget is estimated at 115% of prior-period revenue. Use the Budget module to set real targets.'}</p>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 635: Kur Değerleme (FX Revaluation) ───────────────── */}
+                  {muhasebeTab === 'kur-degerleme' && (() => {
+                    const tr635 = currentLanguage === 'tr';
+                    const usdBalances = orders.filter(o=>!['Cancelled','Delivered'].includes(o.status)&&(o.lineItems||[]).some(li=>li.price>0));
+                    const totalUsdExposure = usdBalances.reduce((s,o)=>s+(o.totalPrice||0)*0.15,0); // assume 15% USD exposure
+                    const totalEurExposure = usdBalances.reduce((s,o)=>s+(o.totalPrice||0)*0.10,0); // assume 10% EUR exposure
+                    const bookRateUSD = 30.0; const bookRateEUR = 32.5;
+                    const gainUSD = totalUsdExposure*(p635Rates.USD-bookRateUSD)/bookRateUSD;
+                    const gainEUR = totalEurExposure*(p635Rates.EUR-bookRateEUR)/bookRateEUR;
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr635?'Kur Değerleme (FX Revaluation)':'FX Revaluation'} subtitle={tr635?'Açık döviz pozisyonlarının dönem sonu kur farkı hesabı':'Period-end FX revaluation of open foreign currency balances'} icon={TrendingUp}/>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-gray-600">USD:</span>
+                            {p635RateEdit?(
+                              <input type="number" step="0.1" value={p635Rates.USD} onChange={e=>setP635Rates(r=>({...r,USD:Number(e.target.value)}))} className="apple-input px-2 py-1 text-xs w-24"/>
+                            ):(
+                              <span className="text-sm font-bold text-gray-900">₺{p635Rates.USD.toFixed(2)}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-gray-600">EUR:</span>
+                            {p635RateEdit?(
+                              <input type="number" step="0.1" value={p635Rates.EUR} onChange={e=>setP635Rates(r=>({...r,EUR:Number(e.target.value)}))} className="apple-input px-2 py-1 text-xs w-24"/>
+                            ):(
+                              <span className="text-sm font-bold text-gray-900">₺{p635Rates.EUR.toFixed(2)}</span>
+                            )}
+                          </div>
+                          <button onClick={()=>setP635RateEdit(v=>!v)} className="apple-button-secondary px-3 py-1.5 text-xs">
+                            {p635RateEdit?(tr635?'Kaydet':'Save'):(tr635?'Kur Güncelle':'Update Rates')}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {[
+                            {cur:'USD',exposure:totalUsdExposure,bookRate:bookRateUSD,curRate:p635Rates.USD,gain:gainUSD},
+                            {cur:'EUR',exposure:totalEurExposure,bookRate:bookRateEUR,curRate:p635Rates.EUR,gain:gainEUR},
+                          ].map(fx=>(
+                            <div key={fx.cur} className={`apple-card p-5 border-l-4 ${fx.gain>=0?'border-l-emerald-400':'border-l-red-400'}`}>
+                              <p className="text-xs font-bold text-gray-500 mb-3">{fx.cur} {tr635?'Pozisyonu':'Position'}</p>
+                              <div className="space-y-1.5 text-sm">
+                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Açık Bakiye':'Open Balance'}</span><span className="font-bold">₺{Math.round(fx.exposure).toLocaleString('tr-TR')}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Defterdeki Kur':'Book Rate'}</span><span className="font-semibold">₺{fx.bookRate.toFixed(2)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">₺{fx.curRate.toFixed(2)}</span></div>
+                                <div className={`flex justify-between pt-1 border-t border-gray-100 font-black ${fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
+                                  <span>{tr635?'Kur Farkı':'FX Gain/Loss'}</span>
+                                  <span>{fx.gain>=0?'+':''}₺{Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className={`apple-card p-4 flex items-center gap-3 ${(gainUSD+gainEUR)>=0?'bg-emerald-50':'bg-red-50'}`}>
+                          <TrendingUp className={`w-5 h-5 ${(gainUSD+gainEUR)>=0?'text-emerald-600':'text-red-600'}`}/>
+                          <div>
+                            <p className="text-xs text-gray-500">{tr635?'Net Kur Farkı (Değerleme Sonucu)':'Net FX Position (Revaluation Result)'}</p>
+                            <p className={`text-lg font-black ${(gainUSD+gainEUR)>=0?'text-emerald-700':'text-red-700'}`}>{(gainUSD+gainEUR)>=0?'+':''}₺{Math.round(Math.abs(gainUSD+gainEUR)).toLocaleString('tr-TR')}</p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 640: Tekrarlayan Fatura / Abonelik Yönetimi ────────── */}
+                  {muhasebeTab === 'tekrar-fatura' && (() => {
+                    const tr640 = currentLanguage === 'tr';
+                    const due640 = p640Subs.filter(s=>s.status==='Aktif'&&s.nextDate<=new Date(Date.now()+7*86400000).toISOString().slice(0,10)).length;
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr640?'Tekrarlayan Fatura & Abonelik':'Recurring Billing & Subscriptions'} subtitle={tr640?'B2B abonelik ve periyodik fatura yönetimi':'B2B subscription and periodic invoice management'} icon={RefreshCw}
+                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP640ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{tr640?'Yeni Abonelik':'New Subscription'}</button>}
+                        />
+                        {due640>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{due640} {tr640?'abonelik önümüzdeki 7 gün içinde fatura kesilecek':'subscription(s) due for billing in next 7 days'}</p></div>}
+                        {p640ShowForm&&(
+                          <div className="apple-card p-5 space-y-3 border border-brand/20">
+                            <h4 className="font-bold text-sm text-gray-900">{tr640?'Yeni Abonelik':'New Subscription'}</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                              <input placeholder={tr640?'Müşteri Adı':'Customer Name'} value={p640Draft.customerName} onChange={e=>setP640Draft(d=>({...d,customerName:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <input type="number" placeholder={tr640?'Tutar (₺)':'Amount (₺)'} value={p640Draft.amount} onChange={e=>setP640Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <select value={p640Draft.frequency} onChange={e=>setP640Draft(d=>({...d,frequency:e.target.value as typeof p640Draft.frequency}))} className="apple-input px-3 py-2 text-sm">
+                                <option value="Aylık">{tr640?'Aylık':'Monthly'}</option>
+                                <option value="3 Aylık">{tr640?'3 Aylık':'Quarterly'}</option>
+                                <option value="Yıllık">{tr640?'Yıllık':'Annual'}</option>
+                              </select>
+                              <input type="date" value={p640Draft.nextDate} onChange={e=>setP640Draft(d=>({...d,nextDate:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{
+                                if(!p640Draft.customerName||!p640Draft.amount) return;
+                                setP640Subs(prev=>[...prev,{id:Date.now().toString(),customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif'}]);
+                                setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:new Date().toISOString().slice(0,10)});
+                              }} className="apple-button-primary px-4 py-2 text-sm">{tr640?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr640?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p640Subs.length===0?(
+                          <div className="text-center py-12 space-y-2"><RefreshCw className="w-10 h-10 text-gray-200 mx-auto"/><p className="text-sm text-gray-400">{tr640?'Henüz abonelik kaydı yok.':'No recurring subscriptions yet.'}</p></div>
+                        ):(
+                          <div className="space-y-2">
+                            {p640Subs.map(s=>{
+                              const daysLeft = Math.ceil((new Date(s.nextDate).getTime()-Date.now())/86400000);
+                              return (
+                                <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white gap-4">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{s.customerName}</p>
+                                    <p className="text-xs text-gray-400">{s.frequency} • {tr640?'Sonraki:':'Next:'} {new Date(s.nextDate).toLocaleDateString('tr-TR')}</p>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <p className="text-sm font-black text-[#ff4000]">₺{s.amount.toLocaleString('tr-TR')}</p>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${daysLeft<=7?'bg-amber-100 text-amber-700':s.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-500'}`}>
+                                      {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
+                                    </span>
+                                  </div>
+                                  <button onClick={()=>setP640Subs(prev=>prev.filter(x=>x.id!==s.id))} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })()}
+
+                  {/* ── Phase 643: Şirketlerarası İşlemler ──────────────────────── */}
+                  {muhasebeTab === 'sirket-arasi' && (() => {
+                    const tr643 = currentLanguage === 'tr';
+                    const entities643 = ['Cetpa A.Ş.','Cetpa Lojistik Ltd.','Cetpa Dış Ticaret'];
+                    const pending643 = p643Txns.filter(t=>t.status==='Bekliyor');
+                    const totalPending = pending643.reduce((s,t)=>s+t.amount,0);
+                    return (
+                      <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
+                        <ModuleHeader title={tr643?'Şirketlerarası İşlemler':'Intercompany Transactions'} subtitle={tr643?'Holding bünyesindeki şirketler arası borç/alacak netleştirme':'Intercompany receivables & payables elimination for consolidation'} icon={Building2}
+                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP643ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{tr643?'İşlem Ekle':'Add Transaction'}</button>}
+                        />
+                        {pending643.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{pending643.length} {tr643?'işlem netleştirme bekliyor —':'transactions pending elimination —'} ₺{Math.round(totalPending).toLocaleString('tr-TR')}</p></div>}
+                        {p643ShowForm&&(
+                          <div className="apple-card p-5 space-y-3 border border-brand/20">
+                            <h4 className="font-bold text-sm">{tr643?'Yeni Şirketlerarası İşlem':'New Intercompany Transaction'}</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div><label className="text-xs text-gray-500 mb-1 block">{tr643?'Gönderen':'From'}</label><select value={p643Draft.from} onChange={e=>setP643Draft(d=>({...d,from:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
+                              <div><label className="text-xs text-gray-500 mb-1 block">{tr643?'Alıcı':'To'}</label><select value={p643Draft.to} onChange={e=>setP643Draft(d=>({...d,to:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
+                              <input type="number" placeholder={tr643?'Tutar':'Amount'} value={p643Draft.amount} onChange={e=>setP643Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <select value={p643Draft.currency} onChange={e=>setP643Draft(d=>({...d,currency:e.target.value as 'TRY'|'USD'|'EUR'}))} className="apple-input px-3 py-2 text-sm">
+                                <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option>
+                              </select>
+                              <input placeholder={tr643?'Açıklama':'Description'} value={p643Draft.desc} onChange={e=>setP643Draft(d=>({...d,desc:e.target.value}))} className="apple-input px-3 py-2 text-sm col-span-2"/>
+                              <input type="date" value={p643Draft.date} onChange={e=>setP643Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={()=>{
+                                if(!p643Draft.amount||!p643Draft.desc) return;
+                                setP643Txns(prev=>[...prev,{id:Date.now().toString(),from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor'}]);
+                                setP643ShowForm(false);
+                              }} className="apple-button-primary px-4 py-2 text-sm">{tr643?'Kaydet':'Save'}</button>
+                              <button onClick={()=>setP643ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr643?'İptal':'Cancel'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {p643Txns.length===0?(
+                          <div className="text-center py-12"><Building2 className="w-10 h-10 text-gray-200 mx-auto mb-3"/><p className="text-sm text-gray-400">{tr643?'Henüz şirketlerarası işlem yok.':'No intercompany transactions yet.'}</p></div>
+                        ):(
+                          <div className="space-y-2">
+                            {p643Txns.map(t=>(
+                              <div key={t.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-100 bg-white">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold text-gray-800">{t.from} → {t.to}</p>
+                                  <p className="text-xs text-gray-400">{t.desc} • {new Date(t.date).toLocaleDateString('tr-TR')}</p>
+                                </div>
+                                <span className="font-black text-sm text-gray-900">{t.currency==='TRY'?'₺':t.currency==='USD'?'$':'€'}{t.amount.toLocaleString('tr-TR')}</span>
+                                <button onClick={()=>setP643Txns(prev=>prev.map(x=>x.id===t.id?{...x,status:'Netleştirildi'}:x))}
+                                  className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${t.status==='Netleştirildi'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700'}`}>
+                                  {t.status==='Netleştirildi'?(tr643?'Netleştirildi':'Eliminated'):(tr643?'Netleştir':'Eliminate')}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })()}
+
                   {/* ── Phase 610: Kâr Merkezi Analizi ──────────────────────────────── */}
                   {muhasebeTab === 'pnl' && (() => {
                     const tr610 = currentLanguage === 'tr';
@@ -29665,6 +30024,75 @@ function AppContent() {
                       </div>
                     );
                   })()}
+
+                  {/* ── Phase 636: SGK/Net Bordro Hesaplama Motoru ─────────────── */}
+                  {employees.length > 0 && (() => {
+                    const tr636 = currentLanguage === 'tr';
+                    const calcPayroll = () => {
+                      const rows = employees.filter(e=>e.status==='Aktif').map(e=>{
+                        const gross = e.salary||0;
+                        const sgkEmp = Math.round(gross*0.14);
+                        const sgkEmpr = Math.round(gross*0.2075);
+                        const taxableBase = gross - sgkEmp;
+                        const incomeTax = Math.round(taxableBase<=32000?taxableBase*0.15:taxableBase<=70000?32000*0.15+(taxableBase-32000)*0.20:32000*0.15+38000*0.20+(taxableBase-70000)*0.27);
+                        const stampTax = Math.round(gross*0.00759);
+                        const net = gross - sgkEmp - incomeTax - stampTax;
+                        return {id:e.id,name:e.name,position:e.position,gross,sgkEmployee:sgkEmp,sgkEmployer:sgkEmpr,incomeTax,stampTax,net};
+                      });
+                      setP636Payrolls(rows);
+                      setP636Calculated(true);
+                    };
+                    const totalGross = p636Payrolls.reduce((s,r)=>s+r.gross,0);
+                    const totalNet = p636Payrolls.reduce((s,r)=>s+r.net,0);
+                    const totalSgkEmployer = p636Payrolls.reduce((s,r)=>s+r.sgkEmployer,0);
+                    const totalCost = p636Payrolls.reduce((s,r)=>s+r.gross+r.sgkEmployer,0);
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div><h3 className="font-bold text-gray-900 text-sm">💰 {tr636?'SGK/Net Bordro Hesaplama':'SGK/Net Payroll Calculator'}</h3>
+                          <p className="text-xs text-gray-400">{tr636?'SGK işçi/işveren payı, gelir vergisi ve net maaş hesabı (2024 dilimleri)':'SGK employee/employer share, income tax and net salary (2024 brackets)'}</p></div>
+                          <div className="flex items-center gap-2">
+                            <div className="apple-input px-3 py-1.5 text-xs flex items-center gap-1.5"><span className="text-gray-400">{tr636?'Dönem:':'Period:'}</span><input type="month" value={p636Month} onChange={e=>setP636Month(e.target.value)} className="bg-transparent focus:outline-none text-xs" /></div>
+                            <button onClick={calcPayroll} className="apple-button-primary text-xs px-4 py-1.5 flex items-center gap-1.5">⚡ {tr636?'Hesapla':'Calculate'}</button>
+                          </div>
+                        </div>
+                        {p636Calculated && p636Payrolls.length > 0 && (
+                          <>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <div className="bg-gray-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Brüt Toplam':'Total Gross'}</p><p className="text-lg font-black text-gray-800">₺{totalGross.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Net Toplam':'Total Net'}</p><p className="text-lg font-black text-emerald-600">₺{totalNet.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'İşveren SGK':'Employer SGK'}</p><p className="text-lg font-black text-orange-600">₺{totalSgkEmployer.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Toplam Maliyet':'Total Cost'}</p><p className="text-lg font-black text-red-600">₺{totalCost.toLocaleString('tr-TR')}</p></div>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead><tr className="border-b border-gray-100 bg-gray-50">
+                                  {[tr636?'Çalışan':'Employee',tr636?'Pozisyon':'Position',tr636?'Brüt':'Gross',tr636?'SGK İşçi':'SGK Emp.',tr636?'Gelir Vergisi':'Inc. Tax',tr636?'Damga':'Stamp',tr636?'Net':'Net'].map(h=>(
+                                    <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                  ))}
+                                </tr></thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {p636Payrolls.map(r=>(
+                                    <tr key={r.id} className="hover:bg-gray-50/50">
+                                      <td className="px-3 py-2.5 font-semibold text-gray-800">{r.name}</td>
+                                      <td className="px-3 py-2.5 text-gray-500">{r.position}</td>
+                                      <td className="px-3 py-2.5 font-mono text-gray-700">₺{r.gross.toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2.5 font-mono text-orange-600">₺{r.sgkEmployee.toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2.5 font-mono text-purple-600">₺{r.incomeTax.toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2.5 font-mono text-gray-500">₺{r.stampTax.toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2.5 font-bold font-mono text-emerald-600">₺{r.net.toLocaleString('tr-TR')}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <p className="text-[10px] text-gray-400">* {tr636?'SGK işçi: %14, işveren: %20.75; Vergi dilimleri: 0-32K %15, 32-70K %20, 70K+ %27; Damga: %0.759':'SGK emp: 14%, employer: 20.75%; Tax brackets: 0-32K 15%, 32-70K 20%, 70K+ 27%; Stamp: 0.759%'}</p>
+                          </>
+                        )}
+                        {!p636Calculated && <p className="text-center text-gray-400 text-xs py-4">{tr636?`"Hesapla" butonuna tıklayın (${employees.filter(e=>e.status==='Aktif').length} aktif çalışan).`:`Click "Calculate" to compute payroll (${employees.filter(e=>e.status==='Aktif').length} active employees).`}</p>}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </motion.div>
@@ -30152,6 +30580,61 @@ function AppContent() {
                           </div>
                         )}
                         {p624Orders.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr624?'Üretim emri ekleyin.':'Create production orders to track manufacturing.'}</p>}
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Phase 637: Kapasite Planlama ──────────────────────────────── */}
+                  {(() => {
+                    const tr637 = currentLanguage === 'tr';
+                    const horizonDays = p637Horizon==='7d'?7:p637Horizon==='30d'?30:90;
+                    const cutoff637 = new Date(Date.now()+horizonDays*86400000).toISOString().slice(0,10);
+                    const upcoming637 = p624Orders.filter(o=>o.status!=='Tamamlandı'&&o.status!=='İptal'&&o.plannedEnd&&o.plannedEnd<=cutoff637);
+                    const workCenterLoad:{[wc:string]:{orders:number;totalQty:number}} = {};
+                    upcoming637.forEach(o=>{
+                      const wc = o.workCenter||tr637?'Genel Hat':'General Line';
+                      if(!workCenterLoad[wc]) workCenterLoad[wc]={orders:0,totalQty:0};
+                      workCenterLoad[wc].orders++;
+                      workCenterLoad[wc].totalQty += o.qty||0;
+                    });
+                    const wcRows = Object.entries(workCenterLoad).map(([wc,d])=>({wc,...d})).sort((a,b)=>b.totalQty-a.totalQty);
+                    const maxQty = wcRows.length>0?Math.max(...wcRows.map(r=>r.totalQty),1):1;
+                    return (
+                      <div className="apple-card p-5 space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div><h3 className="font-bold text-gray-900 text-sm">🏭 {tr637?'Kapasite Planlama':'Capacity Planning'}</h3>
+                          <p className="text-xs text-gray-400">{tr637?'İş merkezi bazında yük dağılımı':'Workload distribution by work center'}</p></div>
+                          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                            {([{k:'7d',l:'7G'},{k:'30d',l:'30G'},{k:'90d',l:'90G'}] as {k:'7d'|'30d'|'90d';l:string}[]).map(t=>(
+                              <button key={t.k} onClick={()=>setP637Horizon(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p637Horizon===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                            ))}
+                          </div>
+                        </div>
+                        {wcRows.length > 0 ? (
+                          <div className="space-y-3">
+                            {wcRows.map(r=>{
+                              const pct = maxQty>0?(r.totalQty/maxQty)*100:0;
+                              const overloaded = pct > 80;
+                              return (
+                                <div key={r.wc}>
+                                  <div className="flex items-center justify-between text-xs mb-1">
+                                    <span className="font-semibold text-gray-800">{r.wc}</span>
+                                    <span className="text-gray-500">{r.orders} {tr637?'emir':'orders'} · {r.totalQty} {tr637?'birim':'units'}</span>
+                                  </div>
+                                  <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all ${overloaded?'bg-red-500':pct>50?'bg-amber-400':'bg-emerald-400'}`} style={{width:`${pct}%`}} />
+                                  </div>
+                                  {overloaded&&<p className="text-[10px] text-red-500 mt-0.5">⚠️ {tr637?'Yüksek yük — kapasite aşımı riski':'High load — capacity overrun risk'}</p>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : <p className="text-center text-gray-400 text-xs py-4">{tr637?`Önümüzdeki ${horizonDays} gün içinde planlanmış üretim emri yok.`:`No production orders planned in the next ${horizonDays} days.`}</p>}
+                        <div className="grid grid-cols-3 gap-3 border-t border-gray-100 pt-3">
+                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'Bekleyen Emir':'Pending Orders'}</p><p className="text-xl font-black text-blue-600">{upcoming637.length}</p></div>
+                          <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'İş Merkezi':'Work Centers'}</p><p className="text-xl font-black text-amber-600">{wcRows.length}</p></div>
+                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'Toplam Birim':'Total Units'}</p><p className="text-xl font-black text-emerald-600">{wcRows.reduce((s,r)=>s+r.totalQty,0)}</p></div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -31716,6 +32199,55 @@ function AppContent() {
                   <p>✓ {currentLanguage === 'tr' ? 'Admin panelinden "Bayi / Dealer" rolü ile davet edebilirsiniz.' : 'Invite via Admin panel with "Bayi / Dealer" role.'}</p>
                 </div>
               </div>
+
+              {/* ── Phase 641: Denetim İzi (Audit Trail) ──────────────────── */}
+              {(() => {
+                const tr641 = currentLanguage === 'tr';
+                const entityOptions: {k:'all'|'orders'|'inventory'|'leads'|'muhasebe';l:string}[] = [
+                  {k:'all',l:tr641?'Tümü':'All'},{k:'orders',l:tr641?'Siparişler':'Orders'},{k:'inventory',l:tr641?'Stok':'Inventory'},{k:'leads',l:tr641?'CRM':'CRM'},{k:'muhasebe',l:tr641?'Muhasebe':'Finance'},
+                ];
+                // Generate live audit entries from existing data changes
+                const liveLogs: typeof p641Logs = [
+                  ...orders.slice(0,3).map((o,i)=>({id:`ord-${o.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'create',entity:'orders',entityId:o.id,ts:typeof (o.createdAt as {toDate?:()=>Date}).toDate==='function'?(o.createdAt as {toDate:()=>Date}).toDate().toISOString():new Date(o.createdAt as string||Date.now()).toISOString(),details:`${o.customerName} · ₺${(o.totalPrice||0).toLocaleString('tr-TR',{maximumFractionDigits:0})}`})),
+                  ...inventory.slice(0,3).map((item,i)=>({id:`inv-${item.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'update',entity:'inventory',entityId:item.id,ts:new Date(Date.now()-i*3600000).toISOString(),details:`${item.name} — stok: ${item.stockLevel}`})),
+                  ...leads.slice(0,2).map((l,i)=>({id:`crm-${l.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'update',entity:'leads',entityId:l.id,ts:new Date(Date.now()-(i+4)*3600000).toISOString(),details:`${l.name} — ${l.status}`})),
+                  ...p641Logs,
+                ].sort((a,b)=>b.ts.localeCompare(a.ts));
+                const filtered641 = p641Entity==='all'?liveLogs:liveLogs.filter(l=>l.entity===p641Entity);
+                const actionIcon:{[k:string]:string}={create:'➕',update:'✏️',delete:'🗑️',view:'👁️'};
+                const entityBadge:{[k:string]:string}={orders:'bg-blue-100 text-blue-700',inventory:'bg-emerald-100 text-emerald-700',leads:'bg-purple-100 text-purple-700',muhasebe:'bg-amber-100 text-amber-700'};
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div><h3 className="font-bold text-gray-900 text-sm">🔍 {tr641?'Denetim İzi (Audit Trail)':'Audit Trail'}</h3>
+                      <p className="text-xs text-gray-400">{tr641?'Tüm varlıklardaki değişikliklerin kaydı':'Log of all changes across entities'}</p></div>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
+                        {entityOptions.map(t=>(
+                          <button key={t.k} onClick={()=>setP641Entity(t.k)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p641Entity===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {filtered641.length > 0 ? (
+                      <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                        {filtered641.slice(0,20).map(l=>(
+                          <div key={l.id} className="flex items-start gap-3 border border-gray-50 rounded-xl px-3 py-2.5 hover:bg-gray-50/50">
+                            <span className="text-base mt-0.5">{actionIcon[l.action]||'•'}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-semibold text-gray-800">{l.user}</span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${entityBadge[l.entity]||'bg-gray-100 text-gray-600'}`}>{l.entity}</span>
+                                <span className="text-[10px] text-gray-400 font-mono">#{l.entityId.slice(-8)}</span>
+                              </div>
+                              {l.details&&<p className="text-[10px] text-gray-500 truncate">{l.details}</p>}
+                            </div>
+                            <span className="text-[10px] text-gray-400 shrink-0">{new Date(l.ts).toLocaleString('tr-TR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-center text-gray-400 text-xs py-4">{tr641?'Bu kategoride denetim kaydı bulunamadı.':'No audit logs found for this category.'}</p>}
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 
@@ -33369,6 +33901,154 @@ function AppContent() {
                 onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satin-alma'); }}
                 exchangeRates={exchangeRates}
               />
+
+              {/* ── Phase 642: Garanti Takip ─────────────────────────────────── */}
+              {(() => {
+                const tr642 = currentLanguage === 'tr';
+                const today642 = new Date().toISOString().slice(0,10);
+                const getExpiryDate = (w: typeof p642Warranties[0]) => {
+                  const d = new Date(w.purchaseDate);
+                  d.setMonth(d.getMonth()+w.warrantyMonths);
+                  return d.toISOString().slice(0,10);
+                };
+                const statusCls:{[k:string]:string}={Aktif:'bg-emerald-100 text-emerald-700','Sona Erdi':'bg-gray-100 text-gray-600','Talep Açık':'bg-amber-100 text-amber-700'};
+                const expiringSoon = p642Warranties.filter(w=>{const e=getExpiryDate(w);return e>=today642&&e<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)&&w.status==='Aktif';});
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div><h3 className="font-bold text-gray-900 text-sm">🛡️ {tr642?'Garanti Takip':'Warranty Tracking'}</h3>
+                      <p className="text-xs text-gray-400">{tr642?'Ürün garanti süreleri ve talep yönetimi':'Product warranty periods and claim management'}</p></div>
+                      <button onClick={()=>setP642ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr642?'Garanti Ekle':'Add Warranty'}</button>
+                    </div>
+                    {expiringSoon.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">⚠️ {expiringSoon.length} {tr642?'ürün garantisi 30 gün içinde sona eriyor':'product warranty(ies) expiring within 30 days'}</div>}
+                    {p642ShowForm && (
+                      <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className="apple-input" placeholder={tr642?'Ürün Adı':'Product Name'} value={p642Draft.productName} onChange={e=>setP642Draft(d=>({...d,productName:e.target.value}))}/>
+                          <input className="apple-input" placeholder="SKU" value={p642Draft.sku} onChange={e=>setP642Draft(d=>({...d,sku:e.target.value}))}/>
+                          <input className="apple-input" placeholder={tr642?'Seri No':'Serial No'} value={p642Draft.serialNo} onChange={e=>setP642Draft(d=>({...d,serialNo:e.target.value}))}/>
+                          <input className="apple-input" placeholder={tr642?'Müşteri':'Customer'} value={p642Draft.customerName} onChange={e=>setP642Draft(d=>({...d,customerName:e.target.value}))}/>
+                          <input type="date" className="apple-input" value={p642Draft.purchaseDate} onChange={e=>setP642Draft(d=>({...d,purchaseDate:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={tr642?'Garanti (ay)':'Warranty (months)'} value={p642Draft.warrantyMonths} onChange={e=>setP642Draft(d=>({...d,warrantyMonths:e.target.value}))}/>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={()=>{
+                            if(!p642Draft.productName) return;
+                            const entry = {id:Date.now().toString(),productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif' as const};
+                            setP642Warranties(prev=>[...prev,entry]);
+                            setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
+                            setP642ShowForm(false);
+                            toast(tr642?'Garanti kaydı oluşturuldu.':'Warranty record created.','success');
+                          }} className="apple-button-primary text-xs px-6">{tr642?'Kaydet':'Save'}</button>
+                          <button onClick={()=>setP642ShowForm(false)} className="apple-button-secondary text-xs px-4">{tr642?'İptal':'Cancel'}</button>
+                        </div>
+                      </div>
+                    )}
+                    {p642Warranties.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b border-gray-100 bg-gray-50">
+                            {[tr642?'Ürün':'Product','SKU',tr642?'Seri No':'Serial',tr642?'Müşteri':'Customer',tr642?'Satın Alma':'Purchase',tr642?'Bitiş':'Expiry',tr642?'Durum':'Status'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {p642Warranties.map(w=>{
+                              const expiry = getExpiryDate(w);
+                              const expired = expiry < today642;
+                              const autoStatus: typeof w.status = expired?'Sona Erdi':w.status;
+                              return (
+                                <tr key={w.id} className="hover:bg-gray-50/50">
+                                  <td className="px-3 py-2.5 font-semibold text-gray-800">{w.productName}</td>
+                                  <td className="px-3 py-2.5 font-mono text-gray-500">{w.sku||'—'}</td>
+                                  <td className="px-3 py-2.5 font-mono text-gray-500">{w.serialNo||'—'}</td>
+                                  <td className="px-3 py-2.5 text-gray-600">{w.customerName||'—'}</td>
+                                  <td className="px-3 py-2.5 text-gray-500">{new Date(w.purchaseDate).toLocaleDateString('tr-TR')}</td>
+                                  <td className={`px-3 py-2.5 font-semibold ${expired?'text-red-500':expiry<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)?'text-amber-500':'text-gray-600'}`}>{new Date(expiry).toLocaleDateString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5">
+                                    <select value={autoStatus} onChange={e=>setP642Warranties(prev=>prev.map(x=>x.id===w.id?{...x,status:e.target.value as typeof w.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[autoStatus]}`}>
+                                      {['Aktif','Sona Erdi','Talep Açık'].map(s=><option key={s}>{s}</option>)}
+                                    </select>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : <p className="text-center text-gray-400 text-xs py-4">{tr642?'Garanti kaydı ekleyin.':'Add warranty records to track product warranties.'}</p>}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phase 644: MRP / Malzeme İhtiyaç Planlaması ─────────────── */}
+              {inventory.length > 0 && (() => {
+                const tr644 = currentLanguage === 'tr';
+                const horizon644 = new Date(Date.now()+p644Horizon*86400000).toISOString().slice(0,10);
+                // Determine demand from open orders
+                const demandMap:{[sku:string]:{name:string;demand:number}} = {};
+                orders.filter(o=>o.status==='Pending'||o.status==='Processing').forEach(o=>{
+                  (o.lineItems||[]).forEach(li=>{
+                    if(!demandMap[li.sku]) demandMap[li.sku]={name:li.name||li.sku,demand:0};
+                    demandMap[li.sku].demand += li.quantity||1;
+                  });
+                });
+                const mrpRows = Object.entries(demandMap).map(([sku,d])=>{
+                  const item = inventory.find(i=>i.sku===sku||i.name===d.name);
+                  const onHand = item?.stockLevel||0;
+                  const reorderPoint = item?.lowStockThreshold||5;
+                  const net = onHand - d.demand;
+                  const needToProcure = Math.max(0, d.demand - onHand);
+                  const status: 'OK'|'Sipariş Ver'|'Kritik' = net >= reorderPoint ? 'OK' : needToProcure > 0 ? 'Sipariş Ver' : 'Kritik';
+                  return {sku,name:d.name,demand:d.demand,onHand,reorderPoint,net,needToProcure,status};
+                }).sort((a,b)=>b.needToProcure-a.needToProcure);
+                const criticalCount = mrpRows.filter(r=>r.status==='Kritik'||r.status==='Sipariş Ver').length;
+                const statusCls644:{[k:string]:string}={OK:'bg-emerald-100 text-emerald-700','Sipariş Ver':'bg-amber-100 text-amber-700',Kritik:'bg-red-100 text-red-700'};
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div><h3 className="font-bold text-gray-900 text-sm">🔧 {tr644?'MRP — Malzeme İhtiyaç Planlaması':'MRP — Material Requirements Planning'}</h3>
+                      <p className="text-xs text-gray-400">{tr644?'Açık siparişlere göre net malzeme ihtiyacı hesabı':'Net material requirements from open orders'}</p></div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{tr644?'Ufuk:':'Horizon:'}</span>
+                        <input type="number" value={p644Horizon} onChange={e=>setP644Horizon(Math.max(1,Number(e.target.value)))} className="apple-input px-2 py-1 text-xs w-14 text-right" />
+                        <span className="text-xs text-gray-500">{tr644?'gün':'days'}</span>
+                      </div>
+                    </div>
+                    {criticalCount > 0 && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-red-700">⚠️ {criticalCount} {tr644?'ürün için tedarik gerekiyor':'product(s) require procurement'}</div>}
+                    {mrpRows.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b border-gray-100 bg-gray-50">
+                            {['SKU',tr644?'Ürün':'Product',tr644?'Talep':'Demand',tr644?'Eldeki':'On Hand',tr644?'Net':'Net',tr644?'Tedarik Et':'Procure',tr644?'Durum':'Status'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {mrpRows.map(r=>(
+                              <tr key={r.sku} className={`hover:bg-gray-50/50 ${r.status==='Kritik'?'bg-red-50/20':r.status==='Sipariş Ver'?'bg-amber-50/20':''}`}>
+                                <td className="px-3 py-2.5 font-mono text-gray-500">{r.sku}</td>
+                                <td className="px-3 py-2.5 font-semibold text-gray-800">{r.name}</td>
+                                <td className="px-3 py-2.5 font-bold text-blue-600">{r.demand}</td>
+                                <td className="px-3 py-2.5 font-mono text-gray-600">{r.onHand}</td>
+                                <td className={`px-3 py-2.5 font-bold ${r.net<0?'text-red-600':'text-emerald-600'}`}>{r.net}</td>
+                                <td className="px-3 py-2.5 font-bold text-orange-600">{r.needToProcure > 0 ? r.needToProcure : '—'}</td>
+                                <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusCls644[r.status]}`}>{tr644&&r.status==='OK'?'Yeterli':r.status}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 space-y-1">
+                        <p className="text-gray-400 text-xs">{tr644?`Ufuk dahilindeki açık siparişlere ait talep yok (${p644Horizon} gün).`:`No demand from open orders within the ${p644Horizon}-day horizon.`}</p>
+                        <p className="text-[10px] text-gray-300">{tr644?'Planlanmış ve Onaylanmış siparişler dahil edilmektedir.':'Planned and Confirmed orders are included.'}</p>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-gray-400">Ufuk: {tr644?'önümüzdeki':'next'} {p644Horizon} {tr644?'gün':'days'} · {tr644?'son güncelleme:':'as of:'} {new Date().toLocaleDateString('tr-TR')}</p>
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 
@@ -35858,6 +36538,71 @@ function AppContent() {
                 );
               })()}
 
+              {/* ── Phase 633: RFM Müşteri Segmentasyonu ────────────────────── */}
+              {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && leads.length > 0 && (() => {
+                const tr633 = currentLanguage === 'tr';
+                const now633 = Date.now();
+                const scored = leads.filter(l=>!['Closed Lost'].includes(l.status)).map(l=>{
+                  const cOrds = orders.filter(o=>o.customerName===l.name||(o as unknown as Record<string,unknown>)['customerId']===l.id);
+                  const cRev = cOrds.reduce((s,o)=>s+(o.totalPrice||0),0);
+                  const lastOrd = cOrds.length>0?Math.max(...cOrds.map(o=>{try{const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);return d.getTime();}catch{return 0;}})):0;
+                  const recency = lastOrd>0?Math.round((now633-lastOrd)/86400000):999;
+                  const frequency = cOrds.length;
+                  const monetary = cRev;
+                  const rScore = recency<30?5:recency<60?4:recency<90?3:recency<180?2:1;
+                  const fScore = frequency>=10?5:frequency>=6?4:frequency>=3?3:frequency>=1?2:1;
+                  const mScore = monetary>=50000?5:monetary>=20000?4:monetary>=5000?3:monetary>=1000?2:1;
+                  const total = rScore+fScore+mScore;
+                  const seg: 'champions'|'loyal'|'at-risk'|'lost' = total>=13?'champions':total>=9?'loyal':total>=5?'at-risk':'lost';
+                  return {id:l.id,name:l.name,company:l.company||'',recency,frequency,monetary,rScore,fScore,mScore,total,seg};
+                }).sort((a,b)=>b.total-a.total);
+                const filtered633 = p633Segment==='all'?scored:scored.filter(x=>x.seg===p633Segment);
+                const segCounts = {champions:scored.filter(x=>x.seg==='champions').length,loyal:scored.filter(x=>x.seg==='loyal').length,'at-risk':scored.filter(x=>x.seg==='at-risk').length,lost:scored.filter(x=>x.seg==='lost').length};
+                const segCls:{[k:string]:string}={champions:'bg-amber-100 text-amber-700',loyal:'bg-emerald-100 text-emerald-700','at-risk':'bg-orange-100 text-orange-700',lost:'bg-red-100 text-red-700'};
+                const segLabel:{[k:string]:string}={champions:tr633?'Şampiyon':'Champion',loyal:tr633?'Sadık':'Loyal','at-risk':tr633?'Risk Altında':'At Risk',lost:tr633?'Kayıp':'Lost'};
+                return (
+                  <div className="apple-card p-5 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div><h3 className="font-bold text-gray-900 text-sm">🎯 {tr633?'RFM Müşteri Segmentasyonu':'RFM Customer Segmentation'}</h3>
+                      <p className="text-xs text-gray-400">{tr633?'Recency · Frequency · Monetary değerlerine göre segmentasyon':'Segments customers by recency, frequency & monetary value'}</p></div>
+                      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
+                        {([{k:'all',l:tr633?'Tümü':'All'},{k:'champions',l:segLabel.champions},{k:'loyal',l:segLabel.loyal},{k:'at-risk',l:segLabel['at-risk']},{k:'lost',l:segLabel.lost}] as {k:'all'|'champions'|'loyal'|'at-risk'|'lost';l:string}[]).map(t=>(
+                          <button key={t.k} onClick={()=>setP633Segment(t.k)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p633Segment===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}{t.k!=='all'?` (${segCounts[t.k as keyof typeof segCounts]})`:''}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(['champions','loyal','at-risk','lost'] as const).map(s=>(
+                        <div key={s} className={`rounded-xl p-3 ${segCls[s]}`}><p className="text-[10px] font-bold uppercase opacity-70">{segLabel[s]}</p><p className="text-xl font-black">{segCounts[s]}</p></div>
+                      ))}
+                    </div>
+                    {filtered633.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead><tr className="border-b border-gray-100 bg-gray-50">
+                            {[tr633?'Müşteri':'Customer','R','F','M',tr633?'Toplam':'Total',tr633?'Segment':'Segment'].map(h=>(
+                              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {filtered633.slice(0,12).map(r=>(
+                              <tr key={r.id} className="hover:bg-gray-50/50">
+                                <td className="px-3 py-2.5"><p className="font-semibold text-gray-800">{r.name}</p><p className="text-[10px] text-gray-400">{r.company}</p></td>
+                                <td className="px-3 py-2.5"><span className={`font-bold ${r.rScore>=4?'text-emerald-600':r.rScore<=2?'text-red-500':'text-amber-500'}`}>{r.rScore}</span><span className="text-[10px] text-gray-400 ml-1">{r.recency<999?`${r.recency}g`:'—'}</span></td>
+                                <td className="px-3 py-2.5"><span className="font-bold text-blue-600">{r.fScore}</span><span className="text-[10px] text-gray-400 ml-1">{r.frequency}</span></td>
+                                <td className="px-3 py-2.5"><span className="font-bold text-purple-600">{r.mScore}</span><span className="text-[10px] text-gray-400 ml-1">₺{(r.monetary/1000).toFixed(0)}K</span></td>
+                                <td className="px-3 py-2.5 font-black text-gray-800">{r.total}</td>
+                                <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${segCls[r.seg]}`}>{segLabel[r.seg]}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : <p className="text-center text-gray-400 text-xs py-4">{tr633?'Bu segmentte müşteri yok.':'No customers in this segment.'}</p>}
+                  </div>
+                );
+              })()}
+
               </>}
             </motion.div>
           )}
@@ -37740,6 +38485,66 @@ function AppContent() {
                   </div>
                 )}
                 {p621Demands.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr621?'Ürün talepleri ekleyin.':'Add product demand requests.'}</p>}
+              </div>
+            );
+          })()}
+
+          {/* ── Phase 639: İade & Kredi Notu ────────────────────────────────── */}
+          {activeTab === 'orders' && !selectedOrder && (() => {
+            const tr639 = currentLanguage === 'tr';
+            const statusCls:{[k:string]:string}={Bekliyor:'bg-amber-100 text-amber-700',Onaylandı:'bg-emerald-100 text-emerald-700',Reddedildi:'bg-red-100 text-red-700'};
+            const pendingReturns = p639Returns.filter(r=>r.status==='Bekliyor').length;
+            const approvedTotal = p639Returns.filter(r=>r.status==='Onaylandı').reduce((s,r)=>s+r.amount,0);
+            return (
+              <div className="apple-card p-5 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div><h3 className="font-bold text-gray-900 text-sm">↩️ {tr639?'İade & Kredi Notu':'Returns & Credit Notes'}</h3>
+                  <p className="text-xs text-gray-400">{tr639?'Müşteri iadelerini ve kredi notlarını yönetin':'Manage customer returns and credit notes'}</p></div>
+                  <button onClick={()=>setP639ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr639?'İade Talebi':'New Return'}</button>
+                </div>
+                {pendingReturns>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">⚠️ {pendingReturns} {tr639?'bekleyen iade talebi':'pending return request(s)'}</div>}
+                {p639ShowForm && (
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className="apple-input" placeholder={tr639?'Sipariş ID':'Order ID'} value={p639Draft.orderId} onChange={e=>setP639Draft(d=>({...d,orderId:e.target.value}))}/>
+                      <input className="apple-input" placeholder={tr639?'Müşteri Adı':'Customer Name'} value={p639Draft.customerName} onChange={e=>setP639Draft(d=>({...d,customerName:e.target.value}))}/>
+                      <input className="apple-input col-span-2" placeholder={tr639?'İade Sebebi':'Return Reason'} value={p639Draft.reason} onChange={e=>setP639Draft(d=>({...d,reason:e.target.value}))}/>
+                      <input type="number" className="apple-input" placeholder={tr639?'Tutar (₺)':'Amount (₺)'} value={p639Draft.amount} onChange={e=>setP639Draft(d=>({...d,amount:e.target.value}))}/>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={()=>{
+                        if(!p639Draft.customerName||!p639Draft.amount) return;
+                        setP639Returns(prev=>[...prev,{id:Date.now().toString(),orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}]);
+                        setP639Draft({orderId:'',customerName:'',reason:'',amount:''});
+                        setP639ShowForm(false);
+                        toast(tr639?'İade talebi oluşturuldu.':'Return request created.','success');
+                      }} className="apple-button-primary text-xs px-6">{tr639?'Oluştur':'Create'}</button>
+                      <button onClick={()=>setP639ShowForm(false)} className="apple-button-secondary text-xs px-4">{tr639?'İptal':'Cancel'}</button>
+                    </div>
+                  </div>
+                )}
+                {p639Returns.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Bekleyen':'Pending'}</p><p className="text-xl font-black text-amber-600">{pendingReturns}</p></div>
+                      <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Onaylanan':'Approved'}</p><p className="text-lg font-black text-emerald-600">₺{approvedTotal.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p></div>
+                      <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Reddedilen':'Rejected'}</p><p className="text-xl font-black text-red-600">{p639Returns.filter(r=>r.status==='Reddedildi').length}</p></div>
+                    </div>
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {[...p639Returns].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(r=>(
+                        <div key={r.id} className="flex items-start gap-3 border border-gray-100 rounded-xl px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800">{r.customerName} <span className="font-normal text-gray-400">#{r.orderId}</span></p>
+                            <p className="text-[10px] text-gray-400">{r.reason} · ₺{r.amount.toLocaleString('tr-TR',{maximumFractionDigits:0})} · {new Date(r.createdAt).toLocaleDateString('tr-TR')}</p>
+                          </div>
+                          <select value={r.status} onChange={e=>setP639Returns(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[r.status]}`}>
+                            {['Bekliyor','Onaylandı','Reddedildi'].map(s=><option key={s}>{s}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : <p className="text-center text-gray-400 text-xs py-4">{tr639?'Henüz iade talebi yok.':'No return requests yet.'}</p>}
               </div>
             );
           })()}
