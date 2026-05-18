@@ -1,12 +1,15 @@
 {
-  "name": "CETPA Sales & Logistics",
+  "name": "CETPA Cloud ERP",
   "short_name": "CETPA",
-  "description": "B2B Sales, Logistics and ERP Platform",
+  "description": "B2B Cloud ERP — CRM, Muhasebe, Lojistik, Envanter, İK ve daha fazlası tek platformda.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ff4000",
   "orientation": "any",
+  "lang": "tr",
+  "scope": "/",
+  "categories": ["business", "productivity", "finance"],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -21,6 +24,44 @@
       "purpose": "any maskable"
     }
   ],
-  "screenshots": [],
-  "categories": ["business", "productivity"]
+  "shortcuts": [
+    {
+      "name": "Siparişler",
+      "short_name": "Siparişler",
+      "description": "Sipariş listesine hızlı erişim",
+      "url": "/?tab=orders",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "CRM",
+      "short_name": "CRM",
+      "description": "Müşteri ve lead takibi",
+      "url": "/?tab=crm",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Envanter",
+      "short_name": "Stok",
+      "description": "Stok yönetimi",
+      "url": "/?tab=inventory",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Lojistik",
+      "short_name": "Lojistik",
+      "description": "Sevkiyat ve rota takibi",
+      "url": "/?tab=lojistik",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/erp_hero.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "CETPA Dashboard — gelir, sipariş ve envanter tek ekranda"
+    }
+  ],
+  "prefer_related_applications": false
 }

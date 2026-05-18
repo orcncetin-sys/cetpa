@@ -10,10 +10,17 @@ interface Message {
   text: string;
 }
 
-export default function AIChat() {
+interface AIChatProps {
+  /** Live business snapshot injected by AppContent — used as system context */
+  businessContext?: string;
+  currentLanguage?: string;
+}
+
+export default function AIChat({ businessContext, currentLanguage = 'tr' }: AIChatProps) {
+  const isTR = currentLanguage !== 'en';
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'ai', text: 'Merhaba! Size nasıl yardımcı olabilirim?' }
+    { role: 'ai', text: isTR ? 'Merhaba! İşte güncel iş durumunuzu biliyorum. Size nasıl yardımcı olabilirim?' : 'Hello! I have your live business data loaded. How can I help?' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -28,14 +35,24 @@ export default function AIChat() {
   }, [messages]);
 
   useEffect(() => {
+    const systemInstruction = [
+      isTR
+        ? "Sen CETPA Cloud ERP platformunun akıllı iş asistanısın. Kullanıcının gerçek zamanlı iş verilerine erişimin var ve bu verilere dayanarak somut, eyleme dönüştürülebilir önerilerde bulunabilirsin. Türkçe yanıt ver. Kısa ve odaklı ol — 3 cümleyi geçme."
+        : "You are the intelligent business assistant for CETPA Cloud ERP. You have access to the user's real-time business data and can give concrete, actionable recommendations based on it. Be concise — no more than 3 sentences per response.",
+      businessContext ? `\n\n=== CURRENT BUSINESS SNAPSHOT (today) ===\n${businessContext}` : '',
+      isTR
+        ? "\n\nKullanıcı 'en iyi müşteri', 'geciken sipariş', 'stok riski', 'nakit akışı' gibi sorular sorabilir. Verilen verilere atıfta bulun. Uyarılar için emoji kullan (⚠️ 📦 💰 🚛). Asla veri uydurmaya çalışma — bilmiyorsan söyle."
+        : "\n\nUsers may ask about top customers, overdue orders, stock risk, cash position. Reference the provided data. Use emojis for alerts (⚠️ 📦 💰 🚛). Never fabricate data — say 'I don't have that data' if not provided.",
+    ].join('');
+
     chatSessionRef.current = ai.chats.create({
       model: isHighThinking ? "gemini-3.1-pro-preview" : "gemini-3.1-flash-lite-preview",
       config: {
-        systemInstruction: "Sen bu kurumsal yönetim ve proje takip programının akıllı asistanısın. Kullanıcılara programla ilgili sorularında yardımcı ol, nazik ve profesyonel bir dil kullan.",
+        systemInstruction,
         thinkingConfig: isHighThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined
       }
     });
-  }, [isHighThinking]);
+  }, [isHighThinking, businessContext, isTR]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;

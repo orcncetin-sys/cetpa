@@ -9,7 +9,7 @@ import {
   ArrowRight, LayoutDashboard, Zap, Package, Truck, Landmark, Users,
   BarChart3, ShieldCheck, Globe, Check, MessageSquare, Briefcase,
   Activity, Scale, Building2, Code, Database, Moon, Sun,
-  TrendingUp, Clock, Play, Pause, ChevronDown, Mail, Star,
+  TrendingUp, Clock, Play, Pause, ChevronDown, Mail, Star, X, Minus,
 } from 'lucide-react';
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
@@ -116,6 +116,398 @@ function ScrollBar() {
     <div className="fixed top-0 left-0 right-0 z-[100] h-[2px] bg-transparent pointer-events-none">
       <div className="h-full bg-gradient-to-r from-brand via-orange-400 to-amber-400 transition-all duration-75" style={{ width: `${p}%` }} />
     </div>
+  );
+}
+
+// ── ICP Persona Selector ──────────────────────────────────────────────────────
+
+interface SectionProps {
+  isTR: boolean;
+  d: (dk: string, lt: string) => string;
+  darkMode: boolean;
+}
+
+const PERSONAS = [
+  {
+    key: 'sme',
+    labelTR: 'Küçük İşletme',
+    labelEN: 'SME',
+    icon: '🏪',
+    bulletsTR: [
+      'Kurulum yok — tarayıcıdan anında kullanmaya başla',
+      'Fatura, stok ve siparişi tek ekranda yönet',
+      'Büyüdükçe planını yükselt, fazla ödeme yok',
+    ],
+    bulletsEN: [
+      'No setup — start instantly from your browser',
+      'Manage invoices, inventory and orders in one view',
+      'Upgrade your plan as you grow, no overpaying',
+    ],
+  },
+  {
+    key: 'exporter',
+    labelTR: 'İhracatçı',
+    labelEN: 'Exporter',
+    icon: '🌍',
+    bulletsTR: [
+      'Çok para birimli fatura ve döviz kurları otomatik güncellenir',
+      'Gümrük & nakliye belgelerini tek tıkla PDF olarak al',
+      'Müşteri başına kredi limiti ve vade takibi',
+    ],
+    bulletsEN: [
+      'Multi-currency invoicing with automatic FX rate updates',
+      'Export customs & shipping docs as PDF in one click',
+      'Per-customer credit limit & payment terms tracking',
+    ],
+  },
+  {
+    key: 'manufacturer',
+    labelTR: 'Üretici',
+    labelEN: 'Manufacturer',
+    icon: '🏭',
+    bulletsTR: [
+      'BOM ve üretim emirleri ile hammadde planlaması',
+      'Lot / seri numarası takibi ve kalite kontrol adımları',
+      'Tedarikçi sipariş ve teslim sürelerini otomatik izle',
+    ],
+    bulletsEN: [
+      'BOM & production orders for raw material planning',
+      'Lot / serial number tracking with quality control steps',
+      'Automatically monitor supplier orders and lead times',
+    ],
+  },
+  {
+    key: 'accountant',
+    labelTR: 'Muhasebeci Partner',
+    labelEN: 'Accountant Partner',
+    icon: '🧾',
+    bulletsTR: [
+      'Birden fazla müşteriyi tek hesaptan yönet',
+      'e-Fatura & e-Arşiv entegrasyonu hazır',
+      'Dönem sonu raporlarını Excel / PDF olarak saniyeler içinde al',
+    ],
+    bulletsEN: [
+      'Manage multiple clients from a single account',
+      'e-Invoice & e-Archive integration ready out of the box',
+      'Pull period-end reports as Excel / PDF in seconds',
+    ],
+  },
+];
+
+function IcpSection({ isTR, d, darkMode }: SectionProps) {
+  const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
+  const active = PERSONAS.find(p => p.key === selectedPersona) ?? null;
+
+  return (
+    <section className={cn('py-24', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
+      <div className="max-w-5xl mx-auto px-6">
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
+              {isTR ? 'Kişiselleştirilmiş Deneyim' : 'Personalised Experience'}
+            </p>
+            <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
+              {isTR ? 'Cetpa sizin için nasıl çalışır?' : 'How does Cetpa work for you?'}
+            </h2>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+              {isTR ? 'Profilinizi seçin, size özel faydaları görün.' : 'Choose your profile and see the benefits tailored to you.'}
+            </p>
+          </div>
+
+          {/* Persona buttons */}
+          <div className="flex flex-wrap justify-center gap-3 mb-10">
+            {PERSONAS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setSelectedPersona(prev => prev === p.key ? null : p.key)}
+                className={cn(
+                  'flex items-center gap-2 px-5 py-3 rounded-full text-sm font-semibold border transition-all duration-200',
+                  selectedPersona === p.key
+                    ? 'bg-brand border-brand text-white shadow-lg shadow-brand/25 scale-105'
+                    : d('bg-white/[0.04] border-white/10 text-white/70 hover:bg-white/[0.08] hover:border-white/20', 'bg-white border-black/10 text-black/60 hover:border-brand/30 hover:text-brand shadow-sm'),
+                )}
+              >
+                <span>{p.icon}</span>
+                <span>{isTR ? p.labelTR : p.labelEN}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Value prop bullets */}
+          <AnimatePresence mode="wait">
+            {active && (
+              <motion.div
+                key={active.key}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.28 }}
+                className={cn('rounded-3xl border p-8 max-w-2xl mx-auto', d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-md'))}
+              >
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="text-3xl">{active.icon}</span>
+                  <h3 className={cn('text-lg font-black', d('text-white', 'text-[#111]'))}>
+                    {isTR ? active.labelTR : active.labelEN}
+                  </h3>
+                </div>
+                <ul className="space-y-4">
+                  {(isTR ? active.bulletsTR : active.bulletsEN).map((b, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <span className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-brand/15 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-brand" />
+                      </span>
+                      <span className={cn('text-sm leading-relaxed', d('text-white/70', 'text-black/65'))}>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            )}
+            {!active && (
+              <motion.p
+                key="hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className={cn('text-center text-sm', d('text-white/30', 'text-black/30'))}
+              >
+                {isTR ? '↑ Profilinizi seçmek için bir düğmeye tıklayın' : '↑ Click a button above to choose your profile'}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+// ── Competitor Comparison Table ───────────────────────────────────────────────
+
+const COMP_ROWS = [
+  { featureTR: 'Bulut Tabanlı',               featureEN: 'Cloud-Native',              cetpa: 'check', logo: 'x',       mikro: 'x'       },
+  { featureTR: 'Mobil PWA',                   featureEN: 'Mobile PWA',                cetpa: 'check', logo: 'partial', mikro: 'x'       },
+  { featureTR: 'AI Asistan',                  featureEN: 'AI Assistant',              cetpa: 'check', logo: 'x',       mikro: 'x'       },
+  { featureTR: 'Shopify Entegrasyonu',        featureEN: 'Shopify Integration',       cetpa: 'check', logo: 'x',       mikro: 'x'       },
+  { featureTR: 'Açık API',                    featureEN: 'Open API',                  cetpa: 'check', logo: 'x',       mikro: 'partial' },
+  { featureTR: '14 Gün Ücretsiz Deneme',      featureEN: '14-Day Free Trial',         cetpa: 'check', logo: 'x',       mikro: 'x'       },
+  { featureTR: 'Gerçek Zamanlı Dashboard',    featureEN: 'Real-Time Dashboard',       cetpa: 'check', logo: 'partial', mikro: 'x'       },
+  { featureTR: 'Kurulum Gerektirmez',         featureEN: 'No Installation Required',  cetpa: 'check', logo: 'x',       mikro: 'x'       },
+];
+
+function CellIcon({ val, isTR }: { val: string; isTR: boolean }) {
+  if (val === 'check') return <Check className="w-4 h-4 text-emerald-500 mx-auto" />;
+  if (val === 'x')     return <X     className="w-4 h-4 text-black/20 mx-auto dark:text-white/20" />;
+  return (
+    <span className="flex flex-col items-center gap-0.5">
+      <Minus className="w-4 h-4 text-amber-500 mx-auto" />
+      <span className="text-[9px] font-semibold text-amber-500">{isTR ? 'Kısmi' : 'Partial'}</span>
+    </span>
+  );
+}
+
+function CompetitorSection({ isTR, d }: SectionProps) {
+  return (
+    <section className="py-24">
+      <div className="max-w-5xl mx-auto px-6">
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
+              {isTR ? 'Karşılaştırma' : 'Comparison'}
+            </p>
+            <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
+              {isTR ? 'Neden CETPA?' : 'Why CETPA?'}
+            </h2>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+              {isTR ? 'Rakiplerimizle yan yana karşılaştırın.' : 'Compare us side by side with alternatives.'}
+            </p>
+          </div>
+
+          <div className={cn('rounded-3xl border overflow-hidden', d('border-white/10', 'border-black/8 shadow-md'))}>
+            {/* Header */}
+            <div className={cn('grid grid-cols-4 text-center text-xs font-black uppercase tracking-wider', d('bg-white/[0.04]', 'bg-black/[0.03]'))}>
+              <div className={cn('px-4 py-4 text-left', d('text-white/40', 'text-black/40'))}>
+                {isTR ? 'Özellik' : 'Feature'}
+              </div>
+              <div className="px-4 py-4 text-brand">CETPA</div>
+              <div className={cn('px-4 py-4', d('text-white/40', 'text-black/40'))}>Logo ERP</div>
+              <div className={cn('px-4 py-4', d('text-white/40', 'text-black/40'))}>Mikro</div>
+            </div>
+
+            {/* Rows */}
+            {COMP_ROWS.map((row, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'grid grid-cols-4 text-center text-sm border-t transition-colors',
+                  d('border-white/[0.06] hover:bg-white/[0.025]', 'border-black/[0.06] hover:bg-black/[0.02]'),
+                )}
+              >
+                <div className={cn('px-4 py-4 text-left text-xs font-semibold', d('text-white/70', 'text-black/70'))}>
+                  {isTR ? row.featureTR : row.featureEN}
+                </div>
+                <div className={cn('px-4 py-4', d('bg-brand/[0.07]', 'bg-brand/[0.04]'))}>
+                  <CellIcon val={row.cetpa} isTR={isTR} />
+                </div>
+                <div className="px-4 py-4">
+                  <CellIcon val={row.logo} isTR={isTR} />
+                </div>
+                <div className="px-4 py-4">
+                  <CellIcon val={row.mikro} isTR={isTR} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+// ── ROI Calculator ────────────────────────────────────────────────────────────
+
+function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryClick: () => void }) {
+  const [employees,   setEmployees]   = useState(15);
+  const [orderVolume, setOrderVolume] = useState(300);
+  const [manualHours, setManualHours] = useState(20);
+
+  const savedHours       = Math.round(manualHours * 4 * 0.7);
+  const productivityGain = employees * 2500 * 0.15;
+  const roiRatio         = ((productivityGain - 2499) / 2499 * 100).toFixed(0);
+  const paybackMonths    = (2499 / (productivityGain / 12)).toFixed(1);
+
+  const sliderClass = cn(
+    'w-full h-1.5 rounded-full appearance-none cursor-pointer accent-brand',
+    d('bg-white/10', 'bg-black/10'),
+  );
+
+  return (
+    <section className={cn('py-24', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
+      <div className="max-w-5xl mx-auto px-6">
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">ROI</p>
+            <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
+              {isTR ? 'Yatırım getirinizi hesaplayın' : 'Calculate your ROI'}
+            </h2>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+              {isTR ? 'Kaydırıcıları ayarlayın, tasarrufu gerçek zamanlı görün.' : 'Adjust the sliders and see your savings in real time.'}
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 items-start">
+            {/* Inputs */}
+            <div className={cn('rounded-3xl border p-8 space-y-8', d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-md'))}>
+              {[
+                {
+                  labelTR: 'Çalışan sayısı',
+                  labelEN: 'Number of employees',
+                  value:   employees,
+                  setter:  setEmployees,
+                  min:     1, max: 200, step: 1,
+                  display: String(employees),
+                },
+                {
+                  labelTR: 'Aylık sipariş hacmi',
+                  labelEN: 'Monthly order volume',
+                  value:   orderVolume,
+                  setter:  setOrderVolume,
+                  min:     50, max: 5000, step: 50,
+                  display: orderVolume.toLocaleString(),
+                },
+                {
+                  labelTR: 'Mevcut manuel süre (saat/hafta)',
+                  labelEN: 'Current manual hours/week',
+                  value:   manualHours,
+                  setter:  setManualHours,
+                  min:     1, max: 40, step: 1,
+                  display: `${manualHours}h`,
+                },
+              ].map(({ labelTR, labelEN, value, setter, min, max, step, display }) => (
+                <div key={labelEN}>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className={cn('text-xs font-semibold', d('text-white/70', 'text-black/65'))}>
+                      {isTR ? labelTR : labelEN}
+                    </label>
+                    <span className="text-xs font-black text-brand tabular-nums">{display}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={min} max={max} step={step}
+                    value={value}
+                    onChange={e => setter(Number(e.target.value))}
+                    className={sliderClass}
+                  />
+                  <div className={cn('flex justify-between text-[10px] mt-1', d('text-white/25', 'text-black/25'))}>
+                    <span>{min}</span><span>{max}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Outputs */}
+            <div className="space-y-4">
+              {[
+                {
+                  labelTR: 'Tasarruf edilen saat/ay',
+                  labelEN: 'Hours saved / month',
+                  value:   `${savedHours} ${isTR ? 'saat' : 'hours'}`,
+                  accent:  false,
+                },
+                {
+                  labelTR: 'Verimlilik artışı',
+                  labelEN: 'Productivity gain',
+                  value:   `₺${productivityGain.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} / ${isTR ? 'ay' : 'mo'}`,
+                  accent:  false,
+                },
+                {
+                  labelTR: 'ROI oranı',
+                  labelEN: 'ROI ratio',
+                  value:   `${Number(roiRatio) > 0 ? '+' : ''}${roiRatio}%`,
+                  accent:  true,
+                },
+                {
+                  labelTR: 'Geri ödeme süresi',
+                  labelEN: 'Payback period',
+                  value:   `${paybackMonths} ${isTR ? 'ay' : 'months'}`,
+                  accent:  false,
+                },
+              ].map(({ labelTR, labelEN, value, accent }) => (
+                <motion.div
+                  key={labelEN}
+                  layout
+                  className={cn(
+                    'flex items-center justify-between rounded-2xl border px-6 py-5',
+                    accent
+                      ? 'bg-brand/10 border-brand/25'
+                      : d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-sm'),
+                  )}
+                >
+                  <span className={cn('text-xs font-semibold', d('text-white/60', 'text-black/55'))}>
+                    {isTR ? labelTR : labelEN}
+                  </span>
+                  <span className={cn('text-lg font-black tabular-nums', accent ? 'text-brand' : d('text-white', 'text-[#111]'))}>
+                    {value}
+                  </span>
+                </motion.div>
+              ))}
+
+              <p className={cn('text-[10px] text-center mt-2', d('text-white/25', 'text-black/25'))}>
+                {isTR
+                  ? '* Hesaplamalar sektör ortalamaları baz alınarak tahmin edilmiştir.'
+                  : '* Estimates are based on industry average benchmarks.'}
+              </p>
+
+              <button
+                onClick={onTryClick}
+                className="w-full mt-2 flex items-center justify-center gap-2 bg-brand hover:bg-brand/90 text-white font-bold text-sm px-6 py-4 rounded-2xl transition-all duration-200 shadow-lg shadow-brand/25 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                {isTR ? '14 Gün Ücretsiz Dene' : 'Start 14-Day Free Trial'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </section>
   );
 }
 
@@ -1309,6 +1701,15 @@ export default function LandingPage({
           </div>
         </div>
       </section>
+
+      {/* ── ICP Persona Selector ─────────────────────────────────────────── */}
+      <IcpSection isTR={isTR} d={d} darkMode={darkMode} />
+
+      {/* ── Competitor Comparison ────────────────────────────────────────── */}
+      <CompetitorSection isTR={isTR} d={d} darkMode={darkMode} />
+
+      {/* ── ROI Calculator ───────────────────────────────────────────────── */}
+      <RoiSection isTR={isTR} d={d} darkMode={darkMode} onTryClick={onTryClick} />
 
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
       <section className={cn('py-32', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>

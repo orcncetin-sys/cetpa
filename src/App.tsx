@@ -357,6 +357,46 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+// ── TabErrorBoundary: per-module crash isolation (Red-team Fix 1) ────────────
+class TabErrorBoundary extends React.Component<
+  { children: React.ReactNode; tabName: string; lang?: string },
+  { hasError: boolean; errorMsg: string }
+> {
+  constructor(props: { children: React.ReactNode; tabName: string; lang?: string }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: '' };
+  }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, errorMsg: error.message }; }
+  render() {
+    if (this.state.hasError) {
+      const isTR = this.props.lang !== 'en';
+      return (
+        <div className="apple-card p-10 flex flex-col items-center justify-center text-center gap-4 min-h-[280px]">
+          <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
+            <AlertCircle className="w-7 h-7 text-red-400" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900 text-base mb-1">
+              {isTR ? `${this.props.tabName} modülünde bir hata oluştu` : `Error in ${this.props.tabName} module`}
+            </h3>
+            <p className="text-sm text-gray-500 max-w-xs mx-auto">
+              {isTR ? 'Diğer modüller etkilenmedi. Modülü yeniden yüklemek için butona tıklayın.' : 'Other modules are unaffected. Click below to reload this module.'}
+            </p>
+          </div>
+          <button
+            onClick={() => this.setState({ hasError: false, errorMsg: '' })}
+            className="apple-button-secondary px-6 py-2 text-sm font-semibold"
+          >
+            {isTR ? '↺ Modülü Yenile' : '↺ Reload Module'}
+          </button>
+          {process.env.NODE_ENV === 'development' && <p className="text-[10px] text-gray-300 font-mono max-w-sm break-all">{this.state.errorMsg}</p>}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── Multi-currency helpers ──────────────────────────────────────────────────
 /**
  * Returns the cost of an inventory item expressed in TRY.
@@ -19489,6 +19529,46 @@ function AppContent() {
   const [p630InvoicePeriod, setP630InvoicePeriod] = useState<'7d'|'30d'|'60d'|'90d'>('30d');
   // ── Phase 631: İş Süreci Analizi (Bottleneck) ─────────────────────────────
   const [p631View, setP631View] = useState<'pipeline'|'cycle-time'|'bottleneck'>('pipeline');
+
+  // ── Red-team Fix A: Integration Staleness Detection ───────────────────────
+  const [staleIntegrations, setStaleIntegrations] = useState<string[]>([]);
+  const [staleAlertDismissed, setStaleAlertDismissed] = useState(false);
+  useEffect(() => {
+    const STALE_HOURS = 24;
+    const threshold = Date.now() - STALE_HOURS * 3600000;
+    const stale: string[] = [];
+    const parseSync = (v: unknown): number | null => {
+      if (!v) return null;
+      try { return typeof (v as {toDate?:()=>Date}).toDate==='function' ? (v as {toDate:()=>Date}).toDate().getTime() : new Date(v as string).getTime(); } catch { return null; }
+    };
+    const mikroTs = parseSync(mikroSettings.lastSync);
+    const lucaTs  = parseSync(lucaSettings.lastSync);
+    if (mikroSettings.enabled && mikroSettings.connected && mikroTs !== null && mikroTs < threshold) stale.push('Mikro ERP');
+    if (lucaSettings.enabled && lucaSettings.connected && lucaTs !== null && lucaTs < threshold) stale.push('Luca');
+    setStaleIntegrations(stale);
+    setStaleAlertDismissed(false);
+  }, [mikroSettings, lucaSettings]);
+
+  // ── Red-team Fix B: KVKK Consent (enterprise users, once per session) ──────
+  const [showKvkkModal, setShowKvkkModal] = useState(false);
+  const [kvkkAccepted, setKvkkAccepted] = useState(() => sessionStorage.getItem('cetpa_kvkk') === '1');
+  useEffect(() => {
+    if (!kvkkAccepted && user && userSubscription?.plan && ['business','enterprise'].includes(userSubscription.plan)) {
+      const t = setTimeout(() => setShowKvkkModal(true), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [user, userSubscription, kvkkAccepted]);
+  const acceptKvkk = () => { sessionStorage.setItem('cetpa_kvkk','1'); setKvkkAccepted(true); setShowKvkkModal(false); };
+
+  // ── Red-team Fix C: PWA Install Prompt ────────────────────────────────────
+  const [pwaPromptEvent, setPwaPromptEvent] = useState<Event & {prompt:()=>void; userChoice:Promise<{outcome:string}>} | null>(null);
+  const [showPwaBanner, setShowPwaBanner] = useState(false);
+  useEffect(() => {
+    const handler = (e: Event) => { e.preventDefault(); setPwaPromptEvent(e as Event & {prompt:()=>void;userChoice:Promise<{outcome:string}>}); setShowPwaBanner(true); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+  const installPwa = () => { pwaPromptEvent?.prompt(); pwaPromptEvent?.userChoice.then(() => setShowPwaBanner(false)); };
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   const [p632Consolidation] = useState([
     {entity:'Cetpa A.Ş.',revenue:0,opex:0,headcount:0},
@@ -21864,6 +21944,74 @@ function AppContent() {
         })()}
 
         <main className="flex-1 min-w-0 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 overflow-x-hidden">
+
+          {/* ── Red-team Fix: Integration Staleness Banner ────────────── */}
+          {staleIntegrations.length > 0 && !staleAlertDismissed && (
+            <div className="mb-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-amber-800 flex-1">
+                {currentLanguage === 'tr'
+                  ? `⚠️ ${staleIntegrations.join(', ')} entegrasyonu 24 saatten uzun süredir senkronize edilmedi. Muhasebe verileriniz güncel olmayabilir.`
+                  : `⚠️ ${staleIntegrations.join(', ')} integration hasn't synced in 24+ hours. Your accounting data may be stale.`}
+              </p>
+              <button onClick={() => { setActiveTab('settings'); setStaleAlertDismissed(true); }} className="text-xs font-bold text-amber-700 underline whitespace-nowrap">
+                {currentLanguage === 'tr' ? 'Ayarlara Git' : 'Fix in Settings'}
+              </button>
+              <button onClick={() => setStaleAlertDismissed(true)} className="text-amber-400 hover:text-amber-600 ml-1 text-sm font-bold leading-none">✕</button>
+            </div>
+          )}
+
+          {/* ── Red-team Fix: PWA Install Banner ─────────────────────── */}
+          {showPwaBanner && (
+            <div className="mb-4 flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+              <span className="text-lg flex-shrink-0">📲</span>
+              <p className="text-xs font-semibold text-blue-800 flex-1">
+                {currentLanguage === 'tr' ? 'CETPA\'yı ana ekrana ekleyin — çevrimdışı da çalışır.' : 'Install CETPA on your home screen — works offline too.'}
+              </p>
+              <button onClick={installPwa} className="apple-button-primary text-xs px-4 py-1.5 whitespace-nowrap">
+                {currentLanguage === 'tr' ? 'Yükle' : 'Install'}
+              </button>
+              <button onClick={() => setShowPwaBanner(false)} className="text-blue-400 hover:text-blue-600 ml-1 text-sm font-bold leading-none">✕</button>
+            </div>
+          )}
+
+          {/* ── Red-team Fix: KVKK Data Processing Modal ─────────────── */}
+          {showKvkkModal && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="apple-card max-w-md w-full p-8 space-y-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <ShieldCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 text-base">
+                    {currentLanguage === 'tr' ? 'KVKK Veri İşleme Bildirimi' : 'Data Processing Notice (KVKK/GDPR)'}
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  {currentLanguage === 'tr'
+                    ? 'CETPA, verilerinizi Google Firebase altyapısında (Frankfurt, Avrupa Birliği) saklamaktadır. İşletme ve Kurumsal plan kullanıcıları için 6698 sayılı KVKK kapsamında kişisel verilerin işlenmesine açık rızanız gerekmektedir. Verileriniz üçüncü şahıslarla paylaşılmaz.'
+                    : 'CETPA stores your data on Google Firebase infrastructure (Frankfurt, EU). Enterprise plan users must explicitly consent to personal data processing under KVKK (Law 6698). Your data is never shared with third parties.'}
+                </p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <p className="text-xs text-amber-800 font-medium">
+                    {currentLanguage === 'tr'
+                      ? '⚠️ Kamu sektörü ve finans kuruluşları için yerli sunucu seçeneğini inceleyiniz: info@cetpa.io'
+                      : '⚠️ Public sector & financial institutions: inquire about on-premise hosting at info@cetpa.io'}
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={acceptKvkk} className="apple-button-primary flex-1 py-3 text-sm font-bold">
+                    {currentLanguage === 'tr' ? 'Okudum, Kabul Ediyorum' : 'I Understand & Accept'}
+                  </button>
+                  <a href="mailto:info@cetpa.io?subject=KVKK" className="apple-button-secondary flex-1 py-3 text-sm font-bold text-center">
+                    {currentLanguage === 'tr' ? 'Sorun Var?' : 'Concerns?'}
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+
+        <TabErrorBoundary tabName={currentLanguage === 'tr' ? activeTab : activeTab} lang={currentLanguage}>
         <AnimatePresence mode="wait">
 
           {/* ── Dashboard (Home) ── */}
@@ -39006,6 +39154,7 @@ function AppContent() {
             </motion.div>
           )}
         </AnimatePresence>
+        </TabErrorBoundary>
       </main>
       </div>{/* ── /flex wrapper (sidebar + main) ── */}
 
@@ -39750,7 +39899,31 @@ function AppContent() {
         />
       )}
 
-      <AIChat />
+      <AIChat
+        currentLanguage={currentLanguage}
+        businessContext={(() => {
+          const now = new Date();
+          const thisMonth = orders.filter(o => {
+            if (!o.createdAt) return false;
+            try { const d = typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : new Date(o.createdAt as string); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); } catch { return false; }
+          });
+          const totalRev = thisMonth.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+(o.totalPrice||0),0);
+          const pendingOrders = orders.filter(o=>o.status==='Pending').length;
+          const processingOrders = orders.filter(o=>o.status==='Processing').length;
+          const lowStockItems = inventory.filter(i=>(i.stockLevel||0)<=(i.lowStockThreshold||5)).length;
+          const activeLeads = leads.filter(l=>!['Closed Won','Closed Lost','Closed'].includes(l.status)).length;
+          const topLead = [...leads].sort((a,b)=>(b.score||0)-(a.score||0))[0];
+          const cancelledRatio = orders.length > 0 ? Math.round(orders.filter(o=>o.status==='Cancelled').length / orders.length * 100) : 0;
+          return [
+            `Bu Ay Ciro: ₺${Math.round(totalRev).toLocaleString('tr-TR')} (${thisMonth.length} sipariş)`,
+            `Bekleyen Siparişler: ${pendingOrders} | İşlemde: ${processingOrders}`,
+            `Düşük Stok Uyarısı: ${lowStockItems} ürün`,
+            `Aktif Lead: ${activeLeads}${topLead ? ` | En Yüksek Puanlı: ${topLead.name} (${topLead.score||'?'})` : ''}`,
+            `Toplam Sipariş: ${orders.length} | İptal Oranı: %${cancelledRatio}`,
+            `Toplam Envanter SKU: ${inventory.length} | Çalışan: ${employees.filter(e=>e.status==='Aktif').length}`,
+          ].join('\n');
+        })()}
+      />
 
       {/* ── Phase 112: RMA / Return Modal ── */}
       <AnimatePresence>
