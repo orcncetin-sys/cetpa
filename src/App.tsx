@@ -20235,6 +20235,29 @@ function AppContent() {
     };
   }, [user, userRole, isAuthReady]);
 
+  // ── Phase extended collections — Firestore subscriptions ─────────────────
+  useEffect(() => {
+    if (!user) return;
+    const u: (() => void)[] = [];
+    const sub = (col: string, setter: (d: unknown[]) => void) =>
+      u.push(onSnapshot(collection(db, col), s => setter(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => setter([])));
+
+    sub('projectCosts',    (d) => setP582Projects(d as typeof p582Projects));
+    sub('workflowTasks',   (d) => setP595Tasks(d as typeof p595Tasks));
+    sub('revenueContracts',(d) => setP597Contracts(d as typeof p597Contracts));
+    sub('capacityLines',   (d) => setP605Capacity(d as typeof p605Capacity));
+    sub('projectTimelines',(d) => setP618Projects(d as typeof p618Projects));
+    sub('demandRequests',  (d) => setP621Demands(d as typeof p621Demands));
+    sub('letterOfCredit',  (d) => setP623LCs(d as typeof p623LCs));
+    sub('productionOrders',(d) => setP624Orders(d as typeof p624Orders));
+    sub('returns',         (d) => setP639Returns(d as typeof p639Returns));
+    sub('recurringBilling',(d) => setP640Subs(d as typeof p640Subs));
+    sub('warranties',      (d) => setP642Warranties(d as typeof p642Warranties));
+    sub('intercompanyTxns',(d) => setP643Txns(d as typeof p643Txns));
+
+    return () => u.forEach(fn => fn());
+  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {
     if (!user || leads.length === 0) return;
@@ -24165,9 +24188,9 @@ function AppContent() {
                       <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Modül (ör. CRM, Stok)':'Module (e.g. CRM, Stock)'} value={p595Draft.module} onChange={e=>setP595Draft(d=>({...d,module:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         if(!p595Draft.title) return;
-                        setP595Tasks(prev=>[...prev,{id:Date.now().toString(),title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false}]);
+                        try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false}); } catch(e){console.error(e);}
                         setP595Draft({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta'});
                         setP595ShowForm(false);
                       }} className="apple-button-primary text-sm px-4 py-1.5">{tr595?'Kaydet':'Save'}</button>
@@ -24184,7 +24207,7 @@ function AppContent() {
                       return (pOrder[a.priority]||3)-(pOrder[b.priority]||3) || a.dueDate.localeCompare(b.dueDate);
                     }).map(t=>(
                       <div key={t.id} className={`flex items-center gap-3 p-3 rounded-xl border border-l-4 ${prioColors595[t.priority]}`}>
-                        <button onClick={()=>setP595Tasks(prev=>prev.map(x=>x.id===t.id?{...x,done:true}:x))} className="w-5 h-5 rounded border-2 border-gray-300 hover:border-emerald-500 flex-shrink-0 transition-colors" />
+                        <button onClick={async ()=>{try{await updateDoc(doc(db,'workflowTasks',t.id),{done:true});}catch(e){console.error(e);}}} className="w-5 h-5 rounded border-2 border-gray-300 hover:border-emerald-500 flex-shrink-0 transition-colors" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-800 truncate">{t.title}</p>
                           <p className="text-xs text-gray-400">
@@ -24194,12 +24217,12 @@ function AppContent() {
                           </p>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${prioBadge595[t.priority]}`}>{t.priority}</span>
-                        <button onClick={()=>setP595Tasks(prev=>prev.filter(x=>x.id!==t.id))} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                        <button onClick={async ()=>{try{await deleteDoc(doc(db,'workflowTasks',t.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                       </div>
                     ))}
                     {p595Tasks.filter(t=>t.done).length>0&&(
                       <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {tr595?'tamamlanan görev':'completed task(s)'} &nbsp;
-                        <button onClick={()=>setP595Tasks(prev=>prev.filter(t=>!t.done))} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
+                        <button onClick={()=>{p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
                       </p>
                     )}
                   </div>
@@ -25354,9 +25377,9 @@ function AppContent() {
                                   <select value={p623Draft.currency} onChange={e=>setP623Draft(d=>({...d,currency:e.target.value as typeof d.currency}))} className="apple-input">{['USD','EUR'].map(c=><option key={c}>{c}</option>)}</select>
                                   <input type="date" className="apple-input" value={p623Draft.expiryDate} onChange={e=>setP623Draft(d=>({...d,expiryDate:e.target.value}))}/>
                                 </div>
-                                <button onClick={()=>{
+                                <button onClick={async ()=>{
                                   if(!p623Draft.bank||!p623Draft.amount) return;
-                                  setP623LCs(prev=>[...prev,{id:Date.now().toString(),bank:p623Draft.bank,beneficiary:p623Draft.beneficiary,amount:Number(p623Draft.amount),currency:p623Draft.currency,expiryDate:p623Draft.expiryDate,status:'Açık',ref:p623Draft.ref}]);
+                                  try { await addDoc(collection(db,'letterOfCredit'),{bank:p623Draft.bank,beneficiary:p623Draft.beneficiary,amount:Number(p623Draft.amount),currency:p623Draft.currency,expiryDate:p623Draft.expiryDate,status:'Açık',ref:p623Draft.ref}); } catch(e){console.error(e);}
                                   setP623Draft(d=>({...d,bank:'',beneficiary:'',amount:'',ref:'',expiryDate:''}));
                                   setP623ShowForm(false);
                                   toast(tr623?'L/C eklendi.':'L/C added.','success');
@@ -25374,7 +25397,7 @@ function AppContent() {
                                       <td className="px-3 py-2.5 font-mono text-gray-500">{lc.ref}</td>
                                       <td className="px-3 py-2.5 font-bold">{lc.currency} {lc.amount.toLocaleString()}</td>
                                       <td className="px-3 py-2.5 text-gray-500">{lc.expiryDate?new Date(lc.expiryDate).toLocaleDateString('tr-TR'):'—'}</td>
-                                      <td className="px-3 py-2.5"><select value={lc.status} onChange={e=>setP623LCs(prev=>prev.map(x=>x.id===lc.id?{...x,status:e.target.value as typeof lc.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statCls[lc.status]}`}>{['Açık','Kullanıldı','Sona Erdi','İptal'].map(s=><option key={s}>{s}</option>)}</select></td>
+                                      <td className="px-3 py-2.5"><select value={lc.status} onChange={async e=>{try{await updateDoc(doc(db,'letterOfCredit',lc.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statCls[lc.status]}`}>{['Açık','Kullanıldı','Sona Erdi','İptal'].map(s=><option key={s}>{s}</option>)}</select></td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -25395,9 +25418,11 @@ function AppContent() {
                             invoiceAmount:o.totalPrice||0,
                           }));
                           const results = unpaidInvoices.map(inv=>{
-                            const confidence = inv.invoiceAmount>0?Math.min(98,60+Math.round(Math.random()*38)):0;
-                            const matchedAmount = confidence>80?inv.invoiceAmount:confidence>60?Math.round(inv.invoiceAmount*(confidence/100)):0;
-                            const status: 'Tam'|'Kısmi'|'Eşleşmedi' = matchedAmount===inv.invoiceAmount?'Tam':matchedAmount>0?'Kısmi':'Eşleşmedi';
+                            const paidCustOrders = orders.filter(o=>o.paid && o.customerName===inv.customer);
+                            const exactMatch = paidCustOrders.some(o=>(o.totalPrice||0)===inv.invoiceAmount);
+                            const confidence = exactMatch?100:paidCustOrders.length>0?80:60;
+                            const matchedAmount = confidence===100?inv.invoiceAmount:confidence===80?Math.round(inv.invoiceAmount*0.8):0;
+                            const status: 'Tam'|'Kısmi'|'Eşleşmedi' = confidence===100?'Tam':matchedAmount>0?'Kısmi':'Eşleşmedi';
                             return {...inv,matchedAmount,confidence,status};
                           });
                           setP638MatchResults(results);
@@ -27492,9 +27517,9 @@ function AppContent() {
                               <input type="date" className="apple-input px-3 py-2 text-sm" value={p597Draft.endDate} onChange={e=>setP597Draft(d=>({...d,endDate:e.target.value}))} />
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={()=>{
+                              <button onClick={async ()=>{
                                 if(!p597Draft.customerName||!p597Draft.totalValue) return;
-                                setP597Contracts(prev=>[...prev,{id:Date.now().toString(),customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0}]);
+                                try { await addDoc(collection(db,'revenueContracts'),{customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0}); } catch(e){console.error(e);}
                                 setP597Draft({customerName:'',totalValue:'',startDate:'',endDate:'',recognized:''});
                                 setP597ShowForm(false);
                               }} className="apple-button-primary text-sm px-4 py-1.5">{tr597?'Kaydet':'Save'}</button>
@@ -27520,7 +27545,7 @@ function AppContent() {
                                 <div key={c.id} className="apple-card p-4">
                                   <div className="flex items-center justify-between mb-2">
                                     <p className="font-semibold text-gray-800">{c.customerName}</p>
-                                    <button onClick={()=>setP597Contracts(prev=>prev.filter(x=>x.id!==c.id))} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                                    <button onClick={async ()=>{try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
                                   </div>
                                   <div className="grid grid-cols-3 gap-3 text-xs mb-3">
                                     <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">₺{c.totalValue.toLocaleString()}</p></div>
@@ -27533,7 +27558,7 @@ function AppContent() {
                                   <div className="flex items-center justify-between text-[10px] text-gray-400">
                                     <span>{recPct.toFixed(0)}% {tr597?'tanındı':'recognized'}</span>
                                     {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} ₺{monthlyRec.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>}
-                                    <button onClick={()=>setP597Contracts(prev=>prev.map(x=>x.id===c.id?{...x,recognized:Math.min(x.totalValue,x.recognized+monthlyRec)}:x))} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
+                                    <button onClick={async ()=>{try{await updateDoc(doc(db,'revenueContracts',c.id),{recognized:Math.min(c.totalValue,c.recognized+monthlyRec)});}catch(e){console.error(e);}}} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
                                   </div>
                                 </div>
                               );
@@ -27845,9 +27870,9 @@ function AppContent() {
                               <input type="date" value={p640Draft.nextDate} onChange={e=>setP640Draft(d=>({...d,nextDate:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={()=>{
+                              <button onClick={async ()=>{
                                 if(!p640Draft.customerName||!p640Draft.amount) return;
-                                setP640Subs(prev=>[...prev,{id:Date.now().toString(),customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif'}]);
+                                try { await addDoc(collection(db,'recurringBilling'),{customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif'}); } catch(e){console.error(e);}
                                 setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:new Date().toISOString().slice(0,10)});
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr640?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr640?'İptal':'Cancel'}</button>
@@ -27872,7 +27897,7 @@ function AppContent() {
                                       {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
                                     </span>
                                   </div>
-                                  <button onClick={()=>setP640Subs(prev=>prev.filter(x=>x.id!==s.id))} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                                  <button onClick={async ()=>{try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
                                 </div>
                               );
                             })}
@@ -27908,9 +27933,9 @@ function AppContent() {
                               <input type="date" value={p643Draft.date} onChange={e=>setP643Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={()=>{
+                              <button onClick={async ()=>{
                                 if(!p643Draft.amount||!p643Draft.desc) return;
-                                setP643Txns(prev=>[...prev,{id:Date.now().toString(),from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor'}]);
+                                try { await addDoc(collection(db,'intercompanyTxns'),{from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor'}); } catch(e){console.error(e);}
                                 setP643ShowForm(false);
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr643?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP643ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr643?'İptal':'Cancel'}</button>
@@ -27928,7 +27953,7 @@ function AppContent() {
                                   <p className="text-xs text-gray-400">{t.desc} • {new Date(t.date).toLocaleDateString('tr-TR')}</p>
                                 </div>
                                 <span className="font-black text-sm text-gray-900">{t.currency==='TRY'?'₺':t.currency==='USD'?'$':'€'}{t.amount.toLocaleString('tr-TR')}</span>
-                                <button onClick={()=>setP643Txns(prev=>prev.map(x=>x.id===t.id?{...x,status:'Netleştirildi'}:x))}
+                                <button onClick={async ()=>{try{await updateDoc(doc(db,'intercompanyTxns',t.id),{status:'Netleştirildi'});}catch(e){console.error(e);}}}
                                   className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${t.status==='Netleştirildi'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700'}`}>
                                   {t.status==='Netleştirildi'?(tr643?'Netleştirildi':'Eliminated'):(tr643?'Netleştir':'Eliminate')}
                                 </button>
@@ -30175,9 +30200,9 @@ function AppContent() {
                               </select>
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={()=>{
+                              <button onClick={async ()=>{
                                 if(!p582Draft.name) return;
-                                setP582Projects(prev=>[...prev,{id:Date.now().toString(),name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}]);
+                                try { await addDoc(collection(db,'projectCosts'),{name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}); } catch(e){console.error(e);}
                                 setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
                                 setP582ShowForm(false);
                               }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
@@ -30201,7 +30226,7 @@ function AppContent() {
                                     </div>
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
-                                      <button onClick={()=>setP582Projects(prev=>prev.filter(x=>x.id!==p.id))} className="text-red-400 hover:text-red-600 ml-2">✕</button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error(e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                                     </div>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
@@ -30246,9 +30271,9 @@ function AppContent() {
                               <input type="date" className="apple-input" value={p618Draft.end} onChange={e=>setP618Draft(d=>({...d,end:e.target.value}))}/>
                               <input type="number" min="0" max="100" className="apple-input" placeholder="% İlerleme" value={p618Draft.progress} onChange={e=>setP618Draft(d=>({...d,progress:e.target.value}))}/>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p618Draft.name||!p618Draft.start||!p618Draft.end) return;
-                              setP618Projects(prev=>[...prev,{id:Date.now().toString(),name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}]);
+                              try { await addDoc(collection(db,'projectTimelines'),{name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}); } catch(e){console.error(e);}
                               setP618Draft({name:'',start:'',end:'',progress:'0',status:'Aktif',owner:''});
                               setP618ShowForm(false);
                               toast(tr618?'Proje eklendi.':'Project added.','success');
@@ -30270,7 +30295,7 @@ function AppContent() {
                                     </div>
                                     <div className="flex items-center gap-3 shrink-0 text-xs text-gray-400">
                                       <span>{p.owner}</span>
-                                      <input type="range" min="0" max="100" value={p.progress} onChange={e=>setP618Projects(prev=>prev.map(x=>x.id===p.id?{...x,progress:Number(e.target.value)}:x))} className="w-20"/>
+                                      <input type="range" min="0" max="100" value={p.progress} onChange={async e=>{try{await updateDoc(doc(db,'projectTimelines',p.id),{progress:Number(e.target.value)});}catch(err){console.error(err);}}} className="w-20"/>
                                       <span className="font-bold text-gray-700 w-8 text-right">%{p.progress}</span>
                                     </div>
                                   </div>
@@ -30476,7 +30501,7 @@ function AppContent() {
                               <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Gerçekleşen':'Actual'} value={p605Draft.actual} onChange={e=>setP605Draft(d=>({...d,actual:e.target.value}))} />
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={()=>{if(!p605Draft.line) return; setP605Capacity(prev=>[...prev,{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0}]); setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
+                              <button onClick={async ()=>{if(!p605Draft.line) return; try{await addDoc(collection(db,'capacityLines'),{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0});}catch(e){console.error(e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP605ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr605?'İptal':'Cancel'}</button>
                             </div>
                           </div>
@@ -30537,9 +30562,9 @@ function AppContent() {
                                 {['Normal','Acil'].map(p=><option key={p}>{p}</option>)}
                               </select>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p624Draft.productName||!p624Draft.qty) return;
-                              setP624Orders(prev=>[...prev,{id:Date.now().toString(),productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter}]);
+                              try { await addDoc(collection(db,'productionOrders'),{productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter}); } catch(e){console.error(e);}
                               setP624Draft(d=>({...d,productName:'',qty:'',workCenter:'',plannedStart:'',plannedEnd:''}));
                               setP624ShowForm(false);
                               toast(tr624?'Üretim emri oluşturuldu.':'Production order created.','success');
@@ -30568,7 +30593,7 @@ function AppContent() {
                                     <td className="px-3 py-2.5 text-gray-500">{o.plannedStart?new Date(o.plannedStart).toLocaleDateString('tr-TR'):'—'}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{o.plannedEnd?new Date(o.plannedEnd).toLocaleDateString('tr-TR'):'—'}</td>
                                     <td className="px-3 py-2.5">
-                                      <select value={o.status} onChange={e=>setP624Orders(prev=>prev.map(x=>x.id===o.id?{...x,status:e.target.value as typeof o.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[o.status]}`}>
+                                      <select value={o.status} onChange={async e=>{try{await updateDoc(doc(db,'productionOrders',o.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[o.status]}`}>
                                         {['Planlandı','Üretimde','Tamamlandı','İptal'].map(s=><option key={s}>{s}</option>)}
                                       </select>
                                     </td>
@@ -32206,21 +32231,24 @@ function AppContent() {
                 const entityOptions: {k:'all'|'orders'|'inventory'|'leads'|'muhasebe';l:string}[] = [
                   {k:'all',l:tr641?'Tümü':'All'},{k:'orders',l:tr641?'Siparişler':'Orders'},{k:'inventory',l:tr641?'Stok':'Inventory'},{k:'leads',l:tr641?'CRM':'CRM'},{k:'muhasebe',l:tr641?'Muhasebe':'Finance'},
                 ];
-                // Generate live audit entries from existing data changes
-                const liveLogs: typeof p641Logs = [
-                  ...orders.slice(0,3).map((o,i)=>({id:`ord-${o.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'create',entity:'orders',entityId:o.id,ts:typeof (o.createdAt as {toDate?:()=>Date}).toDate==='function'?(o.createdAt as {toDate:()=>Date}).toDate().toISOString():new Date(o.createdAt as string||Date.now()).toISOString(),details:`${o.customerName} · ₺${(o.totalPrice||0).toLocaleString('tr-TR',{maximumFractionDigits:0})}`})),
-                  ...inventory.slice(0,3).map((item,i)=>({id:`inv-${item.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'update',entity:'inventory',entityId:item.id,ts:new Date(Date.now()-i*3600000).toISOString(),details:`${item.name} — stok: ${item.stockLevel}`})),
-                  ...leads.slice(0,2).map((l,i)=>({id:`crm-${l.id}-${i}`,user:user?.email?.split('@')[0]||'system',action:'update',entity:'leads',entityId:l.id,ts:new Date(Date.now()-(i+4)*3600000).toISOString(),details:`${l.name} — ${l.status}`})),
-                  ...p641Logs,
-                ].sort((a,b)=>b.ts.localeCompare(a.ts));
-                const filtered641 = p641Entity==='all'?liveLogs:liveLogs.filter(l=>l.entity===p641Entity);
+                // Use real Firestore auditLog — normalise field names from existing schema
+                const normalised = auditLogs.map(l=>({
+                  id: String(l.id||''),
+                  user: String(l.user||l.userId||l.email||'system'),
+                  action: String(l.action||l.type||'update'),
+                  entity: String(l.entity||l.collection||l.module||''),
+                  entityId: String(l.entityId||l.docId||l.id||''),
+                  ts: l.timestamp instanceof Timestamp ? l.timestamp.toDate().toISOString() : String(l.timestamp||l.createdAt||new Date().toISOString()),
+                  details: l.details||l.description||l.message ? String(l.details||l.description||l.message) : undefined,
+                }));
+                const filtered641 = p641Entity==='all'?normalised:normalised.filter(l=>l.entity===p641Entity);
                 const actionIcon:{[k:string]:string}={create:'➕',update:'✏️',delete:'🗑️',view:'👁️'};
                 const entityBadge:{[k:string]:string}={orders:'bg-blue-100 text-blue-700',inventory:'bg-emerald-100 text-emerald-700',leads:'bg-purple-100 text-purple-700',muhasebe:'bg-amber-100 text-amber-700'};
                 return (
                   <div className="apple-card p-5 space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div><h3 className="font-bold text-gray-900 text-sm">🔍 {tr641?'Denetim İzi (Audit Trail)':'Audit Trail'}</h3>
-                      <p className="text-xs text-gray-400">{tr641?'Tüm varlıklardaki değişikliklerin kaydı':'Log of all changes across entities'}</p></div>
+                      <p className="text-xs text-gray-400">{tr641?`Firestore auditLog — son ${auditLogs.length} kayıt`:`Firestore auditLog — ${auditLogs.length} recent entries`}</p></div>
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
                         {entityOptions.map(t=>(
                           <button key={t.k} onClick={()=>setP641Entity(t.k)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p641Entity===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
@@ -32229,14 +32257,14 @@ function AppContent() {
                     </div>
                     {filtered641.length > 0 ? (
                       <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                        {filtered641.slice(0,20).map(l=>(
-                          <div key={l.id} className="flex items-start gap-3 border border-gray-50 rounded-xl px-3 py-2.5 hover:bg-gray-50/50">
+                        {filtered641.slice(0,20).map((l,idx)=>(
+                          <div key={l.id||idx} className="flex items-start gap-3 border border-gray-50 rounded-xl px-3 py-2.5 hover:bg-gray-50/50">
                             <span className="text-base mt-0.5">{actionIcon[l.action]||'•'}</span>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-semibold text-gray-800">{l.user}</span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${entityBadge[l.entity]||'bg-gray-100 text-gray-600'}`}>{l.entity}</span>
-                                <span className="text-[10px] text-gray-400 font-mono">#{l.entityId.slice(-8)}</span>
+                                {l.entity&&<span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${entityBadge[l.entity]||'bg-gray-100 text-gray-600'}`}>{l.entity}</span>}
+                                {l.entityId&&<span className="text-[10px] text-gray-400 font-mono">#{l.entityId.slice(-8)}</span>}
                               </div>
                               {l.details&&<p className="text-[10px] text-gray-500 truncate">{l.details}</p>}
                             </div>
@@ -32244,7 +32272,7 @@ function AppContent() {
                           </div>
                         ))}
                       </div>
-                    ) : <p className="text-center text-gray-400 text-xs py-4">{tr641?'Bu kategoride denetim kaydı bulunamadı.':'No audit logs found for this category.'}</p>}
+                    ) : <p className="text-center text-gray-400 text-xs py-4">{tr641?'Henüz denetim kaydı yok — işlemler gerçekleştikçe burada görünür.':'No audit logs yet — entries appear here as actions occur.'}</p>}
                   </div>
                 );
               })()}
@@ -33932,10 +33960,9 @@ function AppContent() {
                           <input type="number" className="apple-input" placeholder={tr642?'Garanti (ay)':'Warranty (months)'} value={p642Draft.warrantyMonths} onChange={e=>setP642Draft(d=>({...d,warrantyMonths:e.target.value}))}/>
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={()=>{
+                          <button onClick={async ()=>{
                             if(!p642Draft.productName) return;
-                            const entry = {id:Date.now().toString(),productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif' as const};
-                            setP642Warranties(prev=>[...prev,entry]);
+                            try { await addDoc(collection(db,'warranties'),{productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif'}); } catch(e){console.error(e);}
                             setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
                             setP642ShowForm(false);
                             toast(tr642?'Garanti kaydı oluşturuldu.':'Warranty record created.','success');
@@ -33966,7 +33993,7 @@ function AppContent() {
                                   <td className="px-3 py-2.5 text-gray-500">{new Date(w.purchaseDate).toLocaleDateString('tr-TR')}</td>
                                   <td className={`px-3 py-2.5 font-semibold ${expired?'text-red-500':expiry<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)?'text-amber-500':'text-gray-600'}`}>{new Date(expiry).toLocaleDateString('tr-TR')}</td>
                                   <td className="px-3 py-2.5">
-                                    <select value={autoStatus} onChange={e=>setP642Warranties(prev=>prev.map(x=>x.id===w.id?{...x,status:e.target.value as typeof w.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[autoStatus]}`}>
+                                    <select value={autoStatus} onChange={async e=>{try{await updateDoc(doc(db,'warranties',w.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[autoStatus]}`}>
                                       {['Aktif','Sona Erdi','Talep Açık'].map(s=><option key={s}>{s}</option>)}
                                     </select>
                                   </td>
@@ -38460,9 +38487,9 @@ function AppContent() {
                       </select>
                       <input className="apple-input col-span-2 md:col-span-1" placeholder={tr621?'Notlar':'Notes'} value={p621Draft.notes} onChange={e=>setP621Draft(d=>({...d,notes:e.target.value}))}/>
                     </div>
-                    <button onClick={()=>{
+                    <button onClick={async ()=>{
                       if(!p621Draft.productName||!p621Draft.requestedQty) return;
-                      setP621Demands(prev=>[...prev,{id:Date.now().toString(),productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||undefined,createdAt:new Date().toISOString()}]);
+                      try { await addDoc(collection(db,'demandRequests'),{productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||'',createdAt:new Date().toISOString()}); } catch(e){console.error(e);}
                       setP621Draft(d=>({...d,productName:'',sku:'',requestedQty:'',requestedBy:'',notes:''}));
                       setP621ShowForm(false);
                       toast(tr621?'Talep oluşturuldu.':'Request created.','success');
@@ -38477,7 +38504,7 @@ function AppContent() {
                           <p className="text-xs font-semibold text-gray-800">{d.productName} {d.sku&&<span className="text-gray-400 font-normal">({d.sku})</span>}</p>
                           <p className="text-[10px] text-gray-400">{d.requestedBy} · {d.requestedQty} {tr621?'adet':'units'} · {d.priority}</p>
                         </div>
-                        <select value={d.status} onChange={e=>setP621Demands(prev=>prev.map(x=>x.id===d.id?{...x,status:e.target.value as typeof d.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[d.status]}`}>
+                        <select value={d.status} onChange={async e=>{try{await updateDoc(doc(db,'demandRequests',d.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[d.status]}`}>
                           {['Bekliyor','Onaylandı','Reddedildi','Sipariş Verildi'].map(s=><option key={s}>{s}</option>)}
                         </select>
                       </div>
@@ -38512,9 +38539,9 @@ function AppContent() {
                       <input type="number" className="apple-input" placeholder={tr639?'Tutar (₺)':'Amount (₺)'} value={p639Draft.amount} onChange={e=>setP639Draft(d=>({...d,amount:e.target.value}))}/>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         if(!p639Draft.customerName||!p639Draft.amount) return;
-                        setP639Returns(prev=>[...prev,{id:Date.now().toString(),orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}]);
+                        try { await addDoc(collection(db,'returns'),{orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}); } catch(e){console.error(e);}
                         setP639Draft({orderId:'',customerName:'',reason:'',amount:''});
                         setP639ShowForm(false);
                         toast(tr639?'İade talebi oluşturuldu.':'Return request created.','success');
@@ -38537,7 +38564,7 @@ function AppContent() {
                             <p className="text-xs font-semibold text-gray-800">{r.customerName} <span className="font-normal text-gray-400">#{r.orderId}</span></p>
                             <p className="text-[10px] text-gray-400">{r.reason} · ₺{r.amount.toLocaleString('tr-TR',{maximumFractionDigits:0})} · {new Date(r.createdAt).toLocaleDateString('tr-TR')}</p>
                           </div>
-                          <select value={r.status} onChange={e=>setP639Returns(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[r.status]}`}>
+                          <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'returns',r.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[r.status]}`}>
                             {['Bekliyor','Onaylandı','Reddedildi'].map(s=><option key={s}>{s}</option>)}
                           </select>
                         </div>

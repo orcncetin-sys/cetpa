@@ -14,7 +14,7 @@ import {
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
 import { db } from '../firebase';
-import { collection, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -970,11 +970,21 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email.trim()) {
-      setSubmitted(true);
+    if (!email.trim()) return;
+    try {
+      await addDoc(collection(db, 'partnerApplications'), {
+        email: email.trim(),
+        type: 'cpa_partner',
+        createdAt: serverTimestamp(),
+        status: 'new',
+        source: 'landing_partner_section',
+      });
+    } catch {
+      // Non-blocking — still show success
     }
+    setSubmitted(true);
   };
 
   const benefits = [
