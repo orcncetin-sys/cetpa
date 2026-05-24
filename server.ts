@@ -3234,6 +3234,66 @@ async function startServer() {
     }
   });
 
+  /**
+   * POST /api/ai/demand-forecast
+   * Body: { ordersCount, monthlyArr, topProductsCtx, inventoryCtx, today, lang }
+   * Calls Gemini server-side with structured JSON schema and returns ForecastData.
+   * Protected by Firebase Auth (requireAuth).
+   */
+  app.post('/api/ai/demand-forecast', requireAuth, async (req: Request, res: Response) => {
+    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const {
+      ordersCount = 0,
+      monthlyArr = [],
+      topProductsCtx = [],
+      inventoryCtx = '',
+      today = new Date().toISOString().slice(0, 7),
+      lang = 'tr',
+    } = req.body as {
+      ordersCount?: number;
+      monthlyArr?: string[];
+      topProductsCtx?: string[];
+      inventoryCtx?: string;
+      today?: string;
+      lang?: string;
+    };
+    const language = lang === 'tr' ? 'Turkish' : 'English';
+    const prompt = `You are a senior B2B sales analyst for Cetpa, a Turkish wholesale distributor.
+
+Context (today: ${today}):
+- Orders last 90 days: ${ordersCount}
+- Monthly revenue: ${monthlyArr.join(', ')}
+- Top products: ${topProductsCtx.join('; ')}
+- Inventory: ${inventoryCtx || 'N/A'}
+
+Based on these trends, respond in ${language} as valid JSON (no markdown fences).
+Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
+    try {
+      const result = await geminiClient.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              summary:         { type: Type.STRING },
+              topProducts:     { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, units: { type: Type.NUMBER }, trend: { type: Type.STRING } }, required: ['name','units','trend'] } },
+              cashFlow:        { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { month: { type: Type.STRING }, projected: { type: Type.NUMBER } }, required: ['month','projected'] } },
+              recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+              reorderAlerts:   { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { product: { type: Type.STRING }, currentStock: { type: Type.NUMBER }, recommendedReorder: { type: Type.NUMBER } }, required: ['product','currentStock','recommendedReorder'] } },
+            },
+            required: ['summary','topProducts','cashFlow','recommendations','reorderAlerts'],
+          },
+        } as Record<string, unknown>,
+      });
+      return res.json(JSON.parse(result.text ?? '{}'));
+    } catch (e) {
+      console.error('[demand-forecast]', e);
+      return res.status(500).json({ error: 'Demand forecast failed.' });
+    }
+  });
+
   // ── Stripe Payment Integration ───────────────────────────────────────────
   const stripeClient = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-04-22.dahlia' })

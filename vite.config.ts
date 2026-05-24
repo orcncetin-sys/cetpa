@@ -8,7 +8,8 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      // GEMINI_API_KEY is intentionally NOT injected here — it lives server-side only.
+      // Client components must call /api/ai/* proxy routes instead.
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(env.GOOGLE_MAPS_PLATFORM_KEY || ''),
       'process.env.SHOPIFY_API_KEY': JSON.stringify(env.SHOPIFY_API_KEY || ''),
       'process.env.SHOPIFY_STORE_URL': JSON.stringify(env.SHOPIFY_STORE_URL || ''),

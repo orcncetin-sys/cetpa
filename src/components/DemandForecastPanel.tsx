@@ -17,8 +17,7 @@ import {
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import { GoogleGenAI, Type } from '@google/genai';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -136,52 +135,29 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
         .map(i => `${i.name} (${i.quantity ?? '?'} units)`)
         .join('; ');
 
-      // ── 3. Call Gemini ────────────────────────────────────────────────────
-      const apiKey = process.env.GEMINI_API_KEY || '';
-      if (!apiKey) throw new Error(tr ? 'GEMINI_API_KEY ortam değişkeni tanımlı değil.' : 'GEMINI_API_KEY env var not set.');
-
-      const ai    = new GoogleGenAI({ apiKey });
-      const lang  = tr ? 'Turkish' : 'English';
+      // ── 3. Call server-side Gemini proxy ─────────────────────────────────
       const today = new Date().toISOString().slice(0, 7);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error(tr ? 'Oturum açık değil.' : 'Not authenticated.');
 
-      const prompt = `You are a senior B2B sales analyst for Cetpa, a Turkish wholesale distributor.
-
-Context (today: ${today}):
-- Orders last 90 days: ${orders.length}
-- Monthly revenue: ${monthlyArr.join(', ')}
-- Top products: ${topProducts.map(p => `${p.name}: ${p.units} units [${p.months}]`).join('; ')}
-- Inventory: ${inventoryCtx || 'N/A'}
-
-Based on these trends, respond in ${lang} as valid JSON (no markdown fences):
-{
-  "summary": "2-3 sentence executive summary",
-  "topProducts": [{"name":"...","units":number,"trend":"up"|"down"|"stable"}],
-  "cashFlow": [{"month":"YYYY-MM","projected":number}],
-  "recommendations": ["string","string","string"],
-  "reorderAlerts": [{"product":"...","currentStock":number,"recommendedReorder":number}]
-}
-Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
-
-      const res = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary:       { type: Type.STRING },
-              topProducts:   { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, units: { type: Type.NUMBER }, trend: { type: Type.STRING } }, required: ['name','units','trend'] } },
-              cashFlow:      { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { month: { type: Type.STRING }, projected: { type: Type.NUMBER } }, required: ['month','projected'] } },
-              recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
-              reorderAlerts: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { product: { type: Type.STRING }, currentStock: { type: Type.NUMBER }, recommendedReorder: { type: Type.NUMBER } }, required: ['product','currentStock','recommendedReorder'] } },
-            },
-            required: ['summary','topProducts','cashFlow','recommendations','reorderAlerts'],
-          },
-        },
+      const serverRes = await fetch('/api/ai/demand-forecast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ordersCount:    orders.length,
+          monthlyArr,
+          topProductsCtx: topProducts.map(p => `${p.name}: ${p.units} units [${p.months}]`),
+          inventoryCtx,
+          today,
+          lang: currentLanguage,
+        }),
       });
+      if (!serverRes.ok) {
+        const err = await serverRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? (tr ? `Sunucu hatası: ${serverRes.status}` : `Server error: ${serverRes.status}`));
+      }
 
-      const data = JSON.parse(res.text) as ForecastData;
+      const data = await serverRes.json() as ForecastData;
       setForecast(data);
 
     } catch (e) {
