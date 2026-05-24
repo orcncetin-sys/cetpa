@@ -12,7 +12,7 @@ import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp
+  doc, serverTimestamp, runTransaction, getDocs,
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';
@@ -38,6 +38,45 @@ interface ProductionOrder {
   operatorName?: string;
   notes?: string;
   createdAt?: unknown;
+  // ── Ters Kayıt alanları ──
+  bomId?: string;                // Reçete ID (bom collection)
+  finishedInventoryId?: string;  // Mamul stok kalemi ID (inventory collection)
+}
+
+/** Minimal BOM shape loaded for ters kayıt — mirrors BOMPanel's BOM type */
+interface PMBOM {
+  id: string;
+  productName: string;
+  productSku: string;
+  unit: string;
+  components: {
+    inventoryId: string;
+    name: string;
+    sku: string;
+    quantity: number;   // per 1 unit of finished product
+    unit: string;
+  }[];
+}
+
+/** Minimal inventory item for selectors + stock math */
+interface PMInventoryItem {
+  id: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  unit?: string;
+}
+
+/** One line of the ters kayıt preview */
+interface TersKayitLine {
+  inventoryId: string;
+  name: string;
+  sku: string;
+  unit: string;
+  delta: number;          // negative = consume, positive = produce
+  currentStock: number;
+  newStock: number;
+  hasStockWarning: boolean;
 }
 
 interface Machine {
@@ -352,6 +391,8 @@ const DEFAULT_ORDER: Omit<ProductionOrder, 'id' | 'createdAt'> = {
   machineId: '',
   operatorName: '',
   notes: '',
+  bomId: '',
+  finishedInventoryId: '',
 };
 
 const DEFAULT_MACHINE: Omit<Machine, 'id'> = {
@@ -368,6 +409,7 @@ const DEFAULT_MACHINE: Omit<Machine, 'id'> = {
 // ─────────────────────────────────────────────
 export default function ProductionModule({ currentLanguage, isAuthenticated }: ProductionModuleProps) {
   const t = T[currentLanguage] as typeof T['tr'];
+  const tr = currentLanguage === 'tr';
 
   // ── State ──────────────────────────────────
   const [activeTab, setActiveTab] = useState<'orders' | 'machines' | 'analytics'>('orders');
@@ -390,6 +432,13 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
   // Delete confirms
   const [deleteOrderId, setDeleteOrderId] = useState<string | null>(null);
   const [deleteMachineId, setDeleteMachineId] = useState<string | null>(null);
+
+  // ── Ters Kayıt state ───────────────────────
+  const [boms, setBoms] = useState<PMBOM[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<PMInventoryItem[]>([]);
+  const [tersKayitOrder, setTersKayitOrder] = useState<ProductionOrder | null>(null);
+  const [tersKayitLines, setTersKayitLines] = useState<TersKayitLine[]>([]);
+  const [tersKayitLoading, setTersKayitLoading] = useState(false);
 
   // ── Firestore subscriptions (staggered) ───
   useEffect(() => {
@@ -429,9 +478,21 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
       unsubs.push(unsub);
     }, 150);
 
+    // BOM + inventory for ters kayıt (low priority — stagger 300ms)
+    const t3 = setTimeout(() => {
+      const u3 = onSnapshot(collection(db, 'bom'), (snap) => {
+        setBoms(snap.docs.map(d => ({ id: d.id, ...d.data() } as PMBOM)));
+      }, () => {});
+      const u4 = onSnapshot(collection(db, 'inventory'), (snap) => {
+        setInventoryItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as PMInventoryItem)));
+      }, () => {});
+      unsubs.push(u3, u4);
+    }, 300);
+
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
       unsubs.forEach((u) => u());
     };
   }, [isAuthenticated]);
@@ -485,17 +546,123 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
     }
   }, [orderForm, editingOrder, closeOrderModal]);
 
+  // ── Ters Kayıt: önizleme hesapla ──────────────────────────────────────────
+  const openTersKayit = useCallback((order: ProductionOrder) => {
+    const producedQty = order.quantity - order.completedQuantity;
+    if (producedQty <= 0) return; // zaten tamamlandı
+
+    const bom = boms.find(b => b.id === order.bomId)
+      ?? boms.find(b => b.productName.trim().toLowerCase() === order.productName.trim().toLowerCase());
+
+    const lines: TersKayitLine[] = [];
+
+    // Hammadde tüketimi (negatif delta)
+    if (bom) {
+      for (const comp of bom.components) {
+        if (!comp.inventoryId) continue;
+        const invItem = inventoryItems.find(i => i.id === comp.inventoryId);
+        const consumed = comp.quantity * producedQty;
+        const currentStock = invItem?.quantity ?? 0;
+        lines.push({
+          inventoryId: comp.inventoryId,
+          name: comp.name,
+          sku: comp.sku,
+          unit: comp.unit,
+          delta: -consumed,
+          currentStock,
+          newStock: currentStock - consumed,
+          hasStockWarning: currentStock < consumed,
+        });
+      }
+    }
+
+    // Mamul girişi (pozitif delta)
+    if (order.finishedInventoryId) {
+      const finItem = inventoryItems.find(i => i.id === order.finishedInventoryId);
+      const currentStock = finItem?.quantity ?? 0;
+      lines.push({
+        inventoryId: order.finishedInventoryId,
+        name: finItem?.name ?? order.productName,
+        sku: finItem?.sku ?? '',
+        unit: finItem?.unit ?? bom?.unit ?? 'adet',
+        delta: producedQty,
+        currentStock,
+        newStock: currentStock + producedQty,
+        hasStockWarning: false,
+      });
+    }
+
+    setTersKayitOrder(order);
+    setTersKayitLines(lines);
+  }, [boms, inventoryItems]);
+
+  // ── Ters Kayıt: Firestore transaction ile uygula ───────────────────────────
+  const executeTersKayit = useCallback(async () => {
+    if (!tersKayitOrder) return;
+    setTersKayitLoading(true);
+    const order = tersKayitOrder;
+    const producedQty = order.quantity - order.completedQuantity;
+
+    try {
+      // 1. Atomik stok güncellemesi (runTransaction)
+      if (tersKayitLines.length > 0) {
+        await runTransaction(db, async (tx) => {
+          for (const line of tersKayitLines) {
+            const invRef = doc(db, 'inventory', line.inventoryId);
+            const snap = await tx.get(invRef);
+            const currentQty = (snap.exists() ? (snap.data().quantity as number) : 0) || 0;
+            tx.update(invRef, { quantity: currentQty + line.delta });
+          }
+          tx.update(doc(db, 'productionOrders', order.id), {
+            status: 'Tamamlandı',
+            completedQuantity: (order.completedQuantity || 0) + producedQty,
+          });
+        });
+
+        // 2. Hareket kayıtları (transaction dışı — audit amaçlı)
+        for (const line of tersKayitLines) {
+          await addDoc(collection(db, 'inventoryMovements'), {
+            productId: line.inventoryId,
+            productName: line.name,
+            type: line.delta < 0 ? 'Üretim Tüketimi' : 'Üretim Çıktısı',
+            quantity: line.delta,
+            reason: `Üretim Emri: ${order.orderNo} — ${order.productName} (${producedQty} ${line.delta > 0 ? 'adet üretildi' : 'tüketildi'})`,
+            timestamp: serverTimestamp(),
+            referenceId: order.id,
+            referenceNo: order.orderNo,
+          });
+        }
+      } else {
+        // BOM veya stok kalemi tanımlı değil — sadece durum güncelle
+        await updateDoc(doc(db, 'productionOrders', order.id), {
+          status: 'Tamamlandı',
+          completedQuantity: (order.completedQuantity || 0) + producedQty,
+        });
+      }
+
+      setTersKayitOrder(null);
+      setTersKayitLines([]);
+    } catch (err) {
+      logFirestoreError(err as Error, OperationType.UPDATE, 'productionOrders (ters kayıt)');
+    } finally {
+      setTersKayitLoading(false);
+    }
+  }, [tersKayitOrder, tersKayitLines]);
+
   const handleStatusChange = useCallback(
     async (order: ProductionOrder, newStatus: ProductionOrder['status']) => {
-      const updates: Partial<ProductionOrder> = { status: newStatus };
-      if (newStatus === 'Tamamlandı') updates.completedQuantity = order.quantity;
+      if (newStatus === 'Tamamlandı') {
+        // Ters kayıt önizleme modalını aç
+        openTersKayit(order);
+        return;
+      }
       try {
-        await updateDoc(doc(db, 'productionOrders', order.id), updates);
+        await updateDoc(doc(db, 'productionOrders', order.id), { status: newStatus });
       } catch (err) {
         logFirestoreError(err as Error, OperationType.UPDATE, 'productionOrders');
       }
     },
-    []
+    [openTersKayit]
   );
 
   const handleDeleteOrder = useCallback(async () => {
@@ -1007,6 +1174,48 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
             />
           </div>
 
+          {/* BOM Selector */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              {tr ? 'Reçete (BOM)' : 'Bill of Materials'} <span className="text-gray-300 font-normal">— {tr ? 'ters kayıt için' : 'for backflush'}</span>
+            </label>
+            <select
+              className="apple-input w-full"
+              value={orderForm.bomId ?? ''}
+              onChange={(e) => {
+                const bomId = e.target.value;
+                const selectedBom = boms.find(b => b.id === bomId);
+                setOrderForm(p => ({
+                  ...p,
+                  bomId,
+                  productName: selectedBom ? selectedBom.productName : p.productName,
+                }));
+              }}
+            >
+              <option value="">{tr ? '— Reçete seçin (opsiyonel) —' : '— Select BOM (optional) —'}</option>
+              {boms.map(b => (
+                <option key={b.id} value={b.id}>{b.productName} {b.productSku ? `(${b.productSku})` : ''}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Finished Goods Inventory Item */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              {tr ? 'Mamul Stok Kalemi' : 'Finished Goods Item'} <span className="text-gray-300 font-normal">— {tr ? 'ters kayıt girişi' : 'stock entry'}</span>
+            </label>
+            <select
+              className="apple-input w-full"
+              value={orderForm.finishedInventoryId ?? ''}
+              onChange={(e) => setOrderForm(p => ({ ...p, finishedInventoryId: e.target.value }))}
+            >
+              <option value="">{tr ? '— Stok kalemi seçin (opsiyonel) —' : '— Select inventory item (optional) —'}</option>
+              {inventoryItems.map(i => (
+                <option key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ''} — {tr ? 'Stok' : 'Stock'}: {i.quantity}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Quantity + Completed */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1251,6 +1460,106 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
         variant="danger"
         confirmText={t.delete}
       />
+
+      {/* ─── Ters Kayıt Onay Modalı ─── */}
+      <AnimatePresence>
+        {tersKayitOrder && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => !tersKayitLoading && setTersKayitOrder(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0">
+                  <Activity className="w-5 h-5 text-orange-500" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">
+                    {tr ? 'Üretim Sonu Ters Kayıt' : 'Production Completion Backflush'}
+                  </h3>
+                  <p className="text-xs text-gray-400">{tersKayitOrder.orderNo} — {tersKayitOrder.productName}</p>
+                </div>
+              </div>
+
+              {/* Üretilen miktar */}
+              <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-800 font-medium">
+                {tr ? 'Üretilecek miktar' : 'Quantity to produce'}:&nbsp;
+                <b>{tersKayitOrder.quantity - tersKayitOrder.completedQuantity} adet</b>
+              </div>
+
+              {/* Hareket önizleme */}
+              {tersKayitLines.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">
+                    {tr ? 'Stok Hareketleri' : 'Inventory Movements'}
+                  </p>
+                  <div className="rounded-xl border border-gray-100 divide-y divide-gray-100 overflow-hidden">
+                    {tersKayitLines.map((line, i) => (
+                      <div key={i} className={`flex items-center justify-between px-3 py-2.5 text-xs ${line.hasStockWarning ? 'bg-red-50' : ''}`}>
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-800 truncate">{line.name}</p>
+                          <p className="text-gray-400">{line.sku} · {line.unit}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-3">
+                          <p className={`font-bold ${line.delta < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {line.delta > 0 ? '+' : ''}{line.delta}
+                          </p>
+                          <p className="text-gray-400">
+                            {line.currentStock} → <span className={line.hasStockWarning ? 'text-red-600 font-bold' : 'text-gray-700'}>{line.newStock}</span>
+                          </p>
+                          {line.hasStockWarning && (
+                            <p className="text-red-500 text-[10px] font-semibold">
+                              {tr ? 'Yetersiz stok!' : 'Insufficient stock!'}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-amber-50 rounded-xl px-4 py-3 text-xs text-amber-700">
+                  {tr
+                    ? 'Bu emre bağlı reçete veya mamul stok kalemi tanımlı değil. Stok hareketi oluşturulmadan sadece durum güncellenecek.'
+                    : 'No BOM or finished goods item linked. Only status will be updated — no stock movement will be created.'}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setTersKayitOrder(null)}
+                  disabled={tersKayitLoading}
+                  className="apple-button-secondary flex-1 py-2.5 text-sm font-semibold"
+                >
+                  {tr ? 'İptal' : 'Cancel'}
+                </button>
+                <button
+                  onClick={executeTersKayit}
+                  disabled={tersKayitLoading}
+                  className="apple-button-primary flex-1 justify-center py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                >
+                  {tersKayitLoading ? (
+                    <><Activity className="w-4 h-4 animate-spin" /> {tr ? 'Kaydediliyor...' : 'Saving...'}</>
+                  ) : (
+                    <><CheckCircle2 className="w-4 h-4" /> {tr ? 'Tamamla & Kaydet' : 'Complete & Post'}</>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
