@@ -16,6 +16,8 @@ export interface UserSubscription {
   paymentMethod?: string;
   lastPayment?: string;     // ISO date
   cancelledAt?: string;     // ISO date
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
 }
 
 export interface PlanConfig {

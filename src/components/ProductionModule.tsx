@@ -12,7 +12,7 @@ import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy
+  doc, serverTimestamp
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';
@@ -397,10 +397,21 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
     const unsubs: (() => void)[] = [];
 
     const t1 = setTimeout(() => {
+      // No orderBy — sort client-side to avoid Firestore internal assertion
+      // errors (b815/ca9) that occur when documents are missing the createdAt field.
       const unsub = onSnapshot(
-        query(collection(db, 'productionOrders'), orderBy('createdAt', 'desc')),
+        collection(db, 'productionOrders'),
         (snap) => {
-          setProductionOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionOrder)));
+          const orders = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionOrder));
+          // Sort descending by createdAt if present, fallback to orderNo
+          orders.sort((a, b) => {
+            const ta = (a.createdAt as { toDate?: () => Date } | string | undefined);
+            const tb = (b.createdAt as { toDate?: () => Date } | string | undefined);
+            const da = ta ? (typeof (ta as { toDate?: () => Date }).toDate === 'function' ? (ta as { toDate: () => Date }).toDate() : new Date(ta as string)) : new Date(0);
+            const db2 = tb ? (typeof (tb as { toDate?: () => Date }).toDate === 'function' ? (tb as { toDate: () => Date }).toDate() : new Date(tb as string)) : new Date(0);
+            return db2.getTime() - da.getTime();
+          });
+          setProductionOrders(orders);
         },
         (err) => logFirestoreError(err, OperationType.LIST, 'productionOrders')
       );

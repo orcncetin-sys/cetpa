@@ -586,6 +586,108 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Project Costs (Phase 582 — Budget & Cost Tracking) ───────
+    match /projectCosts/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Workflow Tasks (Phase 595 — Workflow Automation) ──────────
+    match /workflowTasks/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if hasRole(['Admin', 'Manager']);
+    }
+
+    // ── Revenue Contracts (Phase 597 — Revenue Recognition) ──────
+    match /revenueContracts/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Capacity Lines (Phase 605 — Capacity Planning) ────────────
+    match /capacityLines/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Project Timelines (Phase 618 — Gantt / Project Mgmt) ─────
+    match /projectTimelines/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasRole(['Admin', 'Manager', 'Corporate']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Demand Requests (Phase 621 — Demand Planning) ─────────────
+    match /demandRequests/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Purchasing', 'Logistics', 'Sales', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Purchasing', 'Sales', 'Logistics']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Letters of Credit (Phase 623 — Trade Finance) ─────────────
+    match /letterOfCredit/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales', 'Legal', 'Logistics']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Warranties (Phase 642 — Warranty Management) ──────────────
+    match /warranties/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Quality', 'Accounting']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Sales', 'Logistics', 'Quality']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Recurring Billing / Subscriptions (Phase 640) ────────────
+    match /recurringBilling/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Intercompany Transactions (Phase 643) ─────────────────────
+    match /intercompanyTxns/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Corporate']);
+      allow create, update: if hasRole(['Admin', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── E-Documents (EBelgeMerkezi) ───────────────────────────────
+    match /eBelgeler/{id} {
+      allow read: if hasRole(['Admin', 'Manager', 'Accounting', 'Sales']);
+      allow create, update: if hasRole(['Admin', 'Manager', 'Accounting']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Outbound Webhook Configs (Phase 649) ──────────────────────
+    match /webhookConfigs/{id} {
+      allow read: if hasRole(['Admin', 'Manager']);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Partner Applications (Landing page form — public write) ──
+    match /partnerApplications/{id} {
+      allow read: if isAdmin();
+      allow create: if true;  // public — unauthenticated partner form
+    }
+
+    // ── User Onboarding State ──────────────────────────────────────
+    match /userOnboarding/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Sync Jobs (Integration scheduler — server-managed) ────────
+    match /syncJobs/{id} {
+      allow read: if hasRole(['Admin', 'Manager']);
+      allow write: if false; // server-side only via Admin SDK
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

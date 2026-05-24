@@ -1,88 +1,93 @@
-import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
-import { Lead } from '../types';
+/**
+ * geminiService.ts
+ * All Gemini calls go through the server-side proxy (/api/ai/generate).
+ * The API key never appears in the browser bundle.
+ */
+import { auth } from '../firebase';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+async function getToken(): Promise<string> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+  return token;
+}
 
-export const scoreLead = async (lead: Lead | Record<string, unknown>) => {
+async function aiGenerate(payload: {
+  prompt: string;
+  model?: string;
+  systemInstruction?: string;
+  thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  jsonSchema?: unknown;
+}): Promise<string> {
+  const token = await getToken();
+  const res = await fetch('/api/ai/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`AI proxy ${res.status}`);
+  const data = await res.json() as { text: string };
+  return data.text;
+}
+
+// ── Lead Scoring ────────────────────────────────────────────────────────────
+
+export const scoreLead = async (lead: Record<string, unknown>): Promise<{ score: number; reasoning: string }> => {
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-preview",
-      contents: `Aşağıdaki potansiyel müşteriyi (lead) 0-100 arası puanla ve nedenini açıkla. Yanıtı JSON formatında ver: { "score": number, "reasoning": "string" }
-      
-      Müşteri Bilgileri:
-      ${JSON.stringify(lead, null, 2)}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            score: { type: Type.NUMBER },
-            reasoning: { type: Type.STRING }
-          },
-          required: ["score", "reasoning"]
-        }
-      }
+    const text = await aiGenerate({
+      model: 'gemini-2.5-flash-preview-05-20',
+      prompt: `Aşağıdaki potansiyel müşteriyi (lead) 0-100 arası puanla ve nedenini açıkla. Yanıtı JSON formatında ver: { "score": number, "reasoning": "string" }\n\nMüşteri Bilgileri:\n${JSON.stringify(lead, null, 2)}`,
+      jsonSchema: {
+        type: 'object',
+        properties: { score: { type: 'number' }, reasoning: { type: 'string' } },
+        required: ['score', 'reasoning'],
+      },
     });
-    return JSON.parse(response.text);
-  } catch (error) {
-    console.error("Lead scoring error:", error);
+    return JSON.parse(text) as { score: number; reasoning: string };
+  } catch (e) {
+    console.error('Lead scoring error:', e);
     return { score: 0, reasoning: 'Analiz yapılamadı.' };
   }
 };
 
-export const analyzeDashboard = async (data: unknown) => {
+// ── Dashboard Analysis ──────────────────────────────────────────────────────
+
+export const analyzeDashboard = async (data: unknown): Promise<string> => {
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: `Sen bir kurumsal veri analistisin. Aşağıdaki dashboard verilerini analiz et ve stratejik öneriler sun. 
-      Analizinde şu konulara değin:
-      1. Satış trendleri ve büyüme fırsatları.
-      2. Envanter yönetimi ve stok riskleri.
-      3. Finansal sağlık ve nakit akışı.
-      4. İnsan kaynakları ve departman verimliliği.
-      
-      Veriler:
-      ${JSON.stringify(data, null, 2)}`,
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
-      }
+    return await aiGenerate({
+      model: 'gemini-2.5-flash-preview-05-20',
+      thinkingLevel: 'HIGH',
+      prompt: `Sen bir kurumsal veri analistisin. Aşağıdaki dashboard verilerini analiz et ve stratejik öneriler sun.\nAnalizinde şu konulara değin:\n1. Satış trendleri ve büyüme fırsatları.\n2. Envanter yönetimi ve stok riskleri.\n3. Finansal sağlık ve nakit akışı.\n4. İnsan kaynakları ve departman verimliliği.\n\nVeriler:\n${JSON.stringify(data, null, 2)}`,
     });
-    return response.text;
-  } catch (error) {
-    console.error("Dashboard analysis error:", error);
-    return "Analiz sırasında bir hata oluştu.";
+  } catch (e) {
+    console.error('Dashboard analysis error:', e);
+    return 'Analiz sırasında bir hata oluştu.';
   }
 };
 
-export const suggestFMEAMitigation = async (failureMode: string, process: string) => {
+// ── FMEA Mitigation ─────────────────────────────────────────────────────────
+
+export const suggestFMEAMitigation = async (failureMode: string, process: string): Promise<string> => {
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-preview",
-      contents: `FMEA Analizi için öneri sun. 
-      Süreç: ${process}
-      Hata Modu: ${failureMode}
-      
-      Bu hata modu için olası kök nedenleri ve önleyici faaliyetleri (mitigation) maddeler halinde öner.`,
+    return await aiGenerate({
+      model: 'gemini-2.5-flash-preview-05-20',
+      prompt: `FMEA Analizi için öneri sun.\nSüreç: ${process}\nHata Modu: ${failureMode}\n\nBu hata modu için olası kök nedenleri ve önleyici faaliyetleri (mitigation) maddeler halinde öner.`,
     });
-    return response.text;
-  } catch (error) {
-    console.error("FMEA suggestion error:", error);
-    return "Öneri alınamadı.";
+  } catch (e) {
+    console.error('FMEA suggestion error:', e);
+    return 'Öneri alınamadı.';
   }
 };
 
-export const suggest8DRootCause = async (problem: string) => {
+// ── 8D Root Cause ────────────────────────────────────────────────────────────
+
+export const suggest8DRootCause = async (problem: string): Promise<string> => {
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-preview",
-      contents: `8D Problem Çözme Metodu için kök neden analizi önerisi sun.
-      Problem: ${problem}
-      
-      Bu problem için 5 Neden (5 Why) analizi taslağı ve olası kök nedenleri öner.`,
+    return await aiGenerate({
+      model: 'gemini-2.5-flash-preview-05-20',
+      prompt: `8D Problem Çözme Metodu için kök neden analizi önerisi sun.\nProblem: ${problem}\n\nBu problem için 5 Neden (5 Why) analizi taslağı ve olası kök nedenleri öner.`,
     });
-    return response.text;
-  } catch (error) {
-    console.error("8D suggestion error:", error);
-    return "Öneri alınamadı.";
+  } catch (e) {
+    console.error('8D suggestion error:', e);
+    return 'Öneri alınamadı.';
   }
 };

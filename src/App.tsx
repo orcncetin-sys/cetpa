@@ -555,7 +555,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, orders: portalOrders = []
       setIsDealerModalOpen(false);
       setEditingDealer(null);
       setDealerForm({ name:'', company:'', email:'', phone:'', taxId:'', creditLimit:500000, priceTier:'Dealer', paymentTerms:'30', address:'' });
-    } catch(e) { console.error(e); }
+    } catch(e) { console.error('[handleSaveDealer]', e); }
   };
 
   const filteredDealers = dealers
@@ -18749,7 +18749,8 @@ function AppContent() {
         await addDoc(collection(db, 'suppliers'), { ...newSupplier, createdAt: serverTimestamp() });
       }
       setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null);
-    } catch (e) { console.error(e); }
+      toast(currentLanguage === 'tr' ? 'Tedarikçi kaydedildi ✓' : 'Supplier saved ✓', 'success');
+    } catch (e) { console.error('[handleSaveSupplier]', e); toast(currentLanguage === 'tr' ? 'Tedarikçi kaydedilemedi.' : 'Failed to save supplier.', 'error'); }
   };
 
   const handleDeleteSupplier = async (id: string) => {
@@ -18842,38 +18843,30 @@ function AppContent() {
   // Subscription handlers
   const handleSelectPlan = async (planId: SubscriptionPlan, cycle: BillingCycle) => {
     if (!user) return;
-    const now = new Date();
-    const endDate = new Date(now);
-    if (cycle === 'monthly') endDate.setMonth(endDate.getMonth() + 1);
-    else endDate.setFullYear(endDate.getFullYear() + 1);
-    const planConfig = getPlanConfig(planId);
-    const amount = cycle === 'monthly' ? planConfig.monthlyPrice : planConfig.yearlyPrice;
-    const sub: UserSubscription = {
-      plan: planId,
-      cycle,
-      status: 'active',
-      startDate: now.toISOString(),
-      endDate: endDate.toISOString(),
-      maxUsers: planConfig.maxUsers,
-      currentUsers: 1,
-      lastPayment: now.toISOString(),
-    };
+    // Enterprise uses custom pricing — redirect to contact form
+    if (planId === 'enterprise') {
+      window.open('mailto:sales@cetpa.com.tr?subject=Enterprise Plan', '_blank');
+      return;
+    }
     try {
-      await setDoc(doc(db, 'subscriptions', user.uid), sub);
-      // Write payment record to payments collection
-      await addDoc(collection(db, 'payments'), {
-        userId: user.uid,
-        plan: planId,
-        planName: planConfig.name,
-        cycle,
-        amount,
-        currency: 'TRY',
-        status: 'paid',
-        date: now.toISOString(),
-        createdAt: serverTimestamp(),
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error('Not authenticated');
+      const res = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ planId, cycle }),
       });
-      setShowPricingPage(false);
-    } catch (e) { console.error(e); }
+      if (!res.ok) throw new Error(`Checkout error ${res.status}`);
+      const data = await res.json() as { url?: string; error?: string };
+      if (data.url) {
+        window.location.href = data.url;   // redirect to Stripe Checkout
+      } else {
+        throw new Error(data.error ?? 'No checkout URL returned');
+      }
+    } catch (e) {
+      console.error('[handleSelectPlan]', e);
+      toast(currentLanguage === 'tr' ? 'Ödeme sayfası açılamadı.' : 'Could not open checkout page.', 'error');
+    }
   };
 
   const handleStartTrial = async (planId: SubscriptionPlan) => {
@@ -18882,7 +18875,10 @@ function AppContent() {
     try {
       await setDoc(doc(db, 'subscriptions', user.uid), sub);
       setShowPricingPage(false);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error('[handleStartTrial]', e);
+      toast(currentLanguage === 'tr' ? 'Deneme başlatılamadı.' : 'Could not start trial.', 'error');
+    }
   };
 
   const handleOnboardingComplete = async (subscription: UserSubscription, companyInfo: { name: string; sector: string; size: string }) => {
@@ -18891,7 +18887,10 @@ function AppContent() {
       await setDoc(doc(db, 'subscriptions', user.uid), subscription);
       await setDoc(doc(db, 'companies', user.uid), { ...companyInfo, createdAt: serverTimestamp() }, { merge: true });
       setShowOnboarding(false);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error('[handleOnboardingComplete]', e);
+      toast(currentLanguage === 'tr' ? 'Kurulum kaydedilemedi.' : 'Could not save onboarding data.', 'error');
+    }
   };
 
   const handleCancelSubscription = async () => {
@@ -18902,7 +18901,11 @@ function AppContent() {
         status: 'cancelled',
         cancelledAt: new Date().toISOString(),
       });
-    } catch (e) { console.error(e); }
+      toast(currentLanguage === 'tr' ? 'Abonelik iptal edildi.' : 'Subscription cancelled.', 'success');
+    } catch (e) {
+      console.error('[handleCancelSubscription]', e);
+      toast(currentLanguage === 'tr' ? 'İptal işlemi başarısız.' : 'Could not cancel subscription.', 'error');
+    }
   };
 
   const handleUpgrade = (planId: SubscriptionPlan) => {
@@ -19190,8 +19193,10 @@ function AppContent() {
       setSelectedOrder({ ...selectedOrder, notes: orderNoteText });
       setOrderNoteSaved(true);
       setTimeout(() => setOrderNoteSaved(false), 2000);
-    } catch (e) { console.error(e); }
-    finally { setOrderNoteSaving(false); }
+    } catch (e) {
+      console.error('[handleSaveOrderNote]', e);
+      toast(currentLanguage === 'tr' ? 'Not kaydedilemedi.' : 'Could not save note.', 'error');
+    } finally { setOrderNoteSaving(false); }
   };
 
   const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
@@ -19565,6 +19570,32 @@ function AppContent() {
   }, [user, userSubscription, kvkkAccepted]);
   const acceptKvkk = () => { sessionStorage.setItem('cetpa_kvkk','1'); setKvkkAccepted(true); setShowKvkkModal(false); };
 
+  // ── Stripe Checkout return handler ───────────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    if (!checkout) return;
+    // Strip the param from the URL without a full reload
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
+    if (checkout === 'success') {
+      const plan = params.get('plan') ?? '';
+      toast(
+        currentLanguage === 'tr'
+          ? `🎉 Ödeme başarılı! ${plan ? plan.charAt(0).toUpperCase() + plan.slice(1) + ' planı' : 'Plan'} aktif edildi.`
+          : `🎉 Payment successful! ${plan ? plan.charAt(0).toUpperCase() + plan.slice(1) + ' plan' : 'Plan'} is now active.`,
+        'success'
+      );
+      setShowPricingPage(false);
+    } else if (checkout === 'cancel') {
+      toast(
+        currentLanguage === 'tr' ? 'Ödeme iptal edildi.' : 'Payment was cancelled.',
+        'error'
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Red-team Fix C: PWA Install Prompt ────────────────────────────────────
   const [pwaPromptEvent, setPwaPromptEvent] = useState<Event & {prompt:()=>void; userChoice:Promise<{outcome:string}>} | null>(null);
   const [showPwaBanner, setShowPwaBanner] = useState(false);
@@ -19614,6 +19645,23 @@ function AppContent() {
   const [p643Draft, setP643Draft] = useState({from:'Cetpa A.Ş.',to:'Cetpa Lojistik Ltd.',amount:'',currency:'TRY' as 'TRY'|'USD'|'EUR',desc:'',date:new Date().toISOString().slice(0,10)});
   // ── Phase 644: MRP / Malzeme İhtiyaç Planlaması ───────────────────────────
   const [p644Horizon, setP644Horizon] = useState(30);
+
+  // ── Phase 645–650 state ───────────────────────────────────────────────────
+  type WebhookConfig = { id: string; url: string; events: string[]; enabled: boolean; createdAt?: unknown };
+  const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
+  const [webhookDraft, setWebhookDraft] = useState({ url: '', events: [] as string[] });
+  const [webhookTestLoading, setWebhookTestLoading] = useState<string | null>(null);
+  const [webhookSaving, setWebhookSaving] = useState(false);
+  const WEBHOOK_EVENTS = ['order.created','order.updated','payment.received','lead.created','inventory.low'];
+
+  // ── Phase 649: Subscribe to webhookConfigs collection ────────────────────
+  useEffect(() => {
+    if (!user) return;
+    return onSnapshot(collection(db, 'webhookConfigs'), s =>
+      setWebhookConfigs(s.docs.map(d => ({ id: d.id, ...d.data() } as WebhookConfig))),
+      () => setWebhookConfigs([])
+    );
+  }, [user?.uid]);
 
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   const [p632Consolidation] = useState([
@@ -24190,7 +24238,7 @@ function AppContent() {
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
                         if(!p595Draft.title) return;
-                        try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false}); } catch(e){console.error(e);}
+                        try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Görev eklendi ✓' : 'Task added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Görev eklenemedi.' : 'Failed to add task.', 'error');}
                         setP595Draft({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta'});
                         setP595ShowForm(false);
                       }} className="apple-button-primary text-sm px-4 py-1.5">{tr595?'Kaydet':'Save'}</button>
@@ -24207,7 +24255,7 @@ function AppContent() {
                       return (pOrder[a.priority]||3)-(pOrder[b.priority]||3) || a.dueDate.localeCompare(b.dueDate);
                     }).map(t=>(
                       <div key={t.id} className={`flex items-center gap-3 p-3 rounded-xl border border-l-4 ${prioColors595[t.priority]}`}>
-                        <button onClick={async ()=>{try{await updateDoc(doc(db,'workflowTasks',t.id),{done:true});}catch(e){console.error(e);}}} className="w-5 h-5 rounded border-2 border-gray-300 hover:border-emerald-500 flex-shrink-0 transition-colors" />
+                        <button onClick={async ()=>{try{await updateDoc(doc(db,'workflowTasks',t.id),{done:true});}catch(e){console.error("[firestore]", e);}}} className="w-5 h-5 rounded border-2 border-gray-300 hover:border-emerald-500 flex-shrink-0 transition-colors" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-800 truncate">{t.title}</p>
                           <p className="text-xs text-gray-400">
@@ -24217,7 +24265,7 @@ function AppContent() {
                           </p>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${prioBadge595[t.priority]}`}>{t.priority}</span>
-                        <button onClick={async ()=>{try{await deleteDoc(doc(db,'workflowTasks',t.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                        <button onClick={async ()=>{try{await deleteDoc(doc(db,'workflowTasks',t.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                       </div>
                     ))}
                     {p595Tasks.filter(t=>t.done).length>0&&(
@@ -25379,7 +25427,7 @@ function AppContent() {
                                 </div>
                                 <button onClick={async ()=>{
                                   if(!p623Draft.bank||!p623Draft.amount) return;
-                                  try { await addDoc(collection(db,'letterOfCredit'),{bank:p623Draft.bank,beneficiary:p623Draft.beneficiary,amount:Number(p623Draft.amount),currency:p623Draft.currency,expiryDate:p623Draft.expiryDate,status:'Açık',ref:p623Draft.ref}); } catch(e){console.error(e);}
+                                  try { await addDoc(collection(db,'letterOfCredit'),{bank:p623Draft.bank,beneficiary:p623Draft.beneficiary,amount:Number(p623Draft.amount),currency:p623Draft.currency,expiryDate:p623Draft.expiryDate,status:'Açık',ref:p623Draft.ref,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Akreditif eklendi ✓' : 'LC added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Akreditif eklenemedi.' : 'Failed to add LC.', 'error');}
                                   setP623Draft(d=>({...d,bank:'',beneficiary:'',amount:'',ref:'',expiryDate:''}));
                                   setP623ShowForm(false);
                                   toast(tr623?'L/C eklendi.':'L/C added.','success');
@@ -27519,7 +27567,7 @@ function AppContent() {
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
                                 if(!p597Draft.customerName||!p597Draft.totalValue) return;
-                                try { await addDoc(collection(db,'revenueContracts'),{customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0}); } catch(e){console.error(e);}
+                                try { await addDoc(collection(db,'revenueContracts'),{customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Sözleşme eklendi ✓' : 'Contract added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Sözleşme eklenemedi.' : 'Failed to add contract.', 'error');}
                                 setP597Draft({customerName:'',totalValue:'',startDate:'',endDate:'',recognized:''});
                                 setP597ShowForm(false);
                               }} className="apple-button-primary text-sm px-4 py-1.5">{tr597?'Kaydet':'Save'}</button>
@@ -27545,7 +27593,7 @@ function AppContent() {
                                 <div key={c.id} className="apple-card p-4">
                                   <div className="flex items-center justify-between mb-2">
                                     <p className="font-semibold text-gray-800">{c.customerName}</p>
-                                    <button onClick={async ()=>{try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                                    <button onClick={async ()=>{try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
                                   </div>
                                   <div className="grid grid-cols-3 gap-3 text-xs mb-3">
                                     <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">₺{c.totalValue.toLocaleString()}</p></div>
@@ -27558,7 +27606,7 @@ function AppContent() {
                                   <div className="flex items-center justify-between text-[10px] text-gray-400">
                                     <span>{recPct.toFixed(0)}% {tr597?'tanındı':'recognized'}</span>
                                     {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} ₺{monthlyRec.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>}
-                                    <button onClick={async ()=>{try{await updateDoc(doc(db,'revenueContracts',c.id),{recognized:Math.min(c.totalValue,c.recognized+monthlyRec)});}catch(e){console.error(e);}}} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
+                                    <button onClick={async ()=>{try{await updateDoc(doc(db,'revenueContracts',c.id),{recognized:Math.min(c.totalValue,c.recognized+monthlyRec)});}catch(e){console.error("[firestore]", e);}}} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
                                   </div>
                                 </div>
                               );
@@ -27872,7 +27920,7 @@ function AppContent() {
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
                                 if(!p640Draft.customerName||!p640Draft.amount) return;
-                                try { await addDoc(collection(db,'recurringBilling'),{customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif'}); } catch(e){console.error(e);}
+                                try { await addDoc(collection(db,'recurringBilling'),{customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Abonelik eklendi ✓' : 'Subscription added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Abonelik eklenemedi.' : 'Failed to add subscription.', 'error');}
                                 setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:new Date().toISOString().slice(0,10)});
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr640?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr640?'İptal':'Cancel'}</button>
@@ -27897,7 +27945,7 @@ function AppContent() {
                                       {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
                                     </span>
                                   </div>
-                                  <button onClick={async ()=>{try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error(e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                                  <button onClick={async ()=>{try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
                                 </div>
                               );
                             })}
@@ -27935,7 +27983,7 @@ function AppContent() {
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
                                 if(!p643Draft.amount||!p643Draft.desc) return;
-                                try { await addDoc(collection(db,'intercompanyTxns'),{from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor'}); } catch(e){console.error(e);}
+                                try { await addDoc(collection(db,'intercompanyTxns'),{from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'İşlem eklendi ✓' : 'Transaction added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'İşlem eklenemedi.' : 'Failed to add transaction.', 'error');}
                                 setP643ShowForm(false);
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr643?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP643ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr643?'İptal':'Cancel'}</button>
@@ -27953,7 +28001,7 @@ function AppContent() {
                                   <p className="text-xs text-gray-400">{t.desc} • {new Date(t.date).toLocaleDateString('tr-TR')}</p>
                                 </div>
                                 <span className="font-black text-sm text-gray-900">{t.currency==='TRY'?'₺':t.currency==='USD'?'$':'€'}{t.amount.toLocaleString('tr-TR')}</span>
-                                <button onClick={async ()=>{try{await updateDoc(doc(db,'intercompanyTxns',t.id),{status:'Netleştirildi'});}catch(e){console.error(e);}}}
+                                <button onClick={async ()=>{try{await updateDoc(doc(db,'intercompanyTxns',t.id),{status:'Netleştirildi'});}catch(e){console.error("[firestore]", e);}}}
                                   className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${t.status==='Netleştirildi'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700'}`}>
                                   {t.status==='Netleştirildi'?(tr643?'Netleştirildi':'Eliminated'):(tr643?'Netleştir':'Eliminate')}
                                 </button>
@@ -30202,7 +30250,7 @@ function AppContent() {
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
                                 if(!p582Draft.name) return;
-                                try { await addDoc(collection(db,'projectCosts'),{name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}); } catch(e){console.error(e);}
+                                try { await addDoc(collection(db,'projectCosts'),{name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Proje maliyeti eklendi ✓' : 'Project cost added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Maliyet eklenemedi.' : 'Failed to add cost.', 'error');}
                                 setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
                                 setP582ShowForm(false);
                               }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
@@ -30226,7 +30274,7 @@ function AppContent() {
                                     </div>
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
-                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error(e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                                     </div>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
@@ -30273,7 +30321,7 @@ function AppContent() {
                             </div>
                             <button onClick={async ()=>{
                               if(!p618Draft.name||!p618Draft.start||!p618Draft.end) return;
-                              try { await addDoc(collection(db,'projectTimelines'),{name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}); } catch(e){console.error(e);}
+                              try { await addDoc(collection(db,'projectTimelines'),{name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklendi ✓' : 'Timeline added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklenemedi.' : 'Failed to add timeline.', 'error');}
                               setP618Draft({name:'',start:'',end:'',progress:'0',status:'Aktif',owner:''});
                               setP618ShowForm(false);
                               toast(tr618?'Proje eklendi.':'Project added.','success');
@@ -30501,7 +30549,7 @@ function AppContent() {
                               <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Gerçekleşen':'Actual'} value={p605Draft.actual} onChange={e=>setP605Draft(d=>({...d,actual:e.target.value}))} />
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={async ()=>{if(!p605Draft.line) return; try{await addDoc(collection(db,'capacityLines'),{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0});}catch(e){console.error(e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
+                              <button onClick={async ()=>{if(!p605Draft.line) return; try{await addDoc(collection(db,'capacityLines'),{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0,createdAt:serverTimestamp()});}catch(e){console.error("[firestore]", e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP605ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr605?'İptal':'Cancel'}</button>
                             </div>
                           </div>
@@ -30564,7 +30612,7 @@ function AppContent() {
                             </div>
                             <button onClick={async ()=>{
                               if(!p624Draft.productName||!p624Draft.qty) return;
-                              try { await addDoc(collection(db,'productionOrders'),{productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter}); } catch(e){console.error(e);}
+                              try { await addDoc(collection(db,'productionOrders'),{productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Üretim emri oluşturuldu ✓' : 'Production order created ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Üretim emri oluşturulamadı.' : 'Failed to create order.', 'error');}
                               setP624Draft(d=>({...d,productName:'',qty:'',workCenter:'',plannedStart:'',plannedEnd:''}));
                               setP624ShowForm(false);
                               toast(tr624?'Üretim emri oluşturuldu.':'Production order created.','success');
@@ -30950,33 +30998,101 @@ function AppContent() {
                 </div>
               </div>
 
-              {/* Webhooks */}
-              <div className="apple-card p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center">
-                    <Link className="w-4 h-4 text-gray-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-[#1D1D1F]">Webhooks</h3>
-                    <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Gelen & giden event bildirimleri' : 'Incoming & outgoing event notifications'}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {[
-                    { name: 'orders/create', source: 'Shopify → Cetpa', status: currentLanguage === 'tr' ? 'Aktif' : 'Active', color: 'bg-green-100 text-green-600' },
-                    { name: 'orders/update', source: 'Shopify → Cetpa', status: currentLanguage === 'tr' ? 'Aktif' : 'Active', color: 'bg-green-100 text-green-600' },
-                    { name: 'inventory/update', source: 'Cetpa → Shopify', status: currentLanguage === 'tr' ? 'Pasif' : 'Inactive', color: 'bg-gray-100 text-gray-500' },
-                    { name: 'journal/sync', source: 'Cetpa → Luca', status: currentLanguage === 'tr' ? 'Manuel' : 'Manual', color: 'bg-yellow-100 text-yellow-600' },
-                    { name: 'fatura/sync', source: 'Cetpa ↔ Mikro', status: companySettings?.mikro_enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive'), color: companySettings?.mikro_enabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400' },
-                  ].map((wh, i) => (
-                    <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                      <div>
-                        <div className="text-xs font-mono font-semibold text-gray-800">{wh.name}</div>
-                        <div className="text-[10px] text-gray-400">{wh.source}</div>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wh.color}`}>{wh.status}</span>
+              {/* ── Phase 649: Outbound Webhooks (Firestore-backed CRUD) ─────── */}
+              <div className="apple-card p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center">
+                      <Link className="w-4 h-4 text-gray-600" />
                     </div>
-                  ))}
+                    <div>
+                      <h3 className="font-bold text-sm text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Giden Webhook\'lar' : 'Outbound Webhooks'}</h3>
+                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Cetpa olaylarını dış sistemlere gönder' : 'Push Cetpa events to external systems'}</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-400">{webhookConfigs.length} {currentLanguage === 'tr' ? 'endpoint' : 'endpoints'}</span>
+                </div>
+
+                {/* Existing webhooks */}
+                {webhookConfigs.length > 0 && (
+                  <div className="space-y-2">
+                    {webhookConfigs.map(wh => (
+                      <div key={wh.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-mono font-semibold text-gray-800 truncate">{wh.url}</div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {(wh.events || []).map(ev => (
+                              <span key={ev} className="text-[9px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{ev}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={async () => {
+                              setWebhookTestLoading(wh.id);
+                              try {
+                                const token = await auth.currentUser?.getIdToken();
+                                const r = await fetch('/api/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ url: wh.url }) });
+                                const d = await r.json() as { ok?: boolean; status?: number };
+                                toast(d.ok ? `✓ ${d.status ?? 200}` : `✗ ${d.status ?? 'error'}`, d.ok ? 'success' : 'error');
+                              } catch { toast(currentLanguage === 'tr' ? 'Test başarısız' : 'Test failed', 'error'); }
+                              finally { setWebhookTestLoading(null); }
+                            }}
+                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-40"
+                            disabled={webhookTestLoading === wh.id}
+                          >
+                            {webhookTestLoading === wh.id ? '…' : (currentLanguage === 'tr' ? 'Test' : 'Test')}
+                          </button>
+                          <button
+                            onClick={async () => { try { await updateDoc(doc(db, 'webhookConfigs', wh.id), { enabled: !wh.enabled }); } catch { toast('Error', 'error'); } }}
+                            className={`text-[9px] font-bold px-2 py-1 rounded-lg transition-colors ${wh.enabled ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                          >
+                            {wh.enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive')}
+                          </button>
+                          <button onClick={async () => { try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add webhook form */}
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Yeni Webhook Ekle' : 'Add New Webhook'}</p>
+                  <input
+                    className="apple-input w-full text-xs"
+                    placeholder="https://your-service.com/webhook"
+                    value={webhookDraft.url}
+                    onChange={e => setWebhookDraft(d => ({ ...d, url: e.target.value }))}
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {WEBHOOK_EVENTS.map(ev => (
+                      <button
+                        key={ev}
+                        onClick={() => setWebhookDraft(d => ({ ...d, events: d.events.includes(ev) ? d.events.filter(e => e !== ev) : [...d.events, ev] }))}
+                        className={`text-[9px] font-bold px-2 py-1 rounded-lg border transition-all ${webhookDraft.events.includes(ev) ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-gray-300'}`}
+                      >
+                        {ev}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    disabled={!webhookDraft.url.startsWith('http') || webhookDraft.events.length === 0 || webhookSaving}
+                    onClick={async () => {
+                      setWebhookSaving(true);
+                      try {
+                        await addDoc(collection(db, 'webhookConfigs'), { url: webhookDraft.url.trim(), events: webhookDraft.events, enabled: true, createdAt: serverTimestamp() });
+                        setWebhookDraft({ url: '', events: [] });
+                        toast(currentLanguage === 'tr' ? 'Webhook eklendi ✓' : 'Webhook added ✓', 'success');
+                      } catch { toast(currentLanguage === 'tr' ? 'Webhook eklenemedi.' : 'Failed to add webhook.', 'error'); }
+                      finally { setWebhookSaving(false); }
+                    }}
+                    className="apple-button-primary text-xs px-5 disabled:opacity-40"
+                  >
+                    {webhookSaving ? '…' : (currentLanguage === 'tr' ? 'Ekle' : 'Add')}
+                  </button>
                 </div>
               </div>
 
@@ -32623,7 +32739,7 @@ function AppContent() {
                                         : `Reorder request created for ${item.name} ✓`,
                                       'success'
                                     );
-                                  } catch (e) { console.error(e); }
+                                  } catch (e) { console.error("[reorder-request]", e); toast(currentLanguage === "tr" ? "Talep oluşturulamadı." : "Could not create request.", "error"); }
                                 }}
                                 className="shrink-0 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
                               >
@@ -32816,7 +32932,7 @@ function AppContent() {
                                     });
                                     toast(currentLanguage === 'tr' ? `Satın alma siparişi oluşturuldu ✓` : `Purchase order created ✓`, 'success');
                                     setSmartReorderSelected(new Set());
-                                  } catch (e) { console.error(e); } finally { setSmartReorderCreating(false); }
+                                  } catch (e) { console.error("[smart-reorder]", e); toast(currentLanguage === "tr" ? "Satın alma siparişi oluşturulamadı." : "Could not create purchase order.", "error"); } finally { setSmartReorderCreating(false); }
                                 }}
                                 className="flex items-center gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-full transition-colors disabled:opacity-50"
                               >
@@ -33962,7 +34078,7 @@ function AppContent() {
                         <div className="flex gap-2">
                           <button onClick={async ()=>{
                             if(!p642Draft.productName) return;
-                            try { await addDoc(collection(db,'warranties'),{productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif'}); } catch(e){console.error(e);}
+                            try { await addDoc(collection(db,'warranties'),{productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Garanti kaydedildi ✓' : 'Warranty saved ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Garanti kaydedilemedi.' : 'Failed to save warranty.', 'error');}
                             setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
                             setP642ShowForm(false);
                             toast(tr642?'Garanti kaydı oluşturuldu.':'Warranty record created.','success');
@@ -34541,7 +34657,7 @@ function AppContent() {
                           setCampaignSending(true);
                           try {
                             // Determine recipients
-                            const recipients = leads.filter(l => {
+                            const recipientLeads = leads.filter(l => {
                               const hasEmail = !!(l.email as string | undefined);
                               if (!hasEmail) return false;
                               if (campaignForm.segment === 'all') return true;
@@ -34549,19 +34665,37 @@ function AppContent() {
                               if (campaignForm.segment === 'active') return l.status === 'Qualified';
                               return (l.score || 0) >= 70;
                             });
-                            // Log campaign to Firestore
-                            await addDoc(collection(db, 'campaigns'), {
+                            // Log campaign to Firestore first (get ID for status update)
+                            const campaignRef = await addDoc(collection(db, 'campaigns'), {
                               subject: campaignForm.subject,
                               body: campaignForm.body,
                               segment: campaignForm.segment,
-                              recipientCount: recipients.length,
+                              recipientCount: recipientLeads.length,
                               sentAt: serverTimestamp(),
                               sentBy: user?.email || 'guest',
+                              status: 'sending',
                             });
-                            setCampaignSent({ count: recipients.length, ts: Date.now() });
+                            // Call bulk email endpoint
+                            const token = await auth.currentUser?.getIdToken();
+                            const r = await fetch('/api/email/bulk-campaign', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                              body: JSON.stringify({
+                                subject: campaignForm.subject,
+                                body: campaignForm.body,
+                                campaignId: campaignRef.id,
+                                recipients: recipientLeads.map(l => ({ name: l.name as string || '', email: l.email as string })),
+                              }),
+                            });
+                            const result = await r.json() as { sent?: number; failed?: number; notConfigured?: boolean };
+                            setCampaignSent({ count: result.sent ?? recipientLeads.length, ts: Date.now() });
                             setCampaignForm({ subject: '', body: '', segment: 'all' });
-                            toast(currentLanguage === 'tr' ? 'Kampanya kaydedildi.' : 'Campaign logged.', 'success');
-                          } catch { toast('Error', 'error'); }
+                            if (result.notConfigured) {
+                              toast(currentLanguage === 'tr' ? 'Kampanya kaydedildi (Resend API anahtarı yapılandırılmamış — e-posta gönderilmedi).' : 'Campaign saved (Resend API key not configured — emails not sent).', 'success');
+                            } else {
+                              toast(currentLanguage === 'tr' ? `${result.sent ?? 0} e-posta gönderildi ✓` : `${result.sent ?? 0} emails sent ✓`, 'success');
+                            }
+                          } catch (e) { console.error('[campaign-send]', e); toast(currentLanguage === 'tr' ? 'Kampanya gönderilemedi.' : 'Campaign send failed.', 'error'); }
                           finally { setCampaignSending(false); }
                         }}
                         className="apple-button-primary px-8 disabled:opacity-50 flex items-center gap-2"
@@ -35717,7 +35851,7 @@ function AppContent() {
                                     ));
                                     toast(`${selectedLeadIds.size} ${currentLanguage === 'tr' ? 'aday güncellendi ✓' : 'leads updated ✓'}`, 'success');
                                     setSelectedLeadIds(new Set());
-                                  } catch(e){ console.error(e); } finally { setBulkLeadLoading(false); }
+                                  } catch(e){ console.error("[bulk-lead-status]", e); toast(currentLanguage === "tr" ? "Güncelleme başarısız." : "Update failed.", "error"); } finally { setBulkLeadLoading(false); }
                                 }}
                                 className="text-[10px] font-bold px-2.5 py-1.5 rounded-full bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-40">
                                 → {currentLanguage === 'tr' ? labelTR519[s] : s}
@@ -36852,7 +36986,7 @@ function AppContent() {
                             onClick={async () => {
                               setRescoreLeadId(selectedLead.id);
                               try {
-                                const newScore = await scoreLead(selectedLead);
+                                const newScore = await scoreLead(selectedLead as unknown as Record<string, unknown>);
                                 if (typeof newScore === 'number' && !isNaN(newScore)) {
                                   await updateDoc(doc(db, 'leads', selectedLead.id), { score: newScore, scoredAt: serverTimestamp() });
                                   setSelectedLead({ ...selectedLead, score: newScore });
@@ -36863,7 +36997,7 @@ function AppContent() {
                                     'success'
                                   );
                                 }
-                              } catch (e) { console.error(e); }
+                              } catch (e) { console.error("[lead-rescore]", e); toast(currentLanguage === "tr" ? "AI skorlama başarısız." : "AI scoring failed.", "error"); }
                               finally { setRescoreLeadId(null); }
                             }}
                             className="text-[9px] font-bold px-2 py-1 rounded-lg bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors disabled:opacity-40 flex items-center gap-1"
@@ -38489,7 +38623,7 @@ function AppContent() {
                     </div>
                     <button onClick={async ()=>{
                       if(!p621Draft.productName||!p621Draft.requestedQty) return;
-                      try { await addDoc(collection(db,'demandRequests'),{productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||'',createdAt:new Date().toISOString()}); } catch(e){console.error(e);}
+                      try { await addDoc(collection(db,'demandRequests'),{productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||'',createdAt:new Date().toISOString()}); toast(currentLanguage === 'tr' ? 'Talep oluşturuldu ✓' : 'Demand request created ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Talep oluşturulamadı.' : 'Failed to create request.', 'error');}
                       setP621Draft(d=>({...d,productName:'',sku:'',requestedQty:'',requestedBy:'',notes:''}));
                       setP621ShowForm(false);
                       toast(tr621?'Talep oluşturuldu.':'Request created.','success');
@@ -38541,7 +38675,7 @@ function AppContent() {
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
                         if(!p639Draft.customerName||!p639Draft.amount) return;
-                        try { await addDoc(collection(db,'returns'),{orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}); } catch(e){console.error(e);}
+                        try { await addDoc(collection(db,'returns'),{orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}); toast(currentLanguage === 'tr' ? 'İade kaydedildi ✓' : 'Return saved ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'İade kaydedilemedi.' : 'Failed to save return.', 'error');}
                         setP639Draft({orderId:'',customerName:'',reason:'',amount:''});
                         setP639ShowForm(false);
                         toast(tr639?'İade talebi oluşturuldu.':'Return request created.','success');
@@ -41381,7 +41515,7 @@ function AppContent() {
                         toast(currentLanguage === 'tr' ? `${Object.keys(stockCountDraft).length} ürün güncellendi ✓` : `${Object.keys(stockCountDraft).length} items updated ✓`, 'success');
                         setStockCountDraft({});
                         setShowStockCount(false);
-                      } catch (e) { console.error(e); toast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error saving', 'error'); } finally { setStockCountSaving(false); }
+                      } catch (e) { console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error saving', 'error'); } finally { setStockCountSaving(false); }
                     }}
                     className="apple-button-primary text-sm px-5 disabled:opacity-40"
                   >

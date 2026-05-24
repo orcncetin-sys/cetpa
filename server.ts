@@ -6,6 +6,8 @@ import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
 import { createHmac } from "crypto";
+import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
+import Stripe from "stripe";
 
 dotenv.config();
 
@@ -2459,6 +2461,110 @@ async function startServer() {
     }
   });
 
+  /**
+   * POST /api/email/bulk-campaign
+   * Body: { subject, body, recipients: {name, email}[], campaignId? }
+   * Sends an email to each recipient, personalising {{name}} placeholder.
+   * Rate-limited to 3 req/s to stay inside Resend free tier.
+   * Returns: { sent, failed, notConfigured? }
+   */
+  app.post('/api/email/bulk-campaign', requireAuth, async (req: Request, res: Response) => {
+    const { subject, body, recipients, campaignId } =
+      req.body as { subject: string; body: string; recipients: { name: string; email: string }[]; campaignId?: string };
+
+    if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'subject, body, and recipients[] required.' });
+    }
+
+    const creds = await getResendKey();
+    if (!creds) return res.json({ sent: 0, failed: 0, notConfigured: true });
+
+    let sent = 0;
+    let failed = 0;
+    const BATCH_DELAY_MS = 350; // ~3 req/s
+
+    for (const recipient of recipients) {
+      if (!recipient.email) { failed++; continue; }
+      const personalised = body.replace(/\{\{name\}\}/gi, recipient.name || recipient.email.split('@')[0]);
+      const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        <p>${personalised.replace(/\n/g, '<br>')}</p>
+        <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+        <p style="font-size:11px;color:#999">Bu e-posta Cetpa ERP tarafından gönderilmiştir. Abonelikten çıkmak için lütfen bizimle iletişime geçin.</p>
+      </body></html>`;
+      const result = await sendEmail(recipient.email, subject, html);
+      if (result.error) { failed++; } else { sent++; }
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    }
+
+    // Update campaign record if ID provided
+    if (campaignId && adminDb) {
+      await adminDb.collection('campaigns').doc(campaignId).update({
+        sent,
+        failed,
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'sent',
+      }).catch(() => {});
+    }
+
+    console.log(`[bulk-campaign] sent=${sent} failed=${failed} total=${recipients.length}`);
+    return res.json({ sent, failed });
+  });
+
+  // ── Outbound Webhooks (Phase 649) ─────────────────────────────────────────
+
+  /**
+   * Fires all enabled webhookConfigs that subscribe to `event`.
+   * Called internally when Cetpa events happen (order created, payment, etc.)
+   */
+  async function fireWebhooks(event: string, payload: Record<string, unknown>) {
+    if (!adminDb) return;
+    try {
+      const snap = await adminDb.collection('webhookConfigs').where('enabled', '==', true).get();
+      const configs = snap.docs.map(d => ({ id: d.id, ...d.data() } as { id: string; url: string; events: string[]; enabled: boolean }));
+      const targets = configs.filter(c => (c.events ?? []).includes(event));
+      await Promise.allSettled(targets.map(async c => {
+        try {
+          const r = await fetch(c.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Cetpa-Event': event },
+            body: JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() }),
+            signal: AbortSignal.timeout(5000),
+          });
+          console.log(`[webhook] ${event} → ${c.url} : ${r.status}`);
+        } catch (e) {
+          console.warn(`[webhook] ${event} → ${c.url} FAILED:`, (e as Error).message);
+        }
+      }));
+    } catch (e) {
+      console.error('[fireWebhooks]', e);
+    }
+  }
+
+  /**
+   * POST /api/webhooks/test
+   * Body: { url }
+   * Sends a test ping to the given URL and returns { ok, status }.
+   */
+  app.post('/api/webhooks/test', requireAuth, async (req: Request, res: Response) => {
+    const { url } = req.body as { url: string };
+    if (!url || !url.startsWith('http')) return res.status(400).json({ error: 'valid url required' });
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Cetpa-Event': 'test' },
+        body: JSON.stringify({ event: 'test', data: { message: 'Cetpa webhook test ping' }, sentAt: new Date().toISOString() }),
+        signal: AbortSignal.timeout(5000),
+      });
+      return res.json({ ok: r.ok, status: r.status });
+    } catch (e) {
+      return res.json({ ok: false, error: (e as Error).message });
+    }
+  });
+
+  // Make fireWebhooks available to Shopify webhook handler (order create fires it)
+  // Re-export via closure — the Shopify route calls it directly since it's in the same scope.
+  // Usage: await fireWebhooks('order.created', { id, customerName, total });
+
   // ── Reports Summary API ────────────────────────────────────────────────────
   // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
   app.get('/api/reports/summary', async (_req: Request, res: Response) => {
@@ -3058,6 +3164,245 @@ async function startServer() {
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
+  });
+
+  // ── Gemini AI Proxy — key never leaves the server ────────────────────────
+  const geminiClient = process.env.GEMINI_API_KEY
+    ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+    : null;
+
+  /**
+   * POST /api/ai/generate
+   * Body: { prompt, model?, systemInstruction?, thinkingLevel?, jsonSchema? }
+   * Returns: { text: string }
+   * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
+   */
+  app.post('/api/ai/generate', requireAuth, async (req: Request, res: Response) => {
+    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const { prompt, model = 'gemini-2.5-flash-preview-05-20', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
+      prompt: string; model?: string; systemInstruction?: string;
+      thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
+    };
+    if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
+    try {
+      const response = await geminiClient.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          ...(systemInstruction ? { systemInstruction } : {}),
+          ...(thinkingLevel && thinkingLevel !== 'NONE' ? { thinkingConfig: { thinkingLevel: ThinkingLevel[thinkingLevel] } } : {}),
+          ...(jsonSchema ? { responseMimeType: 'application/json', responseSchema: jsonSchema } : {}),
+        } as Record<string, unknown>,
+      });
+      return res.json({ text: response.text ?? '' });
+    } catch (e) {
+      console.error('[Gemini generate]', e);
+      return res.status(500).json({ error: 'AI generation failed.' });
+    }
+  });
+
+  /**
+   * POST /api/ai/chat
+   * Body: { message, history?, systemInstruction?, model?, highThinking? }
+   * Returns: { text: string }
+   * Used by: AIChat.tsx
+   */
+  app.post('/api/ai/chat', requireAuth, async (req: Request, res: Response) => {
+    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const { message, history = [], systemInstruction, model = 'gemini-2.5-flash-preview-05-20', highThinking = false } = req.body as {
+      message: string;
+      history?: { role: string; parts: { text: string }[] }[];
+      systemInstruction?: string;
+      model?: string;
+      highThinking?: boolean;
+    };
+    if (!message) return res.status(400).json({ error: 'message is required.' });
+    try {
+      const chat = geminiClient.chats.create({
+        model,
+        config: {
+          ...(systemInstruction ? { systemInstruction } : {}),
+          ...(highThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } } : {}),
+        } as Record<string, unknown>,
+        history: history as { role: 'user' | 'model'; parts: { text: string }[] }[],
+      });
+      const response = await chat.sendMessage({ message });
+      return res.json({ text: response.text ?? '' });
+    } catch (e) {
+      console.error('[Gemini chat]', e);
+      return res.status(500).json({ error: 'AI chat failed.' });
+    }
+  });
+
+  // ── Stripe Payment Integration ───────────────────────────────────────────
+  const stripeClient = process.env.STRIPE_SECRET_KEY
+    ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-04-22.dahlia' })
+    : null;
+
+  /** Price config mirroring src/types/subscription.ts — kept in sync manually */
+  const STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name: string }> = {
+    starter:      { monthly: 99900,  yearly: 999000,  name: 'Cetpa Başlangıç' },
+    professional: { monthly: 249900, yearly: 2499000, name: 'Cetpa Profesyonel' },
+    business:     { monthly: 499900, yearly: 4999000, name: 'Cetpa Business' },
+  };
+  // Amounts above are in kuruş (TRY minor unit, ×100)
+
+  /**
+   * POST /api/stripe/create-checkout
+   * Body: { planId, cycle }
+   * Returns: { url: string } — Stripe Checkout hosted URL
+   * Protected by Firebase Auth (requireAuth).
+   */
+  app.post('/api/stripe/create-checkout', requireAuth, async (req: Request, res: Response) => {
+    if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
+    const uid = (req as Request & { uid: string }).uid;
+    const { planId, cycle } = req.body as { planId: string; cycle: 'monthly' | 'yearly' };
+
+    const prices = STRIPE_PLAN_PRICES[planId];
+    if (!prices) return res.status(400).json({ error: `Unknown plan: ${planId}` });
+    if (!['monthly', 'yearly'].includes(cycle)) return res.status(400).json({ error: 'cycle must be monthly or yearly' });
+
+    const unitAmount = cycle === 'monthly' ? prices.monthly : prices.yearly;
+    const interval  = cycle === 'monthly' ? 'month' : 'year';
+    const origin    = (req.headers.origin as string) || 'http://localhost:5173';
+
+    try {
+      // Fetch or create Stripe customer for this Firebase UID
+      let customerId: string | undefined;
+      if (adminDb) {
+        const subSnap = await adminDb.collection('subscriptions').doc(uid).get();
+        if (subSnap.exists) customerId = (subSnap.data() as { stripeCustomerId?: string }).stripeCustomerId;
+      }
+
+      const session = await stripeClient.checkout.sessions.create({
+        mode: 'subscription',
+        ...(customerId ? { customer: customerId } : {}),
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'try',
+            unit_amount: unitAmount,
+            product_data: { name: prices.name },
+            recurring: { interval },
+          },
+        }],
+        metadata: { firebaseUid: uid, plan: planId, cycle },
+        success_url: `${origin}/?checkout=success&plan=${planId}&cycle=${cycle}`,
+        cancel_url:  `${origin}/?checkout=cancel`,
+        subscription_data: { metadata: { firebaseUid: uid, plan: planId, cycle } },
+      });
+
+      return res.json({ url: session.url });
+    } catch (e) {
+      console.error('[Stripe create-checkout]', e);
+      return res.status(500).json({ error: 'Failed to create checkout session.' });
+    }
+  });
+
+  /**
+   * POST /api/stripe/webhook
+   * Stripe sends events here. Signature verified with STRIPE_WEBHOOK_SECRET.
+   * Handles:
+   *   checkout.session.completed       → activate subscription in Firestore
+   *   customer.subscription.updated    → sync status changes
+   *   customer.subscription.deleted    → mark cancelled
+   */
+  app.post('/api/stripe/webhook', async (req: Request & { rawBody?: Buffer }, res: Response) => {
+    if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
+    const sig = req.headers['stripe-signature'] as string;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) return res.status(503).json({ error: 'Webhook secret not set.' });
+    if (!sig) return res.status(400).json({ error: 'Missing stripe-signature header.' });
+
+    let event: Stripe.Event;
+    try {
+      event = stripeClient.webhooks.constructEvent(req.rawBody ?? Buffer.from(''), sig, webhookSecret);
+    } catch (e) {
+      console.error('[Stripe webhook] signature verification failed:', e);
+      return res.status(400).json({ error: 'Invalid signature.' });
+    }
+
+    if (!adminDb) return res.status(503).json({ error: 'Firestore not available.' });
+
+    try {
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const { firebaseUid, plan, cycle } = session.metadata ?? {};
+        if (!firebaseUid || !plan || !cycle) return res.sendStatus(200);
+
+        const now   = new Date();
+        const end   = new Date(now);
+        if (cycle === 'monthly') end.setMonth(end.getMonth() + 1);
+        else end.setFullYear(end.getFullYear() + 1);
+
+        const planPrices = STRIPE_PLAN_PRICES[plan];
+        const amount = planPrices ? (cycle === 'monthly' ? planPrices.monthly / 100 : planPrices.yearly / 100) : 0;
+
+        // Activate subscription
+        await adminDb.collection('subscriptions').doc(firebaseUid).set({
+          plan,
+          cycle,
+          status: 'active',
+          startDate: now.toISOString(),
+          endDate: end.toISOString(),
+          lastPayment: now.toISOString(),
+          stripeCustomerId: session.customer as string ?? '',
+          stripeSubscriptionId: session.subscription as string ?? '',
+          maxUsers: plan === 'starter' ? 1 : plan === 'professional' ? 5 : plan === 'business' ? 20 : 999,
+          currentUsers: 1,
+        }, { merge: true });
+
+        // Log payment record
+        await adminDb.collection('payments').add({
+          userId: firebaseUid,
+          plan,
+          cycle,
+          amount,
+          currency: 'TRY',
+          status: 'paid',
+          stripeSessionId: session.id,
+          stripeCustomerId: session.customer ?? '',
+          date: now.toISOString(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`[Stripe] Subscription activated for uid=${firebaseUid} plan=${plan}/${cycle}`);
+      }
+
+      if (event.type === 'customer.subscription.updated') {
+        const sub = event.data.object as Stripe.Subscription;
+        const { firebaseUid } = sub.metadata ?? {};
+        if (!firebaseUid) return res.sendStatus(200);
+
+        const statusMap: Record<string, string> = {
+          active:   'active',
+          past_due: 'past_due',
+          canceled: 'cancelled',
+          unpaid:   'past_due',
+        };
+        await adminDb.collection('subscriptions').doc(firebaseUid).set(
+          { status: statusMap[sub.status] ?? sub.status },
+          { merge: true }
+        );
+      }
+
+      if (event.type === 'customer.subscription.deleted') {
+        const sub = event.data.object as Stripe.Subscription;
+        const { firebaseUid } = sub.metadata ?? {};
+        if (!firebaseUid) return res.sendStatus(200);
+
+        await adminDb.collection('subscriptions').doc(firebaseUid).set(
+          { status: 'cancelled', cancelledAt: new Date().toISOString() },
+          { merge: true }
+        );
+        console.log(`[Stripe] Subscription cancelled for uid=${firebaseUid}`);
+      }
+    } catch (e) {
+      console.error('[Stripe webhook] handler error:', e);
+      return res.status(500).json({ error: 'Webhook handler failed.' });
+    }
+
+    return res.sendStatus(200);
   });
 
   // ── Health & Stats endpoints (all modes) ──────────────────────────────────

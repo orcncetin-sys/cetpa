@@ -37,7 +37,7 @@ interface EBelgeMerkeziProps {
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 
-function generateBelgeNo(tur: BelgeTur): string {
+function generateBelgeNo(tur: BelgeTur, existingBelgeler: { belgeNo: string; tur: BelgeTur }[]): string {
   const prefix: Record<BelgeTur, string> = {
     'e-fatura': 'EF',
     'e-arsiv': 'EA',
@@ -45,8 +45,14 @@ function generateBelgeNo(tur: BelgeTur): string {
     'e-smm': 'ES',
   };
   const year = new Date().getFullYear();
-  const seq = String(Math.floor(Math.random() * 9000) + 1000);
-  return `${prefix[tur]}-${year}-${seq}`;
+  const yearPrefix = `${prefix[tur]}-${year}-`;
+  // Find highest sequence number for this type in the current year
+  const existing = existingBelgeler
+    .filter(b => b.tur === tur && b.belgeNo.startsWith(yearPrefix))
+    .map(b => parseInt(b.belgeNo.replace(yearPrefix, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+  return `${yearPrefix}${String(next).padStart(4, '0')}`;
 }
 
 const TUR_LABELS: Record<BelgeTur, string> = {
@@ -156,7 +162,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
 
   const openModal = () => {
     setForm({
-      belgeNo: generateBelgeNo(activeTab),
+      belgeNo: generateBelgeNo(activeTab, belgeler),
       alici: '',
       vergiNo: '',
       tutar: '',
@@ -169,7 +175,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   };
 
   const handleTurChange = (tur: BelgeTur) => {
-    setForm(f => ({ ...f, tur, belgeNo: generateBelgeNo(tur) }));
+    setForm(f => ({ ...f, tur, belgeNo: generateBelgeNo(tur, belgeler) }));
   };
 
   const handleSave = async () => {

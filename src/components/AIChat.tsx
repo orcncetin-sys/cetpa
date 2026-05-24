@@ -1,9 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, Send, X, Bot, RefreshCw, Zap, Brain } from 'lucide-react';
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+import { auth } from '../firebase';
 
 interface Message {
   role: 'user' | 'ai';
@@ -16,6 +14,12 @@ interface AIChatProps {
   currentLanguage?: string;
 }
 
+async function getToken(): Promise<string> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+  return token;
+}
+
 export default function AIChat({ businessContext, currentLanguage = 'tr' }: AIChatProps) {
   const isTR = currentLanguage !== 'en';
   const [isOpen, setIsOpen] = useState(false);
@@ -26,72 +30,72 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
   const [isLoading, setIsLoading] = useState(false);
   const [isHighThinking, setIsHighThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Keep track of the chat session
-  const chatSessionRef = useRef<unknown>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    const systemInstruction = [
-      isTR
-        ? "Sen CETPA Cloud ERP platformunun akıllı iş asistanısın. Kullanıcının gerçek zamanlı iş verilerine erişimin var ve bu verilere dayanarak somut, eyleme dönüştürülebilir önerilerde bulunabilirsin. Türkçe yanıt ver. Kısa ve odaklı ol — 3 cümleyi geçme."
-        : "You are the intelligent business assistant for CETPA Cloud ERP. You have access to the user's real-time business data and can give concrete, actionable recommendations based on it. Be concise — no more than 3 sentences per response.",
-      businessContext ? `\n\n=== CURRENT BUSINESS SNAPSHOT (today) ===\n${businessContext}` : '',
-      isTR
-        ? "\n\nKullanıcı 'en iyi müşteri', 'geciken sipariş', 'stok riski', 'nakit akışı' gibi sorular sorabilir. Verilen verilere atıfta bulun. Uyarılar için emoji kullan (⚠️ 📦 💰 🚛). Asla veri uydurmaya çalışma — bilmiyorsan söyle."
-        : "\n\nUsers may ask about top customers, overdue orders, stock risk, cash position. Reference the provided data. Use emojis for alerts (⚠️ 📦 💰 🚛). Never fabricate data — say 'I don't have that data' if not provided.",
-    ].join('');
+  const buildSystemInstruction = () => [
+    isTR
+      ? "Sen CETPA Cloud ERP platformunun akıllı iş asistanısın. Kullanıcının gerçek zamanlı iş verilerine erişimin var ve bu verilere dayanarak somut, eyleme dönüştürülebilir önerilerde bulunabilirsin. Türkçe yanıt ver. Kısa ve odaklı ol — 3 cümleyi geçme."
+      : "You are the intelligent business assistant for CETPA Cloud ERP. You have access to the user's real-time business data and can give concrete, actionable recommendations based on it. Be concise — no more than 3 sentences per response.",
+    businessContext ? `\n\n=== CURRENT BUSINESS SNAPSHOT (today) ===\n${businessContext}` : '',
+    isTR
+      ? "\n\nKullanıcı 'en iyi müşteri', 'geciken sipariş', 'stok riski', 'nakit akışı' gibi sorular sorabilir. Verilen verilere atıfta bulun. Uyarılar için emoji kullan (⚠️ 📦 💰 🚛). Asla veri uydurmaya çalışma — bilmiyorsan söyle."
+      : "\n\nUsers may ask about top customers, overdue orders, stock risk, cash position. Reference the provided data. Use emojis for alerts (⚠️ 📦 💰 🚛). Never fabricate data — say 'I don't have that data' if not provided.",
+  ].join('');
 
-    chatSessionRef.current = ai.chats.create({
-      model: isHighThinking ? "gemini-3.1-pro-preview" : "gemini-3.1-flash-lite-preview",
-      config: {
-        systemInstruction,
-        thinkingConfig: isHighThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined
-      }
-    });
-  }, [isHighThinking, businessContext, isTR]);
+  /** Convert local message history (excluding the last user message) to Gemini chat format */
+  const buildHistory = (msgs: Message[]) =>
+    msgs
+      .filter(m => m.role === 'user' || m.role === 'ai')
+      .map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.text }],
+      }));
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    const updatedMessages = [...messages, { role: 'user' as const, text: userMessage }];
+    setMessages(updatedMessages);
     setIsLoading(true);
 
     try {
-      if (!chatSessionRef.current) {
-        chatSessionRef.current = ai.chats.create({
-          model: isHighThinking ? "gemini-3.1-pro-preview" : "gemini-3.1-flash-lite-preview",
-          config: {
-            systemInstruction: "Sen bu kurumsal yönetim ve proje takip programının akıllı asistanısın. Kullanıcılara programla ilgili sorularında yardımcı ol, nazik ve profesyonel bir dil kullan.",
-            thinkingConfig: isHighThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined
-          }
-        });
-      }
-      const response = await (chatSessionRef.current as { sendMessage: (params: { message: string }) => Promise<{ text?: string }> }).sendMessage({ message: userMessage });
-      
-      setMessages(prev => [...prev, { role: 'ai', text: response.text || 'Üzgünüm, bir hata oluştu.' }]);
+      const token = await getToken();
+      // Pass all prior messages as history (exclude the one we just added as message)
+      const history = buildHistory(messages);
+
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          message: userMessage,
+          history,
+          systemInstruction: buildSystemInstruction(),
+          model: isHighThinking ? 'gemini-2.5-pro-preview-05-06' : 'gemini-2.5-flash-preview-05-20',
+          highThinking: isHighThinking,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`AI proxy ${res.status}`);
+      const data = await res.json() as { text: string };
+      setMessages(prev => [...prev, { role: 'ai', text: data.text || (isTR ? 'Üzgünüm, bir hata oluştu.' : 'Sorry, an error occurred.') }]);
     } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'ai', text: 'Üzgünüm, şu an yanıt veremiyorum.' }]);
+      console.error('[AIChat]', error);
+      setMessages(prev => [...prev, { role: 'ai', text: isTR ? 'Üzgünüm, şu an yanıt veremiyorum.' : 'Sorry, I cannot respond right now.' }]);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleEndConversation = () => {
-    setMessages([{ role: 'ai', text: 'Görüşme sonlandırıldı. Yeni bir konuda yardımcı olabilir miyim?' }]);
-    chatSessionRef.current = ai.chats.create({
-      model: isHighThinking ? "gemini-3.1-pro-preview" : "gemini-3.1-flash-lite-preview",
-      config: {
-        systemInstruction: "Sen bu kurumsal yönetim ve proje takip programının akıllı asistanısın. Kullanıcılara programla ilgili sorularında yardımcı ol, nazik ve profesyonel bir dil kullan.",
-        thinkingConfig: isHighThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined
-      }
-    }); // Reset the chat session
+    setMessages([{
+      role: 'ai',
+      text: isTR ? 'Görüşme sonlandırıldı. Yeni bir konuda yardımcı olabilir miyim?' : 'Conversation ended. How can I help you with something new?',
+    }]);
   };
 
   return (
@@ -124,22 +128,22 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button 
+                <button
                   onClick={() => setIsHighThinking(!isHighThinking)}
-                  title={isHighThinking ? "Yüksek Düşünme Modu Açık" : "Düşük Gecikme Modu Açık"}
+                  title={isHighThinking ? 'Yüksek Düşünme Modu Açık' : 'Düşük Gecikme Modu Açık'}
                   className={`p-2 rounded-lg transition-all ${isHighThinking ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}
                 >
                   {isHighThinking ? <Brain size={16} /> : <Zap size={16} />}
                 </button>
-                <button 
-                  onClick={handleEndConversation} 
+                <button
+                  onClick={handleEndConversation}
                   title="Konuşmayı Sonlandır"
                   className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                 >
                   <RefreshCw size={16} />
                 </button>
-                <button 
-                  onClick={() => setIsOpen(false)} 
+                <button
+                  onClick={() => setIsOpen(false)}
                   title="Kapat"
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
                 >
@@ -182,11 +186,11 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                  placeholder="Mesajınızı yazın..."
+                  placeholder={isTR ? 'Mesajınızı yazın...' : 'Type your message...'}
                   className="flex-1 p-2 bg-transparent text-sm focus:outline-none"
                 />
-                <button 
-                  onClick={handleSend} 
+                <button
+                  onClick={handleSend}
                   disabled={!input.trim() || isLoading}
                   className="bg-[#ff4000] text-white p-2 rounded-xl hover:bg-[#e63900] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
