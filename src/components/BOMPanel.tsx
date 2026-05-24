@@ -20,6 +20,7 @@ import {
   doc, serverTimestamp, getDocs, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,9 +135,9 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
 
   // ── Firestore subscriptions ────────────────────────────────────────────────
   useEffect(() => {
-    const q = query(collection(db, 'bom'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'bom'));
     const unsub = onSnapshot(q, snap => {
-      setBoms(snap.docs.map(d => ({ id: d.id, ...d.data() } as BOM)));
+      setBoms(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BOM))));
       setLoading(false);
     }, () => setLoading(false));
     return () => unsub();
@@ -144,7 +145,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
 
   useEffect(() => {
     getDocs(collection(db, 'inventory')).then(snap => {
-      setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem)));
+      setInventory(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem))));
     }).catch(() => {});
   }, []);
 

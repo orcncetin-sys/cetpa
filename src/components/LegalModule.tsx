@@ -21,6 +21,7 @@ import {
   type ApprovalRequest
 } from '../types';
 import { cn } from '../lib/utils';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -213,28 +214,28 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     // when many listeners are registered simultaneously.
     const t1 = setTimeout(() => {
       unsubs.push(onSnapshot(query(collection(db, 'contracts'), orderBy('no')), (snap) => {
-        setContracts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Contract)));
+        setContracts(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Contract))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'contracts', auth.currentUser?.uid)));
     }, 0);
     const t2 = setTimeout(() => {
       unsubs.push(onSnapshot(query(collection(db, 'legalCases'), orderBy('no')), (snap) => {
-        setCases(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalCase)));
+        setCases(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalCase))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'legalCases', auth.currentUser?.uid)));
     }, 150);
     const t3 = setTimeout(() => {
       unsubs.push(onSnapshot(query(collection(db, 'complianceItems'), orderBy('title')), (snap) => {
-        setCompliance(snap.docs.map(d => ({ id: d.id, ...d.data() } as ComplianceItem)));
+        setCompliance(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ComplianceItem))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'complianceItems', auth.currentUser?.uid)));
     }, 300);
 
     const t4 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'legalDocs'), orderBy('createdAt', 'desc')), (snap) => {
-        setLegalDocs(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalDoc)));
+      unsubs.push(onSnapshot(query(collection(db, 'legalDocs')), (snap) => {
+        setLegalDocs(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalDoc))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'legalDocs', auth.currentUser?.uid)));
     }, 450);
     const t5 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'approvalRequests'), orderBy('createdAt', 'desc')), (snap) => {
-        setApprovals(snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest)));
+      unsubs.push(onSnapshot(query(collection(db, 'approvalRequests')), (snap) => {
+        setApprovals(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'approvalRequests', auth.currentUser?.uid)));
     }, 600);
 

@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sortByCreatedAt } from '../utils/fsSort';
 import {
   Wrench, ClipboardList, CalendarDays, AlertTriangle,
   Plus, X, CheckCircle, Clock, Settings, Zap, Car, Monitor, Package,
@@ -139,12 +140,12 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
   useEffect(() => {
     if (!isAuthenticated) return;
     const unsubs = [
-      onSnapshot(query(collection(db, 'ekipmanlar'), orderBy('createdAt', 'desc')), snap =>
-        setEkipmanlar(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ekipman)))),
-      onSnapshot(query(collection(db, 'isEmirleri'), orderBy('createdAt', 'desc')), snap =>
-        setIsEmirleri(snap.docs.map(d => ({ id: d.id, ...d.data() } as IsEmri)))),
-      onSnapshot(query(collection(db, 'arizalar'), orderBy('createdAt', 'desc')), snap =>
-        setArizalar(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ariza)))),
+      onSnapshot(query(collection(db, 'ekipmanlar')), snap =>
+        setEkipmanlar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ekipman))))),
+      onSnapshot(query(collection(db, 'isEmirleri')), snap =>
+        setIsEmirleri(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as IsEmri))))),
+      onSnapshot(query(collection(db, 'arizalar')), snap =>
+        setArizalar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ariza))))),
     ];
     return () => unsubs.forEach(u => u());
   }, [isAuthenticated]);

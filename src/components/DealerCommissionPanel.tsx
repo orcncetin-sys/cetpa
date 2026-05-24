@@ -15,6 +15,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import ModuleHeader from './ModuleHeader';
 import ConfirmModal from './ConfirmModal';
 import { cn } from '../lib/utils';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 interface CommissionRule {
   id: string;
@@ -137,9 +138,9 @@ export default function DealerCommissionPanel({
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'commissionRules'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'commissionRules')),
       (snap) => {
-        setCommissionRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule)));
+        setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule))));
       },
       (err) => logFirestoreError(err, OperationType.LIST, 'commissionRules')
     );

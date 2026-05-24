@@ -17,6 +17,7 @@ import {
 import { db } from '../firebase';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,14 +135,12 @@ export default function CariEkstrePanel({
     let q = query(
       ordersRef,
       where('status', 'in', ['Pending', 'Processing', 'Shipped']),
-      orderBy('createdAt', 'desc'),
     );
     if (leadId) {
       q = query(
         ordersRef,
         where('leadId', '==', leadId),
         where('status', 'in', ['Pending', 'Processing', 'Shipped']),
-        orderBy('createdAt', 'desc'),
       );
     }
     const unsub = onSnapshot(q, snap => {

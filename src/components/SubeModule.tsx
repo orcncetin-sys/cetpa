@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy, where, limit
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sortByCreatedAt } from '../utils/fsSort';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
   MapPin, Phone, Mail, User, CheckCircle, Clock, Package
@@ -63,8 +64,8 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(2000)),
-      snap => setPlOrders(snap.docs.map(d => d.data() as PLOrder))
+      query(collection(db, 'orders'), limit(2000)),
+      snap => setPlOrders(sortByCreatedAt(snap.docs.map(d => d.data() as PLOrder)))
     );
     return unsub;
   }, []);
@@ -77,10 +78,10 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
 
   useEffect(() => {
     const unsubs = [
-      onSnapshot(query(collection(db, 'subeler'), orderBy('createdAt', 'desc')), snap =>
-        setSubeler(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sube)))),
-      onSnapshot(query(collection(db, 'subeTransferler'), orderBy('createdAt', 'desc')), snap =>
-        setTransferler(snap.docs.map(d => ({ id: d.id, ...d.data() } as SubeTransfer)))),
+      onSnapshot(query(collection(db, 'subeler')), snap =>
+        setSubeler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sube))))),
+      onSnapshot(query(collection(db, 'subeTransferler')), snap =>
+        setTransferler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as SubeTransfer))))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);

@@ -22,6 +22,7 @@ import {
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import ModuleHeader from './ModuleHeader';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,14 +117,14 @@ export default function ApprovalQueue({
     let q;
     if (isMgr) {
       // Managers see all requests (ordered by date)
-      q = query(collection(db, 'approvalRequests'), orderBy('createdAt', 'desc'));
+      q = query(collection(db, 'approvalRequests'));
     } else {
       // Employees see only their own — filter client-side to avoid composite index requirement
-      q = query(collection(db, 'approvalRequests'), orderBy('createdAt', 'desc'));
+      q = query(collection(db, 'approvalRequests'));
     }
     const meId = userEmail || userName || '';
     const unsub = onSnapshot(q, snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest));
+      const all: ApprovalRequest[] = sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest)));
       setRequests(isMgr ? all : all.filter(r => r.requestedBy === meId));
     }, err => console.error('approvalRequests:', err));
     return () => unsub();

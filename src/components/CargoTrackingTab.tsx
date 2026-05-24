@@ -3,6 +3,7 @@ import { AlertCircle, RefreshCw, Search, Truck, MapPin, ChevronRight } from 'luc
 import { collection, onSnapshot, query, orderBy, limit, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 type Carrier = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
@@ -50,9 +51,9 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
 
   // Load saved tracks from Firestore
   useEffect(() => {
-    const q = query(collection(db, 'cargoTracking'), orderBy('createdAt', 'desc'), limit(20));
+    const q = query(collection(db, 'cargoTracking'), limit(20));
     const unsub = onSnapshot(q, snap => {
-      setSavedTracks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setSavedTracks(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     });
     return () => unsub();
   }, []);

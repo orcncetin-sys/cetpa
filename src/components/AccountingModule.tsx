@@ -43,6 +43,7 @@ import {
 } from '../types';
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 // --- SortHeader Component ---
 const SortHeader = ({ 
@@ -328,8 +329,8 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'invoices'), orderBy('createdAt','desc')), snap => {
-      setInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsub = onSnapshot(query(collection(db, 'invoices')), snap => {
+      setInvoices(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     }, () => {});
     return unsub;
   }, []);
@@ -708,7 +709,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsub = onSnapshot(collection(db, 'bankAccounts'), snap => {
-      setBankAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankAccount)));
+      setBankAccounts(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankAccount))));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'bankAccounts'));
     return unsub;
   }, [isAuthenticated, userRole]);
@@ -717,7 +718,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     if (!isAuthenticated || !userRole) return;
     const unsub = onSnapshot(
       query(collection(db, 'bankTransactions'), orderBy('date', 'desc')),
-      snap => setBankTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction))),
+      snap => setBankTransactions(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction)))),
       () => {}
     );
     return unsub;
@@ -725,9 +726,9 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
 
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
-    const q = query(collection(db, 'journalEntries'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'journalEntries'));
     const unsub = onSnapshot(q, snap => {
-      setJournalEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as JournalEntry)));
+      setJournalEntries(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as JournalEntry))));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'journalEntries'));
     return unsub;
   }, [isAuthenticated, userRole]);

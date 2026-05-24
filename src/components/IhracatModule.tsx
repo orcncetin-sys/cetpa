@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sortByCreatedAt } from '../utils/fsSort';
 import {
   Globe, Package, CreditCard, FileText, Plus, X,
   TrendingUp, Clock, CheckCircle, AlertCircle, Ship
@@ -113,14 +114,14 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
 
   useEffect(() => {
     const unsubs = [
-      onSnapshot(query(collection(db, 'ihracatlar'), orderBy('createdAt', 'desc')), snap =>
-        setIhracatlar(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ihracat)))),
-      onSnapshot(query(collection(db, 'ithalatlar'), orderBy('createdAt', 'desc')), snap =>
-        setIthalatlar(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ithalat)))),
-      onSnapshot(query(collection(db, 'akreditifler'), orderBy('createdAt', 'desc')), snap =>
-        setAkreditifler(snap.docs.map(d => ({ id: d.id, ...d.data() } as Akreditif)))),
-      onSnapshot(query(collection(db, 'gumrukBeyannameleri'), orderBy('createdAt', 'desc')), snap =>
-        setBeyannameler(snap.docs.map(d => ({ id: d.id, ...d.data() } as GumrukBeyanname)))),
+      onSnapshot(query(collection(db, 'ihracatlar')), snap =>
+        setIhracatlar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ihracat))))),
+      onSnapshot(query(collection(db, 'ithalatlar')), snap =>
+        setIthalatlar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ithalat))))),
+      onSnapshot(query(collection(db, 'akreditifler')), snap =>
+        setAkreditifler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Akreditif))))),
+      onSnapshot(query(collection(db, 'gumrukBeyannameleri')), snap =>
+        setBeyannameler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as GumrukBeyanname))))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);

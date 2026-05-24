@@ -34,6 +34,7 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
+import { sortByCreatedAt } from './utils/fsSort';
 import {
   ref,
   uploadBytes,
@@ -515,11 +516,11 @@ const B2BPortal = ({ user, userRole, leads, inventory, orders: portalOrders = []
       : query(collection(db, 'quotations'), where('customerEmail', '==', user?.email ?? ''));
 
     const unsubQuotes = onSnapshot(q, (snap) => {
-      setQuotations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Quotation)));
+      setQuotations(sortByCreatedAt(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Quotation))));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'quotations', auth.currentUser?.uid));
 
     const unsubPrices = onSnapshot(collection(db, 'priceLists'), (snap) => {
-      setPriceLists(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PriceList)));
+      setPriceLists(sortByCreatedAt(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PriceList))));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'priceLists', auth.currentUser?.uid));
 
     // Fetch dealers from leads (customerType === 'Dealer' or priceTier === 'Dealer')
@@ -527,7 +528,7 @@ const B2BPortal = ({ user, userRole, leads, inventory, orders: portalOrders = []
       ? query(collection(db, 'leads'), where('customerType', '==', 'Dealer'))
       : query(collection(db, 'leads'), where('email', '==', user?.email ?? ''));
     const unsubDealers = onSnapshot(dealerQ, (snap) => {
-      setDealers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setDealers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     });
 
     // Fetch credit info from leads/customers
@@ -2331,7 +2332,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'leaveRequests', auth.currentUser?.uid));
 
     const unsubPayroll = onSnapshot(collection(db, 'payrolls'), (snap) => {
-      const pays = snap.docs.map(d => d.data());
+      const pays = sortByCreatedAt(snap.docs.map(d => d.data()));
       const total = pays.filter(p => p.status === 'Ödendi').reduce((sum, p) => sum + (p.netSalary || 0), 0);
       
       const trend = pays.reduce((acc: Record<string, number>, p) => {
@@ -18682,7 +18683,7 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
-      setCommissionRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp)));
+      setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp))));
     });
     return () => unsub();
   }, [user]);
@@ -18698,7 +18699,7 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
-      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)));
+      setSuppliers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))));
     }, err => console.error('suppliers:', err));
     return () => unsub();
   }, [user]);
@@ -18809,12 +18810,12 @@ function AppContent() {
 
     // Load real payment history from Firestore
     const unsubPayments = onSnapshot(
-      query(collection(db, 'payments'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(24)),
+      query(collection(db, 'payments'), where('userId', '==', user.uid), limit(24)),
       (snap) => {
-        setPaymentHistory(snap.docs.map(d => {
+        setPaymentHistory(sortByCreatedAt(snap.docs.map(d => {
           const data = d.data();
           return { id: d.id, ...data, status: (['paid','pending','failed'].includes(data.status) ? data.status : 'paid') } as { id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' };
-        }));
+        })));
       },
       () => { /* payments collection may not exist yet */ }
     );
@@ -19014,8 +19015,8 @@ function AppContent() {
 
   useEffect(() => {
     if (!user || !userRole) return;
-    const unsubNotifications = onSnapshot(query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(10)), (snap) => {
-      setNotifications(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubNotifications = onSnapshot(query(collection(db, 'notifications'), where('userId', '==', user.uid), limit(10)), (snap) => {
+      setNotifications(sortByCreatedAt(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'notifications', auth.currentUser?.uid));
     return () => unsubNotifications();
   }, [user, userRole]);
@@ -19023,7 +19024,7 @@ function AppContent() {
   useEffect(() => {
     if (!user || userRole !== 'Admin') return;
     getDocs(query(collection(db, 'users'), limit(50)))
-      .then(snap => setFirestoreUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .then(snap => setFirestoreUsers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() })))))
       .catch(() => {});
   }, [user, userRole]);
 
@@ -19072,7 +19073,6 @@ function AppContent() {
           collection(db, 'notifications'),
           where('userId', '==', user.uid),
           where('title', '==', title),
-          orderBy('createdAt', 'desc'),
           limit(1)
         ));
         if (!recent.empty) {
@@ -19673,19 +19673,19 @@ function AppContent() {
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
     const unsubBank = onSnapshot(collection(db, 'bankAccounts'), snap => {
-      setP547BankAccounts(snap.docs.map(d => ({
+      setP547BankAccounts(sortByCreatedAt(snap.docs.map(d => ({
         id: d.id, bankName: d.data().bankName || d.data().bank || '—',
         accountType: d.data().accountType || 'Vadesiz',
         balance: Number(d.data().balance) || 0,
         currency: d.data().currency || 'TRY',
-      })));
+      }))));
     }, () => setP547BankAccounts([]));
     const unsubFA = onSnapshot(collection(db, 'sabitKiymetler'), snap => {
-      setP547FixedAssets(snap.docs.map(d => ({
+      setP547FixedAssets(sortByCreatedAt(snap.docs.map(d => ({
         id: d.id, name: d.data().name || '—',
         cost: Number(d.data().cost) || Number(d.data().edinimBedeli) || 0,
         depreciation: Number(d.data().birikimliAmortisman) || 0,
-      })));
+      }))));
     }, () => setP547FixedAssets([]));
     return () => { unsubBank(); unsubFA(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19694,8 +19694,8 @@ function AppContent() {
   // ── Phase 548: Fetch expense claims (masraf) ───────────────────────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'masraf') return;
-    const unsub = onSnapshot(query(collection(db, 'masraflar'), orderBy('createdAt', 'desc')), snap => {
-      setP548Masraflar(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p548Masraflar[number])));
+    const unsub = onSnapshot(query(collection(db, 'masraflar')), snap => {
+      setP548Masraflar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p548Masraflar[number]))));
     }, () => {});
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19705,7 +19705,7 @@ function AppContent() {
   useEffect(() => {
     if (activeTab !== 'ik') return;
     const unsub = onSnapshot(query(collection(db, 'timeAttendance'), orderBy('date', 'desc')), snap => {
-      setP552Records(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number])));
+      setP552Records(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number]))));
     }, () => {});
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19715,7 +19715,7 @@ function AppContent() {
   useEffect(() => {
     if (activeTab !== 'lojistik' || lojistikTab !== 'wms') return;
     const unsub = onSnapshot(collection(db, 'warehouseBins'), snap => {
-      setP554Bins(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p554Bins[number])));
+      setP554Bins(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p554Bins[number]))));
     }, () => {});
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19724,8 +19724,8 @@ function AppContent() {
   // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'iade') return;
-    const unsub = onSnapshot(query(collection(db, 'rmaRequests'), orderBy('createdAt', 'desc')), snap => {
-      setP549Iadeler(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p549Iadeler[number])));
+    const unsub = onSnapshot(query(collection(db, 'rmaRequests')), snap => {
+      setP549Iadeler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p549Iadeler[number]))));
     }, () => {});
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -19976,7 +19976,7 @@ function AppContent() {
     });
     const unsubBranches = onSnapshot(collection(db, 'subeler'), snap => {
       setBranchNames(
-        snap.docs.map(d => (d.data() as { subeAdi?: string }).subeAdi ?? '').filter(Boolean)
+        sortByCreatedAt(snap.docs.map(d => (d.data() as { subeAdi?: string }).subeAdi ?? '')).filter(Boolean)
       );
     });
     return () => { unsubGib(); unsubBranches(); };
@@ -20204,7 +20204,7 @@ function AppContent() {
     }, () => { /* non-critical */ });
 
     // ── Phase 111: Support Tickets ────────────────────────────────────────────
-    const unsubTickets = onSnapshot(query(collection(db, 'supportTickets'), orderBy('createdAt', 'desc'), limit(100)), (snapshot) => {
+    const unsubTickets = onSnapshot(query(collection(db, 'supportTickets'), limit(100)), (snapshot) => {
       setSupportTickets(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof supportTickets[number])));
     }, () => { /* non-critical */ });
 
@@ -20224,12 +20224,12 @@ function AppContent() {
     }, () => { /* non-critical */ });
 
     // ── Phase 122: Price Override Approvals ──────────────────────────────────
-    const unsubPriceOverrides = onSnapshot(query(collection(db, 'priceOverrides'), orderBy('createdAt', 'desc'), limit(100)), (snapshot) => {
+    const unsubPriceOverrides = onSnapshot(query(collection(db, 'priceOverrides'), limit(100)), (snapshot) => {
       setPriceOverrides(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof priceOverrides[number])));
     }, () => { /* non-critical */ });
 
     // ── Phase 145: App-level quotations for Reports Dashboard ─────────────────
-    const unsubAppQuotations = onSnapshot(query(collection(db, 'quotations'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
+    const unsubAppQuotations = onSnapshot(query(collection(db, 'quotations'), limit(200)), (snapshot) => {
       setAppQuotations(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quotation)));
     }, () => { /* non-critical */ });
 

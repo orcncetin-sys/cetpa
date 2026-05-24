@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sortByCreatedAt } from '../utils/fsSort';
 import {
   HeadphonesIcon, ShieldCheck, Users, BarChart2,
   Plus, X, Star, AlertCircle, CheckCircle, Clock, Edit2, Trash2
@@ -143,12 +144,12 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
   useEffect(() => {
     if (!isAuthenticated) return;
     const unsubs = [
-      onSnapshot(query(collection(db, 'servisTalepleri'), orderBy('createdAt', 'desc')), snap =>
-        setTalepler(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServisTalebi)))),
-      onSnapshot(query(collection(db, 'garantiler'), orderBy('createdAt', 'desc')), snap =>
-        setGarantiler(snap.docs.map(d => ({ id: d.id, ...d.data() } as Garanti)))),
-      onSnapshot(query(collection(db, 'teknisyenler'), orderBy('createdAt', 'desc')), snap =>
-        setTeknisyenler(snap.docs.map(d => ({ id: d.id, ...d.data() } as Teknisyen)))),
+      onSnapshot(query(collection(db, 'servisTalepleri')), snap =>
+        setTalepler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServisTalebi))))),
+      onSnapshot(query(collection(db, 'garantiler')), snap =>
+        setGarantiler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Garanti))))),
+      onSnapshot(query(collection(db, 'teknisyenler')), snap =>
+        setTeknisyenler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Teknisyen))))),
     ];
     return () => unsubs.forEach(u => u());
   }, [isAuthenticated]);

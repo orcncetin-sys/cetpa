@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { cn } from '../lib/utils';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 import { 
   BoardMeeting, 
@@ -116,26 +117,26 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsubBoard = onSnapshot(query(collection(db, 'boardMeetings'), orderBy('date', 'desc')), (snap) => {
-      setBoardMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BoardMeeting)));
+      setBoardMeetings(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BoardMeeting))));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'boardMeetings'));
 
     const t1 = setTimeout(() => {
       const unsubShareholders = onSnapshot(collection(db, 'shareholders'), (snap) => {
-        setShareholders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Shareholder)));
+        setShareholders(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Shareholder))));
       }, (error) => logFirestoreError(error, OperationType.LIST, 'shareholders'));
       return () => unsubShareholders();
     }, 150);
 
     const t2 = setTimeout(() => {
       const unsubAssembly = onSnapshot(query(collection(db, 'assemblyMeetings'), orderBy('date', 'desc')), (snap) => {
-        setAssemblyMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
+        setAssemblyMeetings(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
       }, (error) => logFirestoreError(error, OperationType.LIST, 'assemblyMeetings'));
       return () => unsubAssembly();
     }, 300);
 
     const t3 = setTimeout(() => {
-      const unsubContracts = onSnapshot(query(collection(db, 'contracts'), orderBy('createdAt', 'desc')), (snap) => {
-        setContracts(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
+      const unsubContracts = onSnapshot(query(collection(db, 'contracts')), (snap) => {
+        setContracts(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
       }, (error) => logFirestoreError(error, OperationType.LIST, 'contracts'));
       return () => unsubContracts();
     }, 450);
