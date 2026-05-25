@@ -206,6 +206,10 @@ const SubeModule              = React.lazy(() => import('./components/SubeModule
 const VergiTakvimi            = React.lazy(() => import('./components/VergiTakvimi'));
 const LotSeriModule           = React.lazy(() => import('./components/LotSeriModule'));
 const DealerCommissionPanel   = React.lazy(() => import('./components/DealerCommissionPanel'));
+const TerritoryModule         = React.lazy(() => import('./components/TerritoryModule'));
+const PerformansModule        = React.lazy(() => import('./components/PerformansModule'));
+const CPQPanel                = React.lazy(() => import('./components/CPQPanel'));
+const DunningModule           = React.lazy(() => import('./components/DunningModule'));
 const SabitKiymetModule       = React.lazy(() => import('./components/SabitKiymetModule'));
 const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMerkeziModule'));
 const KasaModule              = React.lazy(() => import('./components/KasaModule'));
@@ -21725,7 +21729,7 @@ function AppContent() {
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik' };
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
@@ -21855,6 +21859,8 @@ function AppContent() {
                 { label: tr ? 'Destek Talepleri' : 'Support',      subId: 'tickets',     action: () => { setActiveTab('crm'); setCrmTab('tickets'); } },
                 { label: tr ? 'Hedefler' : 'Targets',              subId: 'hedefler',    action: () => { setActiveTab('crm'); setCrmTab('hedefler'); } },
                 { label: tr ? 'Komisyon' : 'Commission',           subId: 'komisyon',    action: () => { setActiveTab('crm'); setCrmTab('komisyon'); } },
+                { label: tr ? 'Satış Bölgeleri' : 'Territories',  subId: 'territory',   action: () => setActiveTab('territory') },
+                { label: tr ? 'CPQ Teklif' : 'CPQ',               subId: 'cpq',         action: () => setActiveTab('cpq') },
                 { label: tr ? 'Şubeler' : 'Branches',              subId: 'sube',        action: () => setActiveTab('sube') },
                 { label: tr ? 'Servis' : 'After-Sales',            subId: 'servis',      action: () => setActiveTab('servis') },
               ],
@@ -21896,6 +21902,7 @@ function AppContent() {
                 { label: tr ? 'Kasa' : 'Cash Desk',                subId: 'kasa',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kasa'); } },
                 { label: tr ? 'Banka' : 'Banking',                 subId: 'banka',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('banka'); } },
                 { label: tr ? 'Tahsilat' : 'Collections',          subId: 'tahsilat',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tahsilat'); } },
+                { label: tr ? 'Otomatik Hatırlatıcı' : 'Dunning', subId: 'dunning',        action: () => setActiveTab('dunning') },
                 { label: tr ? 'Borç Yönetimi' : 'Payables',        subId: 'ap',             action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ap'); } },
                 { label: tr ? 'Mutabakat' : 'Reconciliation',      subId: 'mutabakat',      action: () => { setActiveTab('muhasebe'); setMuhasebeTab('mutabakat'); } }, // Phase 550
                 { label: tr ? 'Masraf Yönetimi' : 'Expenses',      subId: 'masraf',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
@@ -21941,6 +21948,7 @@ function AppContent() {
               children: [
                 { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',         subId: 'ik-main',    action: () => setActiveTab('ik') },
                 { label: tr ? 'Mesai & Devam' : 'Time & Attendance',         subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
+                { label: tr ? 'Performans Değerlendirme' : 'Performance Reviews', subId: 'performans', action: () => setActiveTab('performans') },
                 { label: tr ? 'Self-Servis Portalı' : 'Self-Service',        subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
                 { label: tr ? 'SGK e-Bildirge' : 'SGK e-Declaration',        subId: 'sgk-bildirge', action: () => setActiveTab('ik') }, // Phase 556 (renders in IK tab)
                 { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',         subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
@@ -32530,6 +32538,55 @@ function AppContent() {
                   <IhracatModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ihracat')} />
                 </>
               )}
+            </motion.div>
+          )}
+
+          {/* ── Territory Management ── */}
+          {activeTab === 'territory' && (
+            <motion.div key="territory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <TerritoryModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                  orders={orders}
+                  leads={leads}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── CPQ ── */}
+          {activeTab === 'cpq' && (
+            <motion.div key="cpq" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <CPQPanel currentLanguage={currentLanguage} isAuthenticated={!!user} />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── Performans Değerlendirme ── */}
+          {activeTab === 'performans' && (
+            <motion.div key="performans" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <PerformansModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                  employees={employees}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── Dunning / Otomatik Tahsilat Hatırlatıcı ── */}
+          {activeTab === 'dunning' && (
+            <motion.div key="dunning" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <DunningModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                  orders={orders}
+                />
+              </React.Suspense>
             </motion.div>
           )}
 
