@@ -210,6 +210,11 @@ const TerritoryModule         = React.lazy(() => import('./components/TerritoryM
 const PerformansModule        = React.lazy(() => import('./components/PerformansModule'));
 const CPQPanel                = React.lazy(() => import('./components/CPQPanel'));
 const DunningModule           = React.lazy(() => import('./components/DunningModule'));
+const MRPModule               = React.lazy(() => import('./components/MRPModule'));
+const HoldingModule           = React.lazy(() => import('./components/HoldingModule'));
+const MuhtasarModule          = React.lazy(() => import('./components/MuhtasarModule'));
+const MobileWMSModule         = React.lazy(() => import('./components/MobileWMSModule'));
+const GelirTanimaModule       = React.lazy(() => import('./components/GelirTanimaModule'));
 const SabitKiymetModule       = React.lazy(() => import('./components/SabitKiymetModule'));
 const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMerkeziModule'));
 const KasaModule              = React.lazy(() => import('./components/KasaModule'));
@@ -21729,7 +21734,7 @@ function AppContent() {
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe' };
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe', mrp:'inventory', holding:'muhasebe', muhtasar:'ik', mobilewms:'lojistik', gelirtanima:'muhasebe' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
@@ -21847,7 +21852,7 @@ function AppContent() {
             { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: LayoutDashboard },
             {
               id: 'crm', label: tr ? 'CRM & Satış' : 'CRM & Sales', icon: Users,
-              childIds: ['sube', 'servis', 'iade', 'orders'],
+              childIds: ['sube', 'servis', 'iade', 'orders', 'territory', 'cpq'],
               children: [
                 { label: tr ? 'Müşteri Adayları' : 'Leads',       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
                 { label: tr ? 'Müşteriler' : 'Customers',          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
@@ -21867,16 +21872,17 @@ function AppContent() {
             },
             {
               id: 'inventory', label: tr ? 'Envanter' : 'Inventory', icon: List,
-              childIds: ['lotseri', 'bakim'],
+              childIds: ['lotseri', 'bakim', 'mrp'],
               children: [
                 { label: tr ? 'Stok Yönetimi' : 'Stock Mgmt',     subId: 'inventory', action: () => setActiveTab('inventory') },
                 { label: tr ? 'Lot / Seri Takip' : 'Lot/Serial',  subId: 'lotseri',   action: () => setActiveTab('lotseri') },
                 { label: tr ? 'Bakım-Onarım' : 'Maintenance',     subId: 'bakim',     action: () => setActiveTab('bakim') },
+                { label: tr ? 'MRP II / Kapasite' : 'MRP II',     subId: 'mrp',       action: () => setActiveTab('mrp') },
               ],
             },
             {
               id: 'lojistik', label: tr ? 'Lojistik & Depo' : 'Logistics', icon: Truck,
-              childIds: ['ihracat'],
+              childIds: ['ihracat', 'mobilewms'],
               children: [
                 { label: tr ? 'Sevkiyat' : 'Shipments',              subId: 'sevkiyat',        action: () => { setActiveTab('lojistik'); setLojistikTab('sevkiyat'); } },
                 { label: tr ? 'Kargo Takip' : 'Cargo Tracking',      subId: 'kargo_takip',     action: () => { setActiveTab('lojistik'); setLojistikTab('kargo_takip'); } },
@@ -21889,11 +21895,12 @@ function AppContent() {
                 { label: tr ? 'Araç Takip' : 'Fleet Tracking', subId: 'arac-takip',         action: () => { setActiveTab('lojistik'); setLojistikTab('arac-takip'); } }, // Phase 593
                 { label: tr ? 'İhracat & Gümrük' : 'Export & Customs', subId: 'ihracat-gumruk', action: () => { setActiveTab('lojistik'); setLojistikTab('ihracat-gumruk'); } }, // Phase 622
                 { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
+                { label: tr ? 'Mobil WMS' : 'Mobile WMS',           subId: 'mobilewms',        action: () => setActiveTab('mobilewms') },
               ],
             },
             {
               id: 'muhasebe', label: tr ? 'Muhasebe & Finans' : 'Accounting', icon: BookOpen,
-              childIds: ['ebelge', 'vergi', 'finance'],
+              childIds: ['ebelge', 'vergi', 'finance', 'holding', 'gelirtanima', 'dunning'],
               children: [
                 { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'genel',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); } },
                 { label: tr ? 'Bilanço' : 'Balance Sheet',         subId: 'bilanco',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('bilanco'); } }, // Phase 547
@@ -21925,6 +21932,8 @@ function AppContent() {
                 { label: tr ? 'Kur Değerleme' : 'FX Revaluation',       subId: 'kur-degerleme',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kur-degerleme'); } }, // Phase 635
                 { label: tr ? 'Tekrarlayan Fatura' : 'Recurring Billing', subId: 'tekrar-fatura', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tekrar-fatura'); } }, // Phase 640
                 { label: tr ? 'Şirketlerarası' : 'Intercompany',          subId: 'sirket-arasi',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sirket-arasi'); } }, // Phase 643
+                { label: tr ? 'Holding Yönetimi' : 'Holding',           subId: 'holding',       action: () => setActiveTab('holding') },
+                { label: tr ? 'IFRS 15 Gelir Tanıma' : 'IFRS 15 Rev. Rec.', subId: 'gelirtanima', action: () => setActiveTab('gelirtanima') },
                 { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
                 { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
                 { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
@@ -21944,13 +21953,14 @@ function AppContent() {
             },
             {
               id: 'ik', label: tr ? 'İnsan Kaynakları' : 'HR', icon: UserCheck,
-              childIds: ['selfservis'],
+              childIds: ['selfservis', 'muhtasar', 'performans', 'mesai'],
               children: [
                 { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',         subId: 'ik-main',    action: () => setActiveTab('ik') },
                 { label: tr ? 'Mesai & Devam' : 'Time & Attendance',         subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
                 { label: tr ? 'Performans Değerlendirme' : 'Performance Reviews', subId: 'performans', action: () => setActiveTab('performans') },
                 { label: tr ? 'Self-Servis Portalı' : 'Self-Service',        subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
                 { label: tr ? 'SGK e-Bildirge' : 'SGK e-Declaration',        subId: 'sgk-bildirge', action: () => setActiveTab('ik') }, // Phase 556 (renders in IK tab)
+                { label: tr ? 'Muhtasar & SGK' : 'Muhtasar & SGK',          subId: 'muhtasar',   action: () => setActiveTab('muhtasar') },
                 { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',         subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
               ],
             },
@@ -32585,6 +32595,71 @@ function AppContent() {
                   currentLanguage={currentLanguage}
                   isAuthenticated={!!user}
                   orders={orders}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── MRP II / Kapasite Planlama ── */}
+          {activeTab === 'mrp' && (
+            <motion.div key="mrp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <MRPModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                  productionOrders={[]}
+                  boms={[]}
+                  inventory={inventory}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── Holding / Çok Şirketli Konsolidasyon ── */}
+          {activeTab === 'holding' && (
+            <motion.div key="holding" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <HoldingModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── Muhtasar & SGK e-Bildirge ── */}
+          {activeTab === 'muhtasar' && (
+            <motion.div key="muhtasar" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <MuhtasarModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── Mobil WMS ── */}
+          {activeTab === 'mobilewms' && (
+            <motion.div key="mobilewms" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <MobileWMSModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
+                  inventory={inventory}
+                  orders={orders}
+                />
+              </React.Suspense>
+            </motion.div>
+          )}
+
+          {/* ── IFRS 15 Gelir Tanıma ── */}
+          {activeTab === 'gelirtanima' && (
+            <motion.div key="gelirtanima" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                <GelirTanimaModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user}
                 />
               </React.Suspense>
             </motion.div>
