@@ -200,14 +200,14 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
-    unsubs.push(onSnapshot(collection(db, 'muhtasarEmployees'), snap => {
+    unsubs.push(onSnapshot(collection(db, 'employees'), snap => {
       setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
       setLoading(false);
     }));
-    unsubs.push(onSnapshot(collection(db, 'muhtasarSalaries'), snap => {
+    unsubs.push(onSnapshot(collection(db, 'payrollEntries'), snap => {
       setSalaryEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as SalaryEntry)));
     }));
-    unsubs.push(onSnapshot(collection(db, 'muhtasarDeclarations'), snap => {
+    unsubs.push(onSnapshot(collection(db, 'taxDeclarations'), snap => {
       setDeclarations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Declaration)));
     }));
     return () => unsubs.forEach(u => u());
@@ -216,7 +216,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
   const addEmployee = async () => {
     if (!eForm.name.trim() || !eForm.tcNo.trim()) return;
     const sgkBase = eForm.sgkBase || eForm.grossSalary;
-    await addDoc(collection(db, 'muhtasarEmployees'), { ...eForm, sgkBase, active: true, createdAt: serverTimestamp() });
+    await addDoc(collection(db, 'employees'), { ...eForm, sgkBase, active: true, createdAt: serverTimestamp() });
     setEForm({ name:'', tcNo:'', sicilNo:'', department:'', grossSalary:0, sgkBase:0, employmentType:'tam', workDays:30 });
     setShowEmpForm(false);
   };
@@ -231,13 +231,13 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
       // Remove old entries for this period
       const existing = salaryEntries.filter(e => e.period === selectedPeriod);
       for (const e of existing) {
-        await updateDoc(doc(db, 'muhtasarSalaries', e.id), { deleted: true });
+        await updateDoc(doc(db, 'payrollEntries', e.id), { deleted: true });
       }
       // Calculate for all active employees
       const activeEmps = employees.filter(e => e.active);
       for (const emp of activeEmps) {
         const entry = calcSalaryEntry(emp, selectedPeriod);
-        await addDoc(collection(db, 'muhtasarSalaries'), { ...entry, calculatedAt: serverTimestamp() });
+        await addDoc(collection(db, 'payrollEntries'), { ...entry, calculatedAt: serverTimestamp() });
       }
     } finally {
       setGenerating(false);
@@ -250,7 +250,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
       ? generateMuhtasarXML(activeEntries, selectedPeriod)
       : generateSGKXML(activeEntries, selectedPeriod);
 
-    await addDoc(collection(db, 'muhtasarDeclarations'), {
+    await addDoc(collection(db, 'taxDeclarations'), {
       type,
       period: selectedPeriod,
       status: 'hazır',
@@ -267,7 +267,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
     const upd: any = { status };
     if (gibRefNo) upd.gibRefNo = gibRefNo;
     if (status === 'gönderildi') upd.submittedAt = new Date().toISOString();
-    await updateDoc(doc(db, 'muhtasarDeclarations', id), upd);
+    await updateDoc(doc(db, 'taxDeclarations', id), upd);
   };
 
   const downloadXML = (decl: Declaration) => {

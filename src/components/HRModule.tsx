@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+const PerformansModule = lazy(() => import('./PerformansModule'));
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, CreditCard, 
@@ -848,95 +849,15 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         )}
 
         {activeTab === 'performance' && (
-          <motion.div key="performance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                <input 
-                  type="text" 
-                  placeholder={(currentLanguage === 'tr' ? 'Değerlendirmelerde Ara' : 'Search Reviews') + '...'} 
-                  value={performanceSearch}
-                  onChange={e => setPerformanceSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-100 rounded-2xl shadow-sm outline-none focus:ring-2 focus:ring-[#ff4000]/20 transition-all text-sm"
-                />
-              </div>
-              <button onClick={() => setShowPerformanceModal(true)} className="apple-button-primary">
-                <Plus size={16} /> {currentLanguage === 'tr' ? 'Yeni Değerlendirme' : 'New Review'}
-              </button>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <SortHeader label={t.name} sortKey="employeeName" currentSort={performanceSort} onSort={(k) => toggleSort(performanceSort, k, setPerformanceSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Değerlendiren' : 'Reviewer'} sortKey="reviewer" currentSort={performanceSort} onSort={(k) => toggleSort(performanceSort, k, setPerformanceSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Tarih' : 'Date'} sortKey="date" currentSort={performanceSort} onSort={(k) => toggleSort(performanceSort, k, setPerformanceSort)} align="center" />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Puan' : 'Score'} sortKey="score" currentSort={performanceSort} onSort={(k) => toggleSort(performanceSort, k, setPerformanceSort)} align="center" />
-                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {sortData(performanceReviews.filter(rev => 
-                      rev.employeeName.toLowerCase().includes(performanceSearch.toLowerCase()) ||
-                      rev.reviewer.toLowerCase().includes(performanceSearch.toLowerCase())
-                    ), performanceSort.key, performanceSort.dir).map(rev => (
-                      <tr key={rev.id} className="hover:bg-gray-50 transition-all group">
-                        <td className="py-3 px-5 font-bold text-gray-900">{rev.employeeName}</td>
-                        <td className="py-3 px-5 text-gray-600">{rev.reviewer}</td>
-                        <td className="py-3 px-5 text-center text-gray-500">{rev.date}</td>
-                        <td className="py-3 px-5 text-center">
-                          <div className="flex items-center justify-center gap-1 text-[#ff4000]">
-                            <Star size={12} fill="currentColor" />
-                            <span className="font-bold">{rev.score}/5</span>
-                          </div>
-                        </td>
-                        <td className="py-3 px-5 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={() => { setPerformanceForm(rev); setEditingPerformanceId(rev.id); setShowPerformanceModal(true); }}
-                              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"
-                            >
-                              <Eye size={14} />
-                            </button>
-                            <button 
-                              onClick={() => { setPerformanceForm(rev); setEditingPerformanceId(rev.id); setShowPerformanceModal(true); }}
-                              className="p-1.5 text-gray-400 hover:text-brand hover:bg-brand/10 rounded-lg transition-all"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button 
-                              onClick={async () => {
-                                setConfirmModal({
-                                  isOpen: true,
-                                  title: currentLanguage === 'tr' ? 'Değerlendirme Sil' : 'Delete Review',
-                                  message: t.confirmDelete,
-                                  onConfirm: async () => {
-                                    try {
-                                      await deleteDoc(doc(db, 'performanceReviews', rev.id));
-                                      showToast(currentLanguage === 'tr' ? 'Değerlendirme silindi.' : 'Review deleted.');
-                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    } catch (error) {
-                                      logFirestoreError(error, OperationType.DELETE, `performanceReviews/${rev.id}`);
-                                      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
-                                    }
-                                  }
-                                });
-                              }}
-                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                              title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <motion.div key="performance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            {/* Delegated to PerformansModule — full OKR + competency review system */}
+            <Suspense fallback={<div className="p-8 text-center text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Yükleniyor…' : 'Loading…'}</div>}>
+              <PerformansModule
+                currentLanguage={currentLanguage}
+                isAuthenticated={isAuthenticated}
+                employees={employees}
+              />
+            </Suspense>
           </motion.div>
         )}
 
@@ -1351,45 +1272,6 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
               <div className="p-6 border-t border-gray-100 flex gap-3">
                 <button onClick={() => setShowPayrollModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{t.cancel}</button>
                 <button onClick={handleAddPayroll} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {showPerformanceModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPerformanceModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Değerlendirme' : 'New Review'}</h3>
-                <button onClick={() => setShowPerformanceModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{t.employees}</label>
-                  <select value={performanceForm.employeeId} onChange={e => setPerformanceForm({...performanceForm, employeeId: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                    <option value="">{currentLanguage === 'tr' ? 'Çalışan Seçin' : 'Select Employee'}</option>
-                    {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Değerlendiren' : 'Reviewer'}</label>
-                    <input type="text" value={performanceForm.reviewer} onChange={e => setPerformanceForm({...performanceForm, reviewer: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Puan (1-5)' : 'Score (1-5)'}</label>
-                    <input type="number" min="1" max="5" value={performanceForm.score} onChange={e => setPerformanceForm({...performanceForm, score: Number(e.target.value)})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Yorumlar' : 'Comments'}</label>
-                  <textarea value={performanceForm.comments} onChange={e => setPerformanceForm({...performanceForm, comments: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm h-24 resize-none" />
-                </div>
-              </div>
-              <div className="p-6 border-t border-gray-100 flex gap-3">
-                <button onClick={() => setShowPerformanceModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{t.cancel}</button>
-                <button onClick={handleSavePerformance} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{t.save}</button>
               </div>
             </motion.div>
           </div>

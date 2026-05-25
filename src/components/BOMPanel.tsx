@@ -1,19 +1,19 @@
 /**
- * BOMPanel.tsx — Bill of Materials + MRP Calculator
+ * BOMPanel.tsx — Bill of Materials (BOM Editor)
  *
  * Firestore collections used:
- *   bom           — BOM definitions  { productName, productSku, unit, description, components[] }
- *   inventory     — read for current stock levels
- *   purchaseOrders— write shortfall POs (via existing PurchasingModule collection)
+ *   bom       — BOM definitions  { productName, productSku, unit, description, components[] }
+ *   inventory — read for component lookup (name/SKU autocomplete)
  *
- * MRP calculation is done entirely client-side against Firestore data.
+ * NOTE: MRP / capacity planning has been consolidated into MRPModule.
+ *   Use Envanter → MRP II to run material requirements planning,
+ *   capacity load calculations, and auto-generate purchase orders.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Factory, Plus, Trash2, Edit2, ChevronDown, ChevronUp,
-  Play, Package, AlertTriangle, CheckCircle2, RefreshCw,
-  Search, X, ShoppingCart,
+  Package, RefreshCw, Search, X, ArrowRight,
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
@@ -51,14 +51,6 @@ interface InventoryItem {
   unit?:    string;
 }
 
-interface MRPRow {
-  component:       BOMComponent;
-  required:        number;
-  available:       number;
-  shortage:        number;
-  sufficient:      boolean;
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const UNITS = ['adet', 'kg', 'g', 'm', 'cm', 'lt', 'm²', 'm³', 'rol', 'kutu', 'palet', 'pk'];
@@ -69,35 +61,6 @@ function emptyBOM(): Omit<BOM, 'id'> {
 
 function emptyComponent(): BOMComponent {
   return { inventoryId: '', name: '', sku: '', quantity: 1, unit: 'adet' };
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function MRPResultRow({ row, lang }: { row: MRPRow; lang: boolean }) {
-  return (
-    <div className={`flex items-center justify-between p-3 rounded-xl text-xs ${row.sufficient ? 'bg-emerald-50' : 'bg-red-50'}`}>
-      <div className="flex items-center gap-2">
-        {row.sufficient
-          ? <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          : <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />}
-        <span className="font-medium text-gray-800">{row.component.name}</span>
-        <span className="text-gray-400 font-mono">{row.component.sku}</span>
-      </div>
-      <div className="flex items-center gap-4 text-[11px] flex-shrink-0">
-        <span className="text-gray-500">
-          {lang ? 'Gerekli' : 'Required'}: <b className="text-gray-800">{row.required} {row.component.unit}</b>
-        </span>
-        <span className="text-gray-500">
-          {lang ? 'Mevcut' : 'Available'}: <b className={row.sufficient ? 'text-emerald-600' : 'text-red-600'}>{row.available}</b>
-        </span>
-        {!row.sufficient && (
-          <span className="font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
-            -{row.shortage} {row.component.unit}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
@@ -120,11 +83,6 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
   const [editing,   setEditing]   = useState<BOM | null>(null);
   const [form,      setForm]      = useState<Omit<BOM, 'id'>>(emptyBOM());
   const [saving,    setSaving]    = useState(false);
-
-  // MRP state
-  const [mrpBomId,  setMrpBomId]  = useState<string | null>(null);
-  const [mrpQty,    setMrpQty]    = useState(1);
-  const [mrpResult, setMrpResult] = useState<MRPRow[] | null>(null);
 
   // Expanded BOM cards
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -202,21 +160,6 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
     setInvSearch('');
   };
 
-  // ── MRP Calculator ─────────────────────────────────────────────────────────
-  const runMRP = useCallback((bomId: string, qty: number) => {
-    const bom = boms.find(b => b.id === bomId);
-    if (!bom || qty <= 0) { setMrpResult(null); return; }
-
-    const rows: MRPRow[] = bom.components.map(comp => {
-      const required  = comp.quantity * qty;
-      const invItem   = inventory.find(i => i.id === comp.inventoryId);
-      const available = invItem?.quantity ?? 0;
-      const shortage  = Math.max(0, required - available);
-      return { component: comp, required, available, shortage, sufficient: shortage === 0 };
-    });
-    setMrpResult(rows);
-  }, [boms, inventory]);
-
   // ── Filtered list ──────────────────────────────────────────────────────────
   const filtered = boms.filter(b =>
     b.productName.toLowerCase().includes(search.toLowerCase()) ||
@@ -240,10 +183,10 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
           </div>
           <div>
             <h3 className="font-bold text-sm text-gray-900">
-              {tr ? 'Ürün Reçeteleri (BOM) & MRP' : 'Bill of Materials & MRP'}
+              {tr ? 'Ürün Reçeteleri (BOM)' : 'Bill of Materials'}
             </h3>
             <p className="text-[11px] text-gray-400">
-              {tr ? 'Reçete tanımla, malzeme ihtiyaç planlaması yap' : 'Define BOMs, run material requirements planning'}
+              {tr ? 'Bileşen yapısını tanımlayın — MRP planlaması için Envanter → MRP II' : 'Define component structure — for MRP planning see Inventory → MRP II'}
             </p>
           </div>
         </div>
@@ -253,94 +196,18 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
         </button>
       </div>
 
-      {/* ── MRP Runner ── */}
-      <div className="bg-white rounded-2xl border border-indigo-100 p-5 space-y-4">
-        <h4 className="font-bold text-xs text-gray-700 uppercase flex items-center gap-1.5">
-          <Play className="w-3.5 h-3.5 text-indigo-500" />
-          {tr ? 'MRP Hesaplayıcı' : 'MRP Calculator'}
-        </h4>
-        <div className="flex items-end gap-3 flex-wrap">
-          <div className="flex-1 min-w-[180px]">
-            <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Reçete' : 'BOM'}</label>
-            <select
-              value={mrpBomId ?? ''}
-              onChange={e => { setMrpBomId(e.target.value || null); setMrpResult(null); }}
-              className="w-full mt-0.5 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-indigo-400"
-            >
-              <option value="">{tr ? '— Reçete seçin —' : '— Select BOM —'}</option>
-              {boms.map(b => <option key={b.id} value={b.id}>{b.productName} ({b.productSku})</option>)}
-            </select>
-          </div>
-          <div className="w-32">
-            <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Üretim Miktarı' : 'Production Qty'}</label>
-            <input
-              type="number" min={1} value={mrpQty}
-              onChange={e => { setMrpQty(Math.max(1, Number(e.target.value))); setMrpResult(null); }}
-              className="w-full mt-0.5 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-indigo-400"
-            />
-          </div>
-          <button
-            onClick={() => mrpBomId && runMRP(mrpBomId, mrpQty)}
-            disabled={!mrpBomId}
-            className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors disabled:opacity-40"
-          >
-            <Play className="w-3.5 h-3.5" />
-            {tr ? 'Hesapla' : 'Calculate'}
-          </button>
-        </div>
-
-        {mrpResult && (
-          <div className="space-y-2 pt-2 border-t border-gray-100">
-            {/* Summary bar */}
-            <div className="flex items-center gap-3 text-xs flex-wrap">
-              <span className="font-bold text-gray-700">
-                {tr ? 'Sonuç' : 'Result'}:
-              </span>
-              <span className="text-emerald-600 font-bold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {mrpResult.filter(r => r.sufficient).length} {tr ? 'yeterli' : 'sufficient'}
-              </span>
-              <span className="text-red-500 font-bold flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                {mrpResult.filter(r => !r.sufficient).length} {tr ? 'eksik' : 'shortage'}
-              </span>
-              {mrpResult.some(r => !r.sufficient) && (
-                <button
-                  onClick={async () => {
-                    const shortages = mrpResult.filter(r => !r.sufficient);
-                    await addDoc(collection(db, 'purchaseOrders'), {
-                      orderNumber: `PO-MRP-${Date.now().toString(36).toUpperCase()}`,
-                      supplier: tr ? 'MRP Otomatik' : 'MRP Auto',
-                      status: 'Taslak',
-                      items: shortages.map(r => ({
-                        id:            r.component.inventoryId || r.component.sku,
-                        name:          r.component.name,
-                        sku:           r.component.sku,
-                        quantity:      r.shortage,
-                        purchasePrice: 0,
-                      })),
-                      totalAmount: 0,
-                      notes: `${tr ? 'MRP hesaplaması' : 'Generated by MRP'}: ${boms.find(b => b.id === mrpBomId)?.productName} × ${mrpQty}`,
-                      createdAt: serverTimestamp(),
-                    });
-                    alert(tr ? 'Taslak satın alma siparişi oluşturuldu.' : 'Draft purchase order created.');
-                  }}
-                  className="ml-auto flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold border border-amber-200 transition-colors"
-                >
-                  <ShoppingCart className="w-3.5 h-3.5" />
-                  {tr ? 'Eksikler için Satın Alma Oluştur' : 'Create PO for Shortages'}
-                </button>
-              )}
-            </div>
-            {mrpResult.map((row, i) => <MRPResultRow key={i} row={row} lang={tr} />)}
-          </div>
-        )}
-
-        {!mrpResult && !mrpBomId && (
-          <p className="text-[11px] text-gray-400 text-center py-2">
-            {tr ? 'Reçete ve miktar seçip "Hesapla" butonuna basın.' : 'Select a BOM and quantity, then press Calculate.'}
-          </p>
-        )}
+      {/* ── MRP redirect banner ── */}
+      <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs">
+        <Package className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+        <p className="text-indigo-700 flex-1">
+          {tr
+            ? 'Malzeme ihtiyaç planlaması (MRP) ve kapasite analizi için:'
+            : 'For material requirements planning (MRP) and capacity analysis:'}
+        </p>
+        <span className="flex items-center gap-1 font-bold text-indigo-600">
+          {tr ? 'Envanter → MRP II' : 'Inventory → MRP II'}
+          <ArrowRight className="w-3 h-3" />
+        </span>
       </div>
 
       {/* ── BOM list ── */}

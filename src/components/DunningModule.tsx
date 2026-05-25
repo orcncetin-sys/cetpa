@@ -1,14 +1,16 @@
 /**
- * DunningModule — Otomatik Tahsilat Hatırlatıcı (Dunning)
- * Gap vs competitors: NetSuite, Odoo, Zoho Books, Paraşüt
+ * DunningModule — Otomatik Tahsilat Hatırlatıcı (Dunning / Escalation)
  *
- * Features:
- *  - Dunning policy: define escalation levels (day 1, 7, 14, 30 overdue)
- *  - Per-level message template (email / WhatsApp)
- *  - Track overdue invoices automatically from orders/tahsilat
- *  - Mark invoice as paid / disputed / in legal
- *  - Dunning activity log
- *  - KPI: DSO (Days Sales Outstanding), overdue aging buckets
+ * Scope: Escalation automation (policy-driven reminders, activity log, DSO KPI)
+ * For manual AR ledger & partial payments → use Muhasebe → Tahsilat (TahsilatModule)
+ *
+ * Firestore collections:
+ *   dunningPolicies  — escalation rules per days-overdue threshold
+ *   dunningInvoices  — overdue invoice tracking (imported from orders or manual entry)
+ *
+ * The two-collection design (dunningInvoices vs tahsilatKayitlari in TahsilatModule)
+ * is intentional: dunning handles escalation workflow; tahsilat handles cash ledger.
+ * A future migration may unify these into a single AR collection.
  */
 
 import React, { useState, useEffect } from 'react';
