@@ -16,7 +16,7 @@ import {
   Package, FileText, Activity, Clock, ChevronDown, ChevronUp,
   Plug,
 } from 'lucide-react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';

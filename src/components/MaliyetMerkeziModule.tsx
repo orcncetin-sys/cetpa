@@ -9,7 +9,7 @@ import {
 import { db } from '../firebase';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
-  query, orderBy, serverTimestamp
+  query, serverTimestamp
 } from 'firebase/firestore';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,

@@ -17,7 +17,7 @@ import { cn } from '../lib/utils';
 import { db, auth } from '../firebase';
 import { 
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, 
-  doc, serverTimestamp, query, orderBy 
+  doc, serverTimestamp, query 
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { byField } from '../utils/fsSort';

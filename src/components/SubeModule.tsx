@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc,
-  doc, serverTimestamp, query, orderBy, where, limit
+  doc, serverTimestamp, query, where, limit
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';

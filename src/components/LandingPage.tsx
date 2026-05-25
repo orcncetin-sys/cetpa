@@ -14,7 +14,7 @@ import {
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
 import { db } from '../firebase';
-import { collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import { byField } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────

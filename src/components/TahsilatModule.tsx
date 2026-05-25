@@ -8,7 +8,7 @@ import {
 import { db } from '../firebase';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
-  query, orderBy, serverTimestamp
+  query, serverTimestamp
 } from 'firebase/firestore';
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
 import { byField } from '../utils/fsSort';

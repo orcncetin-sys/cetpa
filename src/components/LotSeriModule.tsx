@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Plus, Search, X, Save, AlertTriangle, Package, Hash, Calendar, CheckCircle2 } from 'lucide-react';
 import { sortByCreatedAt, byField } from '../utils/fsSort';

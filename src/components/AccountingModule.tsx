@@ -18,8 +18,7 @@ import {
   pullBankMovementsFromMikro
 } from '../services/mikroService';
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot,
-  orderBy, query, serverTimestamp
+  collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, query, serverTimestamp
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import {

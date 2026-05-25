@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, updateDoc, doc,
-  serverTimestamp, query, orderBy, where
+  serverTimestamp, query, where
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';

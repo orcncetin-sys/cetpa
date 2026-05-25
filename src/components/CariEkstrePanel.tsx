@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  collection, query, where, orderBy, onSnapshot, Timestamp,
+  collection, query, where, onSnapshot, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';

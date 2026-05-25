@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { 
   collection, addDoc, updateDoc, deleteDoc, doc, 
-  onSnapshot, query, orderBy, serverTimestamp 
+  onSnapshot, query, serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';

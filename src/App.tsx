@@ -30,7 +30,6 @@ import {
   setDoc,
   getDoc,
   getDocs,
-  orderBy,
   limit,
   Timestamp
 } from 'firebase/firestore';

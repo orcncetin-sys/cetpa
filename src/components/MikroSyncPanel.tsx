@@ -3,7 +3,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle, Download,
   Package, Users, ShoppingCart, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';

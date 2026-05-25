@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy
+  doc, serverTimestamp, query
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';

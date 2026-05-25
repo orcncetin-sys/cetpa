@@ -19,9 +19,41 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            // Firebase SDK → its own chunk
+            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+              return 'vendor-firebase';
+            }
+            // PDF generation → lazy-loaded chunk
+            if (id.includes('node_modules/jspdf')) {
+              return 'vendor-jspdf';
+            }
+            // Leaflet maps → lazy-loaded chunk
+            if (id.includes('node_modules/leaflet') || id.includes('node_modules/react-leaflet')) {
+              return 'vendor-leaflet';
+            }
+            // Lucide icons → its own chunk
+            if (id.includes('node_modules/lucide-react')) {
+              return 'vendor-lucide';
+            }
+            // Recharts + D3 → its own chunk
+            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+              return 'vendor-charts';
+            }
+            // All other node_modules → shared vendor chunk
+            if (id.includes('node_modules')) {
+              return 'vendor';
+            }
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modify — file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

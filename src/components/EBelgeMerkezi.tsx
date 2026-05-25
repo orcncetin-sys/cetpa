@@ -8,7 +8,7 @@ import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
-  onSnapshot, query, orderBy, serverTimestamp
+  onSnapshot, query, serverTimestamp
 } from 'firebase/firestore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
