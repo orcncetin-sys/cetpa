@@ -16,6 +16,7 @@ import {
   PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
 import ConfirmModal from './ConfirmModal';
+import { byField } from '../utils/fsSort';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -276,7 +277,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
   useEffect(() => {
     if (!isAuthenticated) return;
     const unsub1 = onSnapshot(
-      query(collection(db, 'maliyetMerkezleri'), orderBy('kod', 'asc')),
+      query(collection(db, 'maliyetMerkezleri')),
       snap => {
         const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as MaliyetMerkezi));
         setMerkezler(data);
@@ -286,7 +287,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
 
     const timer = setTimeout(() => {
       const unsub2 = onSnapshot(
-        query(collection(db, 'maliyetKalemleri'), orderBy('tarih', 'desc')),
+        query(collection(db, 'maliyetKalemleri')),
         snap => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as MaliyetKalemi));
           setKalemler(data);

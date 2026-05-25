@@ -21,6 +21,7 @@ import {
   doc, serverTimestamp, query, orderBy 
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { byField } from '../utils/fsSort';
 
 interface QCRecord {
   id: string;
@@ -250,13 +251,13 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage }) => {
       return t;
     };
     const timers = [
-      schedule(() => onSnapshot(query(collection(db, 'qcRecords'), orderBy('date', 'desc')), (snap) => {
+      schedule(() => onSnapshot(query(collection(db, 'qcRecords')), (snap) => {
         setQcRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as QCRecord)));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'qcRecords', auth.currentUser?.uid)), 0),
-      schedule(() => onSnapshot(query(collection(db, 'complaints'), orderBy('date', 'desc')), (snap) => {
+      schedule(() => onSnapshot(query(collection(db, 'complaints')), (snap) => {
         setComplaints(snap.docs.map(d => ({ id: d.id, ...d.data() } as Complaint)));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'complaints', auth.currentUser?.uid)), 100),
-      schedule(() => onSnapshot(query(collection(db, 'auditItems'), orderBy('category')), (snap) => {
+      schedule(() => onSnapshot(query(collection(db, 'auditItems')), (snap) => {
         setAuditItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as AuditItem)));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'auditItems', auth.currentUser?.uid)), 200),
       schedule(() => onSnapshot(collection(db, 'fmeaRecords'), (snap) => {

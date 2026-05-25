@@ -13,7 +13,7 @@ import { format } from 'date-fns';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { cn } from '../lib/utils';
-import { sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt, byField } from '../utils/fsSort';
 
 import { 
   BoardMeeting, 
@@ -116,8 +116,8 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
 
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
-    const unsubBoard = onSnapshot(query(collection(db, 'boardMeetings'), orderBy('date', 'desc')), (snap) => {
-      setBoardMeetings(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BoardMeeting))));
+    const unsubBoard = onSnapshot(query(collection(db, 'boardMeetings')), (snap) => {
+      setBoardMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BoardMeeting)).sort(byField('date','desc')));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'boardMeetings'));
 
     const t1 = setTimeout(() => {
@@ -128,8 +128,8 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
     }, 150);
 
     const t2 = setTimeout(() => {
-      const unsubAssembly = onSnapshot(query(collection(db, 'assemblyMeetings'), orderBy('date', 'desc')), (snap) => {
-        setAssemblyMeetings(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
+      const unsubAssembly = onSnapshot(query(collection(db, 'assemblyMeetings')), (snap) => {
+        setAssemblyMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort(byField('date', 'desc')));
       }, (error) => logFirestoreError(error, OperationType.LIST, 'assemblyMeetings'));
       return () => unsubAssembly();
     }, 300);

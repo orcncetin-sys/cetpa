@@ -5,6 +5,7 @@ import {
   CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown
 } from 'lucide-react';
 import { db } from '../firebase';
+import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, orderBy, serverTimestamp
@@ -153,7 +154,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   // Firestore listener
   useEffect(() => {
     if (!isAuthenticated) return;
-    const q = query(collection(db, 'eBelgeler'), orderBy('belgeDate', 'desc'));
+    const q = query(collection(db, 'eBelgeler'));
     const unsub = onSnapshot(q, snap => {
       setBelgeler(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<EBelge, 'id'>) })));
     });

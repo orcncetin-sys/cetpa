@@ -15,6 +15,7 @@ import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
 import { db } from '../firebase';
 import { collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import { byField } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1121,18 +1122,20 @@ export default function LandingPage({
   const testimonials = firestoreTestimonials ?? staticTestimonials;
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'testimonials'), orderBy('order', 'asc')), snap => {
+    const unsub = onSnapshot(query(collection(db, 'testimonials')), snap => {
       if (!snap.empty) {
-        setFirestoreTestimonials(snap.docs.map(d => {
-          const x = d.data();
-          return {
-            quote: isTR ? (x.quote_tr ?? x.quote ?? '') : (x.quote_en ?? x.quote ?? ''),
-            name: x.name ?? '',
-            role: isTR ? (x.role_tr ?? x.role ?? '') : (x.role_en ?? x.role ?? ''),
-            company: x.company ?? '',
-            rating: x.rating ?? 5,
-          };
-        }));
+        setFirestoreTestimonials(snap.docs
+          .sort(byField('order', 'asc'))
+          .map(d => {
+            const x = d.data();
+            return {
+              quote: isTR ? (x.quote_tr ?? x.quote ?? '') : (x.quote_en ?? x.quote ?? ''),
+              name: x.name ?? '',
+              role: isTR ? (x.role_tr ?? x.role ?? '') : (x.role_en ?? x.role ?? ''),
+              company: x.company ?? '',
+              rating: x.rating ?? 5,
+            };
+          }));
       } else {
         setFirestoreTestimonials(null); // fall back to static
       }

@@ -30,3 +30,39 @@ export function sortByCreatedAt<T>(docs: T[], dir: 'asc' | 'desc' = 'desc'): T[]
     return dir === 'desc' ? diff : -diff;
   });
 }
+
+/**
+ * General-purpose field sort.
+ * Handles Firestore Timestamps, ISO date strings, numbers, and plain strings.
+ * Docs missing the field sort to the end regardless of direction.
+ *
+ * @example
+ * snap.docs.map(d => ({id:d.id,...d.data()})).sort(byField('date','desc'))
+ */
+export function byField<T>(field: string, dir: 'asc' | 'desc' = 'asc') {
+  return (a: T, b: T): number => {
+    const av = (a as Record<string, unknown>)[field];
+    const bv = (b as Record<string, unknown>)[field];
+
+    // Both missing → stable
+    if (av == null && bv == null) return 0;
+    // Missing → push to end regardless of direction
+    if (av == null) return 1;
+    if (bv == null) return -1;
+
+    // Firestore Timestamp
+    const isTs = (v: unknown): v is FirestoreTimestamp =>
+      typeof (v as FirestoreTimestamp).toDate === 'function';
+
+    if (isTs(av) && isTs(bv)) {
+      const diff = av.toDate().getTime() - bv.toDate().getTime();
+      return dir === 'asc' ? diff : -diff;
+    }
+
+    // ISO date strings or plain strings
+    const as = String(av);
+    const bs = String(bv);
+    const cmp = as < bs ? -1 : as > bs ? 1 : 0;
+    return dir === 'asc' ? cmp : -cmp;
+  };
+}

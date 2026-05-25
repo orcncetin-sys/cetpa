@@ -11,6 +11,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { byField } from '../utils/fsSort';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,7 +102,6 @@ export async function processPendingSyncJobs(
     collection(db, COLLECTION),
     where('status', '==', 'queued'),
     where('nextRetryAt', '<=', now),
-    orderBy('nextRetryAt', 'asc'),
     limit(20),
   );
 
@@ -178,7 +178,6 @@ export async function getSyncQueueStats(): Promise<{
       query(
         col,
         where('status', '==', 'success'),
-        orderBy('updatedAt', 'desc'),
         limit(1),
       ),
     ),

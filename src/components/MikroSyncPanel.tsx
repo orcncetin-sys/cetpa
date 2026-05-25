@@ -7,6 +7,7 @@ import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestor
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { byField } from '../utils/fsSort';
 import {
   getMikroStatus,
   importStokFromMikro,
@@ -105,7 +106,6 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   useEffect(() => {
     const q = query(
       collection(db, 'syncLog'),
-      orderBy('timestamp', 'desc'),
       limit(30)
     );
     const unsub = onSnapshot(q, snap => {

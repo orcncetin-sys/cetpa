@@ -21,7 +21,7 @@ import {
   type ApprovalRequest
 } from '../types';
 import { cn } from '../lib/utils';
-import { sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt, byField } from '../utils/fsSort';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -213,18 +213,18 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     // Stagger subscriptions to prevent Firebase watch-stream assertion errors
     // when many listeners are registered simultaneously.
     const t1 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'contracts'), orderBy('no')), (snap) => {
-        setContracts(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Contract))));
+      unsubs.push(onSnapshot(query(collection(db, 'contracts')), (snap) => {
+        setContracts(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Contract))).sort(byField('no','asc')));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'contracts', auth.currentUser?.uid)));
     }, 0);
     const t2 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'legalCases'), orderBy('no')), (snap) => {
-        setCases(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalCase))));
+      unsubs.push(onSnapshot(query(collection(db, 'legalCases')), (snap) => {
+        setCases(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as LegalCase))).sort(byField('no','asc')));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'legalCases', auth.currentUser?.uid)));
     }, 150);
     const t3 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'complianceItems'), orderBy('title')), (snap) => {
-        setCompliance(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ComplianceItem))));
+      unsubs.push(onSnapshot(query(collection(db, 'complianceItems')), (snap) => {
+        setCompliance(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ComplianceItem))).sort(byField('title','asc')));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'complianceItems', auth.currentUser?.uid)));
     }, 300);
 

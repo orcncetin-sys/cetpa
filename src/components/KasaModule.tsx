@@ -5,6 +5,7 @@ import {
   DollarSign, Trash2, Lock, Edit2, AlertCircle, CheckCircle
 } from 'lucide-react';
 import { db } from '../firebase';
+import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, orderBy, serverTimestamp
@@ -112,12 +113,12 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
   // Firestore listeners
   useEffect(() => {
     if (!isAuthenticated) return;
-    const u1 = onSnapshot(query(collection(db, 'kasalar'), orderBy('ad')), snap =>
-      setKasalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Kasa, 'id'>) }))));
-    const u2 = onSnapshot(query(collection(db, 'kasaHareketleri'), orderBy('tarih', 'desc')), snap =>
-      setHareketler(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<KasaHareketi, 'id'>) }))));
-    const u3 = onSnapshot(query(collection(db, 'kasaKapanislar'), orderBy('tarih', 'desc')), snap =>
-      setKapanislar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<KasaKapanis, 'id'>) }))));
+    const u1 = onSnapshot(query(collection(db, 'kasalar')), snap =>
+      setKasalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Kasa, 'id'>) })).sort(byField('ad', 'asc'))));
+    const u2 = onSnapshot(query(collection(db, 'kasaHareketleri')), snap =>
+      setHareketler(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<KasaHareketi, 'id'>) })).sort(byField('tarih', 'desc'))));
+    const u3 = onSnapshot(query(collection(db, 'kasaKapanislar')), snap =>
+      setKapanislar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<KasaKapanis, 'id'>) })).sort(byField('tarih', 'desc'))));
     return () => { u1(); u2(); u3(); };
   }, [isAuthenticated]);
 

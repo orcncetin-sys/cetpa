@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, Plus } from 'lucide-react';
+import { byField } from '../utils/fsSort';
 
 interface VergiDeadline {
   id: string;
@@ -51,8 +52,8 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'vergiTakvimi'), orderBy('sonTarih')), snap => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as VergiDeadline));
+    const unsub = onSnapshot(query(collection(db, 'vergiTakvimi')), snap => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as VergiDeadline)).sort(byField('sonTarih', 'asc'));
       // Auto-mark overdue
       const today = new Date().toISOString().slice(0, 10);
       const updated = data.map(d => d.durum === 'Yapılacak' && d.sonTarih < today ? { ...d, durum: 'Gecikmiş' as const } : d);

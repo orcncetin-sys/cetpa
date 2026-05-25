@@ -8,6 +8,7 @@ import {
   Archive, ShieldCheck, Sofa, Calculator, RefreshCw,
 } from 'lucide-react';
 import { db } from '../firebase';
+import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, orderBy, serverTimestamp,
@@ -407,23 +408,23 @@ export default function SabitKiymetModule({
     if (!isAuthenticated) { setLoading(false); return; }
     const unsubs: (() => void)[] = [];
 
-    const q1 = query(collection(db, 'sabitKiymetler'), orderBy('alisTarihi', 'desc'));
+    const q1 = query(collection(db, 'sabitKiymetler'));
     unsubs.push(onSnapshot(q1, snap => {
       setVarliklar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<SabitKiymet, 'id'>) })));
       setLoading(false);
     }, err => { console.error('sabitKiymetler:', err); setLoading(false); }));
 
-    const q2 = query(collection(db, 'amortismanKayitlari'), orderBy('hesaplamaTarihi', 'desc'));
+    const q2 = query(collection(db, 'amortismanKayitlari'));
     unsubs.push(onSnapshot(q2, snap => {
       setAmortKayitlar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<AmortismanKayit, 'id'>) })));
     }, err => console.error('amortismanKayitlari:', err)));
 
-    const q3 = query(collection(db, 'sabitKiymetBakim'), orderBy('bakimTarihi', 'desc'));
+    const q3 = query(collection(db, 'sabitKiymetBakim'));
     unsubs.push(onSnapshot(q3, snap => {
       setBakimlar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<BakimKayit, 'id'>) })));
     }, err => console.error('sabitKiymetBakim:', err)));
 
-    const q4 = query(collection(db, 'sabitKiymetSigorta'), orderBy('bitisTarihi', 'asc'));
+    const q4 = query(collection(db, 'sabitKiymetSigorta'));
     unsubs.push(onSnapshot(q4, snap => {
       setSigortalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<SigortaKayit, 'id'>) })));
     }, err => console.error('sabitKiymetSigorta:', err)));

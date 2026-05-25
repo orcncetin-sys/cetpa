@@ -34,7 +34,7 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
-import { sortByCreatedAt } from './utils/fsSort';
+import { sortByCreatedAt, byField } from './utils/fsSort';
 import {
   ref,
   uploadBytes,
@@ -19704,7 +19704,7 @@ function AppContent() {
   // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
   useEffect(() => {
     if (activeTab !== 'ik') return;
-    const unsub = onSnapshot(query(collection(db, 'timeAttendance'), orderBy('date', 'desc')), snap => {
+    const unsub = onSnapshot(query(collection(db, 'timeAttendance')), snap => {
       setP552Records(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number]))));
     }, () => {});
     return () => unsub();
@@ -19736,7 +19736,7 @@ function AppContent() {
     if (activeTab !== 'dashboard') return;
     const today543 = new Date().toISOString().slice(0, 10);
     const unsub = onSnapshot(
-      query(collection(db, 'vergiTakvimi'), orderBy('sonTarih')),
+      query(collection(db, 'vergiTakvimi')),
       snap => {
         const upcoming = snap.docs
           .map(d => ({ id: d.id, ...(d.data() as { vergiTuru: string; sonTarih: string; durum: string }) }))
@@ -20165,7 +20165,7 @@ function AppContent() {
       }
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventory', auth.currentUser?.uid));
 
-    const unsubCategories = onSnapshot(query(collection(db, 'categories'), orderBy('name')), (snapshot) => {
+    const unsubCategories = onSnapshot(query(collection(db, 'categories')), (snapshot) => {
       setFirestoreCategories(snapshot.docs.map(d => d.data().name as string).filter(Boolean));
     }, () => { /* silently ignore — categories may not exist yet */ });
 
@@ -20173,7 +20173,7 @@ function AppContent() {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
 
-    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), orderBy('timestamp', 'desc'), limit(200)), (snapshot) => {
+    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), limit(200)), (snapshot) => {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
 
@@ -20189,7 +20189,7 @@ function AppContent() {
       setShipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Shipment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'shipments', auth.currentUser?.uid));
 
-    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
+    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), limit(50)), (snapshot) => {
       setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid));
 
@@ -20219,7 +20219,7 @@ function AppContent() {
     }, () => { /* non-critical */ });
 
     // ── Phase 121: Leave Requests ─────────────────────────────────────────────
-    const unsubLeave = onSnapshot(query(collection(db, 'leaveRequests'), orderBy('startDate', 'desc'), limit(100)), (snapshot) => {
+    const unsubLeave = onSnapshot(query(collection(db, 'leaveRequests'), limit(100)), (snapshot) => {
       setLeaveRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as typeof leaveRequests[number])));
     }, () => { /* non-critical */ });
 

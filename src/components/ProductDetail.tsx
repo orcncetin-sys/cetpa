@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 
 import { InventoryItem } from '../types';
+import { byField } from '../utils/fsSort';
 
 interface InventoryMovement {
   id: string;
@@ -40,7 +41,6 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
     const q = query(
       collection(db, 'inventoryMovements'),
       where('productId', '==', product.id),
-      orderBy('timestamp', 'desc'),
       limit(20)
     );
 

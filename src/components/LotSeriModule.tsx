@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Plus, Search, X, Save, AlertTriangle, Package, Hash, Calendar, CheckCircle2 } from 'lucide-react';
-import { sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt, byField } from '../utils/fsSort';
 
 interface LotKaydi {
   id: string;
@@ -71,11 +71,11 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
   const [hareketForm, setHareketForm] = useState(initHareket);
 
   useEffect(() => {
-    const u1 = onSnapshot(query(collection(db, 'lotKayitlari'), orderBy('girisDate', 'desc')), s =>
+    const u1 = onSnapshot(query(collection(db, 'lotKayitlari')), s =>
       setLotlar(s.docs.map(d => ({ id: d.id, ...d.data() } as LotKaydi))));
     const u2 = onSnapshot(query(collection(db, 'seriNolar')), s =>
       setSeriler(s.docs.map(d => ({ id: d.id, ...d.data() } as SeriNo))));
-    const u3 = onSnapshot(query(collection(db, 'lotHareketleri'), orderBy('tarih', 'desc')), s =>
+    const u3 = onSnapshot(query(collection(db, 'lotHareketleri')), s =>
       setHareketler(s.docs.map(d => ({ id: d.id, ...d.data() } as LotHareketi))));
     return () => { u1(); u2(); u3(); };
   }, []);

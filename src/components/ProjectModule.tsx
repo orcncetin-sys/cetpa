@@ -20,6 +20,7 @@ import {
   doc, serverTimestamp, query, orderBy 
 } from 'firebase/firestore';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { byField } from '../utils/fsSort';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; dir: 'asc' | 'desc' }; onSort: (key: string) => void; align?: 'left' | 'right' | 'center' }> = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isActive = currentSort.key === sortKey;
@@ -240,7 +241,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
   useEffect(() => {
     const unsubs: (() => void)[] = [];
     const t1 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'projects'), orderBy('name')), (snap) => {
+      unsubs.push(onSnapshot(query(collection(db, 'projects')), (snap) => {
         setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() } as Project)));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'projects', auth.currentUser?.uid)));
     }, 0);
@@ -250,7 +251,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
       }, (err) => logFirestoreError(err, OperationType.LIST, 'tasks', auth.currentUser?.uid)));
     }, 150);
     const t3 = setTimeout(() => {
-      unsubs.push(onSnapshot(query(collection(db, 'resources'), orderBy('name')), (snap) => {
+      unsubs.push(onSnapshot(query(collection(db, 'resources')), (snap) => {
         setResources(snap.docs.map(d => ({ id: d.id, ...d.data() } as Resource)));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'resources', auth.currentUser?.uid)));
     }, 300);

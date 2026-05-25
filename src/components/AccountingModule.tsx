@@ -43,7 +43,7 @@ import {
 } from '../types';
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
-import { sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt, byField } from '../utils/fsSort';
 
 // --- SortHeader Component ---
 const SortHeader = ({ 
@@ -717,7 +717,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsub = onSnapshot(
-      query(collection(db, 'bankTransactions'), orderBy('date', 'desc')),
+      query(collection(db, 'bankTransactions')),
       snap => setBankTransactions(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction)))),
       () => {}
     );

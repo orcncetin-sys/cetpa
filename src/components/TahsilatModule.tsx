@@ -11,6 +11,7 @@ import {
   query, orderBy, serverTimestamp
 } from 'firebase/firestore';
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
+import { byField } from '../utils/fsSort';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -333,7 +334,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
 
   useEffect(() => {
     const unsub1 = onSnapshot(
-      query(collection(db, 'tahsilatKayitlari'), orderBy('faturaTarihi', 'desc')),
+      query(collection(db, 'tahsilatKayitlari')),
       (snap) => {
         setKayitlar(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TahsilatKaydi, 'id'>) }))
@@ -345,7 +346,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     let unsub2: (() => void) | null = null;
     const t2 = setTimeout(() => {
       unsub2 = onSnapshot(
-        query(collection(db, 'tahsilatOdemeleri'), orderBy('tarih', 'desc')),
+        query(collection(db, 'tahsilatOdemeleri')),
         (snap) => {
           setOdemeler(
             snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TahsilatOdeme, 'id'>) }))

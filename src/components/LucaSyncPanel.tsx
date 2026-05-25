@@ -20,6 +20,7 @@ import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestor
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
+import { byField } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,6 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   useEffect(() => {
     const q = query(
       collection(db, 'lucaSyncLog'),
-      orderBy('timestamp', 'desc'),
       limit(20),
     );
     const unsub = onSnapshot(q, snap =>
