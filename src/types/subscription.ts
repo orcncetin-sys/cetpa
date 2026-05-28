@@ -84,6 +84,10 @@ export const PLANS: PlanConfig[] = [
       'dashboard', 'crm', 'inventory', 'orders',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
       'reports', 'integrations', 'finance', 'analytics',
+      // sub-tabs
+      'sube', 'servis', 'iade', 'territory', 'cpq',
+      'ebelge', 'vergi', 'dunning', 'gelirtanima',
+      'ihracat', 'mobilewms',
     ],
   },
   {
@@ -114,6 +118,11 @@ export const PLANS: PlanConfig[] = [
       'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',
       'risk', 'kurumsal',
+      // sub-tabs
+      'sube', 'servis', 'iade', 'territory', 'cpq',
+      'ebelge', 'vergi', 'dunning', 'gelirtanima',
+      'ihracat', 'mobilewms', 'mrp', 'lotseri', 'bakim',
+      'holding', 'muhtasar', 'mesai', 'selfservis', 'performans',
     ],
   },
   {
@@ -142,6 +151,12 @@ export const PLANS: PlanConfig[] = [
       'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',
       'risk', 'kurumsal', 'admin', 'settings',
+      // sub-tabs
+      'sube', 'servis', 'iade', 'territory', 'cpq',
+      'ebelge', 'vergi', 'dunning', 'gelirtanima',
+      'ihracat', 'mobilewms', 'mrp', 'lotseri', 'bakim',
+      'holding', 'muhtasar', 'mesai', 'selfservis', 'performans',
+      'orders', 'finance',
     ],
   },
 ];
@@ -168,6 +183,13 @@ export const ALL_MODULES: { id: string; label: { tr: string; en: string }; icon:
   { id: 'proje',        label: { tr: 'Projeler', en: 'Projects' },              icon: '📐' },
   { id: 'risk',         label: { tr: 'Risk', en: 'Risk' },                      icon: '🛡️' },
   { id: 'kurumsal',     label: { tr: 'Kurumsal', en: 'Governance' },            icon: '🏛️' },
+  { id: 'mrp',          label: { tr: 'MRP II / Kapasite', en: 'MRP II' },       icon: '⚙️' },
+  { id: 'holding',      label: { tr: 'Holding Yönetimi', en: 'Holding' },       icon: '🏦' },
+  { id: 'muhtasar',     label: { tr: 'Muhtasar & SGK', en: 'Muhtasar & SGK' }, icon: '📑' },
+  { id: 'mobilewms',    label: { tr: 'Mobil WMS', en: 'Mobile WMS' },           icon: '📱' },
+  { id: 'gelirtanima',  label: { tr: 'IFRS 15 Gelir Tanıma', en: 'Revenue Rec.'},icon: '📊' },
+  { id: 'dunning',      label: { tr: 'Tahsilat Takibi', en: 'Dunning' },        icon: '⚠️' },
+  { id: 'performans',   label: { tr: 'Performans', en: 'Performance' },          icon: '🎯' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

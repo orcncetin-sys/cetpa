@@ -241,9 +241,8 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
       <div className="space-y-3">
         {filtered.map(bom => {
           const isExp = expanded[bom.id];
-          const isRunning = mrpBomId === bom.id;
           return (
-            <div key={bom.id} className={`bg-white rounded-2xl border transition-colors ${isRunning ? 'border-indigo-200' : 'border-gray-100'}`}>
+            <div key={bom.id} className="bg-white rounded-2xl border border-gray-100 transition-colors">
               {/* Card header */}
               <div className="flex items-center gap-3 p-4">
                 <div className="w-9 h-9 bg-indigo-50 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -260,13 +259,6 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => { setMrpBomId(bom.id); setMrpResult(null); }}
-                    className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors"
-                    title={tr ? 'MRP Hesapla' : 'Run MRP'}
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                  </button>
                   <button onClick={() => openEdit(bom)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>

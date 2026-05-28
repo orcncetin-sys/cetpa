@@ -107,7 +107,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
       setSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueSchedule)));
     }));
     unsubs.push(onSnapshot(collection(db, 'revenueMilestones'), snap => {
-      setMilestones(snap.docs.map(d => ({ id: d.id, ...d.data() } as MilestoneProgress)));
+      setMilestones(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as MilestoneProgress)));
     }));
     return () => unsubs.forEach(u => u());
   }, []);

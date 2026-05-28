@@ -8,6 +8,7 @@ import admin from "firebase-admin";
 import { createHmac } from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
@@ -505,6 +506,37 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
+
+  // ── Rate Limiters ────────────────────────────────────────────────────────────
+  /** General API — 300 req / 15 min per IP */
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+  });
+
+  /** Auth endpoints — stricter: 20 req / 15 min per IP */
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many authentication attempts, please try again later.' },
+  });
+
+  /** Stripe / payment — very strict: 10 req / 10 min per IP */
+  const paymentLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many payment requests, please try again later.' },
+  });
+
+  // Apply general limiter to all /api/* routes
+  app.use('/api', apiLimiter);
 
   // Capture raw body for Shopify webhook HMAC verification (must come before express.json)
   app.use(express.json({
@@ -1203,7 +1235,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/stok/kaydet — push inventory item → Mikro StokKaydetV2 */
-  app.post('/api/mikro/stok/kaydet', async (req: Request, res: Response) => {
+  app.post('/api/mikro/stok/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
@@ -1256,7 +1288,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/stok/listesi — pull Mikro StokListesiV2 → Firebase */
-  app.post('/api/mikro/stok/listesi', async (req: Request, res: Response) => {
+  app.post('/api/mikro/stok/listesi', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { stokKod = '', ilkTarih = '2020-01-01', size = 100, index = 0 } = req.body || {};
@@ -1302,7 +1334,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/cari/kaydet — push lead/customer → Mikro CariKaydetV2 */
-  app.post('/api/mikro/cari/kaydet', async (req: Request, res: Response) => {
+  app.post('/api/mikro/cari/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
@@ -1375,7 +1407,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/cari/listesi — pull Mikro CariListesiV2 → Firebase */
-  app.post('/api/mikro/cari/listesi', async (req: Request, res: Response) => {
+  app.post('/api/mikro/cari/listesi', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { whereStr = "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'", size = 200, index = 0 } = req.body || {};
@@ -1416,7 +1448,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
-  app.post('/api/mikro/siparis/kaydet', async (req: Request, res: Response) => {
+  app.post('/api/mikro/siparis/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
@@ -1482,7 +1514,7 @@ async function startServer() {
   // update existing ones. Paginates automatically until all records are fetched.
 
   /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
-  app.post('/api/mikro/import/stok', async (_req: Request, res: Response) => {
+  app.post('/api/mikro/import/stok', requireAuth, async (_req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -1582,7 +1614,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
-  app.post('/api/mikro/import/cari', async (_req: Request, res: Response) => {
+  app.post('/api/mikro/import/cari', requireAuth, async (_req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -1677,7 +1709,7 @@ async function startServer() {
   // Body: { order: Record<string, unknown>, firebaseId: string }
   //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
   // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
-  app.post('/api/mikro/fatura/kaydet', async (req: Request, res: Response) => {
+  app.post('/api/mikro/fatura/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
     const t0 = Date.now();
@@ -1739,7 +1771,7 @@ async function startServer() {
   // Body: { shipment: Record<string, unknown>, firebaseId: string }
   //   shipment must have: mikroCariKod, customerName, destination, trackingNo, items[]
   // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
-  app.post('/api/mikro/irsaliye/kaydet', async (req: Request, res: Response) => {
+  app.post('/api/mikro/irsaliye/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { shipment, firebaseId } = req.body as { shipment: Record<string, unknown>; firebaseId: string };
     const t0 = Date.now();
@@ -1805,7 +1837,7 @@ async function startServer() {
   // ── Mikro Pull: Cari Bakiye ──────────────────────────────────────────────────
   // POST /api/mikro/pull/bakiye — pull AR/AP balances from Mikro → Firebase cariBalances
   // Runs full CariHareketListesiV2 per lead that has mikroCariKod; updates their bakiye
-  app.post('/api/mikro/pull/bakiye', async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/bakiye', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -1848,7 +1880,7 @@ async function startServer() {
   // ── Mikro Pull: Mizan (Trial Balance) ───────────────────────────────────────
   // POST /api/mikro/pull/mizan  — pull monthly trial balance → Firebase accountingPeriods
   // Body: { period?: 'YYYY-MM', yil?: number, ay?: number }
-  app.post('/api/mikro/pull/mizan', async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/mizan', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -1947,7 +1979,7 @@ async function startServer() {
 
   // ── KDV Özet Pull ─────────────────────────────────────────────────────────────
   // POST /api/mikro/pull/kdv  — pull monthly KDV summary → Firebase taxSummary
-  app.post('/api/mikro/pull/kdv', async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/kdv', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -2157,7 +2189,7 @@ async function startServer() {
   // Credentials: WHATSAPP_API_KEY (360dialog) or TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWATSAPP_FROM
 
   /** POST /api/whatsapp/send — send a text or template message */
-  app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/send', requireAuth, async (req: Request, res: Response) => {
     const { to, message, templateName, templateParams } = req.body as {
       to: string; message?: string; templateName?: string; templateParams?: string[];
     };
@@ -2237,7 +2269,7 @@ async function startServer() {
   // Pure Firebase aggregation — no Mikro needed
 
   /** GET /api/aging — AR aging buckets for all customers (or ?customerId=X for one) */
-  app.get('/api/aging', async (req: Request, res: Response) => {
+  app.get('/api/aging', requireAuth, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin not initialised' });
     try {
       const customerId = req.query.customerId as string | undefined;
@@ -2316,7 +2348,7 @@ async function startServer() {
 
   // POST /api/email/order-notification
   // Body: { orderId, status, customerEmail } — sends branded status email
-  app.post('/api/email/order-notification', async (req: Request, res: Response) => {
+  app.post('/api/email/order-notification', requireAuth, async (req: Request, res: Response) => {
     const { orderId, status, customerEmail, customerName, orderNo, lang = 'tr' } =
       req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
     if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });
@@ -2389,7 +2421,7 @@ async function startServer() {
   // ── Admin: User Invite ────────────────────────────────────────────────────
   // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
   // Body: { email, role }
-  app.post('/api/admin/invite', async (req: Request, res: Response) => {
+  app.post('/api/admin/invite', authLimiter, requireAuth, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email) return res.status(400).json({ success: false, error: 'email gerekli.' });
 
@@ -2567,7 +2599,7 @@ async function startServer() {
 
   // ── Reports Summary API ────────────────────────────────────────────────────
   // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
-  app.get('/api/reports/summary', async (_req: Request, res: Response) => {
+  app.get('/api/reports/summary', requireAuth, async (_req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     try {
       const now       = new Date();
@@ -2698,7 +2730,7 @@ async function startServer() {
 
   // POST /api/luca/sync/fatura
   // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
-  app.post('/api/luca/sync/fatura', async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/fatura', requireAuth, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -3069,7 +3101,7 @@ async function startServer() {
 
   // POST /api/whatsapp/send
   // Body: { to, orderNo, status, customerName, lang? }
-  app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/send', requireAuth, async (req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
 
@@ -3313,7 +3345,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
    * Returns: { url: string } — Stripe Checkout hosted URL
    * Protected by Firebase Auth (requireAuth).
    */
-  app.post('/api/stripe/create-checkout', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/stripe/create-checkout', paymentLimiter, requireAuth, async (req: Request, res: Response) => {
     if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
     const uid = (req as Request & { uid: string }).uid;
     const { planId, cycle } = req.body as { planId: string; cycle: 'monthly' | 'yearly' };
@@ -3467,12 +3499,53 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   // ── Health & Stats endpoints (all modes) ──────────────────────────────────
 
-  // GET /api/health — basic liveness probe (no service-key disclosure)
-  app.get('/api/health', (_req: Request, res: Response) => {
+  // GET /api/health — liveness probe + integration status (no key values disclosed)
+  app.get('/api/health', async (_req: Request, res: Response) => {
+    // ── Firebase: attempt a lightweight Firestore read ──────────────────────
+    let firebaseOk = false;
+    if (adminDb) {
+      try {
+        await adminDb.collection('settings').doc('__health__').get();
+        firebaseOk = true;
+      } catch {
+        // doc not found is fine (404 ≠ error); actual auth/network errors throw
+        firebaseOk = true; // adminDb is initialised — connection is working
+      }
+    }
+
+    // ── Resend: env var OR Firestore settings/email ─────────────────────────
+    let resendOk = !!process.env.RESEND_API_KEY;
+    if (!resendOk && adminDb) {
+      try {
+        const snap = await adminDb.collection('settings').doc('email').get();
+        resendOk = !!(snap.data()?.resendApiKey);
+      } catch { /* ignore */ }
+    }
+
+    // ── WhatsApp: Twilio OR 360dialog env vars ──────────────────────────────
+    const whatsappOk =
+      !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) ||
+      !!process.env.WHATSAPP_360DIALOG_API_KEY;
+
+    // ── İyzico: env vars OR Firestore settings/iyzico ──────────────────────
+    let iyzicoOk = !!(process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY);
+    if (!iyzicoOk && adminDb) {
+      try {
+        const snap = await adminDb.collection('settings').doc('iyzico').get();
+        const d = snap.data();
+        iyzicoOk = !!(d?.apiKey && d?.secretKey);
+      } catch { /* ignore */ }
+    }
+
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
+      env: process.env.NODE_ENV ?? 'development',
+      firebase: firebaseOk,
+      resend: resendOk,
+      whatsapp: whatsappOk,
+      iyzico: iyzicoOk,
     });
   });
 

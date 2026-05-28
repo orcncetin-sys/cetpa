@@ -11,6 +11,10 @@ import {
   signInWithPopup,
   signInWithRedirect,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  updateProfile,
   signInAnonymously,
   GoogleAuthProvider,
   signOut,
@@ -2909,7 +2913,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                       <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
                       <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
                     </div>
-                    <span className="text-sm font-bold text-brand">{revenueSymbol}{formatInCurrency(c.total, revenueCurrency, exchangeRates)}</span>
+                    <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, exchangeRates)}</span>
                   </div>
                 ))}
               </div>
@@ -2959,7 +2963,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
                         <p className="text-sm font-bold text-gray-800 truncate">{r.name}</p>
                         <p className="text-[10px] text-gray-400">{r.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {r.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</p>
                       </div>
-                      <span className="text-sm font-bold text-brand">{revenueSymbol}{formatInCurrency(r.revenue, revenueCurrency, exchangeRates)}</span>
+                      <span className="text-sm font-bold text-brand">{formatInCurrency(r.revenue, revenueCurrency, exchangeRates)}</span>
                     </div>
                   ))}
                 </div>
@@ -2977,7 +2981,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
             {([
               { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), color: 'text-blue-600', bg: 'bg-blue-50', isMoney: false },
               { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), color: 'text-orange-500', bg: 'bg-orange-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: `${revenueSymbol}${formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates)}`, color: 'text-green-600', bg: 'bg-green-50', isMoney: true },
+              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates), color: 'text-green-600', bg: 'bg-green-50', isMoney: true },
               { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), color: 'text-purple-600', bg: 'bg-purple-50', isMoney: false },
             ] as { label: string; value: string; color: string; bg: string; isMoney: boolean }[]).map((k,i) => (
               <motion.div key={i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}}
@@ -3649,7 +3653,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {([
               { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
-              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: revenueSymbol + formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
+              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
               { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
             ] as { label: string; value: string; icon: React.ElementType; color: string; bg: string; desc: string; isMoney: boolean }[]).map((k,i) => {
               const Icon = k.icon;
@@ -18540,7 +18544,10 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [emailLogin, setEmailLogin] = useState({ email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [isEmailLoginLoading, setIsEmailLoginLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
+  const [resetSent, setResetSent] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
 
@@ -20091,6 +20098,69 @@ function AppContent() {
     }
   };
 
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    const tr = currentLanguage === 'tr';
+    if (!signupForm.name.trim() || !signupForm.email.trim() || !signupForm.password) {
+      setAuthError(tr ? 'Tüm alanlar zorunludur.' : 'All fields are required.');
+      return;
+    }
+    if (signupForm.password.length < 8) {
+      setAuthError(tr ? 'Şifre en az 8 karakter olmalıdır.' : 'Password must be at least 8 characters.');
+      return;
+    }
+    if (signupForm.password !== signupForm.confirm) {
+      setAuthError(tr ? 'Şifreler eşleşmiyor.' : 'Passwords do not match.');
+      return;
+    }
+    setIsEmailLoginLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, signupForm.email.trim(), signupForm.password);
+      await updateProfile(cred.user, { displayName: signupForm.name.trim() });
+      await sendEmailVerification(cred.user);
+      // user state will be set by onAuthStateChanged
+    } catch (error) {
+      const code = (error as Record<string, unknown>)?.code as string | undefined;
+      if (code === 'auth/email-already-in-use') {
+        setAuthError(tr ? 'Bu e-posta zaten kullanımda.' : 'This email is already in use.');
+      } else if (code === 'auth/invalid-email') {
+        setAuthError(tr ? 'Geçersiz e-posta adresi.' : 'Invalid email address.');
+      } else if (code === 'auth/weak-password') {
+        setAuthError(tr ? 'Şifre çok zayıf.' : 'Password is too weak.');
+      } else {
+        setAuthError(tr ? `Kayıt başarısız: ${code || 'bilinmeyen-hata'}` : `Sign up failed: ${code || 'unknown-error'}`);
+      }
+    } finally {
+      setIsEmailLoginLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    const tr = currentLanguage === 'tr';
+    if (!emailLogin.email.trim()) {
+      setAuthError(tr ? 'E-posta adresi gerekli.' : 'Email address is required.');
+      return;
+    }
+    setIsEmailLoginLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, emailLogin.email.trim());
+      setResetSent(true);
+    } catch (error) {
+      const code = (error as Record<string, unknown>)?.code as string | undefined;
+      if (code === 'auth/user-not-found') {
+        // Don't reveal if email exists for security
+        setResetSent(true);
+      } else {
+        setAuthError(tr ? 'Sıfırlama e-postası gönderilemedi.' : 'Could not send reset email.');
+      }
+    } finally {
+      setIsEmailLoginLoading(false);
+    }
+  };
+
   const handleGuestContinue = async () => {
     setAuthError(null);
     try {
@@ -21323,102 +21393,177 @@ function AppContent() {
         >
           <div className={cn("backdrop-blur-3xl rounded-[2.5rem] overflow-hidden transition-colors duration-500", darkMode ? "bg-[#1c1c1e]/90 border border-white/10 shadow-[0_40px_80px_rgba(0,0,0,0.6)]" : "bg-white/80 border border-white shadow-[0_40px_80px_rgba(0,0,0,0.08)]")}>
             {/* Brand strip */}
-            <div className="px-10 pt-12 pb-8 text-center">
-              <div className="flex justify-center mb-6">
-                <img src="/cetpalogo.avif" alt="CETPA" className="h-14 w-auto object-contain drop-shadow-sm" />
+            <div className="px-10 pt-10 pb-6 text-center">
+              <div className="flex justify-center mb-5">
+                <img src="/cetpalogo.avif" alt="CETPA" className="h-12 w-auto object-contain drop-shadow-sm" />
               </div>
-              <h1 className={cn("text-3xl font-black tracking-tight mb-2", darkMode ? "text-[#f5f5f7]" : "text-[#1D1D1F]")}>
-                {currentLanguage === 'tr' ? 'Hoş Geldiniz' : 'Welcome Back'}
+              <h1 className={cn("text-2xl font-black tracking-tight mb-1", darkMode ? "text-[#f5f5f7]" : "text-[#1D1D1F]")}>
+                {authMode === 'signup'
+                  ? (currentLanguage === 'tr' ? 'Hesap Oluştur' : 'Create Account')
+                  : authMode === 'reset'
+                  ? (currentLanguage === 'tr' ? 'Şifre Sıfırla' : 'Reset Password')
+                  : (currentLanguage === 'tr' ? 'Hoş Geldiniz' : 'Welcome Back')}
               </h1>
-              <p className={cn("text-base font-medium", darkMode ? "text-white/50" : "text-gray-500")}>
-                {currentLanguage === 'tr' ? 'Satış & Lojistik Yazılımı' : 'Sales & Logistics Software'}
+              <p className={cn("text-sm font-medium", darkMode ? "text-white/50" : "text-gray-500")}>
+                CETPA Cloud ERP
               </p>
             </div>
 
-            <div className="px-10 pb-10 space-y-5">
-              {/* Email / Password form */}
-              <form onSubmit={handleEmailSignIn} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className={cn("text-[11px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
-                    {currentLanguage === 'tr' ? 'E-POSTA ADRESİ' : 'EMAIL ADDRESS'}
-                  </label>
-                  <input
-                    type="email"
-                    value={emailLogin.email}
-                    onChange={(e) => setEmailLogin(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder={currentLanguage === 'tr' ? 'örnek@cetpa.com' : 'example@cetpa.com'}
-                    className={cn("w-full rounded-2xl px-5 py-4 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400 shadow-inner")}
-                    autoComplete="email"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className={cn("text-[11px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
-                    {currentLanguage === 'tr' ? 'GÜVENLİ ŞİFRE' : 'SECURE PASSWORD'}
-                  </label>
-                  <input
-                    type="password"
-                    value={emailLogin.password}
-                    onChange={(e) => setEmailLogin(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="••••••••"
-                    className={cn("w-full rounded-2xl px-5 py-4 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400 shadow-inner")}
-                    autoComplete="current-password"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isEmailLoginLoading}
-                  className="w-full font-black py-4 px-6 rounded-2xl transition-all disabled:opacity-60 mt-2 text-sm active:scale-[0.98] bg-[#1D1D1F] hover:bg-black text-white shadow-xl shadow-black/20 outline-none"
-                >
-                  {isEmailLoginLoading
-                    ? (currentLanguage === 'tr' ? 'GİRİŞ YAPILIYOR...' : 'SIGNING IN...')
-                    : (currentLanguage === 'tr' ? 'HESABA GİRİŞ YAP' : 'SIGN IN TO ACCOUNT')}
-                </button>
-              </form>
-
-              {/* Divider */}
-              <div className="relative flex items-center gap-4 py-2">
-                <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
-                <span className={cn("text-[12px] font-bold uppercase tracking-widest", darkMode ? "text-white/20" : "text-gray-300")}>
-                  {currentLanguage === 'tr' ? 'veya' : 'OR'}
-                </span>
-                <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
+            {/* Mode tabs */}
+            <div className="px-10 mb-4">
+              <div className={cn("flex rounded-2xl p-1 gap-1", darkMode ? "bg-white/5" : "bg-gray-100")}>
+                {(['signin','signup'] as const).map(m => (
+                  <button key={m} onClick={() => { setAuthMode(m); setAuthError(null); setResetSent(false); }}
+                    className={cn("flex-1 py-2 rounded-xl text-xs font-black transition-all",
+                      authMode === m
+                        ? "bg-brand text-white shadow-sm"
+                        : darkMode ? "text-white/40 hover:text-white/70" : "text-gray-400 hover:text-gray-700"
+                    )}>
+                    {m === 'signin' ? (currentLanguage === 'tr' ? 'Giriş Yap' : 'Sign In') : (currentLanguage === 'tr' ? 'Kayıt Ol' : 'Sign Up')}
+                  </button>
+                ))}
               </div>
+            </div>
 
-              {/* Google */}
-              <button
-                onClick={handleLogin}
-                className={cn("w-full flex items-center justify-center gap-3 font-bold py-4 px-6 rounded-2xl transition-all shadow-sm group active:scale-[0.98]", darkMode ? "bg-white/5 hover:bg-white/10 border border-white/10 text-[#f5f5f7]" : "bg-white hover:bg-gray-50 border border-gray-200 text-[#1D1D1F]")}
-              >
-                <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0 transition-transform group-hover:scale-110" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                </svg>
-                {currentT.sign_in_google || 'Google ile Devam Et'}
-              </button>
+            <div className="px-10 pb-8 space-y-4">
+              {/* ── PASSWORD RESET mode ── */}
+              {authMode === 'reset' && (
+                resetSent
+                  ? <div className="text-center py-4 space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto">
+                        <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      <p className={cn("text-sm font-semibold", darkMode ? "text-white" : "text-gray-800")}>
+                        {currentLanguage === 'tr' ? 'Sıfırlama bağlantısı e-postanıza gönderildi.' : 'Reset link sent to your email.'}
+                      </p>
+                      <button onClick={() => { setAuthMode('signin'); setResetSent(false); }} className="text-brand text-sm font-black hover:underline">
+                        {currentLanguage === 'tr' ? '← Giriş Yap' : '← Back to Sign In'}
+                      </button>
+                    </div>
+                  : <form onSubmit={handlePasswordReset} className="space-y-4">
+                      <p className={cn("text-xs", darkMode ? "text-white/50" : "text-gray-500")}>
+                        {currentLanguage === 'tr' ? 'E-posta adresinizi girin, sıfırlama bağlantısı gönderelim.' : 'Enter your email and we\'ll send a reset link.'}
+                      </p>
+                      <input type="email" value={emailLogin.email}
+                        onChange={(e) => setEmailLogin(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder={currentLanguage === 'tr' ? 'örnek@cetpa.com' : 'example@cetpa.com'}
+                        className={cn("w-full rounded-2xl px-5 py-3.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
+                        autoComplete="email" autoFocus />
+                      <button type="submit" disabled={isEmailLoginLoading}
+                        className="w-full font-black py-3.5 px-6 rounded-2xl transition-all disabled:opacity-60 text-sm active:scale-[0.98] bg-brand hover:bg-brand/90 text-white shadow-lg outline-none">
+                        {isEmailLoginLoading ? '...' : (currentLanguage === 'tr' ? 'SIFIRLAMA BAĞLANTISI GÖNDER' : 'SEND RESET LINK')}
+                      </button>
+                      <button type="button" onClick={() => { setAuthMode('signin'); setAuthError(null); }}
+                        className={cn("w-full text-sm font-semibold", darkMode ? "text-white/40 hover:text-white/70" : "text-gray-400 hover:text-gray-600")}>
+                        {currentLanguage === 'tr' ? '← Giriş Yap' : '← Back to Sign In'}
+                      </button>
+                    </form>
+              )}
 
-              {/* Guest */}
-              <button
-                onClick={handleGuestContinue}
-                className="w-full text-brand hover:text-brand/80 text-sm font-black transition-all hover:underline underline-offset-4"
-              >
-                {currentLanguage === 'tr' ? 'Misafir Olarak Devam Et →' : 'Continue as Guest →'}
-              </button>
+              {/* ── SIGN UP mode ── */}
+              {authMode === 'signup' && (
+                <form onSubmit={handleEmailSignUp} className="space-y-3">
+                  {[
+                    { key: 'name', label: currentLanguage === 'tr' ? 'AD SOYAD' : 'FULL NAME', type: 'text', ac: 'name' },
+                    { key: 'email', label: currentLanguage === 'tr' ? 'E-POSTA' : 'EMAIL', type: 'email', ac: 'email' },
+                    { key: 'password', label: currentLanguage === 'tr' ? 'ŞİFRE (min 8)' : 'PASSWORD (min 8)', type: 'password', ac: 'new-password' },
+                    { key: 'confirm', label: currentLanguage === 'tr' ? 'ŞİFRE TEKRAR' : 'CONFIRM PASSWORD', type: 'password', ac: 'new-password' },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-1">
+                      <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>{f.label}</label>
+                      <input type={f.type} value={signupForm[f.key as keyof typeof signupForm]}
+                        onChange={(e) => setSignupForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                        className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
+                        autoComplete={f.ac} />
+                    </div>
+                  ))}
+                  <button type="submit" disabled={isEmailLoginLoading}
+                    className="w-full font-black py-3.5 px-6 rounded-2xl transition-all disabled:opacity-60 text-sm active:scale-[0.98] bg-brand hover:bg-brand/90 text-white shadow-lg outline-none mt-1">
+                    {isEmailLoginLoading ? '...' : (currentLanguage === 'tr' ? 'HESAP OLUŞTUR' : 'CREATE ACCOUNT')}
+                  </button>
+                  <p className={cn("text-[10px] text-center", darkMode ? "text-white/30" : "text-gray-400")}>
+                    {currentLanguage === 'tr' ? 'Kayıt olarak ' : 'By registering you agree to our '}
+                    <span className="text-brand">{currentLanguage === 'tr' ? 'Kullanım Koşulları' : 'Terms of Service'}</span>
+                    {currentLanguage === 'tr' ? "'nı kabul etmiş olursunuz." : '.'}
+                  </p>
+                </form>
+              )}
+
+              {/* ── SIGN IN mode ── */}
+              {authMode === 'signin' && (
+                <form onSubmit={handleEmailSignIn} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                      {currentLanguage === 'tr' ? 'E-POSTA ADRESİ' : 'EMAIL ADDRESS'}
+                    </label>
+                    <input type="email" value={emailLogin.email}
+                      onChange={(e) => setEmailLogin(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder={currentLanguage === 'tr' ? 'örnek@cetpa.com' : 'example@cetpa.com'}
+                      className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
+                      autoComplete="email" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className={cn("text-[10px] font-black uppercase tracking-widest", darkMode ? "text-white/30" : "text-gray-400")}>
+                        {currentLanguage === 'tr' ? 'ŞİFRE' : 'PASSWORD'}
+                      </label>
+                      <button type="button" onClick={() => { setAuthMode('reset'); setAuthError(null); }}
+                        className="text-[10px] font-bold text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'Şifremi Unuttum' : 'Forgot password?'}
+                      </button>
+                    </div>
+                    <input type="password" value={emailLogin.password}
+                      onChange={(e) => setEmailLogin(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="••••••••"
+                      className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
+                      autoComplete="current-password" />
+                  </div>
+                  <button type="submit" disabled={isEmailLoginLoading}
+                    className="w-full font-black py-3.5 px-6 rounded-2xl transition-all disabled:opacity-60 text-sm active:scale-[0.98] bg-[#1D1D1F] hover:bg-black text-white shadow-xl shadow-black/20 outline-none">
+                    {isEmailLoginLoading ? (currentLanguage === 'tr' ? 'GİRİŞ YAPILIYOR...' : 'SIGNING IN...') : (currentLanguage === 'tr' ? 'GİRİŞ YAP' : 'SIGN IN')}
+                  </button>
+                </form>
+              )}
 
               {authError && (
-                <motion.p
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 text-center"
-                >
+                <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 text-center">
                   {authError}
                 </motion.p>
+              )}
+
+              {/* Divider */}
+              {authMode !== 'reset' && (
+                <>
+                  <div className="relative flex items-center gap-4 py-1">
+                    <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
+                    <span className={cn("text-[11px] font-bold uppercase tracking-widest", darkMode ? "text-white/20" : "text-gray-300")}>
+                      {currentLanguage === 'tr' ? 'veya' : 'OR'}
+                    </span>
+                    <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
+                  </div>
+                  {/* Google */}
+                  <button onClick={handleLogin}
+                    className={cn("w-full flex items-center justify-center gap-3 font-bold py-3.5 px-6 rounded-2xl transition-all shadow-sm group active:scale-[0.98]", darkMode ? "bg-white/5 hover:bg-white/10 border border-white/10 text-[#f5f5f7]" : "bg-white hover:bg-gray-50 border border-gray-200 text-[#1D1D1F]")}>
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                    {currentT.sign_in_google || 'Google ile Devam Et'}
+                  </button>
+                  {/* Guest */}
+                  <button onClick={handleGuestContinue}
+                    className="w-full text-brand hover:text-brand/80 text-sm font-black transition-all hover:underline underline-offset-4">
+                    {currentLanguage === 'tr' ? 'Misafir Olarak Devam Et →' : 'Continue as Guest →'}
+                  </button>
+                </>
               )}
             </div>
           </div>
 
-          <p className={cn("text-center text-xs mt-6", darkMode ? "text-white/20" : "text-gray-400")}>
+          <p className={cn("text-center text-xs mt-4", darkMode ? "text-white/20" : "text-gray-400")}>
             © 2026 CETPA · {currentT.authorized_only || 'Authorized Personnel Only'}
           </p>
         </motion.div>
@@ -25784,8 +25929,17 @@ function AppContent() {
 
                   {/* ── Phase 143: Profit & Loss Statement ── */}
                   {muhasebeTab === 'pnl' && (() => {
+                    // ── Shared currency setup (used by entire PnL tab) ──────────
+                    const pnlUsd = exchangeRates?.USD ?? 38;
+                    const pnlEur = exchangeRates?.EUR ?? 41;
+                    const pnlRate = p563PnlCurrency === 'USD' ? pnlUsd : p563PnlCurrency === 'EUR' ? pnlEur : 1;
+                    const pnlSym  = p563PnlCurrency === 'USD' ? '$' : p563PnlCurrency === 'EUR' ? '€' : '₺';
+                    const fmtPnl  = (v: number) => `${pnlSym}${(v / pnlRate).toLocaleString(
+                      p563PnlCurrency === 'TRY' ? 'tr-TR' : p563PnlCurrency === 'EUR' ? 'de-DE' : 'en-US',
+                      { maximumFractionDigits: 0 }
+                    )}`;
+
                     const now143 = new Date();
-                    // Build last 6 months P&L
                     const months143: { label: string; revenue: number; cogs: number; grossProfit: number }[] = [];
                     for (let m = 5; m >= 0; m--) {
                       const d = new Date(now143.getFullYear(), now143.getMonth() - m, 1);
@@ -25802,12 +25956,12 @@ function AppContent() {
                       months143.push({ label, revenue, cogs, grossProfit: revenue - cogs });
                     }
                     const ytdRevenue = months143.reduce((s, m) => s + m.revenue, 0);
-                    const ytdCOGS = months143.reduce((s, m) => s + m.cogs, 0);
-                    const ytdGross = ytdRevenue - ytdCOGS;
-                    const ytdOpEx = ytdRevenue * 0.12; // estimated 12% SG&A
-                    const ytdEBIT = ytdGross - ytdOpEx;
+                    const ytdCOGS    = months143.reduce((s, m) => s + m.cogs, 0);
+                    const ytdGross   = ytdRevenue - ytdCOGS;
+                    const ytdOpEx    = ytdRevenue * 0.12;
+                    const ytdEBIT    = ytdGross - ytdOpEx;
                     const grossMargin143 = ytdRevenue > 0 ? (ytdGross / ytdRevenue) * 100 : 0;
-                    const netMargin143 = ytdRevenue > 0 ? (ytdEBIT / ytdRevenue) * 100 : 0;
+                    const netMargin143   = ytdRevenue > 0 ? (ytdEBIT  / ytdRevenue) * 100 : 0;
                     const pnlRows = [
                       { label: currentLanguage === 'tr' ? 'Gelir (Satışlar)' : 'Revenue (Net Sales)', value: ytdRevenue, bold: true, indent: false, positive: true },
                       { label: currentLanguage === 'tr' ? 'Satılan Malın Maliyeti (COGS)' : 'Cost of Goods Sold', value: -ytdCOGS, bold: false, indent: true, positive: false },
@@ -25817,15 +25971,40 @@ function AppContent() {
                     ];
                     return (
                       <motion.div key="muhasebe-pnl" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                        <ModuleHeader
-                          title={currentLanguage === 'tr' ? 'Gelir Tablosu (P&L)' : 'Profit & Loss Statement'}
-                          subtitle={currentLanguage === 'tr' ? 'Son 6 ay özeti' : 'Last 6-month summary'}
-                          icon={TrendingUp}
-                        />
+                        {/* Header + currency toggle in one row */}
+                        <div className="flex items-start justify-between gap-4 flex-wrap">
+                          <ModuleHeader
+                            title={currentLanguage === 'tr' ? 'Gelir Tablosu (P&L)' : 'Profit & Loss Statement'}
+                            subtitle={currentLanguage === 'tr' ? 'Son 6 ay özeti' : 'Last 6-month summary'}
+                            icon={TrendingUp}
+                          />
+                          {/* Currency toggle — controls ALL numbers on this tab */}
+                          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 self-start mt-1">
+                            {(['TRY','USD','EUR'] as const).map(c => (
+                              <button key={c} onClick={() => setP563PnlCurrency(c)}
+                                className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${p563PnlCurrency === c ? 'bg-white shadow text-gray-900' : 'text-gray-400 hover:text-gray-700'}`}>
+                                {c === 'TRY' ? '₺ TRY' : c === 'USD' ? '$ USD' : '€ EUR'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Live rate notice when converted */}
+                        {p563PnlCurrency !== 'TRY' && (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-700">
+                            <Globe className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>
+                              {currentLanguage === 'tr'
+                                ? `Kur: ₺1 = ${p563PnlCurrency === 'USD' ? `$${(1/pnlRate).toFixed(4)}` : `€${(1/pnlRate).toFixed(4)}`} — Frankfurter API (TCMB referans)`
+                                : `Rate: ₺1 = ${p563PnlCurrency === 'USD' ? `$${(1/pnlRate).toFixed(4)}` : `€${(1/pnlRate).toFixed(4)}`} — Frankfurter API`}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Summary KPIs */}
                         <div className="grid grid-cols-3 gap-3">
                           {[
-                            { label: currentLanguage==='tr'?'Toplam Gelir':'Total Revenue', value: `₺${ytdRevenue.toLocaleString()}`, color: 'text-blue-600', bg: 'bg-blue-50' },
+                            { label: currentLanguage==='tr'?'Toplam Gelir':'Total Revenue', value: fmtPnl(ytdRevenue), color: 'text-blue-600', bg: 'bg-blue-50' },
                             { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${grossMargin143.toFixed(1)}`, color: grossMargin143 >= 30 ? 'text-emerald-600' : 'text-amber-600', bg: grossMargin143 >= 30 ? 'bg-emerald-50' : 'bg-amber-50' },
                             { label: currentLanguage==='tr'?'Net Marj':'Net Margin', value: `%${netMargin143.toFixed(1)}`, color: netMargin143 >= 10 ? 'text-emerald-600' : 'text-amber-600', bg: netMargin143 >= 10 ? 'bg-emerald-50' : 'bg-amber-50' },
                           ].map(k => (
@@ -25835,29 +26014,47 @@ function AppContent() {
                             </div>
                           ))}
                         </div>
+
                         {/* P&L table */}
                         <div className="apple-card p-6">
-                          <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Gelir-Gider Özeti (6 Ay)' : 'Income Statement (6 Months)'}</h3>
+                          <h3 className="font-bold text-gray-800 mb-4">
+                            {currentLanguage === 'tr' ? 'Gelir-Gider Özeti (6 Ay)' : 'Income Statement (6 Months)'}
+                          </h3>
                           <div className="space-y-0 divide-y divide-gray-100">
                             {pnlRows.map(row => (
                               <div key={row.label} className={`flex items-center justify-between py-3 ${row.bold ? 'bg-gray-50 -mx-2 px-2 rounded-xl' : ''}`}>
                                 <span className={`text-sm ${row.indent ? 'pl-4 text-gray-500' : 'font-semibold text-gray-900'}`}>{row.label}</span>
-                                <span className={`text-sm font-bold tabular-nums ${row.positive ? 'text-emerald-600' : 'text-red-500'}`}>
-                                  {row.value < 0 ? '– ' : ''}{fmtKpi(Math.abs(row.value),'full',0)}
-                                </span>
+                                <div className="flex items-center gap-3">
+                                  {/* Show TRY reference when not in TRY mode */}
+                                  {p563PnlCurrency !== 'TRY' && (
+                                    <span className="text-xs text-gray-400 font-mono tabular-nums">
+                                      ₺{Math.abs(row.value).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                    </span>
+                                  )}
+                                  <span className={`text-sm font-bold tabular-nums ${row.positive ? 'text-emerald-600' : 'text-red-500'}`}>
+                                    {row.value < 0 ? '– ' : ''}{fmtPnl(Math.abs(row.value))}
+                                  </span>
+                                </div>
                               </div>
                             ))}
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-4">* {currentLanguage === 'tr' ? 'İşletme giderleri %12 SG&A tahminidir. Gerçek giderler için muhasebe entegrasyonu gereklidir.' : 'Operating expenses estimated at 12% SG&A. Real-time opex requires accounting integration.'}</p>
+                          <p className="text-[10px] text-gray-400 mt-4">
+                            * {currentLanguage === 'tr'
+                              ? 'İşletme giderleri %12 SG&A tahminidir. Gerçek giderler için muhasebe entegrasyonu gereklidir.'
+                              : 'Operating expenses estimated at 12% SG&A. Real-time opex requires accounting integration.'}
+                          </p>
                         </div>
+
                         {/* Monthly chart */}
                         <div className="apple-card p-6">
-                          <h3 className="font-semibold text-gray-800 mb-4 text-sm">{currentLanguage === 'tr' ? 'Aylık Gelir & Brüt Kâr' : 'Monthly Revenue & Gross Profit'}</h3>
+                          <h3 className="font-semibold text-gray-800 mb-4 text-sm">
+                            {currentLanguage === 'tr' ? 'Aylık Gelir & Brüt Kâr' : 'Monthly Revenue & Gross Profit'}
+                          </h3>
                           <div className="space-y-3">
                             {months143.map(m => {
                               const maxVal = Math.max(...months143.map(x => x.revenue), 1);
-                              const revW = Math.round((m.revenue / maxVal) * 100);
-                              const gpW = m.revenue > 0 ? Math.round((m.grossProfit / maxVal) * 100) : 0;
+                              const revW   = Math.round((m.revenue / maxVal) * 100);
+                              const gpW    = m.revenue > 0 ? Math.round((m.grossProfit / maxVal) * 100) : 0;
                               return (
                                 <div key={m.label} className="flex items-center gap-3">
                                   <span className="text-xs text-gray-500 w-12 shrink-0 text-right">{m.label}</span>
@@ -25869,7 +26066,7 @@ function AppContent() {
                                       <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${Math.max(gpW, 0)}%` }} />
                                     </div>
                                   </div>
-                                  <span className="text-xs text-gray-600 w-28 shrink-0 tabular-nums">{fmtKpi(m.revenue,'full',0)}</span>
+                                  <span className="text-xs text-gray-600 w-28 shrink-0 tabular-nums">{fmtPnl(m.revenue)}</span>
                                 </div>
                               );
                             })}
@@ -25883,7 +26080,7 @@ function AppContent() {
                     );
                   })()}
 
-                  {/* ── Phase 150: Break-Even Calculator ── */}
+                  {/* ── Break-Even Calculator ── */}
                   {muhasebeTab === 'pnl' && (() => {
                     const totalRevBE = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
                     const totalCOGSBE = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) =>
@@ -25942,80 +26139,6 @@ function AppContent() {
                     );
                   })()}
 
-                  {/* ── Phase 563: Multi-Currency P&L Konsolidasyon ───────────────────── */}
-                  {muhasebeTab === 'pnl' && (() => {
-                    const tr563 = currentLanguage === 'tr';
-                    const usd = exchangeRates?.USD ?? 32;
-                    const eur = exchangeRates?.EUR ?? 35;
-                    const rate563 = p563PnlCurrency === 'USD' ? usd : p563PnlCurrency === 'EUR' ? eur : 1;
-                    const sym563 = p563PnlCurrency === 'USD' ? '$' : p563PnlCurrency === 'EUR' ? '€' : '₺';
-                    const fmt563 = (v: number) => `${sym563}${(v/rate563).toLocaleString(p563PnlCurrency==='TRY'?'tr-TR':p563PnlCurrency==='EUR'?'de-DE':'en-US',{maximumFractionDigits:0})}`;
-
-                    const totalRevTRY = orders.filter(o => o.status !== 'Cancelled').reduce((s,o) => s+(o.totalPrice||0), 0);
-                    const totalCogsTRY = orders.filter(o => o.status !== 'Cancelled').reduce((s,o) => s+(o.lineItems??[]).reduce((ls,li) => ls+((li.costPrice??0)*li.quantity),0), 0);
-                    const grossTRY = totalRevTRY - totalCogsTRY;
-                    const opexTRY = totalRevTRY * 0.12;
-                    const ebitTRY = grossTRY - opexTRY;
-
-                    const pnl563 = [
-                      { label: tr563?'Gelir':'Revenue', try: totalRevTRY },
-                      { label: 'COGS', try: -totalCogsTRY },
-                      { label: tr563?'Brüt Kâr':'Gross Profit', try: grossTRY },
-                      { label: tr563?'Faaliyet Giderleri':'Operating Expenses', try: -opexTRY },
-                      { label: 'EBIT', try: ebitTRY },
-                    ];
-
-                    // Per-currency revenue breakdown (from orders with different currencies)
-                    const currBreakdown: Record<string, number> = { TRY: 0, USD: 0, EUR: 0 };
-                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-                      const c = 'TRY'; // Orders don't have currency; assume TRY
-                      currBreakdown[c] = (currBreakdown[c] || 0) + (o.totalPrice || 0);
-                    });
-
-                    return (
-                      <div className="apple-card p-5 mt-2">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <Globe className="w-4 h-4 text-indigo-500" />
-                            <h4 className="font-bold text-gray-800 text-sm">{tr563?'Çok Dövizli P&L Konsolidasyon':'Multi-Currency P&L Consolidation'}</h4>
-                          </div>
-                          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-                            {(['TRY','USD','EUR'] as const).map(c => (
-                              <button key={c} onClick={() => setP563PnlCurrency(c)}
-                                className={`text-xs font-bold px-3 py-1 rounded-md transition-all ${p563PnlCurrency===c?'bg-white shadow-sm text-gray-800':'text-gray-400 hover:text-gray-600'}`}>
-                                {c==='TRY'?'₺ TRY':c==='USD'?'$ USD':'€ EUR'}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Exchange rate notice */}
-                        {p563PnlCurrency !== 'TRY' && (
-                          <div className="mb-3 px-3 py-2 bg-indigo-50 rounded-xl text-xs text-indigo-700 flex items-center gap-2">
-                            <span>📌</span>
-                            <span>{tr563?`Kur: 1 ${p563PnlCurrency} = ₺${rate563.toLocaleString('tr-TR')}`:`Rate: 1 ${p563PnlCurrency} = ₺${rate563.toLocaleString()}`}</span>
-                          </div>
-                        )}
-
-                        <div className="space-y-0 divide-y divide-gray-100">
-                          {pnl563.map(row => (
-                            <div key={row.label} className={`flex items-center justify-between py-3 ${['Brüt Kâr','Gross Profit','EBIT'].includes(row.label)?'bg-gray-50 -mx-2 px-2 rounded-xl font-bold':''}`}>
-                              <span className="text-sm text-gray-700">{row.label}</span>
-                              <div className="flex items-center gap-4">
-                                {p563PnlCurrency !== 'TRY' && (
-                                  <span className="text-xs text-gray-400 font-mono">₺{Math.abs(row.try).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
-                                )}
-                                <span className={`text-sm font-bold font-mono ${row.try < 0?'text-red-500':row.try===0?'text-gray-400':'text-emerald-700'}`}>
-                                  {row.try < 0 ? '– ' : ''}{fmt563(Math.abs(row.try))}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="text-[10px] text-gray-400 mt-3">* {tr563?'Dönüşüm TCMB spot kurları üzerinden yapılmıştır.':'Conversion uses TCMB spot exchange rates.'}</p>
-                      </div>
-                    );
-                  })()}
 
                   {/* ── Nakit Akışı (Cash Flow) ── */}
                   {muhasebeTab === 'nakit-akis' && (() => {
@@ -31773,68 +31896,103 @@ function AppContent() {
 
         {/* Service connectivity cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
+          {([
             {
               name: 'Firebase Firestore',
-              ok: healthData ? healthData.firebase : true,
-              status: healthData ? (healthData.firebase ? 'Aktif' : 'Hata') : 'Bekleniyor',
+              ok: healthData ? healthData.firebase : null,
+              status: !healthData ? (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending') : healthData.firebase ? (currentLanguage==='tr' ? 'Aktif' : 'Active') : (currentLanguage==='tr' ? 'Bağlantı Hatası' : 'Connection Error'),
               desc: currentLanguage==='tr' ? 'Gerçek zamanlı veritabanı' : 'Real-time database',
+              optional: false,
+              settingsTab: null as string|null,
             },
             {
               name: 'Firebase Auth',
-              ok: true,
-              status: user ? (currentLanguage==='tr' ? 'Giriş Yapıldı' : 'Authenticated') : (currentLanguage==='tr' ? 'Misafir' : 'Guest'),
+              ok: true as boolean|null,
+              status: user ? (currentLanguage==='tr' ? 'Giriş Yapıldı' : 'Authenticated') : (currentLanguage==='tr' ? 'Misafir (Anonim)' : 'Guest (Anonymous)'),
               desc: user?.email || 'anonymous',
+              optional: false,
+              settingsTab: null as string|null,
             },
             {
               name: 'TCMB Kur API',
-              ok: !!exchangeRates,
+              ok: !!exchangeRates as boolean|null,
               status: exchangeRates ? (currentLanguage==='tr' ? 'Bağlı' : 'Connected') : (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending'),
               desc: exchangeRates ? `1 USD = ₺${(exchangeRates.USD||0).toFixed(2)}` : (currentLanguage==='tr' ? 'Güncelleniyor...' : 'Fetching...'),
+              optional: false,
+              settingsTab: null as string|null,
             },
             {
               name: 'Express Server',
-              ok: !!healthData,
+              ok: !!healthData as boolean|null,
               status: healthData ? `${currentLanguage==='tr' ? 'Çalışıyor' : 'Running'} — ${Math.floor((healthData.uptime || 0) / 60)}m` : (currentLanguage==='tr' ? 'Bağlanılamadı' : 'Unreachable'),
               desc: healthData ? healthData.env : '—',
+              optional: false,
+              settingsTab: null as string|null,
             },
             {
               name: 'Resend (E-posta)',
-              ok: !!healthData?.resend,
-              status: healthData?.resend ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'API Key Yok' : 'No API Key'),
+              ok: healthData ? (healthData.resend ? true : null) : null,
+              status: !healthData ? '…' : healthData.resend ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
               desc: currentLanguage==='tr' ? 'Haftalık rapor & davet emaili' : 'Weekly report & invite emails',
+              optional: true,
+              settingsTab: 'settings' as string|null,
             },
             {
               name: 'WhatsApp (Twilio)',
-              ok: !!healthData?.whatsapp,
-              status: healthData?.whatsapp ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Credentials Yok' : 'No Credentials'),
+              ok: healthData ? (healthData.whatsapp ? true : null) : null,
+              status: !healthData ? '…' : healthData.whatsapp ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
               desc: currentLanguage==='tr' ? 'Kargo bildirim mesajları' : 'Shipping notification messages',
+              optional: true,
+              settingsTab: 'settings' as string|null,
             },
             {
               name: 'İyzico (Ödeme)',
-              ok: !!healthData?.iyzico,
-              status: healthData?.iyzico ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'API Key Yok' : 'No API Key'),
+              ok: healthData ? (healthData.iyzico ? true : null) : null,
+              status: !healthData ? '…' : healthData.iyzico ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
               desc: currentLanguage==='tr' ? 'B2B ödeme entegrasyonu' : 'B2B payment integration',
+              optional: true,
+              settingsTab: 'settings' as string|null,
             },
             {
               name: 'Shopify',
-              ok: true,
+              ok: true as boolean|null,
               status: currentLanguage==='tr' ? 'Manuel Sync' : 'Manual Sync',
               desc: currentLanguage==='tr' ? 'Son sync: manuel' : 'Last sync: manual',
+              optional: false,
+              settingsTab: null as string|null,
             },
-          ].map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-gray-800 text-sm">{s.name}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{s.desc}</div>
+          ] as { name: string; ok: boolean|null; status: string; desc: string; optional: boolean; settingsTab: string|null }[]).map((s, i) => {
+            // ok=true → green, ok=false → red (required) or gray (optional not configured), ok=null → amber/pending
+            const badge =
+              s.ok === true  ? 'bg-green-100 text-green-700' :
+              s.ok === false ? 'bg-red-100 text-red-600' :
+              s.optional     ? 'bg-gray-100 text-gray-500' :
+                               'bg-amber-100 text-amber-600';
+            const dot = s.ok === true ? '●' : s.ok === false ? '●' : '○';
+            return (
+              <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-gray-800 text-sm">{s.name}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{s.desc}</div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {s.ok !== true && s.optional && s.settingsTab && (
+                      <button
+                        onClick={() => setActiveTab(s.settingsTab!)}
+                        className="text-[11px] font-semibold text-brand hover:underline whitespace-nowrap"
+                      >
+                        {currentLanguage==='tr' ? 'Yapılandır →' : 'Configure →'}
+                      </button>
+                    )}
+                    <span className={`text-xs font-bold px-3 py-1.5 rounded-full whitespace-nowrap ${badge}`}>
+                      {dot} {s.status}
+                    </span>
+                  </div>
                 </div>
-                <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${s.ok ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
-                  {s.ok ? '● ' : '○ '}{s.status}
-                </span>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Collection counts */}
@@ -41038,6 +41196,23 @@ function AppContent() {
           currentLanguage={currentLanguage}
           onClose={() => setLabelItems(null)}
         />
+      )}
+
+      {/* ── Email Verification Banner ── */}
+      {user && !user.isAnonymous && user.providerData?.[0]?.providerId === 'password' && !user.emailVerified && (
+        <div className="fixed top-0 left-0 right-0 z-[300] bg-amber-500 text-white text-xs font-bold px-4 py-2.5 flex items-center justify-between gap-4 shadow-lg">
+          <span>
+            {currentLanguage === 'tr'
+              ? `📧 E-posta adresinizi doğrulamanız gerekiyor. ${user.email} adresine bir doğrulama bağlantısı gönderildi.`
+              : `📧 Please verify your email address. A verification link was sent to ${user.email}.`}
+          </span>
+          <button
+            onClick={async () => { try { await sendEmailVerification(user); toast(currentLanguage === 'tr' ? 'Doğrulama e-postası yeniden gönderildi.' : 'Verification email resent.', 'success'); } catch { /* ignore */ } }}
+            className="shrink-0 bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1 transition-colors whitespace-nowrap"
+          >
+            {currentLanguage === 'tr' ? 'Yeniden Gönder' : 'Resend'}
+          </button>
+        </div>
       )}
 
       {/* ── Onboarding Checklist (post-purchase activation) ── */}

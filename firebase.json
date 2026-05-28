@@ -55,7 +55,7 @@
           },
           {
             "key": "Content-Security-Policy",
-            "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://*.firebaseapp.com https://*.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com https://api.exchangerate-api.com https://www.tcmb.gov.tr; frame-ancestors 'none'"
+            "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://*.firebaseapp.com https://*.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com https://api.exchangerate-api.com https://www.tcmb.gov.tr https://api.frankfurter.app https://api.resend.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; frame-ancestors 'none'"
           },
           {
             "key": "Permissions-Policy",
