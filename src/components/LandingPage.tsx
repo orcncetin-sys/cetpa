@@ -9,7 +9,7 @@ import {
   ArrowRight, LayoutDashboard, Zap, Package, Truck, Landmark, Users,
   BarChart3, ShieldCheck, Globe, Check, MessageSquare, Briefcase,
   Activity, Scale, Building2, Code, Database, Moon, Sun,
-  TrendingUp, Clock, Play, Pause, ChevronDown, Mail, Star, X, Minus,
+  TrendingUp, Play, Pause, ChevronDown, Mail, Star, X, Minus,
 } from 'lucide-react';
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
@@ -1401,7 +1401,7 @@ export default function LandingPage({
               className={cn('w-full sm:w-auto px-8 py-4 rounded-2xl font-bold text-base border transition-all flex items-center justify-center gap-2.5 hover:scale-[1.02]',
                 d('border-white/12 bg-white/5 text-white hover:bg-white/10', 'border-black/12 bg-white text-black hover:bg-gray-50 shadow-sm'))}>
               <Play className="w-4 h-4" />
-              {isTR ? 'Demo İzle' : 'Watch Demo'}
+              {isTR ? 'Demo Talep Et' : 'Request Demo'}
             </button>
           </motion.div>
 
@@ -1696,7 +1696,7 @@ export default function LandingPage({
             {isTR ? 'CETPA\'yı aksiyonda görün' : 'See CETPA in action'}
           </h2>
           <p className={cn('max-w-xl mx-auto mb-12', d('text-white/40', 'text-black/40'))}>
-            {isTR ? '4 dakikalık tur ile tüm modülleri keşfedin.' : 'Discover all modules in a 4-minute tour.'}
+            {isTR ? 'Demo talep edin, ekibimiz size özel bir sunum ayarlasın.' : 'Request a demo and our team will set up a personalized presentation.'}
           </p>
           <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
             className={cn('relative rounded-3xl border overflow-hidden cursor-pointer group', d('border-white/8', 'border-black/8'))}>
@@ -1710,7 +1710,7 @@ export default function LandingPage({
               </button>
             </div>
             <div className="absolute bottom-4 right-4 bg-black/70 text-white text-xs font-bold px-3 py-1.5 rounded-xl backdrop-blur-sm flex items-center gap-1.5">
-              <Clock className="w-3 h-3" /> 4:12
+              <Play className="w-3 h-3" /> {isTR ? 'Demo Talep Et' : 'Request Demo'}
             </div>
           </motion.div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16">

@@ -1088,67 +1088,57 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                       <Folder className="w-4 h-4 text-gray-400" />
                       {typeof modalConfig.data === 'string' ? modalConfig.data : ''}
                     </h4>
-                    <ul className="space-y-2">
-                      {(
-                        modalConfig.data === 'Sözleşme Şablonları' ? [
-                          'Genel Satış Sözleşmesi.pdf',
-                          'Gizlilik Sözleşmesi (NDA).pdf',
-                          'Hizmet Alım Sözleşmesi.docx',
-                          'Bayilik Sözleşmesi.pdf',
-                          'Kira Sözleşmesi Örneği.pdf'
-                        ] : modalConfig.data === 'Hukuki Yazışmalar' ? [
-                          'İhtarname Örneği - Ödeme Gecikmesi.pdf',
-                          'KVKK Aydınlatma Metni.pdf',
-                          'Muva faka fername.docx',
-                          'İstifa Dilekçesi Örneği.pdf'
-                        ] : modalConfig.data === 'Mahkeme Belgeleri' ? [
-                          'Dava Dilekçesi Taslağı.pdf',
-                          'Cevap Dilekçesi.docx',
-                          'Bilirkişi Raporu İtiraz.pdf',
-                          'Vekaletname Örneği.pdf'
-                        ] : ['Dosya 1.pdf', 'Dosya 2.docx', 'Dosya 3.xlsx']
-                      ).map((file, i) => (
-                        <li key={i} className="flex items-center justify-between p-4 bg-gray-50 hover:bg-white hover:shadow-md transition-all rounded-2xl border border-transparent hover:border-brand/10 text-sm group/file">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shadow-sm">
-                              {file.endsWith('.pdf') ? <FileText className="w-5 h-5 text-red-500" /> : <ShieldCheck className="w-5 h-5 text-blue-500" />}
-                            </div>
-                            <div>
-                                <p className="font-bold text-gray-800">{file}</p>
-                                <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">{file.split('.').pop()} Document</p>
-                            </div>
+                    {(() => {
+                      const category = typeof modalConfig.data === 'string' ? modalConfig.data : '';
+                      const categoryDocs = legalDocs.filter(d => !category || category === 'Tümü' || d.type === category);
+                      if (categoryDocs.length === 0) {
+                        return (
+                          <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
+                            <Folder className="w-10 h-10 text-gray-200" />
+                            <p className="text-sm font-semibold text-gray-400">
+                              {currentLanguage === 'tr' ? 'Bu kategoride henüz belge yok.' : 'No documents in this category yet.'}
+                            </p>
+                            <p className="text-xs text-gray-300">
+                              {currentLanguage === 'tr' ? '"Belgeler" sekmesinden yeni belge yükleyebilirsiniz.' : 'Upload documents from the "Documents" tab.'}
+                            </p>
                           </div>
-                          <div className="flex gap-2">
-                             <button 
-                               type="button" 
-                               onClick={() => {
-                                  showToast(currentLanguage === 'tr' ? 'Belge yükleniyor...' : 'Loading document...');
-                                  setTimeout(() => {
-                                    const win = window.open('', '_blank');
-                                    win?.document.write(`<html><head><title>${file}</title></head><body style="margin:0;display:flex;align-items:center;justify-center;background:#525659;"><iframe src="https://mozilla.github.io/pdf.js/web/viewer.html?file=https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/examples/learning/helloworld.pdf" width="100%" height="100%" style="border:none"></iframe></body></html>`);
-                                  }, 500);
-                                }} 
-                               className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] hover:bg-blue-100 transition-colors"
-                             >
-                               {currentLanguage === 'tr' ? 'Görüntüle' : 'View'}
-                             </button>
-                             <button 
-                               type="button" 
-                               onClick={() => {
-                                 showToast(currentLanguage === 'tr' ? 'İndirme başlatıldı: ' + file : 'Download started: ' + file);
-                                 const link = document.createElement('a');
-                                 link.href = '#';
-                                 link.setAttribute('download', file);
-                                 link.click();
-                               }}
-                               className="px-3 py-1.5 rounded-lg bg-[#ff4000]/10 text-[#ff4000] font-bold text-[11px] hover:bg-[#ff4000]/20 transition-colors"
-                             >
-                               {currentLanguage === 'tr' ? 'İndir' : 'Download'}
-                             </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                        );
+                      }
+                      return (
+                        <ul className="space-y-2">
+                          {categoryDocs.map((document) => (
+                            <li key={document.id} className="flex items-center justify-between p-4 bg-gray-50 hover:bg-white hover:shadow-md transition-all rounded-2xl border border-transparent hover:border-brand/10 text-sm group/file">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shadow-sm">
+                                  {document.fileName?.endsWith('.pdf') ? <FileText className="w-5 h-5 text-red-500" /> : <ShieldCheck className="w-5 h-5 text-blue-500" />}
+                                </div>
+                                <div>
+                                  <p className="font-bold text-gray-800">{document.title}</p>
+                                  <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">
+                                    {document.fileName?.split('.').pop() ?? document.type}
+                                    {document.fileSize ? ` · ${(document.fileSize / 1024).toFixed(0)} KB` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                {document.fileUrl && (
+                                  <a href={document.fileUrl} target="_blank" rel="noopener noreferrer"
+                                    className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] hover:bg-blue-100 transition-colors">
+                                    {currentLanguage === 'tr' ? 'Görüntüle' : 'View'}
+                                  </a>
+                                )}
+                                {document.fileUrl && (
+                                  <a href={document.fileUrl} download={document.fileName || document.title}
+                                    className="px-3 py-1.5 rounded-lg bg-[#ff4000]/10 text-[#ff4000] font-bold text-[11px] hover:bg-[#ff4000]/20 transition-colors">
+                                    {currentLanguage === 'tr' ? 'İndir' : 'Download'}
+                                  </a>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
                   </div>
                 )}
 
