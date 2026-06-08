@@ -10,7 +10,7 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # ── Stage 2: Build frontend ───────────────────────────────────────────────────
 FROM node:22-alpine AS build
