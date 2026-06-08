@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
-import { createServer as createViteServer } from "vite";
+// vite is imported dynamically below — only in development, never in production
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -3573,6 +3573,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
