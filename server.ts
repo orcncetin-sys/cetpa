@@ -3587,8 +3587,17 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  // Graceful shutdown — Docker/systemd sends SIGTERM before SIGKILL
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully...');
+    server.close(() => {
+      console.log('Server closed.');
+      process.exit(0);
+    });
   });
 }
 

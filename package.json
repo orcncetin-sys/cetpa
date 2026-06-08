@@ -11,6 +11,7 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "tsx server.ts",
+    "start:prod": "NODE_ENV=production node startup.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"

@@ -1,0 +1,27 @@
+# Dependencies (rebuilt in container)
+node_modules
+npm-debug.log*
+
+# Build artifacts (rebuilt in container)
+dist
+
+# Environment files (must be provided at runtime, NEVER baked in)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Development tools
+.vscode
+*.log
+*.zip
+
+# macOS
+.DS_Store
+
+# TypeScript build info
+*.tsbuildinfo
+tsconfig.tsbuildinfo

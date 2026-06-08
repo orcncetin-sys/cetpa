@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: cetpa-app
+    ports:
+      # Sadece localhost'a bağla — Nginx reverse proxy üzerinden dışarı açılır
+      - "127.0.0.1:5173:5173"
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5173/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
