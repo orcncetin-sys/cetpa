@@ -21553,11 +21553,6 @@ function AppContent() {
                     </svg>
                     {currentT.sign_in_google || 'Google ile Devam Et'}
                   </button>
-                  {/* Guest */}
-                  <button onClick={handleGuestContinue}
-                    className="w-full text-brand hover:text-brand/80 text-sm font-black transition-all hover:underline underline-offset-4">
-                    {currentLanguage === 'tr' ? 'Misafir Olarak Devam Et →' : 'Continue as Guest →'}
-                  </button>
                 </>
               )}
             </div>
