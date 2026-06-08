@@ -47,6 +47,6 @@ USER cetpa
 EXPOSE 5173
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:5173/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:5173/api/health || exit 1
 
 CMD ["node", "startup.cjs"]
