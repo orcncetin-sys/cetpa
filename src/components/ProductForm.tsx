@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
 
@@ -98,13 +98,16 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               quantity: Math.abs(diff),
               reason: 'Manuel Stok Düzeltmesi',
               notes: `${oldStock} → ${newStock}`,
+              companyId: auth.currentUser?.uid ?? 'unknown',
               timestamp: serverTimestamp(),
             });
           } catch { /* non-critical */ }
         }
       } else {
+        const companyId = auth.currentUser?.uid ?? 'unknown';
         const newRef = await addDoc(collection(db, 'inventory'), {
           ...data,
+          companyId,
           createdAt: serverTimestamp(),
         });
 
@@ -118,6 +121,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               quantity: Number(formData.stockLevel),
               reason: 'Açılış Stoğu',
               notes: 'Ürün oluşturulurken belirlenen başlangıç stok miktarı',
+              companyId,
               timestamp: serverTimestamp(),
             });
           } catch { /* non-critical */ }

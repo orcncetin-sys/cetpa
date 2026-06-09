@@ -990,7 +990,8 @@ function AppContent() {
   // Handle tab clicks with subscription gating
   const handleTabClick = (tabId: string) => {
     if (!canAccessBySubscription(tabId) && userSubscription) {
-      setUpgradeModal({ isOpen: true, blockedModule: tabId });
+      // Go directly to pricing page when a locked (PRO) module is clicked
+      setShowPricingPage(true);
       return;
     }
     setActiveTab(tabId);
@@ -2323,16 +2324,21 @@ function AppContent() {
   // --- Data Fetching ---
   useEffect(() => {
     if (!isAuthReady || !user || !userRole) return;
+
+    // Data is scoped by companyId (= uid of the account owner).
+    // Documents without a companyId field are legacy/test data and are excluded.
+    const companyId = user.uid;
+
     const leadsQuery = (userRole === UserRole.Admin || userRole === UserRole.Manager)
-      ? collection(db, 'leads')
-      : query(collection(db, 'leads'), where('assignedTo', '==', user.uid));
+      ? query(collection(db, 'leads'), where('companyId', '==', companyId))
+      : query(collection(db, 'leads'), where('companyId', '==', companyId), where('assignedTo', '==', user.uid));
     const unsubLeads = onSnapshot(leadsQuery, (snapshot) => {
       setLeads(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lead)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'leads', auth.currentUser?.uid));
 
     const ordersQuery = (userRole === UserRole.Dealer)
-      ? query(collection(db, 'orders'), where('assignedTo', '==', user.uid))
-      : collection(db, 'orders');
+      ? query(collection(db, 'orders'), where('companyId', '==', companyId), where('assignedTo', '==', user.uid))
+      : query(collection(db, 'orders'), where('companyId', '==', companyId));
     const unsubOrders = onSnapshot(ordersQuery, (snapshot) => {
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'orders', auth.currentUser?.uid));
@@ -2340,7 +2346,7 @@ function AppContent() {
     // Track previously-known low-stock IDs so we only fire once per drop
     const prevLowStockIds = new Set<string>();
 
-    const unsubInventory = onSnapshot(collection(db, 'inventory'), (snapshot) => {
+    const unsubInventory = onSnapshot(query(collection(db, 'inventory'), where('companyId', '==', companyId)), (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
       setInventory(items);
 
@@ -2375,7 +2381,7 @@ function AppContent() {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
 
-    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), limit(200)), (snapshot) => {
+    const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), where('companyId', '==', companyId), limit(200)), (snapshot) => {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
 
@@ -2639,6 +2645,7 @@ function AppContent() {
               try {
                 await addDoc(collection(db, 'leads'), {
                   name, company, email, phone, status: 'New', score: 50, notes,
+                  companyId: user?.uid ?? 'guest',
                   assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
                 });
                 importedCount++;
@@ -2708,6 +2715,7 @@ function AppContent() {
       const docRef = await addDoc(collection(db, 'leads'), {
         ...newLead, status: 'New', score: scoreResult.score,
         notes: `${newLead.notes}\n\nAI Insights: ${scoreResult.reasoning}`,
+        companyId: user?.uid ?? 'guest',
         assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         customerType: 'B2B' as const,
       });
@@ -2892,6 +2900,7 @@ function AppContent() {
           kdvTutari,
           trackingNumber: `TRK-${orderDocRef.id.slice(0, 12).toUpperCase()}`,
           location: null,
+          companyId: user?.uid ?? null,
           assignedTo: user?.uid ?? null,
           createdAt: serverTimestamp(),
           syncedAt: serverTimestamp()
@@ -13065,7 +13074,7 @@ function AppContent() {
           {/* ── Analytics Panel ── */}
           {activeTab === 'analytics' && (
             <motion.div key="analytics" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <AnalyticsPanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} />
+              <AnalyticsPanel orders={orders} leads={leads} inventory={inventory} currentLanguage={currentLanguage as 'tr' | 'en'} />
             </motion.div>
           )}
 
