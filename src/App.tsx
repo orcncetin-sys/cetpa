@@ -930,9 +930,30 @@ function AppContent() {
   const [subscriptionLoaded, setSubscriptionLoaded] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<{ id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' }[]>([]);
 
+  // Admin emails that bypass subscription gating entirely
+  const ADMIN_EMAILS = ['orcncetin@gmail.com'];
+  const isOwnerAdmin = !!(user?.email && ADMIN_EMAILS.includes(user.email));
+
   // Load subscription from Firestore
   useEffect(() => {
     if (!user) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
+
+    // Owner/admin accounts get a permanent enterprise subscription — no Firestore doc needed
+    if (ADMIN_EMAILS.includes(user.email ?? '')) {
+      setUserSubscription({
+        plan: 'enterprise',
+        status: 'active',
+        cycle: 'annual',
+        startDate: '2024-01-01',
+        endDate: '2099-12-31',
+        currentPeriodEnd: '2099-12-31',
+        maxUsers: 9999,
+        currentUsers: 1,
+      } as unknown as UserSubscription);
+      setSubscriptionLoaded(true);
+      return;
+    }
+
     const unsub = onSnapshot(doc(db, 'subscriptions', user.uid), (snap) => {
       if (snap.exists()) {
         setUserSubscription(snap.data() as UserSubscription);
@@ -959,7 +980,8 @@ function AppContent() {
 
   // Check if module is accessible by subscription
   const canAccessBySubscription = (tabId: string): boolean => {
-    if (isGuestMode) return true; // Guest mode: no gating
+    if (isGuestMode) return true;   // Guest mode: no gating
+    if (isOwnerAdmin) return true;  // Owner/admin: full access always
     if (!userSubscription) return false;
     if (tabId === 'settings' || tabId === 'admin') return true; // Always allow settings/admin
     return canAccessModule(userSubscription, tabId);
@@ -3669,7 +3691,7 @@ function AppContent() {
   }
 
   // ─── Onboarding Gate: Show onboarding for new users ───────────────────
-  if (user && subscriptionLoaded && !userSubscription && !isGuestMode && !showPricingPage) {
+  if (user && subscriptionLoaded && !userSubscription && !isGuestMode && !showPricingPage && !isOwnerAdmin) {
     return (
       <OnboardingFlow
         currentLanguage={currentLanguage}
