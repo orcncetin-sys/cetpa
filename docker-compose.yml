@@ -7,6 +7,9 @@ services:
       - "127.0.0.1:5173:5173"
     env_file:
       - .env.production
+    volumes:
+      # Mount service account so it survives container rebuilds
+      - /opt/cetpa/firebase-service-account.json:/app/service-account.json:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/api/health"]

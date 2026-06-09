@@ -507,6 +507,9 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
 
+  // Trust the first proxy (nginx/Cloudflare) so express-rate-limit reads real IP
+  app.set('trust proxy', 1);
+
   // ── Rate Limiters ────────────────────────────────────────────────────────────
   /** General API — 300 req / 15 min per IP */
   const apiLimiter = rateLimit({
