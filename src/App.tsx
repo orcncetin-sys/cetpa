@@ -2164,19 +2164,22 @@ function AppContent() {
       }
 
       if (code === 'auth/unauthorized-domain') {
-        alert(
+        const currentDomain = window.location.hostname;
+        toast(
           currentLanguage === 'tr'
-            ? 'Bu domain Firebase Auth icin yetkili degil. Firebase Console > Authentication > Settings > Authorized domains altina localhost ve 127.0.0.1 ekleyin.'
-            : 'This domain is not authorized for Firebase Auth. In Firebase Console > Authentication > Settings > Authorized domains, add localhost and 127.0.0.1.'
+            ? `"${currentDomain}" Firebase Auth için yetkili değil. Firebase Console > Authentication > Settings > Authorized domains altına "${currentDomain}" ekleyin.`
+            : `"${currentDomain}" is not authorized for Firebase Auth. Add "${currentDomain}" in Firebase Console > Authentication > Settings > Authorized domains.`,
+          'error'
         );
       } else if (code === 'auth/operation-not-allowed') {
-        alert(
+        toast(
           currentLanguage === 'tr'
-            ? 'Google ile giris Firebase Authentication ayarlarinda etkin degil. Sign-in method altindan Google provider\'i aktif edin.'
-            : 'Google sign-in is not enabled in Firebase Authentication. Enable the Google provider under Sign-in method.'
+            ? "Google ile giriş Firebase Authentication ayarlarında etkin değil. Sign-in method altından Google provider'ı aktif edin."
+            : "Google sign-in is not enabled in Firebase Authentication. Enable the Google provider under Sign-in method.",
+          'error'
         );
       } else if (code === 'auth/popup-closed-by-user') {
-        alert(currentLanguage === 'tr' ? 'Giris penceresi kapatildi.' : 'The sign-in popup was closed.');
+        toast(currentLanguage === 'tr' ? 'Giriş penceresi kapatıldı.' : 'The sign-in popup was closed.', 'info');
       } else {
         alert(
           currentLanguage === 'tr'
