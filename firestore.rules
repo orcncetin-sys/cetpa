@@ -381,7 +381,7 @@ service cloud.firestore {
 
     match /settings/{id} {
       allow read: if isAuthenticated();
-      allow write: if hasRole(['Admin', 'Manager']);
+      allow write: if isAuthenticated();
     }
 
     // ── Bank Transactions (AccountingModule) ──────────────────────

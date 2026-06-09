@@ -755,6 +755,8 @@ function AppContent() {
   const [firestoreUsers, setFirestoreUsers] = useState<Record<string, unknown>[]>([]);
   const [auditLogs, setAuditLogs] = useState<Record<string, unknown>[]>([]);
   const [companySettings, setCompanySettings] = useState<Record<string, unknown>>({});
+  const [geminiApiKeySetting, setGeminiApiKeySetting] = useState('');
+  const [savingGeminiKey, setSavingGeminiKey] = useState(false);
   const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
   const [mikroSettings, setMikroSettings] = useState<Partial<MikroConfig>>({});
   // Notification preferences — must be top-level (not inside conditional IIFE) to respect Rules of Hooks
@@ -2114,6 +2116,15 @@ function AppContent() {
       }
     }, (error) => importedLogFirestoreError(error, OperationType.GET, 'settings/app', user.uid));
     return () => unsubSettings();
+  }, [user]);
+
+  // --- AI Config (Gemini key) ---
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, 'settings', 'aiConfig'), snap => {
+      if (snap.exists()) setGeminiApiKeySetting((snap.data()?.geminiApiKey as string) ?? '');
+    });
+    return unsub;
   }, [user]);
 
   // --- Real-time Mikro & Luca Settings ---
@@ -14176,6 +14187,54 @@ function AppContent() {
                     </div>
                   ))}
                   <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '* Ücretsiz API anahtarı: resend.com' : '* Free API key at resend.com'}</p>
+                </div>
+              </div>
+
+              {/* ── Gemini AI ── */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-purple-50 rounded-xl flex items-center justify-center text-lg">🤖</div>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-sm text-gray-900">Gemini AI</h4>
+                    <p className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'AI Asistan, lead skorlama ve analiz için Google Gemini API anahtarı.' : 'Google Gemini API key for AI Assistant, lead scoring and analysis.'}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${geminiApiKeySetting ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-500'}`}>
+                    {geminiApiKeySetting ? (currentLanguage === 'tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage === 'tr' ? 'Eksik' : 'Missing')}
+                  </span>
+                </div>
+                <div className="space-y-0.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key'}</label>
+                  <input
+                    type="password"
+                    placeholder="AIza..."
+                    value={geminiApiKeySetting}
+                    onChange={e => setGeminiApiKeySetting(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/10 transition-all"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={async () => {
+                      setSavingGeminiKey(true);
+                      try {
+                        await setDoc(doc(db, 'settings', 'aiConfig'), { geminiApiKey: geminiApiKeySetting.trim() }, { merge: true });
+                        toast(currentLanguage === 'tr' ? 'Gemini API anahtarı kaydedildi ✓' : 'Gemini API key saved ✓', 'success');
+                      } catch (e) {
+                        handleFirestoreError(e, OperationType.WRITE, 'settings/aiConfig');
+                      } finally {
+                        setSavingGeminiKey(false);
+                      }
+                    }}
+                    disabled={savingGeminiKey}
+                    className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-full transition-colors disabled:opacity-50"
+                  >
+                    {savingGeminiKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                    {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                  </button>
+                  <p className="text-[10px] text-gray-400">
+                    {currentLanguage === 'tr' ? '* Ücretsiz anahtar: ' : '* Free key at '}
+                    <span className="font-mono">aistudio.google.com/apikey</span>
+                  </p>
                 </div>
               </div>
 

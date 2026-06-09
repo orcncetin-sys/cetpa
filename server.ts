@@ -3176,26 +3176,51 @@ async function startServer() {
   });
 
   // ── Gemini AI Proxy — key never leaves the server ────────────────────────
-  // Priority: GEMINI_API_KEY → Vertex AI via service account (GOOGLE_APPLICATION_CREDENTIALS)
+  // Priority: GEMINI_API_KEY env → Firestore settings/aiConfig → Vertex AI
   const PLACEHOLDERS_GEMINI = ['your_gemini_api_key_here', ''];
-  const geminiApiKey = process.env.GEMINI_API_KEY ?? '';
+  const geminiApiKeyEnv = process.env.GEMINI_API_KEY ?? '';
   let geminiClient: GoogleGenAI | null = null;
-  if (geminiApiKey && !PLACEHOLDERS_GEMINI.includes(geminiApiKey)) {
-    geminiClient = new GoogleGenAI({ apiKey: geminiApiKey });
+
+  // Cache for Firestore-sourced key (5-min TTL)
+  let geminiKeyCache: { key: string; ts: number } | null = null;
+
+  async function resolveGeminiClient(): Promise<GoogleGenAI | null> {
+    // 1. Env var wins
+    if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) {
+      return geminiClient ?? (geminiClient = new GoogleGenAI({ apiKey: geminiApiKeyEnv }));
+    }
+    // 2. Vertex AI
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      return geminiClient ?? (geminiClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: 'us-central1' }));
+    }
+    // 3. Firestore settings/aiConfig.geminiApiKey (set from UI)
+    if (adminDb) {
+      const now = Date.now();
+      if (!geminiKeyCache || now - geminiKeyCache.ts > 5 * 60 * 1000) {
+        try {
+          const snap = await adminDb.collection('settings').doc('aiConfig').get();
+          const key = (snap.data()?.geminiApiKey as string) ?? '';
+          geminiKeyCache = { key, ts: now };
+          if (key) console.log('Gemini client: Firestore key mode ✓');
+        } catch { geminiKeyCache = { key: '', ts: now }; }
+      }
+      if (geminiKeyCache?.key) return new GoogleGenAI({ apiKey: geminiKeyCache.key });
+    }
+    return null;
+  }
+
+  if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) {
+    geminiClient = new GoogleGenAI({ apiKey: geminiApiKeyEnv });
     console.log('Gemini client: API key mode ✓');
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     try {
-      geminiClient = new GoogleGenAI({
-        vertexai: true,
-        project: PROJECT_ID,
-        location: 'us-central1',
-      });
+      geminiClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: 'us-central1' });
       console.log('Gemini client: Vertex AI mode (service account) ✓');
     } catch (e) {
       console.warn('Gemini Vertex AI init failed:', (e as Error).message);
     }
   } else {
-    console.warn('Gemini client: not configured — AI endpoints will return 503');
+    console.log('Gemini: no env key — will read from Firestore settings/aiConfig on first request');
   }
 
   /**
@@ -3205,14 +3230,15 @@ async function startServer() {
    * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
    */
   app.post('/api/ai/generate', requireAuth, async (req: Request, res: Response) => {
-    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const client = await resolveGeminiClient();
+    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const { prompt, model = 'gemini-2.5-flash-preview-05-20', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
       prompt: string; model?: string; systemInstruction?: string;
       thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
     };
     if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
     try {
-      const response = await geminiClient.models.generateContent({
+      const response = await client.models.generateContent({
         model,
         contents: prompt,
         config: {
@@ -3235,7 +3261,8 @@ async function startServer() {
    * Used by: AIChat.tsx
    */
   app.post('/api/ai/chat', requireAuth, async (req: Request, res: Response) => {
-    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const client = await resolveGeminiClient();
+    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const { message, history = [], systemInstruction, model = 'gemini-2.5-flash-preview-05-20', highThinking = false } = req.body as {
       message: string;
       history?: { role: string; parts: { text: string }[] }[];
@@ -3245,7 +3272,7 @@ async function startServer() {
     };
     if (!message) return res.status(400).json({ error: 'message is required.' });
     try {
-      const chat = geminiClient.chats.create({
+      const chat = client.chats.create({
         model,
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
@@ -3268,7 +3295,8 @@ async function startServer() {
    * Protected by Firebase Auth (requireAuth).
    */
   app.post('/api/ai/demand-forecast', requireAuth, async (req: Request, res: Response) => {
-    if (!geminiClient) return res.status(503).json({ error: 'AI service not configured.' });
+    const client = await resolveGeminiClient();
+    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const {
       ordersCount = 0,
       monthlyArr = [],
@@ -3296,7 +3324,7 @@ Context (today: ${today}):
 Based on these trends, respond in ${language} as valid JSON (no markdown fences).
 Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
     try {
-      const result = await geminiClient.models.generateContent({
+      const result = await client.models.generateContent({
         model: 'gemini-2.0-flash',
         contents: prompt,
         config: {
@@ -3584,8 +3612,21 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   // Auth: API Key header (X-Logo-ApiKey) + LOGO_FIRM_NO in request body
   // Base: LOGO_API_URL env var (self-hosted or Logo cloud)
 
+  type LogoCreds = { apiUrl: string; apiKey: string; firmNo: string };
+  async function getLogoCreds(): Promise<LogoCreds | null> {
+    if (process.env.LOGO_API_URL && process.env.LOGO_API_KEY && process.env.LOGO_FIRM_NO)
+      return { apiUrl: process.env.LOGO_API_URL, apiKey: process.env.LOGO_API_KEY, firmNo: process.env.LOGO_FIRM_NO };
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('logo').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.logoApiUrl && !d.apiUrl) return null;
+    return { apiUrl: d.logoApiUrl || d.apiUrl || '', apiKey: d.logoApiKey || d.apiKey || '', firmNo: d.logoFirmNo || d.firmNo || '1' };
+  }
+
   app.get('/api/logo/status', async (_req: Request, res: Response) => {
-    const configured = !!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY && process.env.LOGO_FIRM_NO);
+    const creds = await getLogoCreds();
+    const configured = !!creds;
     if (!configured) return res.json({ configured: false, connected: false });
     try {
       // TODO: implement real Logo Tiger auth check (e.g. GET /api/v1/firms)
@@ -3601,22 +3642,19 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   app.post('/api/logo/import/stok', requireAuth, async (_req: Request, res: Response) => {
-    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /api/v1/items, upsert to Firebase inventory
+    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo stok import not yet implemented.' });
   });
 
   app.post('/api/logo/import/cari', requireAuth, async (_req: Request, res: Response) => {
-    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /api/v1/accounts, upsert to Firebase leads
+    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo cari import not yet implemented.' });
   });
 
   app.post('/api/logo/export/siparis', requireAuth, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true });
-    // TODO: fetch order from Firebase, POST /api/v1/orders to Logo
+    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true });
     return res.json({ success: false, notImplemented: true, error: 'Logo sipariş export not yet implemented.' });
   });
 
@@ -3627,18 +3665,41 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   const DYNAMICS_TOKEN_CACHE: { token?: string; expiresAt?: number } = {};
 
+  type DynamicsCreds = { tenantId: string; clientId: string; clientSecret: string; companyId: string; environment: string };
+  async function getDynamicsCredsFromFirestore(): Promise<DynamicsCreds | null> {
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('dynamics365').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.dynamicsTenantId && !d.tenantId) return null;
+    return {
+      tenantId:     d.dynamicsTenantId || d.tenantId || '',
+      clientId:     d.dynamicsClientId || d.clientId || '',
+      clientSecret: d.dynamicsClientSecret || d.clientSecret || '',
+      companyId:    d.dynamicsCompanyId || d.companyId || '',
+      environment:  d.dynamicsEnvironment || d.environment || 'production',
+    };
+  }
+
   async function getDynamicsToken(): Promise<string | null> {
     const now = Date.now();
     if (DYNAMICS_TOKEN_CACHE.token && DYNAMICS_TOKEN_CACHE.expiresAt && now < DYNAMICS_TOKEN_CACHE.expiresAt - 60_000) {
       return DYNAMICS_TOKEN_CACHE.token;
     }
-    const { DYNAMICS_TENANT_ID, DYNAMICS_CLIENT_ID, DYNAMICS_CLIENT_SECRET } = process.env;
-    if (!(DYNAMICS_TENANT_ID && DYNAMICS_CLIENT_ID && DYNAMICS_CLIENT_SECRET)) return null;
-    const url = `https://login.microsoftonline.com/${DYNAMICS_TENANT_ID}/oauth2/v2.0/token`;
+    let tenantId = process.env.DYNAMICS_TENANT_ID ?? '';
+    let clientId = process.env.DYNAMICS_CLIENT_ID ?? '';
+    let clientSecret = process.env.DYNAMICS_CLIENT_SECRET ?? '';
+    if (!(tenantId && clientId && clientSecret)) {
+      const fsCreds = await getDynamicsCredsFromFirestore();
+      if (!fsCreds) return null;
+      tenantId = fsCreds.tenantId; clientId = fsCreds.clientId; clientSecret = fsCreds.clientSecret;
+    }
+    if (!(tenantId && clientId && clientSecret)) return null;
+    const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
     const body = new URLSearchParams({
       grant_type:    'client_credentials',
-      client_id:     DYNAMICS_CLIENT_ID,
-      client_secret: DYNAMICS_CLIENT_SECRET,
+      client_id:     clientId,
+      client_secret: clientSecret,
       scope:         'https://api.businesscentral.dynamics.com/.default',
     });
     const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
@@ -3655,12 +3716,9 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   }
 
   app.get('/api/dynamics/status', async (_req: Request, res: Response) => {
-    const configured = !!(
-      process.env.DYNAMICS_TENANT_ID &&
-      process.env.DYNAMICS_CLIENT_ID &&
-      process.env.DYNAMICS_CLIENT_SECRET &&
-      process.env.DYNAMICS_COMPANY_ID
-    );
+    const hasEnvCreds = !!(process.env.DYNAMICS_TENANT_ID && process.env.DYNAMICS_CLIENT_ID && process.env.DYNAMICS_CLIENT_SECRET && process.env.DYNAMICS_COMPANY_ID);
+    const fsCreds = hasEnvCreds ? null : await getDynamicsCredsFromFirestore();
+    const configured = hasEnvCreds || !!fsCreds;
     if (!configured) return res.json({ configured: false, connected: false });
     try {
       const token = await getDynamicsToken();
@@ -3721,19 +3779,42 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   const SAP_SESSION: { sessionId?: string; lastUsed?: number } = {};
 
+  type SAPCreds = { serviceLayerUrl: string; username: string; password: string; companyDb: string };
+  async function getSAPCredsFromFirestore(): Promise<SAPCreds | null> {
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('sap').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.sapServiceLayerUrl && !d.serviceLayerUrl) return null;
+    return {
+      serviceLayerUrl: d.sapServiceLayerUrl || d.serviceLayerUrl || '',
+      username:        d.sapUsername || d.username || '',
+      password:        d.sapPassword || d.password || '',
+      companyDb:       d.sapCompanyDb || d.companyDb || '',
+    };
+  }
+
   async function getSAPSession(): Promise<string | null> {
-    const { SAP_SERVICE_LAYER_URL, SAP_USERNAME, SAP_PASSWORD, SAP_COMPANY_DB } = process.env;
-    if (!(SAP_SERVICE_LAYER_URL && SAP_USERNAME && SAP_PASSWORD && SAP_COMPANY_DB)) return null;
+    let serviceLayerUrl = process.env.SAP_SERVICE_LAYER_URL ?? '';
+    let username        = process.env.SAP_USERNAME ?? '';
+    let password        = process.env.SAP_PASSWORD ?? '';
+    let companyDb       = process.env.SAP_COMPANY_DB ?? '';
+    if (!(serviceLayerUrl && username && password && companyDb)) {
+      const fsCreds = await getSAPCredsFromFirestore();
+      if (!fsCreds) return null;
+      serviceLayerUrl = fsCreds.serviceLayerUrl; username = fsCreds.username; password = fsCreds.password; companyDb = fsCreds.companyDb;
+    }
+    if (!(serviceLayerUrl && username && password && companyDb)) return null;
     // If session is younger than 4 minutes, reuse it (SAP timeout is 5 min idle)
     const now = Date.now();
     if (SAP_SESSION.sessionId && SAP_SESSION.lastUsed && now - SAP_SESSION.lastUsed < 4 * 60 * 1000) {
       SAP_SESSION.lastUsed = now;
       return SAP_SESSION.sessionId;
     }
-    const r = await fetch(`${SAP_SERVICE_LAYER_URL}/Login`, {
+    const r = await fetch(`${serviceLayerUrl}/Login`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ UserName: SAP_USERNAME, Password: SAP_PASSWORD, CompanyDB: SAP_COMPANY_DB }),
+      body:    JSON.stringify({ UserName: username, Password: password, CompanyDB: companyDb }),
     });
     if (!r.ok) return null;
     const cookie = r.headers.get('set-cookie') ?? '';
@@ -3745,12 +3826,9 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   }
 
   app.get('/api/sap/status', async (_req: Request, res: Response) => {
-    const configured = !!(
-      process.env.SAP_SERVICE_LAYER_URL &&
-      process.env.SAP_USERNAME &&
-      process.env.SAP_PASSWORD &&
-      process.env.SAP_COMPANY_DB
-    );
+    const hasEnvCreds = !!(process.env.SAP_SERVICE_LAYER_URL && process.env.SAP_USERNAME && process.env.SAP_PASSWORD && process.env.SAP_COMPANY_DB);
+    const fsCreds = hasEnvCreds ? null : await getSAPCredsFromFirestore();
+    const configured = hasEnvCreds || !!fsCreds;
     if (!configured) return res.json({ configured: false, connected: false });
     try {
       const session = await getSAPSession();
