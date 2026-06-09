@@ -1877,7 +1877,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                           <td className="px-4 py-3"><span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{inv.status as string || 'Kesildi'}</span></td>
                           {isAuthenticated && (
                             <td className="px-4 py-3">
-                              <button onClick={async()=>{if(window.confirm(currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz?':'Delete this invoice?')){await deleteDoc(doc(db,'invoices',inv.id as string));}}} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                              <button onClick={() => setConfirmModal({ isOpen: true, title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice', message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.', onConfirm: async () => { await deleteDoc(doc(db,'invoices',inv.id as string)); setConfirmModal(prev => ({ ...prev, isOpen: false })); } })} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                             </td>
                           )}
                         </tr>

@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import ConfirmModal from './ConfirmModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,9 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
   const [form,      setForm]      = useState<Omit<BOM, 'id'>>(emptyBOM());
   const [saving,    setSaving]    = useState(false);
 
+  // Confirm modal
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; onConfirm: () => void }>({ isOpen: false, onConfirm: () => {} });
+
   // Expanded BOM cards
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -139,9 +143,14 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm(tr ? 'Bu BOM\'u silmek istediğinize emin misiniz?' : 'Delete this BOM?')) return;
-    await deleteDoc(doc(db, 'bom', id));
+  const handleDelete = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      onConfirm: async () => {
+        await deleteDoc(doc(db, 'bom', id));
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      },
+    });
   };
 
   // ── Component form helpers ─────────────────────────────────────────────────
@@ -470,6 +479,14 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={tr ? 'BOM\'u Sil' : 'Delete BOM'}
+        message={tr ? 'Bu BOM\'u silmek istediğinize emin misiniz? Bu işlem geri alınamaz.' : 'Are you sure you want to delete this BOM? This cannot be undone.'}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

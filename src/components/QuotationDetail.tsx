@@ -21,6 +21,7 @@ interface QuotationDetailProps {
 
 export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, onConvertToOrder, t }: QuotationDetailProps) {
   const [isConverting, setIsConverting] = React.useState(false);
+  const [pdfError, setPdfError] = React.useState<string | null>(null);
 
   if (!isOpen || !quotation) return null;
 
@@ -237,9 +238,11 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
 
       doc.save(`CETPA_Teklif_${docNo}_${dateStr.replace(/\./g, '-')}.pdf`);
+      setPdfError(null);
     } catch (error) {
       console.error('Error generating PDF:', error);
-      alert('PDF olusturulurken bir hata olustu.');
+      setPdfError('PDF oluşturulurken bir hata oluştu.');
+      setTimeout(() => setPdfError(null), 4000);
     }
   };
 
@@ -254,6 +257,12 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      {pdfError && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-2 bg-red-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {pdfError}
+        </div>
+      )}
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
