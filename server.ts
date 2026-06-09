@@ -503,6 +503,32 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
   console.log('Weekly email report cron aktif (Pazartesi 08:00) ✓');
 }
 
+// ── Startup env validation ───────────────────────────────────────────────────
+// Warn once at boot for missing/placeholder values — never crash, just surface.
+function validateEnv() {
+  const PLACEHOLDERS = ['your_gemini_api_key_here', 'your_mikro_idm_password', 'your_md5_hash_here', 'TESTAPKEY'];
+  const checks: Array<{ key: string; warn: string }> = [
+    { key: 'GEMINI_API_KEY',       warn: 'AI features disabled (Vertex AI fallback active if service account present)' },
+    { key: 'RESEND_API_KEY',       warn: 'E-posta bildirimleri devre dışı' },
+    { key: 'SHOPIFY_ACCESS_TOKEN', warn: 'Shopify sync devre dışı' },
+    { key: 'MIKRO_IDM_PASSWORD',   warn: 'Mikro JumpBulut auth devre dışı' },
+    { key: 'MIKRO_SIFRE',          warn: 'Mikro eski API auth devre dışı' },
+    { key: 'STRIPE_SECRET_KEY',    warn: 'Stripe ödemeleri devre dışı' },
+    { key: 'IYZICO_API_KEY',       warn: 'İyzico ödemeleri devre dışı' },
+  ];
+  const missing: string[] = [];
+  for (const { key, warn } of checks) {
+    const val = process.env[key] ?? '';
+    if (!val || PLACEHOLDERS.includes(val)) missing.push(`  ⚠️  ${key}: ${warn}`);
+  }
+  if (missing.length) {
+    console.warn('\n╔══ ENV WARNINGS (eksik/placeholder değerler) ══╗');
+    missing.forEach(m => console.warn(m));
+    console.warn('╚═══════════════════════════════════════════════╝\n');
+  }
+}
+validateEnv();
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
@@ -3102,58 +3128,6 @@ async function startServer() {
     }
   });
 
-  // POST /api/whatsapp/send
-  // Body: { to, orderNo, status, customerName, lang? }
-  app.post('/api/whatsapp/send', requireAuth, async (req: Request, res: Response) => {
-    const creds = await getWACreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-
-    const { to, orderNo, status, customerName, lang = 'tr' } = req.body as {
-      to: string; orderNo: string; status: string; customerName?: string; lang?: string;
-    };
-    if (!to || !orderNo || !status) {
-      return res.status(400).json({ success: false, error: 'to, orderNo ve status zorunludur.' });
-    }
-
-    // Status label in Turkish or English
-    const statusLabels: Record<string, { tr: string; en: string }> = {
-      Pending:    { tr: 'Sipariş Alındı',    en: 'Order Received'  },
-      Processing: { tr: 'Hazırlanıyor',       en: 'Processing'      },
-      Shipped:    { tr: 'Kargoya Verildi',    en: 'Shipped'         },
-      Delivered:  { tr: 'Teslim Edildi',      en: 'Delivered'       },
-      Cancelled:  { tr: 'İptal Edildi',       en: 'Cancelled'       },
-    };
-    const statusLabel = (statusLabels[status]?.[lang as 'tr' | 'en']) ?? status;
-
-    // Template body components: {{1}} = orderNo, {{2}} = statusLabel, {{3}} = customerName
-    const components = [{
-      type:       'body',
-      parameters: [
-        { type: 'text', text: orderNo },
-        { type: 'text', text: statusLabel },
-        { type: 'text', text: customerName ?? '' },
-      ],
-    }];
-
-    try {
-      const result = await sendWhatsApp(creds, to, components);
-      if (result.error) return res.json({ success: false, error: result.error });
-
-      // Log to Firestore
-      if (adminDb) {
-        await adminDb.collection('waMessageLog').add({
-          to, orderNo, status,
-          messageId:  result.messageId ?? null,
-          sentAt:     admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      res.json({ success: true, messageId: result.messageId });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
   // POST /api/whatsapp/order-notification
   // Body: { orderId, status, phone, customerName, orderNo, lang }
   // Fire-and-forget safe — always 200 even if WA not configured
@@ -3202,9 +3176,27 @@ async function startServer() {
   });
 
   // ── Gemini AI Proxy — key never leaves the server ────────────────────────
-  const geminiClient = process.env.GEMINI_API_KEY
-    ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-    : null;
+  // Priority: GEMINI_API_KEY → Vertex AI via service account (GOOGLE_APPLICATION_CREDENTIALS)
+  const PLACEHOLDERS_GEMINI = ['your_gemini_api_key_here', ''];
+  const geminiApiKey = process.env.GEMINI_API_KEY ?? '';
+  let geminiClient: GoogleGenAI | null = null;
+  if (geminiApiKey && !PLACEHOLDERS_GEMINI.includes(geminiApiKey)) {
+    geminiClient = new GoogleGenAI({ apiKey: geminiApiKey });
+    console.log('Gemini client: API key mode ✓');
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      geminiClient = new GoogleGenAI({
+        vertexai: true,
+        project: PROJECT_ID,
+        location: 'us-central1',
+      });
+      console.log('Gemini client: Vertex AI mode (service account) ✓');
+    } catch (e) {
+      console.warn('Gemini Vertex AI init failed:', (e as Error).message);
+    }
+  } else {
+    console.warn('Gemini client: not configured — AI endpoints will return 503');
+  }
 
   /**
    * POST /api/ai/generate
