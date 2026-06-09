@@ -37,6 +37,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   Timestamp
 } from 'firebase/firestore';
 import { sortByCreatedAt, byField } from './utils/fsSort';
@@ -1297,7 +1298,9 @@ function AppContent() {
         action,
         details,
         userId: user.uid,
+        companyId: user.uid,
         userName: user?.displayName || user?.email || 'Misafir',
+        userEmail: user?.email || '',
         timestamp: serverTimestamp()
       });
     } catch (error) {
@@ -2397,7 +2400,7 @@ function AppContent() {
       setShipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Shipment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'shipments', auth.currentUser?.uid));
 
-    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), limit(50)), (snapshot) => {
+    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)), (snapshot) => {
       setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid));
 
