@@ -200,6 +200,7 @@ const AnalyticsPanel          = React.lazy(() => import('./components/AnalyticsP
 const SubscriptionPanel       = React.lazy(() => import('./components/SubscriptionPanel'));
 const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncPanel'));
 const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
+const ERPHubPanel             = React.lazy(() => import('./components/ERPHubPanel'));
 const MarketplacePanel        = React.lazy(() => import('./components/MarketplacePanel'));
 const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
 const MutabakatPanel          = React.lazy(() => import('./components/MutabakatPanel'));
@@ -3739,7 +3740,6 @@ function AppContent() {
                 { id: 'b2b', label: currentLanguage === 'tr' ? 'B2B Portal' : 'B2B Portal' },
                 { id: 'risk', label: currentLanguage === 'tr' ? 'Risk' : 'Risk' },
                 { id: 'reports', label: currentT.reports },
-                { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations' },
                 { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals' },
                 { id: 'admin', label: currentT.admin },
                 { id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings' },
@@ -3967,7 +3967,6 @@ function AppContent() {
                   { id: 'b2b', label: currentLanguage === 'tr' ? 'B2B Bayi Portalı' : 'B2B Dealer Portal', icon: ShoppingBag },
                   { id: 'risk', label: currentLanguage === 'tr' ? 'Risk & Uyarılar' : 'Risk & Alerts', icon: AlertTriangle },
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
-                  { id: 'integrations', label: currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations', icon: Link },
                   { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
                   ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
@@ -4221,7 +4220,6 @@ function AppContent() {
               ],
             },
             { id: 'analytics', label: tr ? 'Analitik' : 'Analytics',         icon: BarChart2 },
-            { id: 'integrations', label: tr ? 'Entegrasyonlar' : 'Integrations', icon: Link },
             { id: 'onaylar',   label: tr ? 'Onaylar' : 'Approvals',           icon: CheckCircle2 },
             ...(userRole === 'Admin' ? [{
               id: 'admin', label: tr ? 'Yönetim' : 'Admin', icon: Shield,
@@ -13018,455 +13016,6 @@ function AppContent() {
           )}
 
           {/* ── Integrations / Entegrasyonlar ── */}
-          {activeTab === 'integrations' && (
-            <motion.div key="integrations" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 max-w-3xl">
-              {!canAccess('integrations') && <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Entegrasyonlar':'Integrations'} />}
-              {canAccess('integrations') && <>
-              {!hasFullAccess('integrations') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-              <ModuleHeader 
-                title={currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations'} 
-                subtitle={currentLanguage === 'tr' ? 'Bağlı sistemler ve dış servis durumları.' : 'Connected systems and external service statuses.'}
-                icon={RefreshCw}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Shopify */}
-                <div className="apple-card p-5 flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center">
-                      <ShoppingBag className="w-5 h-5 text-green-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">Shopify</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'E-ticaret entegrasyonu' : 'E-commerce integration'}</p>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                      {companySettings?.shopify_access_token ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Not Connected')}
-                    </span>
-                  </div>
-                  <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>Store URL</span><span className="font-mono text-gray-700 truncate max-w-[160px]">{(companySettings?.shopify_store_url as string) || '—'}</span></div>
-                    <div className="flex justify-between"><span>Access Token</span><span className="font-mono text-gray-400">{companySettings?.shopify_access_token ? '••••••••' : '—'}</span></div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const token = (companySettings?.shopify_access_token as string) || '';
-                      if (!token) { toast(currentLanguage==='tr'?'Önce Ayarlar\'dan Access Token girin.':'Enter Access Token in Settings first.','error'); return; }
-                      toast(currentLanguage==='tr'?'Shopify senkronizasyonu başlatıldı…':'Starting Shopify sync…','info');
-                      try {
-                        const r = await fetch('/api/shopify/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
-                        const d = await r.json();
-                        if (d.error) throw new Error(d.error);
-                        toast(`${currentLanguage==='tr'?'Senkronize edildi':'Synced'} — ${d.products?.length ?? 0} ${currentLanguage==='tr'?'ürün':'products'}, ${d.orders?.length ?? 0} ${currentLanguage==='tr'?'sipariş':'orders'}`, 'success');
-                      } catch(e) { toast(e instanceof Error ? e.message : 'Sync hatası', 'error'); }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {currentLanguage === 'tr' ? 'Senkronize Et' : 'Sync Now'}
-                  </button>
-                </div>
-
-                {/* TCMB */}
-                <div className="apple-card p-5 flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
-                      <Globe className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">TCMB Döviz</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Canlı kur bilgisi' : 'Live exchange rates'}</p>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${exchangeRates ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
-                      {exchangeRates ? (currentLanguage === 'tr' ? 'Canlı' : 'Live') : (currentLanguage === 'tr' ? 'Bekleniyor' : 'Loading')}
-                    </span>
-                  </div>
-                  <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>USD / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.USD ? `₺${(exchangeRates.USD).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
-                    <div className="flex justify-between"><span>EUR / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.EUR ? `₺${(exchangeRates.EUR).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
-                    <div className="flex justify-between"><span>GBP / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.GBP ? `₺${(exchangeRates.GBP).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      toast(currentLanguage==='tr'?'Kurlar güncelleniyor…':'Refreshing rates…', 'info');
-                      try {
-                        const r = await fetch('/api/settings/exchange-rates');
-                        const d = await r.json();
-                        if (d.rates) {
-                          setExchangeRates(d.rates);
-                          toast(currentLanguage==='tr'?'Döviz kurları güncellendi.':'Exchange rates updated.', 'success');
-                        } else throw new Error('Kur verisi alınamadı');
-                      } catch(e) { toast(e instanceof Error ? e.message : 'Hata', 'error'); }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {currentLanguage === 'tr' ? 'Kurları Yenile' : 'Refresh Rates'}
-                  </button>
-                </div>
-
-                {/* Luca */}
-                <div className="apple-card p-5 flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center">
-                      <BookOpen className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">Luca ERP</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Muhasebe entegrasyonu' : 'Accounting integration'}</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        const newVal = !lucaSettings.enabled;
-                        await setDoc(doc(db, 'settings', 'luca'), { enabled: newVal }, { merge: true });
-                        if (newVal) {
-                          await setDoc(doc(db, 'settings', 'mikro'), { enabled: false }, { merge: true }).catch(() => {});
-                        }
-                        toast(newVal ? (currentLanguage==='tr'?'Luca aktif edildi':'Luca enabled') : (currentLanguage==='tr'?'Luca devre dışı':'Luca disabled'), 'success');
-                      }}
-                      className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${lucaSettings.enabled ? 'bg-purple-500' : 'bg-gray-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${lucaSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                  <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Kontör bakiyesi' : 'e-Invoice credit'}</span>
-                      <span className={`font-semibold ${lucaSettings.enabled ? 'text-purple-600' : 'text-gray-400'}`}>{lucaSettings.enabled ? (currentLanguage==='tr'?'Aktif':'Active') : (currentLanguage==='tr'?'Pasif':'Inactive')}</span>
-                    </div>
-                    <div className="flex justify-between"><span>API</span><span className="font-mono text-gray-400">api.luca.com.tr</span></div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      toast(currentLanguage==='tr'?'Luca bağlantısı test ediliyor…':'Testing Luca connection…','info');
-                      try {
-                        const r = await fetch('/api/luca/status');
-                        const d = await r.json() as { configured: boolean; connected: boolean; companyName?: string; error?: string };
-                        if (!d.configured) { toast(currentLanguage==='tr'?'Luca API Key yapılandırılmamış. Ayarlar\'dan girin.':'Luca API Key not configured.','error'); return; }
-                        if (d.connected) toast(`${currentLanguage==='tr'?'Luca bağlantısı başarılı':'Luca connected'}${d.companyName ? ` — ${d.companyName}` : ''}`, 'success');
-                        else toast(d.error || 'Luca bağlantı hatası', 'error');
-                      } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {currentLanguage === 'tr' ? 'Bağlantıyı Test Et' : 'Test Connection'}
-                  </button>
-                </div>
-
-                {/* Mikro */}
-                <div className="apple-card p-5 flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#e8f0f7' }}>
-                      <BookOpen className="w-5 h-5" style={{ color: '#1a3a5c' }} />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">Mikro ERP</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'JumpBulut entegrasyonu' : 'JumpBulut integration'}</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        const newVal = !mikroSettings.enabled;
-                        await setDoc(doc(db, 'settings', 'mikro'), { enabled: newVal }, { merge: true });
-                        if (newVal) {
-                          await setDoc(doc(db, 'settings', 'luca'), { enabled: false }, { merge: true }).catch(() => {});
-                        }
-                        toast(newVal ? (currentLanguage==='tr'?'Mikro aktif edildi':'Mikro enabled') : (currentLanguage==='tr'?'Mikro devre dışı':'Mikro disabled'), 'success');
-                      }}
-                      className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${mikroSettings.enabled ? 'bg-[#1a3a5c]' : 'bg-gray-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${mikroSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                  <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Veri akışı' : 'Data flow'}</span><span className="text-gray-700">Cetpa ↔ Mikro</span></div>
-                    <div className="flex justify-between"><span>API</span><span className="font-mono text-gray-400 truncate max-w-[140px]">jumpbulutapigw.mikro.com.tr</span></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={async () => {
-                        toast(currentLanguage==='tr'?'Mikro bağlantısı kontrol ediliyor…':'Checking Mikro connection…','info');
-                        try {
-                          const r = await fetch('/api/mikro/status');
-                          const d = await r.json();
-                          if (!d.configured) { toast(currentLanguage==='tr'?'Mikro env vars sunucuda ayarlanmamış.':'Mikro env vars not set on server.','error'); return; }
-                          if (d.connected) toast(currentLanguage==='tr'?'Mikro bağlantısı başarılı ✓':'Mikro connection successful ✓','success');
-                          else toast(d.error || (currentLanguage==='tr'?'Token alınamadı':'Could not get token'),'error');
-                        } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
-                      }}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-[#1a3a5c] text-[#1a3a5c] hover:bg-[#1a3a5c]/5 text-xs font-bold transition-colors"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      {currentLanguage === 'tr' ? 'Test Et' : 'Test'}
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('settings')}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[#1a3a5c] hover:bg-[#1a3a5c]/90 text-white text-xs font-bold transition-colors"
-                    >
-                      <Download className="w-3 h-3" />
-                      {currentLanguage === 'tr' ? 'Veri Aktar' : 'Import Data'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Firebase */}
-                <div className="apple-card p-5 flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center">
-                      <Flame className="w-5 h-5 text-orange-500" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">Firebase</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Veritabanı & Kimlik Doğrulama' : 'Database & Authentication'}</p>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                      {user ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Anonim' : 'Anonymous')}
-                    </span>
-                  </div>
-                  <div className="space-y-2 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>{currentLanguage === 'tr' ? 'Kullanıcı' : 'User'}</span><span className="font-mono text-gray-700 truncate max-w-[160px]">{user?.email || user?.uid?.slice(0, 8) || '—'}</span></div>
-                    <div className="flex justify-between"><span>Firestore</span><span className="text-green-600 font-semibold">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</span></div>
-                    <div className="flex justify-between"><span>Auth</span><span className={`font-semibold ${user ? 'text-green-600' : 'text-gray-400'}`}>{user ? (currentLanguage === 'tr' ? 'Oturum Açık' : 'Signed In') : (currentLanguage === 'tr' ? 'Oturum Yok' : 'Not Signed In')}</span></div>
-                    <div className="flex justify-between"><span>Project ID</span><span className="font-mono text-gray-400 text-[10px]">gen-lang-client-0628151245</span></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Phase 649: Outbound Webhooks (Firestore-backed CRUD) ─────── */}
-              <div className="apple-card p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center">
-                      <Link className="w-4 h-4 text-gray-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Giden Webhook\'lar' : 'Outbound Webhooks'}</h3>
-                      <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Cetpa olaylarını dış sistemlere gönder' : 'Push Cetpa events to external systems'}</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-bold text-gray-400">{webhookConfigs.length} {currentLanguage === 'tr' ? 'endpoint' : 'endpoints'}</span>
-                </div>
-
-                {/* Existing webhooks */}
-                {webhookConfigs.length > 0 && (
-                  <div className="space-y-2">
-                    {webhookConfigs.map(wh => (
-                      <div key={wh.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[11px] font-mono font-semibold text-gray-800 truncate">{wh.url}</div>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {(wh.events || []).map(ev => (
-                              <span key={ev} className="text-[9px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{ev}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            onClick={async () => {
-                              setWebhookTestLoading(wh.id);
-                              try {
-                                const token = await auth.currentUser?.getIdToken();
-                                const r = await fetch('/api/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ url: wh.url }) });
-                                const d = await r.json() as { ok?: boolean; status?: number };
-                                toast(d.ok ? `✓ ${d.status ?? 200}` : `✗ ${d.status ?? 'error'}`, d.ok ? 'success' : 'error');
-                              } catch { toast(currentLanguage === 'tr' ? 'Test başarısız' : 'Test failed', 'error'); }
-                              finally { setWebhookTestLoading(null); }
-                            }}
-                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-40"
-                            disabled={webhookTestLoading === wh.id}
-                          >
-                            {webhookTestLoading === wh.id ? '…' : (currentLanguage === 'tr' ? 'Test' : 'Test')}
-                          </button>
-                          <button
-                            onClick={async () => { try { await updateDoc(doc(db, 'webhookConfigs', wh.id), { enabled: !wh.enabled }); } catch { toast('Error', 'error'); } }}
-                            className={`text-[9px] font-bold px-2 py-1 rounded-lg transition-colors ${wh.enabled ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
-                          >
-                            {wh.enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive')}
-                          </button>
-                          <button onClick={async () => { try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
-                            <X size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add webhook form */}
-                <div className="border-t border-gray-100 pt-4 space-y-3">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Yeni Webhook Ekle' : 'Add New Webhook'}</p>
-                  <input
-                    className="apple-input w-full text-xs"
-                    placeholder="https://your-service.com/webhook"
-                    value={webhookDraft.url}
-                    onChange={e => setWebhookDraft(d => ({ ...d, url: e.target.value }))}
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {WEBHOOK_EVENTS.map(ev => (
-                      <button
-                        key={ev}
-                        onClick={() => setWebhookDraft(d => ({ ...d, events: d.events.includes(ev) ? d.events.filter(e => e !== ev) : [...d.events, ev] }))}
-                        className={`text-[9px] font-bold px-2 py-1 rounded-lg border transition-all ${webhookDraft.events.includes(ev) ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-gray-300'}`}
-                      >
-                        {ev}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    disabled={!webhookDraft.url.startsWith('http') || webhookDraft.events.length === 0 || webhookSaving}
-                    onClick={async () => {
-                      setWebhookSaving(true);
-                      try {
-                        await addDoc(collection(db, 'webhookConfigs'), { url: webhookDraft.url.trim(), events: webhookDraft.events, enabled: true, createdAt: serverTimestamp() });
-                        setWebhookDraft({ url: '', events: [] });
-                        toast(currentLanguage === 'tr' ? 'Webhook eklendi ✓' : 'Webhook added ✓', 'success');
-                      } catch { toast(currentLanguage === 'tr' ? 'Webhook eklenemedi.' : 'Failed to add webhook.', 'error'); }
-                      finally { setWebhookSaving(false); }
-                    }}
-                    className="apple-button-primary text-xs px-5 disabled:opacity-40"
-                  >
-                    {webhookSaving ? '…' : (currentLanguage === 'tr' ? 'Ekle' : 'Add')}
-                  </button>
-                </div>
-              </div>
-
-              {/* ── WhatsApp Business ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  {currentLanguage === 'tr' ? 'WhatsApp Business (Meta Cloud API)' : 'WhatsApp Business (Meta Cloud API)'}
-                </h4>
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center">
-                      <MessageSquare className="w-5 h-5 text-green-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-bold text-sm text-gray-900">WhatsApp Business API</h4>
-                      <p className="text-[11px] text-gray-400">
-                        {currentLanguage === 'tr'
-                          ? 'Müşterilere kargo ve teslimat bildirimleri gönder.'
-                          : 'Send order shipping & delivery notifications to customers.'}
-                      </p>
-                    </div>
-                  </div>
-                  {[
-                    { key: 'phoneNumberId', label: currentLanguage === 'tr' ? 'Phone Number ID'  : 'Phone Number ID',   placeholder: '1234567890',                isSecret: false },
-                    { key: 'accessToken',   label: currentLanguage === 'tr' ? 'Access Token'     : 'Access Token',      placeholder: 'EAA...',                    isSecret: true  },
-                    { key: 'templateName',  label: currentLanguage === 'tr' ? 'Şablon Adı'       : 'Template Name',     placeholder: 'order_status_update',       isSecret: false },
-                    { key: 'templateLang',  label: currentLanguage === 'tr' ? 'Şablon Dili'      : 'Template Language', placeholder: 'tr',                        isSecret: false },
-                  ].map(f => (
-                    <div key={f.key} className="space-y-0.5">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
-                      <input
-                        type={f.isSecret ? 'password' : 'text'}
-                        placeholder={f.placeholder}
-                        onChange={e => setDoc(doc(db, 'settings', 'whatsapp'), { [f.key]: e.target.value.trim() }, { merge: true })}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-green-400 focus:ring-2 focus:ring-green-400/10 transition-all font-mono"
-                      />
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-gray-400">
-                    {currentLanguage === 'tr'
-                      ? '* Meta Developer Console\'dan System User Permanent Token alın. Mesaj şablonu önceden Meta tarafından onaylanmış olmalıdır.'
-                      : '* Get a System User Permanent Token from Meta Developer Console. The message template must be pre-approved by Meta.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* ── iyzico Payment Gateway ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
-                  <CreditCard className="w-3.5 h-3.5" />
-                  {currentLanguage === 'tr' ? 'iyzico Ödeme Geçidi' : 'iyzico Payment Gateway'}
-                </h4>
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center">
-                      <CreditCard className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-bold text-sm text-gray-900">iyzico</h4>
-                      <p className="text-[11px] text-gray-400">
-                        {currentLanguage === 'tr' ? 'B2B müşterilere ödeme linki oluştur ve gönder.' : 'Generate and send payment links to B2B customers.'}
-                      </p>
-                    </div>
-                  </div>
-                  {[
-                    { key: 'apiKey',    label: 'API Key',    placeholder: 'sandbox-...', isSecret: false },
-                    { key: 'secretKey', label: 'Secret Key', placeholder: 'sandbox-...', isSecret: true  },
-                    { key: 'baseUrl',   label: 'Base URL',   placeholder: 'https://sandbox-api.iyzipay.com', isSecret: false },
-                  ].map(f => (
-                    <div key={f.key} className="space-y-0.5">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
-                      <input
-                        type={f.isSecret ? 'password' : 'text'}
-                        placeholder={f.placeholder}
-                        onChange={e => setDoc(doc(db, 'settings', 'iyzico'), { [f.key]: e.target.value.trim() }, { merge: true })}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/10 transition-all font-mono"
-                      />
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-gray-400">
-                    {currentLanguage === 'tr'
-                      ? '* Değerler otomatik kaydedilir. Test için sandbox URL kullanın. Canlıya geçmek için https://api.iyzipay.com girin.'
-                      : '* Values auto-saved. Use sandbox URL for testing. Enter https://api.iyzipay.com for production.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* ── Email Notifications (Resend) ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5" />
-                  {currentLanguage === 'tr' ? 'E-posta Bildirimleri (Resend)' : 'Email Notifications (Resend)'}
-                </h4>
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
-                      <Mail className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-bold text-sm text-gray-900">Resend</h4>
-                      <p className="text-[11px] text-gray-400">
-                        {currentLanguage === 'tr'
-                          ? 'Sipariş durumu değişimlerinde müşterilere otomatik bildirim gönder.'
-                          : 'Automatically notify customers when order status changes.'}
-                      </p>
-                    </div>
-                  </div>
-                  {[
-                    { key: 'apiKey',      label: currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key',       placeholder: 're_...',                   isSecret: true  },
-                    { key: 'fromAddress', label: currentLanguage === 'tr' ? 'Gönderen Adres' : 'From Address', placeholder: 'siparis@cetpa.com.tr',      isSecret: false },
-                  ].map(f => (
-                    <div key={f.key} className="space-y-0.5">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
-                      <input
-                        type={f.isSecret ? 'password' : 'email'}
-                        placeholder={f.placeholder}
-                        onChange={e => setDoc(doc(db, 'settings', 'email'), { [f.key]: e.target.value.trim() }, { merge: true })}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/10 transition-all font-mono"
-                      />
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-gray-400">
-                    {currentLanguage === 'tr'
-                      ? '* Değerler anında kaydedilir. Resend\'den ücretsiz API anahtarı alın: resend.com'
-                      : '* Values auto-saved. Get a free API key at resend.com'}
-                  </p>
-                </div>
-              </div>
-
-              {/* ── Turkish Marketplaces ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
-                  {currentLanguage === 'tr' ? 'Türk Pazaryerleri' : 'Turkish Marketplaces'}
-                </h4>
-                <MarketplacePanel currentLanguage={currentLanguage} />
-              </div>
-              </>}
-            </motion.div>
-          )}
-
           {/* ── Finance Panel ── */}
           {activeTab === 'finance' && (
             <motion.div key="finance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
@@ -14118,8 +13667,11 @@ function AppContent() {
           const tr600 = currentLanguage === 'tr';
           const integrations600 = [
             { name: 'Shopify', connected: !!(healthData as {shopify?:boolean}|null)?.shopify, lastSync: tr600?'Entegrasyon':'Integration', icon: '🛒', desc: tr600?'E-ticaret entegrasyonu':'E-commerce integration' },
-            { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? new Date((mikroSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '💼', desc: tr600?'ERP muhasebe entegrasyonu':'ERP accounting integration' },
+            { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? new Date((mikroSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '💼', desc: tr600?'ERP entegrasyonu (JumpBulut)':'ERP integration (JumpBulut)' },
             { name: 'Luca', connected: !!(lucaSettings as {connected?:boolean})?.connected, lastSync: (lucaSettings as {lastSync?:string})?.lastSync ? new Date((lucaSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '📒', desc: tr600?'Muhasebe entegrasyonu':'Accounting integration' },
+            { name: 'Logo', connected: false, lastSync: null, icon: '🐯', desc: tr600?'Logo Tiger/Go ERP':'Logo Tiger/Go ERP' },
+            { name: 'Dynamics', connected: false, lastSync: null, icon: '🪟', desc: tr600?'Microsoft Dynamics 365 BC':'Microsoft Dynamics 365 BC' },
+            { name: 'SAP B1', connected: false, lastSync: null, icon: '🔷', desc: tr600?'SAP Business One':'SAP Business One' },
             { name: 'Gemini AI', connected: true, lastSync: tr600?'Sürekli':'Continuous', icon: '🤖', desc: tr600?'Lead skorlama yapay zekası':'Lead scoring AI' },
             { name: 'Firebase', connected: true, lastSync: tr600?'Gerçek zamanlı':'Real-time', icon: '🔥', desc: tr600?'Veritabanı & kimlik doğrulama':'Database & auth' },
           ];
@@ -14261,7 +13813,7 @@ function AppContent() {
 
           {/* ── Settings / Ayarlar ── */}
           {activeTab === 'settings' && (userRole === 'Admin' || userRole === 'Manager') && (
-            <motion.div key="settings" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 max-w-2xl">
+            <motion.div key="settings" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 max-w-3xl">
 
               {/* ─── Subscription Management ─── */}
               <SubscriptionPanel
@@ -14276,220 +13828,332 @@ function AppContent() {
               <hr className="border-gray-100" />
 
               <ModuleHeader 
-                title={currentLanguage === 'tr' ? 'Entegrasyon Ayarları' : 'Integration Settings'} 
-                subtitle={currentLanguage === 'tr' ? 'API anahtarları ve entegrasyon bilgilerini buradan yönetin.' : 'Manage API keys and integration credentials here.'}
-                icon={Settings}
+                title={currentLanguage === 'tr' ? 'Entegrasyonlar' : 'Integrations'} 
+                subtitle={currentLanguage === 'tr' ? 'ERP, e-ticaret ve servis entegrasyonlarını buradan yönetin.' : 'Manage ERP, e-commerce and service integrations here.'}
+                icon={RefreshCw}
               />
 
-              {/* Shopify */}
-              <div className="apple-card p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center">
-                    <ShoppingBag className="w-5 h-5 text-green-600" />
+              {/* ── ERP Entegrasyon Merkezi ── */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity className="w-3 h-3" />
+                  {currentLanguage === 'tr' ? 'ERP Entegrasyonları' : 'ERP Integrations'}
+                </p>
+                <React.Suspense fallback={
+                  <div className="flex items-center justify-center gap-2 py-8 text-gray-400 text-sm apple-card">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    {currentLanguage === 'tr' ? 'ERP paneli yükleniyor…' : 'Loading ERP panel…'}
                   </div>
-                  <div>
-                    <h3 className="font-bold text-sm">Shopify</h3>
-                    <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'E-ticaret entegrasyonu' : 'E-commerce integration'}</p>
-                  </div>
-                </div>
-                {[
-                  { key: 'shopify_store_url', label: currentLanguage === 'tr' ? 'Mağaza URL' : 'Store URL', placeholder: 'mystore.myshopify.com' },
-                  { key: 'shopify_access_token', label: currentLanguage === 'tr' ? 'Access Token' : 'Access Token', placeholder: 'shpat_...' },
-                  { key: 'shopify_api_key', label: 'API Key', placeholder: 'API Key' },
-                  { key: 'shopify_api_secret', label: 'API Secret', placeholder: 'API Secret' },
-                ].map(field => (
-                  <div key={field.key} className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
-                    <input
-                      type={field.key.includes('token') || field.key.includes('secret') ? 'password' : 'text'}
-                      defaultValue={(companySettings?.[field.key] as string) || ''}
-                      placeholder={field.placeholder}
-                      onChange={e => setCompanySettings((prev: Record<string, unknown>) => ({...prev, [field.key]: e.target.value}))}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
-                    />
-                  </div>
-                ))}
-                <button
-                  onClick={async () => {
-                    try {
-                      await syncShopify({
-                        accessToken: companySettings.shopify_access_token as string,
-                        storeUrl: companySettings.shopify_store_url as string
-                      });
-                      alert(currentLanguage === 'tr' ? 'Shopify bağlantısı başarılı!' : 'Shopify connection successful!');
-                    } catch (e) {
-                      alert(e instanceof Error ? e.message : 'Error');
-                    }
-                  }}
-                  className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  {currentLanguage === 'tr' ? 'Bağlantıyı Test Et' : 'Test Connection'}
-                </button>
+                }>
+                  <ERPHubPanel currentLanguage={currentLanguage} />
+                </React.Suspense>
               </div>
 
-              {/* Luca */}
-              <div className="apple-card p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
-                    <BookOpen className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-bold text-sm">Luca Muhasebe</h3>
-                    <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Muhasebe yazılımı entegrasyonu' : 'Accounting software integration'}</p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const newVal = !lucaSettings.enabled;
-                      await setDoc(doc(db, 'settings', 'luca'), { enabled: newVal }, { merge: true });
-                      if (newVal) {
-                        await setDoc(doc(db, 'settings', 'mikro'), { enabled: false }, { merge: true }).catch(() => {});
-                      }
-                    }}
-                    className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${lucaSettings.enabled ? 'bg-purple-500' : 'bg-gray-200'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${lucaSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-                {([
-                  { firestoreKey: 'apiKey',     label: 'API Key',                                                    placeholder: 'Luca API Key',         isSecret: true  },
-                  { firestoreKey: 'companyId',  label: currentLanguage === 'tr' ? 'Şirket ID' : 'Company ID',       placeholder: 'Company ID',           isSecret: false },
-                  { firestoreKey: 'baseUrl',    label: 'Base URL',                                                   placeholder: 'https://api.luca.com.tr', isSecret: false },
-                ] as { firestoreKey: keyof typeof lucaSettings; label: string; placeholder: string; isSecret: boolean }[]).map(field => (
-                  <div key={field.firestoreKey} className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
-                    <input
-                      key={`luca-${field.firestoreKey}-${String(lucaSettings[field.firestoreKey] ?? '')}`}
-                      type={field.isSecret ? 'password' : 'text'}
-                      defaultValue={(lucaSettings[field.firestoreKey] as string) || (field.firestoreKey === 'baseUrl' ? 'https://api.luca.com.tr' : '')}
-                      placeholder={field.placeholder}
-                      onChange={e => {
-                        const val = e.target.value.trim();
-                        setDoc(doc(db, 'settings', 'luca'), { [field.firestoreKey]: val }, { merge: true });
+              {/* ── Bağlı Servisler ── */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Link className="w-3 h-3" />
+                  {currentLanguage === 'tr' ? 'Bağlı Servisler' : 'Connected Services'}
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Shopify — credentials + sync */}
+                  <div className="apple-card p-5 flex flex-col gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center">
+                        <ShoppingBag className="w-4.5 h-4.5 text-green-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-sm">Shopify</h3>
+                        <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'E-ticaret entegrasyonu' : 'E-commerce integration'}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {companySettings?.shopify_access_token ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Not Connected')}
+                      </span>
+                    </div>
+                    {[
+                      { key: 'shopify_store_url',    label: currentLanguage === 'tr' ? 'Mağaza URL' : 'Store URL',    placeholder: 'mystore.myshopify.com', secret: false },
+                      { key: 'shopify_access_token', label: 'Access Token', placeholder: 'shpat_...', secret: true },
+                      { key: 'shopify_api_key',      label: 'API Key',      placeholder: 'API Key',   secret: false },
+                      { key: 'shopify_api_secret',   label: 'API Secret',   placeholder: 'API Secret',secret: true  },
+                    ].map(f => (
+                      <div key={f.key} className="space-y-0.5">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                        <input
+                          type={f.secret ? 'password' : 'text'}
+                          defaultValue={(companySettings?.[f.key] as string) || ''}
+                          placeholder={f.placeholder}
+                          onChange={e => setCompanySettings((prev: Record<string, unknown>) => ({...prev, [f.key]: e.target.value}))}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-green-400 focus:ring-2 focus:ring-green-400/10 transition-all font-mono"
+                        />
+                      </div>
+                    ))}
+                    <button
+                      onClick={async () => {
+                        const token = (companySettings?.shopify_access_token as string) || '';
+                        if (!token) { toast(currentLanguage==='tr'?'Önce Access Token girin.':'Enter Access Token first.','error'); return; }
+                        toast(currentLanguage==='tr'?'Shopify senkronizasyonu başlatıldı…':'Starting Shopify sync…','info');
+                        try {
+                          const r = await fetch('/api/shopify/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
+                          const d = await r.json();
+                          if (d.error) throw new Error(d.error);
+                          toast(`${currentLanguage==='tr'?'Senkronize edildi':'Synced'} — ${d.products?.length ?? 0} ${currentLanguage==='tr'?'ürün':'products'}, ${d.orders?.length ?? 0} ${currentLanguage==='tr'?'sipariş':'orders'}`, 'success');
+                        } catch(e) { toast(e instanceof Error ? e.message : 'Sync hatası', 'error'); }
                       }}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all font-mono"
-                    />
+                      className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'Senkronize Et' : 'Sync Now'}
+                    </button>
                   </div>
-                ))}
-              </div>
 
-              {/* Mikro */}
-              <div className="apple-card p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#e8f0f7' }}>
-                    <BookOpen className="w-5 h-5" style={{ color: '#1a3a5c' }} />
+                  {/* TCMB Döviz */}
+                  <div className="apple-card p-5 flex flex-col gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
+                        <Globe className="w-4.5 h-4.5 text-blue-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-sm">TCMB Döviz</h3>
+                        <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Canlı kur bilgisi' : 'Live exchange rates'}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${exchangeRates ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
+                        {exchangeRates ? (currentLanguage === 'tr' ? 'Canlı' : 'Live') : (currentLanguage === 'tr' ? 'Bekleniyor' : 'Loading')}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-xs text-gray-500">
+                      <div className="flex justify-between"><span>USD / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.USD ? `₺${(exchangeRates.USD).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
+                      <div className="flex justify-between"><span>EUR / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.EUR ? `₺${(exchangeRates.EUR).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
+                      <div className="flex justify-between"><span>GBP / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.GBP ? `₺${(exchangeRates.GBP).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        toast(currentLanguage==='tr'?'Kurlar güncelleniyor…':'Refreshing rates…', 'info');
+                        try {
+                          const r = await fetch('/api/settings/exchange-rates');
+                          const d = await r.json();
+                          if (d.rates) { setExchangeRates(d.rates); toast(currentLanguage==='tr'?'Döviz kurları güncellendi.':'Exchange rates updated.', 'success'); }
+                          else throw new Error('Kur verisi alınamadı');
+                        } catch(e) { toast(e instanceof Error ? e.message : 'Hata', 'error'); }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors mt-auto"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {currentLanguage === 'tr' ? 'Kurları Yenile' : 'Refresh Rates'}
+                    </button>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="font-bold text-sm">Mikro ERP (JumpBulut)</h3>
-                    <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'Cetpa → Mikro senkronizasyon' : 'Cetpa → Mikro sync'}</p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const newVal = !mikroSettings.enabled;
-                      await setDoc(doc(db, 'settings', 'mikro'), { enabled: newVal }, { merge: true });
-                      if (newVal) {
-                        await setDoc(doc(db, 'settings', 'luca'), { enabled: false }, { merge: true }).catch(() => {});
-                      }
-                    }}
-                    className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${mikroSettings.enabled ? 'bg-[#1a3a5c]' : 'bg-gray-200'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${mikroSettings.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
                 </div>
 
-                {/* ── Credential fields ── */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {([
-                    { firestoreKey: 'idmEmail',    label: currentLanguage === 'tr' ? 'IDM E-posta' : 'IDM Email',       placeholder: 'ornek@firma.com',  isSecret: false,  hint: currentLanguage === 'tr' ? 'Online İşlem Merkezi kullanıcı adı' : 'Online İşlem Merkezi username' },
-                    { firestoreKey: 'idmPassword', label: currentLanguage === 'tr' ? 'IDM Şifre (Access Token)' : 'IDM Password (Access Token)', placeholder: '1234…',             isSecret: true,   hint: currentLanguage === 'tr' ? 'Online İşlem Merkezi şifresi veya API token' : 'Online İşlem Merkezi password or API token' },
-                    { firestoreKey: 'alias',       label: 'Alias',                          placeholder: 'XCXY-8332',        isSecret: false,  hint: currentLanguage === 'tr' ? 'Mikro firma alias kodu (zorunlu)' : 'Mikro company alias code (required)' },
-                    { firestoreKey: 'apiKey',      label: 'API Key',                        placeholder: 'mikro-api-key…',   isSecret: true,   hint: currentLanguage === 'tr' ? 'Mikro yönetici portalından alınan API anahtarı' : 'API key from Mikro admin portal' },
-                    { firestoreKey: 'firmaKodu',   label: currentLanguage === 'tr' ? 'Firma Kodu' : 'Company Code', placeholder: '01',               isSecret: false,  hint: '' },
-                    { firestoreKey: 'calismaYili', label: currentLanguage === 'tr' ? 'Çalışma Yılı' : 'Work Year',   placeholder: String(new Date().getFullYear()), isSecret: false, hint: '' },
-                    { firestoreKey: 'kullaniciKodu', label: currentLanguage === 'tr' ? 'Kullanıcı Kodu' : 'User Code', placeholder: 'SRV',           isSecret: false,  hint: '' },
-                    { firestoreKey: 'sifre',       label: currentLanguage === 'tr' ? 'Sunucu Şifresi (MD5)' : 'Server Password (MD5)', placeholder: 'MD5 hash…', isSecret: true, hint: '' },
-                  ] as { firestoreKey: keyof MikroConfig; label: string; placeholder: string; isSecret: boolean; hint: string }[]).map(field => (
-                    <div key={field.firestoreKey} className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
-                        {field.label}
-                        {(field.firestoreKey === 'idmPassword' || field.firestoreKey === 'alias') && (
-                          <span className="text-red-400">*</span>
-                        )}
-                      </label>
+                {/* Pazaryerleri */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    {currentLanguage === 'tr' ? 'Türk Pazaryerleri' : 'Turkish Marketplaces'}
+                  </p>
+                  <MarketplacePanel currentLanguage={currentLanguage} />
+                </div>
+              </div>
+
+              {/* ── Webhook'lar ── */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Link className="w-3 h-3" />
+                  {currentLanguage === 'tr' ? "Giden Webhook'lar" : 'Outbound Webhooks'}
+                </p>
+                <div className="apple-card p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-gray-500">{currentLanguage === 'tr' ? 'Cetpa olaylarını dış sistemlere gönder.' : 'Push Cetpa events to external systems.'}</p>
+                    <span className="text-[10px] font-bold text-gray-400">{webhookConfigs.length} {currentLanguage === 'tr' ? 'endpoint' : 'endpoints'}</span>
+                  </div>
+
+                  {webhookConfigs.length > 0 && (
+                    <div className="space-y-2">
+                      {webhookConfigs.map(wh => (
+                        <div key={wh.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-mono font-semibold text-gray-800 truncate">{wh.url}</div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {(wh.events || []).map(ev => (
+                                <span key={ev} className="text-[9px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{ev}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={async () => {
+                                setWebhookTestLoading(wh.id);
+                                try {
+                                  const token = await auth.currentUser?.getIdToken();
+                                  const r = await fetch('/api/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ url: wh.url }) });
+                                  const d = await r.json() as { ok?: boolean; status?: number };
+                                  toast(d.ok ? `✓ ${d.status ?? 200}` : `✗ ${d.status ?? 'error'}`, d.ok ? 'success' : 'error');
+                                } catch { toast(currentLanguage === 'tr' ? 'Test başarısız' : 'Test failed', 'error'); }
+                                finally { setWebhookTestLoading(null); }
+                              }}
+                              className="text-[9px] font-bold px-2 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-40"
+                              disabled={webhookTestLoading === wh.id}
+                            >
+                              {webhookTestLoading === wh.id ? '…' : 'Test'}
+                            </button>
+                            <button
+                              onClick={async () => { try { await updateDoc(doc(db, 'webhookConfigs', wh.id), { enabled: !wh.enabled }); } catch { toast('Error', 'error'); } }}
+                              className={`text-[9px] font-bold px-2 py-1 rounded-lg transition-colors ${wh.enabled ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                            >
+                              {wh.enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive')}
+                            </button>
+                            <button onClick={async () => { try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="border-t border-gray-100 pt-4 space-y-3">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Yeni Webhook Ekle' : 'Add New Webhook'}</p>
+                    <input
+                      className="apple-input w-full text-xs"
+                      placeholder="https://your-service.com/webhook"
+                      value={webhookDraft.url}
+                      onChange={e => setWebhookDraft(d => ({ ...d, url: e.target.value }))}
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEBHOOK_EVENTS.map(ev => (
+                        <button
+                          key={ev}
+                          onClick={() => setWebhookDraft(d => ({ ...d, events: d.events.includes(ev) ? d.events.filter(e => e !== ev) : [...d.events, ev] }))}
+                          className={`text-[9px] font-bold px-2 py-1 rounded-lg border transition-all ${webhookDraft.events.includes(ev) ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-gray-300'}`}
+                        >
+                          {ev}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      disabled={!webhookDraft.url.startsWith('http') || webhookDraft.events.length === 0 || webhookSaving}
+                      onClick={async () => {
+                        setWebhookSaving(true);
+                        try {
+                          await addDoc(collection(db, 'webhookConfigs'), { url: webhookDraft.url.trim(), events: webhookDraft.events, enabled: true, createdAt: serverTimestamp() });
+                          setWebhookDraft({ url: '', events: [] });
+                          toast(currentLanguage === 'tr' ? 'Webhook eklendi ✓' : 'Webhook added ✓', 'success');
+                        } catch { toast(currentLanguage === 'tr' ? 'Webhook eklenemedi.' : 'Failed to add webhook.', 'error'); }
+                        finally { setWebhookSaving(false); }
+                      }}
+                      className="apple-button-primary text-xs px-5 disabled:opacity-40"
+                    >
+                      {webhookSaving ? '…' : (currentLanguage === 'tr' ? 'Ekle' : 'Add')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Bildirim & Ödeme ── */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Bell className="w-3 h-3" />
+                  {currentLanguage === 'tr' ? 'Bildirim & Ödeme' : 'Notifications & Payments'}
+                </p>
+
+                {/* WhatsApp Business */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center">
+                      <MessageSquare className="w-4.5 h-4.5 text-green-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-gray-900">WhatsApp Business API</h4>
+                      <p className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'Müşterilere kargo ve teslimat bildirimleri.' : 'Order shipping & delivery notifications.'}</p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'phoneNumberId', label: 'Phone Number ID',                                                  placeholder: '1234567890',          isSecret: false },
+                    { key: 'accessToken',   label: 'Access Token',                                                     placeholder: 'EAA...',              isSecret: true  },
+                    { key: 'templateName',  label: currentLanguage === 'tr' ? 'Şablon Adı' : 'Template Name',         placeholder: 'order_status_update', isSecret: false },
+                    { key: 'templateLang',  label: currentLanguage === 'tr' ? 'Şablon Dili' : 'Template Language',    placeholder: 'tr',                  isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
                       <input
-                        key={`mikro-${field.firestoreKey}-${String(mikroSettings[field.firestoreKey] ?? '')}`}
-                        type={field.isSecret ? 'password' : 'text'}
-                        defaultValue={(mikroSettings[field.firestoreKey] as string) || ''}
-                        placeholder={field.placeholder}
-                        onChange={e => {
-                          const val = e.target.value.trim();
-                          setDoc(doc(db, 'settings', 'mikro'), { [field.firestoreKey]: val }, { merge: true });
-                        }}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#1a3a5c] focus:ring-2 focus:ring-[#1a3a5c]/10 transition-all font-mono"
+                        type={f.isSecret ? 'password' : 'text'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'whatsapp'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-green-400 focus:ring-2 focus:ring-green-400/10 transition-all font-mono"
                       />
-                      {field.hint && (
-                        <p className="text-[10px] text-gray-400">{field.hint}</p>
-                      )}
                     </div>
                   ))}
+                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? "* Meta Developer Console'dan System User Permanent Token alın." : '* Get a System User Permanent Token from Meta Developer Console.'}</p>
                 </div>
 
-                <div className="p-3 bg-blue-50 rounded-xl text-xs text-blue-700 space-y-1">
-                  <p>💡 {currentLanguage === 'tr'
-                    ? 'IDM Şifre ve Alias alanları zorunludur. Diğer alanlar boş bırakılırsa sunucu varsayılan değerlerini kullanır.'
-                    : 'IDM Password and Alias fields are required. Other fields fall back to server defaults if empty.'}</p>
-                  <p className="text-blue-500">{currentLanguage === 'tr'
-                    ? '* Sunucuda MIKRO_* ortam değişkenleri tanımlıysa bunlar Firestore ayarlarını geçersiz kılar.'
-                    : '* Server MIKRO_* env vars override Firestore settings if defined.'}</p>
+                {/* iyzico */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
+                      <CreditCard className="w-4.5 h-4.5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-gray-900">iyzico</h4>
+                      <p className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'B2B müşterilere ödeme linki oluştur.' : 'Generate payment links for B2B customers.'}</p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'apiKey',    label: 'API Key',    placeholder: 'sandbox-...', isSecret: false },
+                    { key: 'secretKey', label: 'Secret Key', placeholder: 'sandbox-...', isSecret: true  },
+                    { key: 'baseUrl',   label: 'Base URL',   placeholder: 'https://sandbox-api.iyzipay.com', isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                      <input
+                        type={f.isSecret ? 'password' : 'text'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'iyzico'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/10 transition-all font-mono"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '* Test için sandbox URL kullanın. Canlı: https://api.iyzipay.com' : '* Use sandbox for testing. Live: https://api.iyzipay.com'}</p>
                 </div>
 
-                {/* Test connection */}
-                <button
-                  onClick={async () => {
-                    toast(currentLanguage==='tr'?'Mikro bağlantısı kontrol ediliyor…':'Checking Mikro connection…','info');
-                    try {
-                      const r = await fetch('/api/mikro/status');
-                      const d = await r.json();
-                      if (!d.configured) { toast(currentLanguage==='tr'?'Mikro yapılandırılmamış. IDM Şifre ve Alias alanlarını doldurun.':'Mikro not configured. Fill in IDM Password and Alias.','error'); return; }
-                      if (d.connected) toast(currentLanguage==='tr'?'Mikro bağlantısı başarılı ✓':'Mikro connection successful ✓','success');
-                      else toast(d.error || (currentLanguage==='tr'?'Token alınamadı':'Could not get token'),'error');
-                    } catch(e) { toast(e instanceof Error ? e.message : 'Bağlantı hatası','error'); }
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-[#1a3a5c] text-[#1a3a5c] hover:bg-[#1a3a5c]/5 text-sm font-bold transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Bağlantıyı Test Et' : 'Test Connection'}
-                </button>
+                {/* Resend */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
+                      <Mail className="w-4.5 h-4.5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-gray-900">Resend</h4>
+                      <p className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'Sipariş durumu otomatik e-posta bildirimleri.' : 'Automatic order status email notifications.'}</p>
+                    </div>
+                  </div>
+                  {[
+                    { key: 'apiKey',      label: currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key',         placeholder: 're_...', isSecret: true  },
+                    { key: 'fromAddress', label: currentLanguage === 'tr' ? 'Gönderen Adres' : 'From Address',  placeholder: 'siparis@cetpa.com.tr', isSecret: false },
+                  ].map(f => (
+                    <div key={f.key} className="space-y-0.5">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
+                      <input
+                        type={f.isSecret ? 'password' : 'email'}
+                        placeholder={f.placeholder}
+                        onChange={e => setDoc(doc(db, 'settings', 'email'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/10 transition-all font-mono"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '* Ücretsiz API anahtarı: resend.com' : '* Free API key at resend.com'}</p>
+                </div>
               </div>
 
-              {/* ── Mikro Data Import Panel ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
-                  {currentLanguage === 'tr' ? 'Mikro\'dan Veri Aktar' : 'Import Data from Mikro'}
-                </h4>
-                <MikroSyncPanel currentLanguage={currentLanguage} />
-              </div>
-
-              {/* ── Luca Sync Panel ── */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" />
-                  {currentLanguage === 'tr' ? 'Luca Muhasebe Entegrasyonu' : 'Luca Accounting Sync'}
-                </h4>
-                <LucaSyncPanel currentLanguage={currentLanguage} />
-              </div>
-
+              {/* Ayarları kaydet */}
               <button
                 onClick={async () => {
                   try {
                     await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
-                    toast(currentLanguage==='tr'?'Entegrasyon ayarları kaydedildi!':'Integration settings saved!', 'success');
+                    toast(currentLanguage==='tr'?'Ayarlar kaydedildi!':'Settings saved!', 'success');
                   } catch (error) {
                     handleFirestoreError(error, OperationType.WRITE, 'settings/app');
                     toast(currentLanguage==='tr'?'Hata oluştu!':'Error occurred!', 'error');
                   }
                 }}
-                className="apple-button-primary w-full mt-4"
+                className="apple-button-primary w-full"
               >
                 {currentLanguage==='tr'?'Ayarları Kaydet':'Save Settings'}
               </button>

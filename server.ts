@@ -3566,6 +3566,249 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ERP PLUGIN ROUTES
+  // Each ERP follows the same contract:
+  //   GET  /api/{erpId}/status          → { configured, connected, error? }
+  //   POST /api/{erpId}/import/stok     → ErpImportResult
+  //   POST /api/{erpId}/import/cari     → ErpImportResult
+  //   POST /api/{erpId}/export/siparis  { orderId } → { success, {erpId}OrderNo }
+  //   POST /api/{erpId}/export/fatura   { orderId } → { success, {erpId}InvoiceNo }
+  //
+  // Status: stubs return notImplemented=true until real API adapters are built.
+  // Credentials live in server env vars — never sent to browser.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── Logo Tiger / Go / Start ──────────────────────────────────────────────────
+  // Docs: https://developer.logo.com.tr
+  // Auth: API Key header (X-Logo-ApiKey) + LOGO_FIRM_NO in request body
+  // Base: LOGO_API_URL env var (self-hosted or Logo cloud)
+
+  app.get('/api/logo/status', async (_req: Request, res: Response) => {
+    const configured = !!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY && process.env.LOGO_FIRM_NO);
+    if (!configured) return res.json({ configured: false, connected: false });
+    try {
+      // TODO: implement real Logo Tiger auth check (e.g. GET /api/v1/firms)
+      // const r = await fetch(`${process.env.LOGO_API_URL}/api/v1/firms`, {
+      //   headers: { 'X-Logo-ApiKey': process.env.LOGO_API_KEY },
+      // });
+      // const ok = r.ok;
+      // return res.json({ configured: true, connected: ok, error: ok ? undefined : `HTTP ${r.status}` });
+      return res.json({ configured: true, connected: false, error: 'Logo adapter not yet implemented — set LOGO_API_URL, LOGO_API_KEY, LOGO_FIRM_NO and build the adapter.' });
+    } catch (err) {
+      return res.json({ configured: true, connected: false, error: String(err) });
+    }
+  });
+
+  app.post('/api/logo/import/stok', requireAuth, async (_req: Request, res: Response) => {
+    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /api/v1/items, upsert to Firebase inventory
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo stok import not yet implemented.' });
+  });
+
+  app.post('/api/logo/import/cari', requireAuth, async (_req: Request, res: Response) => {
+    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /api/v1/accounts, upsert to Firebase leads
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo cari import not yet implemented.' });
+  });
+
+  app.post('/api/logo/export/siparis', requireAuth, async (req: Request, res: Response) => {
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
+    if (!(process.env.LOGO_API_URL && process.env.LOGO_API_KEY)) return res.json({ success: false, notConfigured: true });
+    // TODO: fetch order from Firebase, POST /api/v1/orders to Logo
+    return res.json({ success: false, notImplemented: true, error: 'Logo sipariş export not yet implemented.' });
+  });
+
+  // ── Microsoft Dynamics 365 Business Central ──────────────────────────────────
+  // Docs: https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/
+  // Auth: Azure AD OAuth2 client_credentials → Bearer token
+  // Base: https://api.businesscentral.dynamics.com/v2.0/{DYNAMICS_TENANT_ID}/{DYNAMICS_ENVIRONMENT}/api/v2.0/companies({DYNAMICS_COMPANY_ID})/
+
+  const DYNAMICS_TOKEN_CACHE: { token?: string; expiresAt?: number } = {};
+
+  async function getDynamicsToken(): Promise<string | null> {
+    const now = Date.now();
+    if (DYNAMICS_TOKEN_CACHE.token && DYNAMICS_TOKEN_CACHE.expiresAt && now < DYNAMICS_TOKEN_CACHE.expiresAt - 60_000) {
+      return DYNAMICS_TOKEN_CACHE.token;
+    }
+    const { DYNAMICS_TENANT_ID, DYNAMICS_CLIENT_ID, DYNAMICS_CLIENT_SECRET } = process.env;
+    if (!(DYNAMICS_TENANT_ID && DYNAMICS_CLIENT_ID && DYNAMICS_CLIENT_SECRET)) return null;
+    const url = `https://login.microsoftonline.com/${DYNAMICS_TENANT_ID}/oauth2/v2.0/token`;
+    const body = new URLSearchParams({
+      grant_type:    'client_credentials',
+      client_id:     DYNAMICS_CLIENT_ID,
+      client_secret: DYNAMICS_CLIENT_SECRET,
+      scope:         'https://api.businesscentral.dynamics.com/.default',
+    });
+    const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    if (!r.ok) return null;
+    const d = await r.json() as { access_token: string; expires_in: number };
+    DYNAMICS_TOKEN_CACHE.token     = d.access_token;
+    DYNAMICS_TOKEN_CACHE.expiresAt = now + d.expires_in * 1000;
+    return d.access_token;
+  }
+
+  function getDynamicsBase(): string {
+    const env = process.env.DYNAMICS_ENVIRONMENT ?? 'production';
+    return `https://api.businesscentral.dynamics.com/v2.0/${process.env.DYNAMICS_TENANT_ID}/${env}/api/v2.0/companies(${process.env.DYNAMICS_COMPANY_ID})`;
+  }
+
+  app.get('/api/dynamics/status', async (_req: Request, res: Response) => {
+    const configured = !!(
+      process.env.DYNAMICS_TENANT_ID &&
+      process.env.DYNAMICS_CLIENT_ID &&
+      process.env.DYNAMICS_CLIENT_SECRET &&
+      process.env.DYNAMICS_COMPANY_ID
+    );
+    if (!configured) return res.json({ configured: false, connected: false });
+    try {
+      const token = await getDynamicsToken();
+      if (!token) return res.json({ configured: true, connected: false, error: 'OAuth2 token request failed — check DYNAMICS_CLIENT_ID / DYNAMICS_CLIENT_SECRET / DYNAMICS_TENANT_ID' });
+      const r = await fetch(`${getDynamicsBase()}/companies`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      });
+      if (!r.ok) return res.json({ configured: true, connected: false, error: `BC API returned HTTP ${r.status}` });
+      const data = await r.json() as { value?: { displayName?: string; name?: string }[] };
+      const company = data?.value?.[0];
+      return res.json({
+        configured: true,
+        connected:  true,
+        companyName: company?.displayName ?? company?.name ?? 'Business Central',
+        environmentName: process.env.DYNAMICS_ENVIRONMENT ?? 'production',
+      });
+    } catch (err) {
+      return res.json({ configured: true, connected: false, error: String(err) });
+    }
+  });
+
+  app.post('/api/dynamics/import/stok', requireAuth, async (_req: Request, res: Response) => {
+    const token = await getDynamicsToken();
+    if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /items, upsert to Firebase inventory
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics items import not yet implemented.' });
+  });
+
+  app.post('/api/dynamics/import/cari', requireAuth, async (_req: Request, res: Response) => {
+    const token = await getDynamicsToken();
+    if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /customers, upsert to Firebase leads
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics customer import not yet implemented.' });
+  });
+
+  app.post('/api/dynamics/export/siparis', requireAuth, async (req: Request, res: Response) => {
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
+    const token = await getDynamicsToken();
+    if (!token) return res.json({ success: false, notConfigured: true });
+    // TODO: fetch order from Firebase, POST /salesOrders to Business Central
+    return res.json({ success: false, notImplemented: true, error: 'Dynamics order export not yet implemented.' });
+  });
+
+  app.post('/api/dynamics/export/fatura', requireAuth, async (req: Request, res: Response) => {
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
+    const token = await getDynamicsToken();
+    if (!token) return res.json({ success: false, notConfigured: true });
+    // TODO: fetch order from Firebase, POST /salesInvoices to Business Central
+    return res.json({ success: false, notImplemented: true, error: 'Dynamics invoice export not yet implemented.' });
+  });
+
+  // ── SAP Business One (Service Layer) ─────────────────────────────────────────
+  // Docs: https://help.sap.com/docs/SAP_BUSINESS_ONE/b1
+  // Auth: POST /b1s/v1/Login { UserName, Password, CompanyDB } → Set-Cookie: B1SESSION
+  // The session has a 5-minute idle timeout; server renews it automatically.
+
+  const SAP_SESSION: { sessionId?: string; lastUsed?: number } = {};
+
+  async function getSAPSession(): Promise<string | null> {
+    const { SAP_SERVICE_LAYER_URL, SAP_USERNAME, SAP_PASSWORD, SAP_COMPANY_DB } = process.env;
+    if (!(SAP_SERVICE_LAYER_URL && SAP_USERNAME && SAP_PASSWORD && SAP_COMPANY_DB)) return null;
+    // If session is younger than 4 minutes, reuse it (SAP timeout is 5 min idle)
+    const now = Date.now();
+    if (SAP_SESSION.sessionId && SAP_SESSION.lastUsed && now - SAP_SESSION.lastUsed < 4 * 60 * 1000) {
+      SAP_SESSION.lastUsed = now;
+      return SAP_SESSION.sessionId;
+    }
+    const r = await fetch(`${SAP_SERVICE_LAYER_URL}/Login`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ UserName: SAP_USERNAME, Password: SAP_PASSWORD, CompanyDB: SAP_COMPANY_DB }),
+    });
+    if (!r.ok) return null;
+    const cookie = r.headers.get('set-cookie') ?? '';
+    const match  = cookie.match(/B1SESSION=([^;]+)/);
+    if (!match) return null;
+    SAP_SESSION.sessionId = match[1];
+    SAP_SESSION.lastUsed  = now;
+    return SAP_SESSION.sessionId;
+  }
+
+  app.get('/api/sap/status', async (_req: Request, res: Response) => {
+    const configured = !!(
+      process.env.SAP_SERVICE_LAYER_URL &&
+      process.env.SAP_USERNAME &&
+      process.env.SAP_PASSWORD &&
+      process.env.SAP_COMPANY_DB
+    );
+    if (!configured) return res.json({ configured: false, connected: false });
+    try {
+      const session = await getSAPSession();
+      if (!session) return res.json({ configured: true, connected: false, error: 'SAP B1 Login failed — check SAP_USERNAME, SAP_PASSWORD, SAP_COMPANY_DB' });
+      // Quick version check
+      const r = await fetch(`${process.env.SAP_SERVICE_LAYER_URL}/CompanyInfo`, {
+        headers: { Cookie: `B1SESSION=${session}`, Accept: 'application/json' },
+      });
+      if (!r.ok) return res.json({ configured: true, connected: false, error: `SAP Service Layer returned HTTP ${r.status}` });
+      const info = await r.json() as { CompanyName?: string; Version?: string };
+      return res.json({
+        configured:  true,
+        connected:   true,
+        companyDb:   process.env.SAP_COMPANY_DB,
+        sapVersion:  info.Version,
+        companyName: info.CompanyName,
+      });
+    } catch (err) {
+      return res.json({ configured: true, connected: false, error: String(err) });
+    }
+  });
+
+  app.post('/api/sap/import/stok', requireAuth, async (_req: Request, res: Response) => {
+    const session = await getSAPSession();
+    if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /Items?$select=ItemCode,ItemName,OnHand,Price, upsert to Firebase
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP items import not yet implemented.' });
+  });
+
+  app.post('/api/sap/import/cari', requireAuth, async (_req: Request, res: Response) => {
+    const session = await getSAPSession();
+    if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: paginate GET /BusinessPartners?$filter=CardType eq 'cCustomer', upsert to Firebase leads
+    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP business partner import not yet implemented.' });
+  });
+
+  app.post('/api/sap/export/siparis', requireAuth, async (req: Request, res: Response) => {
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
+    const session = await getSAPSession();
+    if (!session) return res.json({ success: false, notConfigured: true });
+    // TODO: fetch order from Firebase, POST /Orders to SAP Service Layer
+    return res.json({ success: false, notImplemented: true, error: 'SAP order export not yet implemented.' });
+  });
+
+  app.post('/api/sap/export/fatura', requireAuth, async (req: Request, res: Response) => {
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
+    const session = await getSAPSession();
+    if (!session) return res.json({ success: false, notConfigured: true });
+    // TODO: fetch order from Firebase, POST /Invoices to SAP Service Layer
+    return res.json({ success: false, notImplemented: true, error: 'SAP invoice export not yet implemented.' });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // END ERP PLUGIN ROUTES
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
