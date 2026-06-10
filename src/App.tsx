@@ -13846,6 +13846,7 @@ function AppContent() {
               onClick={async () => {
                 try {
                   await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
+                  logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
                   toast(currentLanguage==='tr'?'Ayarlar kaydedildi!':'Settings saved!', 'success');
                 } catch (error) {
                   handleFirestoreError(error, OperationType.WRITE, 'settings/app');
@@ -14257,6 +14258,7 @@ function AppContent() {
                   setSettingsSaved(false);
                   try {
                     await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
+                  logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
                     setSettingsSaved(true);
                     toast(currentLanguage==='tr'?'Ayarlar kaydedildi!':'Settings saved!', 'success');
                     setTimeout(() => setSettingsSaved(false), 2500);

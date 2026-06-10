@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { logAudit } from '../services/auditLog';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   RefreshCw, Search, Upload, Download, ShoppingCart, Plus, Scan,
@@ -216,6 +217,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           await updateDoc(doc(db, 'inventory', existing.id), payload);
         } else {
           await addDoc(collection(db, 'inventory'), { ...payload, createdAt: serverTimestamp() });
+          logAudit('CSV Ürün Ekleme', `${payload.name ?? payload.sku ?? ''} CSV ile eklendi`);
         }
         upserted++;
       }
@@ -918,6 +920,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                                 onConfirm: async () => {
                                   try {
                                     await deleteDoc(doc(db, 'inventory', item.id));
+                            logAudit('Ürün Silme', `${item.name} (${item.sku}) silindi`);
                                   } catch (error) {
                                     logFirestoreError(error as Error, OperationType.DELETE, `inventory/${item.id}`);
                                   }

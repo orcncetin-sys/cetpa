@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logAudit } from '../services/auditLog';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
@@ -84,6 +85,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
 
       if (initialData?.id) {
         await updateDoc(doc(db, 'inventory', initialData.id), data);
+        logAudit('Ürün Güncelleme', `${data.name ?? initialData.id} güncellendi`);
 
         // Log stock adjustment if quantity changed
         const oldStock = Number(initialData.stockLevel) || 0;
@@ -105,6 +107,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
         }
       } else {
         const companyId = auth.currentUser?.uid ?? 'unknown';
+        logAudit('Ürün Ekleme', `${data.name ?? ''} (${data.sku ?? ''}) eklendi`);
         const newRef = await addDoc(collection(db, 'inventory'), {
           ...data,
           companyId,

@@ -55,11 +55,18 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
   }
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    (req as Request & { uid: string }).uid = decoded.uid;
+    (req as Request & { uid: string; userEmail?: string }).uid = decoded.uid;
+    (req as Request & { uid: string; userEmail?: string }).userEmail = decoded.email;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token.' });
   }
+}
+
+/** Actor info extracted from an authenticated request — for audit logging. */
+function reqActor(req: Request): { uid: string; email: string } {
+  const r = req as Request & { uid?: string; userEmail?: string };
+  return { uid: r.uid || 'system', email: r.userEmail || '' };
 }
 
 // ── Luca API helpers ────────────────────────────────────────────────────────
@@ -348,7 +355,10 @@ async function mikroPost(
   return { ok: res.ok, status: res.status, data };
 }
 
-/** Write a sync event to the syncLog Firestore collection */
+/** Write a sync event to the syncLog Firestore collection.
+ *  When `actor` is provided, ALSO writes an auditLog entry so the operation
+ *  shows up in the Admin > Denetim Kaydı screen (filtered by companyId).
+ */
 async function writeSyncLog(
   operation: string,
   entityType: string,
@@ -356,7 +366,8 @@ async function writeSyncLog(
   success:    boolean,
   mikroRef:   string | null,
   error:      string | null,
-  duration:   number
+  duration:   number,
+  actor?:     { uid: string; email: string }
 ): Promise<void> {
   if (!adminDb) return;
   try {
@@ -369,9 +380,40 @@ async function writeSyncLog(
       mikroRef,
       error,
       duration,
+      ...(actor ? { userId: actor.uid, userEmail: actor.email } : {}),
     });
   } catch (e) {
     console.warn('syncLog write failed:', e);
+  }
+  if (actor) {
+    await writeAuditLog(actor, operation, success
+      ? `${entityType}/${entityId}${mikroRef ? ` → ${mikroRef}` : ''} (${duration}ms)`
+      : `HATA: ${error} — ${entityType}/${entityId}`);
+  }
+}
+
+/** Write an entry to the auditLog collection — same schema the client's
+ *  logAuditAction uses, so server-side operations appear in the audit screen.
+ */
+async function writeAuditLog(
+  actor:   { uid: string; email: string },
+  action:  string,
+  details: string
+): Promise<void> {
+  if (!adminDb) return;
+  try {
+    await adminDb.collection('auditLog').add({
+      action,
+      details,
+      userId:    actor.uid,
+      companyId: actor.uid,
+      userName:  actor.email || 'Sunucu',
+      userEmail: actor.email,
+      source:    'server',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('auditLog write failed:', e);
   }
 }
 
@@ -676,6 +718,8 @@ async function startServer() {
       }
       const ordersData = await ordersResponse.json();
 
+      await writeAuditLog(reqActor(req), 'Shopify Senkronizasyon',
+        `${(productsData.products || []).length} ürün, ${(ordersData.orders || []).length} sipariş çekildi`);
       res.json({ 
         message: "Shopify sync completed successfully", 
         products: productsData.products || [],
@@ -749,6 +793,8 @@ async function startServer() {
       }
 
       const data = await shopifyRes.json();
+      await writeAuditLog(reqActor(req), 'Shopify Taslak Sipariş',
+        `#${data.draft_order.order_number || data.draft_order.id} oluşturuldu`);
       res.json({
         shopifyDraftOrderId: `#${data.draft_order.order_number || data.draft_order.id}`,
         shopifyAdminUrl: data.draft_order.admin_graphql_api_id,
@@ -999,6 +1045,7 @@ async function startServer() {
       const data = await r.json();
       if (!r.ok) return res.status(r.status).json({ success: false, error: data.message || 'Luca fatura gönderim hatası' });
       // Real Luca response should include ettn field
+      await writeAuditLog(reqActor(req), 'Luca e-Fatura Gönderim', `ETTN: ${data.ettn || data.uuid || data.id}`);
       res.json({ success: true, message: 'Fatura Luca e-Fatura sistemine iletildi.', ettn: data.ettn || data.uuid || data.id });
     } catch (err) {
       console.error('Luca fatura-gonder error:', err);
@@ -1238,7 +1285,7 @@ async function startServer() {
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
-  app.post('/api/inventory/auto-reorder', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/inventory/auto-reorder', requireAuth, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
       const snap = await adminDb.collection('inventory').get();
@@ -1286,6 +1333,7 @@ async function startServer() {
       }
       await batch.commit();
 
+      await writeAuditLog(reqActor(req), 'Otomatik Sipariş', `${created.length} taslak SAS oluşturuldu (${lowStock.length} kritik stok)`);
       res.json({ success: true, created: created.length, lowStockCount: lowStock.length, items: lowStock.map(i => i.name) });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -1358,7 +1406,7 @@ async function startServer() {
       const mikroStoKod = stok.sto_kod;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId, success, mikroStoKod, errorMsg, duration);
+      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId, success, mikroStoKod, errorMsg, duration, reqActor(req));
 
       if (adminDb && firebaseId && success) {
         await adminDb.collection('inventory').doc(firebaseId).update({
@@ -1372,7 +1420,7 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId || 'unknown', false, null, errorMsg, duration);
+      await writeSyncLog('StokKaydetV2', 'inventory', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       console.error('Mikro StokKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -1417,6 +1465,7 @@ async function startServer() {
         }
       }
 
+      await writeAuditLog(reqActor(req), 'Mikro Stok Listesi Çekme', `${Array.isArray(stoklar) ? stoklar.length : 0} stok kaydı çekildi`);
       res.json({ success: true, count: Array.isArray(stoklar) ? stoklar.length : 0, data: stoklar, duration: Date.now() - t0 });
     } catch (err) {
       console.error('Mikro StokListesiV2 hatası:', err);
@@ -1478,7 +1527,7 @@ async function startServer() {
       const success = ok && !r0?.IsError;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('CariKaydetV2', 'lead', firebaseId, success, cariKod, errorMsg, duration);
+      await writeSyncLog('CariKaydetV2', 'lead', firebaseId, success, cariKod, errorMsg, duration, reqActor(req));
 
       if (adminDb && firebaseId && success) {
         await adminDb.collection('leads').doc(firebaseId).update({
@@ -1492,7 +1541,7 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('CariKaydetV2', 'lead', firebaseId || 'unknown', false, null, errorMsg, duration);
+      await writeSyncLog('CariKaydetV2', 'lead', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       console.error('Mikro CariKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -1533,6 +1582,7 @@ async function startServer() {
         }
       }
 
+      await writeAuditLog(reqActor(req), 'Mikro Cari Listesi Çekme', `${Array.isArray(cariler) ? cariler.length : 0} cari kaydı çekildi`);
       res.json({ success: true, count: Array.isArray(cariler) ? cariler.length : 0, data: cariler, duration: Date.now() - t0 });
     } catch (err) {
       console.error('Mikro CariListesiV2 hatası:', err);
@@ -1584,7 +1634,7 @@ async function startServer() {
       const mikroEvrakNo = (md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration);
+      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration, reqActor(req));
 
       if (adminDb && firebaseId && success) {
         await adminDb.collection('orders').doc(firebaseId).update({
@@ -1598,7 +1648,7 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration);
+      await writeSyncLog('SiparisKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       console.error('Mikro SiparisKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -1715,14 +1765,14 @@ async function startServer() {
       await commitBatch();
 
       const duration = Date.now() - t0;
-      await writeSyncLog('ImportStok', 'inventory', 'bulk', true, null, null, duration);
+      await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel`, true, null, null, duration, reqActor(req));
       console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
       res.json({ success: true, created, updated, errors, duration });
 
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('ImportStok', 'inventory', 'bulk', false, null, errorMsg, duration);
+      await writeSyncLog('ImportStok', 'inventory', 'bulk', false, null, errorMsg, duration, reqActor(req));
       console.error('Stok import genel hatası:', err);
       res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
     }
@@ -1824,14 +1874,14 @@ async function startServer() {
       await commitBatch();
 
       const duration = Date.now() - t0;
-      await writeSyncLog('ImportCari', 'lead', 'bulk', true, null, null, duration);
+      await writeSyncLog('ImportCari', 'lead', `${created} yeni / ${updated} güncel`, true, null, null, duration, reqActor(req));
       console.log(`Cari import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
       res.json({ success: true, created, updated, errors, duration });
 
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('ImportCari', 'lead', 'bulk', false, null, errorMsg, duration);
+      await writeSyncLog('ImportCari', 'lead', 'bulk', false, null, errorMsg, duration, reqActor(req));
       console.error('Cari import genel hatası:', err);
       res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
     }
@@ -1881,7 +1931,7 @@ async function startServer() {
       const ettn          = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
       const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration);
+      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, reqActor(req));
       if (adminDb && firebaseId && success) {
         await adminDb.collection('orders').doc(firebaseId).set({
           mikroFaturaNo,
@@ -1896,7 +1946,7 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration);
+      await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       res.status(500).json({ success: false, error: errorMsg });
     }
   });
@@ -1953,7 +2003,7 @@ async function startServer() {
       const irsaliyeEttn  = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
       const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration);
+      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, reqActor(req));
       if (adminDb && firebaseId && success) {
         await adminDb.collection('shipments').doc(firebaseId).set({
           irsaliyeNo,
@@ -1966,7 +2016,7 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', false, null, errorMsg, duration);
+      await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       res.status(500).json({ success: false, error: errorMsg });
     }
   });
@@ -2008,6 +2058,7 @@ async function startServer() {
           updated++;
         } catch { errors++; }
       }
+      await writeAuditLog(reqActor(req), 'Mikro Bakiye Çekme', `${updated} cari bakiyesi güncellendi, ${errors} hata`);
       res.json({ success: true, total: leadsSnap.size, updated, errors, duration: Date.now() - t0 });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -2048,6 +2099,7 @@ async function startServer() {
         syncedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
 
+      await writeAuditLog(reqActor(req), 'Mikro Mizan Çekme', `${period} dönemi — ${rows.length} hesap satırı`);
       res.json({ success: true, period, rowCount: rows.length, duration: Date.now() - t0 });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -2141,6 +2193,7 @@ async function startServer() {
         rawData: md,
         syncedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', `${period} dönemi KDV özeti alındı`);
       res.json({ success: true, period, data: md, duration: Date.now() - t0 });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -2230,6 +2283,8 @@ async function startServer() {
           }
         }
       }
+      await writeAuditLog(reqActor(req), 'Trendyol Senkronizasyon', `${orders.length} sipariş — ${created} yeni, ${updated} güncellendi`);
+      await writeAuditLog(reqActor(req), 'Hepsiburada Senkronizasyon', `${orders.length} sipariş — ${created} yeni, ${updated} güncellendi`);
       res.json({ success: true, total: orders.length, created, updated, duration: Date.now() - t0 });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -2365,6 +2420,7 @@ async function startServer() {
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
+        await writeAuditLog(reqActor(req), 'WhatsApp Mesaj', `${phone} numarasına gönderildi (360dialog)`);
         return res.json({ success: true, provider: '360dialog', data });
       } catch (e) {
         return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -2391,6 +2447,7 @@ async function startServer() {
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
+        await writeAuditLog(reqActor(req), 'WhatsApp Mesaj', `${phone} numarasına gönderildi (Twilio)`);
         return res.json({ success: true, provider: 'twilio', data });
       } catch (e) {
         return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -2923,6 +2980,7 @@ async function startServer() {
           hasInvoice:   true,
         }, { merge: true });
       }
+      await writeAuditLog(reqActor(req), 'Luca Fatura Sync', success ? `Fatura ${lucaFaturaNo ?? ''} Luca'ya aktarıldı` : 'HATA: Luca fatura aktarımı başarısız');
       res.json({ success, lucaFaturaNo, data, duration });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -2930,7 +2988,7 @@ async function startServer() {
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
-  app.post('/api/luca/sync/stok', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/luca/sync/stok', requireAuth, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -2965,6 +3023,7 @@ async function startServer() {
         else             { batch.set(ref, { ...data2, createdAt: admin.firestore.FieldValue.serverTimestamp() }); created++; }
       }
       await batch.commit();
+      await writeAuditLog(reqActor(req), 'Luca Stok Sync', `${items.length} ürün — ${created} yeni, ${updated} güncellendi`);
       res.json({ success: true, total: items.length, created, updated, duration: Date.now() - t0 });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -3147,6 +3206,7 @@ async function startServer() {
           iyzicoSandbox:      creds.baseUrl.includes('sandbox'),
         }, { merge: true });
       }
+      if (success) await writeAuditLog(reqActor(req), 'İyzico Ödeme Linki', `Sipariş ${orderId} için ödeme linki oluşturuldu (${amount} ${currency})`);
       res.json({ success, paymentPageUrl: d.paymentPageUrl, token: d.token, error: d.errorMessage });
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
@@ -3277,6 +3337,7 @@ async function startServer() {
           sentAt:     admin.firestore.FieldValue.serverTimestamp(),
         });
       }
+      if (!result.error) await writeAuditLog(reqActor(req), 'WhatsApp Sipariş Bildirimi', `${phone} — sipariş durumu: ${status}`);
       res.json({ success: !result.error, messageId: result.messageId, error: result.error });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

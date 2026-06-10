@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logAudit } from '../services/auditLog';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Plus, Trash2, Save, Search, Package, User, DollarSign, Calendar, FileText } from 'lucide-react';
@@ -102,7 +103,9 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
 
       if (initialData) {
         await setDoc(doc(db, 'quotations', initialData.id), quotationData, { merge: true });
+        logAudit('Teklif Güncelleme', `${selectedLead.name} teklifi güncellendi`);
       } else {
+        logAudit('Teklif Oluşturma', `${selectedLead.name} için teklif oluşturuldu`);
         await addDoc(collection(db, 'quotations'), {
           ...quotationData,
           createdAt: serverTimestamp(),
