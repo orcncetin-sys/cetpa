@@ -230,7 +230,7 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
       calismaYili:   (d.calismaYili   as string) || String(new Date().getFullYear()),
       apiKey:        apiKey  || '',
       kullaniciKodu: (d.kullaniciKodu as string) || 'SRV',
-      sifre:         toMd5IfPlain((d.sifre as string) || ''),
+      sifre:         (d.sifre as string) || '',
       firmaNo:       Number(d.firmaNo  ?? 0),
       subeNo:        Number(d.subeNo   ?? 0),
     };
@@ -277,6 +277,12 @@ async function getMikroToken(creds: MikroCreds): Promise<string> {
   return data.access_token;
 }
 
+/** Mikro Jump API requires a daily-rotating hash: MD5("YYYY-MM-DD " + plainPassword) */
+function buildMikroDailySifre(plainPassword: string): string {
+  const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  return createHash('md5').update(`${today} ${plainPassword}`).digest('hex');
+}
+
 function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
   return {
     Alias:         creds.alias,
@@ -284,7 +290,7 @@ function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
     CalismaYili:   creds.calismaYili,
     ApiKey:        creds.apiKey,
     KullaniciKodu: creds.kullaniciKodu,
-    Sifre:         creds.sifre,
+    Sifre:         buildMikroDailySifre(creds.sifre),
     FirmaNo:       creds.firmaNo,
     SubeNo:        creds.subeNo,
   };
