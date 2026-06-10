@@ -1314,9 +1314,10 @@ async function startServer() {
       if (ok && r0 && !r0.IsError) {
         return res.json({ configured: true, connected: true });
       }
+      console.warn('Mikro status probe failed:', JSON.stringify(data)?.slice(0, 300));
       res.json({
         configured: true, connected: false,
-        error: (r0?.ErrorMessage as string) || 'Mikro API bağlantı hatası',
+        error: (r0?.ErrorMessage as string) || `Mikro API bağlantı hatası (HTTP ${ok ? 200 : 'err'}: ${JSON.stringify(data)?.slice(0, 120)})`,
       });
     } catch (err) {
       res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
