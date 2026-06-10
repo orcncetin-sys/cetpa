@@ -332,27 +332,41 @@ async function mikroPost(
   const creds = await getMikroCreds();
   if (!creds) throw new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.');
 
-  const token = await getMikroToken(creds);
-  const url   = `${MIKRO_API_BASE}/${endpoint}`;
+  const url = `${MIKRO_API_BASE}/${endpoint}`;
 
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }),
-  });
+  const doCall = async (): Promise<{ ok: boolean; status: number; data: unknown }> => {
+    const token = await getMikroToken(creds);
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }),
+    });
+    const text = await res.text();
+    let data: unknown;
+    try { data = JSON.parse(text); } catch { data = text; }
+    if (!res.ok) {
+      console.warn(`Mikro ${endpoint} HTTP ${res.status}:`, text.substring(0, 300));
+    }
+    return { ok: res.ok, status: res.status, data };
+  };
 
-  const text = await res.text();
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { data = text; }
+  let result = await doCall();
 
-  if (!res.ok) {
-    console.warn(`Mikro ${endpoint} HTTP ${res.status}:`, text.substring(0, 300));
+  // Mikro IDM tek oturumlu: başka bir yerden token alınınca cache'lenmiş token
+  // sessizce geçersizleşir ve API 'result' anahtarı olmayan stub döner
+  // ({"Method": "..."}). Bu durumda cache'i boşalt, taze token ile bir kez dene.
+  const isStub = (d: unknown) =>
+    !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
+  if (result.ok && isStub(result.data)) {
+    console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
+    mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
+    result = await doCall();
   }
 
-  return { ok: res.ok, status: res.status, data };
+  return result;
 }
 
 /** Write a sync event to the syncLog Firestore collection.
