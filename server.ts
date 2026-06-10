@@ -374,16 +374,27 @@ async function mikroPost(
   // Mikro IDM tek oturumlu: başka bir yerden token alınınca cache'lenmiş token
   // sessizce geçersizleşir ve API 'result' anahtarı olmayan stub döner
   // ({"Method": "..."}). Bu durumda cache'i boşalt, taze token ile bir kez dene.
+  // ANCAK: taze token da stub alırsa sorun Mikro tarafındadır (kilit/bakım) —
+  // 5 dk boyunca tekrar token üretme ki kendi kendimize kilidi uzatmayalım.
   const isStub = (d: unknown) =>
     !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
   if (result.ok && isStub(result.data)) {
-    console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
-    mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
-    result = await doCall();
+    const cacheKey = `${creds.idmEmail}|${creds.alias}`;
+    const lastRefresh = mikroStubRefreshAt.get(cacheKey) ?? 0;
+    if (Date.now() - lastRefresh > 5 * 60 * 1000) {
+      console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
+      mikroStubRefreshAt.set(cacheKey, Date.now());
+      mikroTokenCacheMap.delete(cacheKey);
+      result = await doCall();
+    } else {
+      console.warn(`Mikro ${endpoint}: stub yanıt — backoff aktif (5 dk), token YENİLENMEDİ`);
+    }
   }
 
   return result;
 }
+// Stub sonrası token tazeleme zaman damgası — refresh fırtınasını önler
+const mikroStubRefreshAt = new Map<string, number>();
 
 /** Write a sync event to the syncLog Firestore collection.
  *  When `actor` is provided, ALSO writes an auditLog entry so the operation
