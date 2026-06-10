@@ -1304,10 +1304,11 @@ async function startServer() {
       return res.json({ configured: false, connected: false, message: 'Mikro kimlik bilgileri yapılandırılmamış. Ayarlar > Mikro ERP bölümünden girin.' });
     }
     try {
+      // NOT: Size 5'in altında Mikro 'result' anahtarı olmayan bozuk yanıt dönüyor
       const { ok, data } = await mikroPost('StokListesiV2', {
         StokKod: '', TarihTipi: 2,
         IlkTarih: '2000-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
-        Sort: 'sto_kod', Size: '1', Index: 0,
+        Sort: 'sto_kod', Size: '5', Index: 0,
       });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (ok && r0 && !r0.IsError) {
@@ -1989,7 +1990,7 @@ async function startServer() {
         try {
           const { ok, data } = await mikroPost('CariHareketListesiV2', {
             CariKod: cariKod,
-            Size: '1',    // We only need the running balance; some versions return it in the header
+            Size: '5',    // Mikro returns a malformed response (no 'result' key) for Size < 5
             Index: 0,
           });
           if (!ok) { errors++; continue; }
