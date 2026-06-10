@@ -2046,11 +2046,12 @@ function AppContent() {
     setBudgets(allBudgetsFirestore[budgetMonth] ?? []);
   }, [budgetMonth, allBudgetsFirestore]);
   const [butceCurrency, setButceCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
-  // Merge Firestore category master list with any category strings on existing inventory items
-  const inventoryCategories = [...new Set([
-    ...firestoreCategories,
-    ...inventory.map(i => i.category).filter((c): c is string => !!c)
-  ])].sort();
+  // Kategori chip'leri YALNIZCA envanterdeki gerçek ürünlerden türer —
+  // categories koleksiyonundaki dummy/eski kayıtlar filtreye sızamaz.
+  // (firestoreCategories ürün formu dropdown'ı için ayrıca duruyor.)
+  const inventoryCategories = [...new Set(
+    inventory.map(i => i.category).filter((c): c is string => !!c)
+  )].sort((a, b) => a.localeCompare(b, 'tr'));
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // ── Confirmation Modal state (replaces PIN + window.confirm) ──────────────
