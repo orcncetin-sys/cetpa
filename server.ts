@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
+import compression from "compression";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
 import { fileURLToPath } from "url";
@@ -569,6 +570,9 @@ async function startServer() {
 
   // Trust the first proxy (nginx/Cloudflare) so express-rate-limit reads real IP
   app.set('trust proxy', 1);
+
+  // Gzip compression for all responses (API + static)
+  app.use(compression());
 
   // ── Rate Limiters ────────────────────────────────────────────────────────────
   /** General API — 300 req / 15 min per IP */
@@ -3940,7 +3944,13 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Hashed assets (JS/CSS with content hash in filename) — cache 1 year
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true,
+    }));
+    // Everything else (index.html, icons) — no cache so new deploys are picked up
+    app.use(express.static(distPath, { maxAge: 0 }));
     app.use((_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
