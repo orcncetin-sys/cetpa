@@ -4016,8 +4016,8 @@ function AppContent() {
                   { id: 'risk', label: currentLanguage === 'tr' ? 'Risk & Uyarılar' : 'Risk & Alerts', icon: AlertTriangle },
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
                   { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
-                  ...(userRole === 'Admin' ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
-                  ...(userRole === 'Admin' || userRole === 'Manager' ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
+                  ...(userRole === 'Admin' || isOwnerAdmin ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
+                  ...(userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
                   const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe', mrp:'inventory', holding:'muhasebe', muhtasar:'ik', mobilewms:'lojistik', gelirtanima:'muhasebe' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
@@ -13860,7 +13860,7 @@ function AppContent() {
 )}
 
           {/* ── Settings / Ayarlar ── */}
-          {activeTab === 'settings' && (userRole === 'Admin' || userRole === 'Manager') && (
+          {activeTab === 'settings' && (userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin) && (
             <motion.div key="settings" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 max-w-3xl">
 
               {/* ─── Subscription Management ─── */}
