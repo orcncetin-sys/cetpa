@@ -73,14 +73,16 @@ const SECRET_PATTERN = /PASSWORD|SECRET|KEY|TOKEN/i;
 interface CredsEditorProps {
   erp: ErpInfo;
   lang: boolean;
+  connected?: boolean;
   onSaved?: () => void;
 }
 
-function ErpCredentialsEditor({ erp, lang, onSaved }: CredsEditorProps) {
+function ErpCredentialsEditor({ erp, lang, connected, onSaved }: CredsEditorProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     getDoc(doc(db, 'settings', erp.id)).then(snap => {
@@ -109,6 +111,9 @@ function ErpCredentialsEditor({ erp, lang, onSaved }: CredsEditorProps) {
     }
   }, [erp, values, onSaved]);
 
+  const hasFirestoreValues = erp.requiredEnvVars.some(v => values[v]);
+  const showConfigured = connected && !hasFirestoreValues && !editing;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-1">
@@ -117,6 +122,23 @@ function ErpCredentialsEditor({ erp, lang, onSaved }: CredsEditorProps) {
           {lang ? 'Bağlantı Bilgileri' : 'Credentials'}
         </span>
       </div>
+
+      {showConfigured ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3">
+          <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-emerald-700">{lang ? 'Sunucu ortam değişkenlerinden yapılandırıldı' : 'Configured via server environment variables'}</p>
+            <p className="text-[11px] text-emerald-600 mt-0.5">{lang ? 'Kimlik bilgileri .env dosyasında güvenli şekilde saklanıyor.' : 'Credentials are securely stored in the .env file.'}</p>
+          </div>
+          <button
+            onClick={() => setEditing(true)}
+            className="text-[11px] font-bold text-emerald-700 border border-emerald-300 rounded-lg px-3 py-1.5 hover:bg-emerald-100 transition-colors shrink-0"
+          >
+            {lang ? 'Üstüne Yaz' : 'Override'}
+          </button>
+        </div>
+      ) : (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {erp.requiredEnvVars.map(envVar => {
           const isSecret = SECRET_PATTERN.test(envVar);
@@ -155,6 +177,11 @@ function ErpCredentialsEditor({ erp, lang, onSaved }: CredsEditorProps) {
           {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           {lang ? 'Kaydet' : 'Save'}
         </button>
+        {editing && (
+          <button onClick={() => setEditing(false)} className="text-[11px] text-gray-400 hover:text-gray-600">
+            {lang ? 'İptal' : 'Cancel'}
+          </button>
+        )}
         {saved && (
           <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -165,6 +192,8 @@ function ErpCredentialsEditor({ erp, lang, onSaved }: CredsEditorProps) {
           {lang ? 'Bilgiler güvenli olarak saklanır.' : 'Credentials stored securely.'}
         </span>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -434,7 +463,7 @@ function ErpCard({
 
           <div className="p-4">
             {credTab === 'creds' ? (
-              <ErpCredentialsEditor erp={erp} lang={t} />
+              <ErpCredentialsEditor erp={erp} lang={t} connected={status?.connected} />
             ) : (
               <Suspense fallback={
                 <div className="flex items-center justify-center gap-2 py-8 text-gray-400 text-sm">
