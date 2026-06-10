@@ -4417,15 +4417,15 @@ function AppContent() {
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                   <p className="text-xs text-amber-800 font-medium">
                     {currentLanguage === 'tr'
-                      ? '⚠️ Kamu sektörü ve finans kuruluşları için yerli sunucu seçeneğini inceleyiniz: info@cetpa.io'
-                      : '⚠️ Public sector & financial institutions: inquire about on-premise hosting at info@cetpa.io'}
+                      ? '⚠️ Kamu sektörü ve finans kuruluşları için yerli sunucu seçeneğini inceleyiniz: info@cetpa.com.tr'
+                      : '⚠️ Public sector & financial institutions: inquire about on-premise hosting at info@cetpa.com.tr'}
                   </p>
                 </div>
-                <div className="flex gap-3">
-                  <button onClick={acceptKvkk} className="apple-button-primary flex-1 py-3 text-sm font-bold">
+                <div className="flex flex-col gap-3">
+                  <button onClick={acceptKvkk} className="apple-button-primary w-full py-3 text-sm font-bold">
                     {currentLanguage === 'tr' ? 'Okudum, Kabul Ediyorum' : 'I Understand & Accept'}
                   </button>
-                  <a href="mailto:info@cetpa.io?subject=KVKK" className="apple-button-secondary flex-1 py-3 text-sm font-bold text-center">
+                  <a href="mailto:info@cetpa.com.tr?subject=KVKK" className="apple-button-secondary w-full py-3 text-sm font-bold text-center">
                     {currentLanguage === 'tr' ? 'Sorun Var?' : 'Concerns?'}
                   </a>
                 </div>

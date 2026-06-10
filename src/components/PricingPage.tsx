@@ -308,21 +308,21 @@ export default function PricingPage({
           transition={{ delay: 0.5 }}
           className="max-w-3xl mx-auto mb-16"
         >
-          <h2 className="text-2xl sm:text-3xl font-black text-white text-center mb-8">
+          <h2 className={cn("text-2xl sm:text-3xl font-black text-center mb-8", darkMode ? "text-white" : "text-[#1D1D1F]")}>
             {t.faqTitle}
           </h2>
           <div className="space-y-3">
             {faqs.map((faq, i) => (
               <div
                 key={i}
-                className="bg-white/[0.04] backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden transition-all hover:border-white/20"
+                className={cn("backdrop-blur-sm border rounded-2xl overflow-hidden transition-all", darkMode ? "bg-white/[0.04] border-white/10 hover:border-white/20" : "bg-white border-black/8 hover:border-black/15 shadow-sm")}
               >
                 <button
                   onClick={() => setExpandedFaq(expandedFaq === i ? null : i)}
                   className="w-full flex items-center justify-between p-5 text-left"
                 >
-                  <span className="text-white font-bold text-sm pr-4">{faq.q}</span>
-                  <ChevronDown className={`w-5 h-5 text-white/40 flex-shrink-0 transition-transform ${expandedFaq === i ? 'rotate-180' : ''}`} />
+                  <span className={cn("font-bold text-sm pr-4", darkMode ? "text-white" : "text-[#1D1D1F]")}>{faq.q}</span>
+                  <ChevronDown className={cn(`w-5 h-5 flex-shrink-0 transition-transform ${expandedFaq === i ? 'rotate-180' : ''}`, darkMode ? "text-white/40" : "text-black/30")} />
                 </button>
                 <AnimatePresence>
                   {expandedFaq === i && (
@@ -332,7 +332,7 @@ export default function PricingPage({
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <p className="px-5 pb-5 text-white/50 text-sm leading-relaxed">{faq.a}</p>
+                      <p className={cn("px-5 pb-5 text-sm leading-relaxed", darkMode ? "text-white/50" : "text-black/55")}>{faq.a}</p>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -348,7 +348,7 @@ export default function PricingPage({
             { icon: CreditCard, text: t.guarantee },
             { icon: Globe, text: t.global },
           ].map(({ icon: Icon, text }, i) => (
-            <div key={i} className="flex items-center gap-2 text-white/30">
+            <div key={i} className={cn("flex items-center gap-2", darkMode ? "text-white/30" : "text-black/30")}>
               <Icon className="w-4 h-4" />
               <span className="text-xs font-bold uppercase tracking-wider">{text}</span>
             </div>
