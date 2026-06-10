@@ -4,7 +4,7 @@ import {
   Package, Users, ShoppingCart, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { collection, query, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { byField } from '../utils/fsSort';
@@ -151,10 +151,15 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   }
 
   // ── Pull-flow handlers ─────────────────────────────────────────────────────
+  async function authHeaders(): Promise<Record<string, string>> {
+    const token = await auth.currentUser?.getIdToken();
+    return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  }
+
   async function handlePullBakiye() {
     setBakiyePull({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/mikro/pull/bakiye', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const r = await fetch('/api/mikro/pull/bakiye', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
       const d = await r.json() as { success: boolean; updated?: number; skipped?: number; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
@@ -167,7 +172,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   async function handlePullMizan() {
     setMizanPull({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/mikro/pull/mizan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period: pullPeriod }) });
+      const r = await fetch('/api/mikro/pull/mizan', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
       const d = await r.json() as { success: boolean; period?: string; rows?: number; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
@@ -180,7 +185,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   async function handlePullKdv() {
     setKdvPull({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/mikro/pull/kdv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ period: pullPeriod }) });
+      const r = await fetch('/api/mikro/pull/kdv', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
       const d = await r.json() as { success: boolean; period?: string; kdvMatrahi?: number; hesaplananKdv?: number; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
