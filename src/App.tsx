@@ -757,6 +757,8 @@ function AppContent() {
   const [companySettings, setCompanySettings] = useState<Record<string, unknown>>({});
   const [geminiApiKeySetting, setGeminiApiKeySetting] = useState('');
   const [savingGeminiKey, setSavingGeminiKey] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
   const [mikroSettings, setMikroSettings] = useState<Partial<MikroConfig>>({});
   // Notification preferences — must be top-level (not inside conditional IIFE) to respect Rules of Hooks
@@ -14240,18 +14242,35 @@ function AppContent() {
 
               {/* Ayarları kaydet */}
               <button
+                disabled={savingSettings || settingsSaved}
                 onClick={async () => {
+                  setSavingSettings(true);
+                  setSettingsSaved(false);
                   try {
                     await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
+                    setSettingsSaved(true);
                     toast(currentLanguage==='tr'?'Ayarlar kaydedildi!':'Settings saved!', 'success');
+                    setTimeout(() => setSettingsSaved(false), 2500);
                   } catch (error) {
+                    console.error('[Settings save error]', error);
                     handleFirestoreError(error, OperationType.WRITE, 'settings/app');
-                    toast(currentLanguage==='tr'?'Hata oluştu!':'Error occurred!', 'error');
+                    toast(currentLanguage==='tr'?'Hata oluştu! Konsolu kontrol edin.':'Error occurred! Check console.', 'error');
+                  } finally {
+                    setSavingSettings(false);
                   }
                 }}
-                className="apple-button-primary w-full"
+                className={`w-full rounded-full py-3 text-sm font-semibold transition-all ${
+                  settingsSaved
+                    ? 'bg-green-500 text-white'
+                    : 'apple-button-primary'
+                } disabled:opacity-60 disabled:cursor-not-allowed`}
               >
-                {currentLanguage==='tr'?'Ayarları Kaydet':'Save Settings'}
+                {savingSettings
+                  ? (currentLanguage==='tr' ? 'Kaydediliyor…' : 'Saving…')
+                  : settingsSaved
+                    ? (currentLanguage==='tr' ? '✓ Kaydedildi' : '✓ Saved')
+                    : (currentLanguage==='tr' ? 'Ayarları Kaydet' : 'Save Settings')
+                }
               </button>
 
               {/* Firebase / General */}
