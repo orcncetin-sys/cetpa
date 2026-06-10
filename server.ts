@@ -13,20 +13,32 @@ import rateLimit from "express-rate-limit";
 dotenv.config();
 
 // ── Firebase Admin SDK ──────────────────────────────────────────────────────
-// Initialise once; used by server-side routes (webhook, etc.)
-// Locally: run `gcloud auth application-default login` OR set GOOGLE_APPLICATION_CREDENTIALS
-// In production (Firebase Hosting / Cloud Run) ADC is automatic.
 let adminDb: admin.firestore.Firestore | null = null;
 const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
 const PROJECT_ID = "gen-lang-client-0628151245";
 
 try {
-  const adminApp = admin.initializeApp({ projectId: PROJECT_ID });
+  let credential: admin.credential.Credential | undefined;
+
+  // Option 1: explicit env-var credentials (VDS / any server without ADC)
+  const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const fbKey   = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  if (fbEmail && fbKey) {
+    credential = admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey });
+    console.log("Firebase Admin: using FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY ✓");
+  }
+  // Option 2: GOOGLE_APPLICATION_CREDENTIALS file (local dev / Cloud Run ADC)
+  // Falls through to ADC automatically when credential is undefined
+
+  const adminApp = credential
+    ? admin.initializeApp({ credential, projectId: PROJECT_ID })
+    : admin.initializeApp({ projectId: PROJECT_ID });
+
   adminDb = adminApp.firestore();
   adminDb.settings({ databaseId: FIRESTORE_DB_ID });
   console.log("Firebase Admin SDK initialised ✓");
 } catch (e) {
-  console.warn("Firebase Admin SDK not initialised — webhook writes disabled:", (e as Error).message);
+  console.warn("Firebase Admin SDK not initialised:", (e as Error).message);
 }
 
 // ── Security: Firebase Auth middleware ──────────────────────────────────────
