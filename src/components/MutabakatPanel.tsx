@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -203,7 +204,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
   const fetchData = async () => {
     setLoading(true); setError(null); setData(null); setSent(null);
     try {
-      const r = await fetch(`/api/mutabakat/${leadId}`);
+      const r = await authFetch(`/api/mutabakat/${leadId}`);
       const d = await r.json() as MutabakatData & { error?: string };
       if (!d.success) throw new Error(d.error || 'Veri alınamadı.');
       setData(d);
@@ -230,7 +231,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
       const msg = t
         ? `Merhaba ${data.lead.name}, ${data.period} dönemi cari hesap mutabakat mektubumuz hazırlanmıştır. Toplam bakiye: ₺${data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}. Lütfen kayıtlarınızla karşılaştırınız.`
         : `Hello ${data.lead.name}, your account reconciliation letter for ${data.period} is ready. Total: ₺${data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}. Please compare with your records.`;
-      const r = await fetch('/api/whatsapp/send', {
+      const r = await authFetch('/api/whatsapp/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: data.lead.phone, message: msg }),
       });

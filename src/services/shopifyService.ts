@@ -1,7 +1,8 @@
 import { Order } from '../types';
+import { authFetch } from './authFetch';
 
 export const syncShopify = async (config?: { accessToken?: string; storeUrl?: string }): Promise<{ products: any[], orders: any[] }> => {
-  const res = await fetch('/api/shopify/sync', {
+  const res = await authFetch('/api/shopify/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -17,7 +18,7 @@ export const syncShopify = async (config?: { accessToken?: string; storeUrl?: st
 };
 
 export const createShopifyDraftOrder = async (order: Order): Promise<{ shopifyDraftOrderId: string }> => {
-  const res = await fetch('/api/shopify/draft-order', {
+  const res = await authFetch('/api/shopify/draft-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(order)

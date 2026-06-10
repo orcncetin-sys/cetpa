@@ -396,7 +396,10 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (!sku) continue;
         const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
         if (!snap.empty) {
-          await snap.docs[0].ref.update({ mikroData: s, mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp() });
+          await snap.docs[0].ref.update({
+            stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
+            mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
           stokUpdated++;
         }
       }
@@ -414,7 +417,11 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (!cariKod) continue;
         const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
         if (!snap.empty) {
-          await snap.docs[0].ref.update({ mikroData: c, mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp() });
+          await snap.docs[0].ref.update({
+            email:         (c.cari_EMail  as string) || '',
+            phone:         (c.cari_CepTel as string) || '',
+            mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
           cariUpdated++;
         }
       }
@@ -615,7 +622,7 @@ async function startServer() {
   // ... (keep existing routes)
   
   // Manual Sync Trigger
-  app.post("/api/shopify/sync", async (req: Request, res: Response) => {
+  app.post("/api/shopify/sync", requireAuth, async (req: Request, res: Response) => {
     const body = req.body || {};
     const accessToken = body.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
     let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
@@ -681,7 +688,7 @@ async function startServer() {
   });
 
   // Create Draft Order
-  app.post('/api/shopify/draft-order', async (req: Request, res: Response) => {
+  app.post('/api/shopify/draft-order', requireAuth, async (req: Request, res: Response) => {
     const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     const storeDomain = (() => {
       const raw = process.env.SHOPIFY_STORE_DOMAIN || 'cetpa.myshopify.com';
@@ -875,7 +882,7 @@ async function startServer() {
   });
 
   // GIB VKN Sorgulama
-  app.get("/api/gib/vkn/:vkt", async (req: Request, res: Response) => {
+  app.get("/api/gib/vkn/:vkt", requireAuth, async (req: Request, res: Response) => {
     const vkt = Array.isArray(req.params.vkt) ? req.params.vkt[0] : req.params.vkt;
     const apiKey = req.headers["x-gib-api-key"] as string;
     const integratorVkn = req.headers["x-gib-integrator-vkn"] as string;
@@ -949,7 +956,7 @@ async function startServer() {
   });
 
   // ── Luca Kontör Bakiyesi ─────────────────────────────────────────────────
-  app.get("/api/luca/kontor", async (_req: Request, res: Response) => {
+  app.get("/api/luca/kontor", requireAuth, async (_req: Request, res: Response) => {
     if (!LUCA_API_KEY) {
       return res.status(503).json({
         success: false,
@@ -971,7 +978,7 @@ async function startServer() {
   });
 
   // ── Luca e-Fatura Gönderimi ──────────────────────────────────────────────
-  app.post("/api/luca/fatura-gonder", async (req: Request, res: Response) => {
+  app.post("/api/luca/fatura-gonder", requireAuth, async (req: Request, res: Response) => {
     const { invoiceId, invoiceData } = req.body;
     console.log(`e-Fatura gönderimi başlatıldı: ${invoiceId}`);
 
@@ -1002,7 +1009,7 @@ async function startServer() {
   // ── Cargo Tracking Proxy Routes ──────────────────────────────────────────
 
   // DHL Tracking — https://developer.dhl.com/api-reference/shipment-tracking
-  app.get('/api/tracking/dhl/:trackingNumber', async (req: Request, res: Response) => {
+  app.get('/api/tracking/dhl/:trackingNumber', requireAuth, async (req: Request, res: Response) => {
     const apiKey = process.env.DHL_API_KEY;
     const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
 
@@ -1036,7 +1043,7 @@ async function startServer() {
   });
 
   // UPS Tracking — https://developer.ups.com/api/reference/tracking
-  app.get('/api/tracking/ups/:trackingNumber', async (req: Request, res: Response) => {
+  app.get('/api/tracking/ups/:trackingNumber', requireAuth, async (req: Request, res: Response) => {
     const clientId = process.env.UPS_CLIENT_ID;
     const clientSecret = process.env.UPS_CLIENT_SECRET;
     const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
@@ -1083,7 +1090,7 @@ async function startServer() {
   });
 
   // FedEx Tracking — https://developer.fedex.com/api/en-us/catalog/tracking
-  app.post('/api/tracking/fedex', async (req: Request, res: Response) => {
+  app.post('/api/tracking/fedex', requireAuth, async (req: Request, res: Response) => {
     const clientId = process.env.FEDEX_CLIENT_ID;
     const clientSecret = process.env.FEDEX_CLIENT_SECRET;
     const { trackingNumber } = req.body;
@@ -1156,7 +1163,7 @@ async function startServer() {
   }
 
   // Yurtiçi Kargo
-  app.get('/api/tracking/yurtici/:no', async (req: Request, res: Response) => {
+  app.get('/api/tracking/yurtici/:no', requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.YURTICI_API_KEY;
     if (!apiKey) return res.json(trMockEvents('Yurtiçi', no, 'Dağıtımda'));
@@ -1176,7 +1183,7 @@ async function startServer() {
   });
 
   // MNG Kargo
-  app.get('/api/tracking/mng/:no', async (req: Request, res: Response) => {
+  app.get('/api/tracking/mng/:no', requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.MNG_API_KEY;
     if (!apiKey) return res.json(trMockEvents('MNG', no, 'Yolda'));
@@ -1194,7 +1201,7 @@ async function startServer() {
   });
 
   // Aras Kargo
-  app.get('/api/tracking/aras/:no', async (req: Request, res: Response) => {
+  app.get('/api/tracking/aras/:no', requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.ARAS_API_KEY;
     if (!apiKey) return res.json(trMockEvents('Aras', no, 'Transfer Merkezinde'));
@@ -1212,7 +1219,7 @@ async function startServer() {
   });
 
   // PTT Kargo
-  app.get('/api/tracking/ptt/:no', async (req: Request, res: Response) => {
+  app.get('/api/tracking/ptt/:no', requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     try {
       // PTT has a semi-public JSON endpoint
@@ -1287,15 +1294,29 @@ async function startServer() {
 
   // ── Mikro Jump API Routes ────────────────────────────────────────────────────
 
-  /** GET /api/mikro/status — is Mikro configured and token reachable? */
+  /** GET /api/mikro/status — is Mikro configured and the FULL API context working?
+   *  Makes a real StokListesiV2 call (Size=1) so wrong KullaniciKodu/Sifre/Alias
+   *  surface here instead of silently failing during imports.
+   */
   app.get('/api/mikro/status', async (_req: Request, res: Response) => {
     const statusCreds = await getMikroCreds();
     if (!statusCreds) {
       return res.json({ configured: false, connected: false, message: 'Mikro kimlik bilgileri yapılandırılmamış. Ayarlar > Mikro ERP bölümünden girin.' });
     }
     try {
-      await getMikroToken(statusCreds);
-      res.json({ configured: true, connected: true });
+      const { ok, data } = await mikroPost('StokListesiV2', {
+        StokKod: '', TarihTipi: 2,
+        IlkTarih: '2000-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
+        Sort: 'sto_kod', Size: '1', Index: 0,
+      });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      if (ok && r0 && !r0.IsError) {
+        return res.json({ configured: true, connected: true });
+      }
+      res.json({
+        configured: true, connected: false,
+        error: (r0?.ErrorMessage as string) || 'Mikro API bağlantı hatası',
+      });
     } catch (err) {
       res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
     }
@@ -1387,7 +1408,7 @@ async function startServer() {
             await snap.docs[0].ref.update({
               mikroStoKod:   sku,
               mikroSynced:   true,
-              mikroData:     s,
+              stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
               mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
           }
@@ -1502,7 +1523,8 @@ async function startServer() {
           const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
           if (!snap.empty) {
             await snap.docs[0].ref.update({
-              mikroData:     c,
+              email:         (c.cari_EMail  as string) || '',
+              phone:         (c.cari_CepTel as string) || '',
               mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
           }
@@ -1585,9 +1607,13 @@ async function startServer() {
   // update existing ones. Paginates automatically until all records are fetched.
 
   /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
-  app.post('/api/mikro/import/stok', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/mikro/import/stok', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+
+    // Data is scoped by companyId (= uid of the account owner) — the app's
+    // inventory listener filters on it, so imports MUST set it or items are invisible.
+    const companyId = (req as Request & { uid: string }).uid;
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
@@ -1596,6 +1622,22 @@ async function startServer() {
     let hasMore = true;
 
     try {
+      // Prefetch ALL existing inventory docs for this company → Map<sku, ref>
+      // (one query instead of one query per imported item)
+      const existingSnap = await adminDb.collection('inventory')
+        .where('companyId', '==', companyId).get();
+      const existingBySku = new Map<string, FirebaseFirestore.DocumentReference>();
+      for (const docSnap of existingSnap.docs) {
+        const sku = (docSnap.data().sku as string)?.trim();
+        if (sku && !existingBySku.has(sku)) existingBySku.set(sku, docSnap.ref);
+      }
+
+      let batch = adminDb.batch();
+      let batchOps = 0;
+      const commitBatch = async () => {
+        if (batchOps > 0) { await batch.commit(); batch = adminDb!.batch(); batchOps = 0; }
+      };
+
       while (hasMore) {
         const { ok, data } = await mikroPost('StokListesiV2', {
           StokKod: '', TarihTipi: 2,
@@ -1628,6 +1670,7 @@ async function startServer() {
             if (!prices['Dealer'] && s.sto_satis_fiyat4)        prices['Dealer']       = Number(s.sto_satis_fiyat4);
 
             const item = {
+              companyId,
               sku,
               name:             (s.sto_isim as string)     || sku,
               category:         (s.sto_grup_isim as string) || (s.sto_grup_kodu as string) || 'Genel',
@@ -1639,26 +1682,23 @@ async function startServer() {
               price:            prices['Retail'] || 0,
               mikroStoKod:      sku,
               mikroSynced:      true,
-              mikroData:        s,
               source:           'mikro_import',
+              mikroSyncedAt:    admin.firestore.FieldValue.serverTimestamp(),
             };
 
-            // Upsert: update if exists, create if not
-            const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
-            if (!snap.empty) {
-              await snap.docs[0].ref.update({
-                ...item,
-                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+            // Upsert via batch: update if exists, create if not
+            const existingRef = existingBySku.get(sku);
+            if (existingRef) {
+              batch.update(existingRef, item);
               updated++;
             } else {
-              await adminDb.collection('inventory').add({
-                ...item,
-                createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+              const newRef = adminDb.collection('inventory').doc();
+              batch.set(newRef, { ...item, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+              existingBySku.set(sku, newRef); // guard against duplicate SKUs across pages
               created++;
             }
+            batchOps++;
+            if (batchOps >= 450) await commitBatch();
           } catch (itemErr) {
             console.warn(`Stok import hatası (${sku}):`, itemErr);
             errors++;
@@ -1669,6 +1709,8 @@ async function startServer() {
         index += PAGE_SIZE;
         console.log(`Stok import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
       }
+
+      await commitBatch();
 
       const duration = Date.now() - t0;
       await writeSyncLog('ImportStok', 'inventory', 'bulk', true, null, null, duration);
@@ -1685,9 +1727,12 @@ async function startServer() {
   });
 
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
-  app.post('/api/mikro/import/cari', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/mikro/import/cari', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+
+    // Data is scoped by companyId — the app's leads listener filters on it.
+    const companyId = (req as Request & { uid: string }).uid;
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
@@ -1696,6 +1741,21 @@ async function startServer() {
     let hasMore = true;
 
     try {
+      // Prefetch existing leads for this company → Map<mikroCariKod, ref>
+      const existingSnap = await adminDb.collection('leads')
+        .where('companyId', '==', companyId).get();
+      const existingByKod = new Map<string, FirebaseFirestore.DocumentReference>();
+      for (const docSnap of existingSnap.docs) {
+        const kod = (docSnap.data().mikroCariKod as string)?.trim();
+        if (kod && !existingByKod.has(kod)) existingByKod.set(kod, docSnap.ref);
+      }
+
+      let batch = adminDb.batch();
+      let batchOps = 0;
+      const commitBatch = async () => {
+        if (batchOps > 0) { await batch.commit(); batch = adminDb!.batch(); batchOps = 0; }
+      };
+
       while (hasMore) {
         const { ok, data } = await mikroPost('CariListesiV2', {
           FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi,cari_muh_kod',
@@ -1719,6 +1779,7 @@ async function startServer() {
             const leadType = hareketTipi === 1 ? 'Supplier' : 'Customer';
 
             const lead = {
+              companyId,
               mikroCariKod:   cariKod,
               company:        unvan,
               name:           unvan,
@@ -1730,26 +1791,23 @@ async function startServer() {
               type:           leadType,
               status:         'Active',
               mikroSynced:    true,
-              mikroData:      c,
               source:         'mikro_import',
+              mikroSyncedAt:  admin.firestore.FieldValue.serverTimestamp(),
             };
 
-            // Upsert by mikroCariKod
-            const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
-            if (!snap.empty) {
-              await snap.docs[0].ref.update({
-                ...lead,
-                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+            // Upsert by mikroCariKod via batch
+            const existingRef = existingByKod.get(cariKod);
+            if (existingRef) {
+              batch.update(existingRef, lead);
               updated++;
             } else {
-              await adminDb.collection('leads').add({
-                ...lead,
-                createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-                mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+              const newRef = adminDb.collection('leads').doc();
+              batch.set(newRef, { ...lead, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+              existingByKod.set(cariKod, newRef);
               created++;
             }
+            batchOps++;
+            if (batchOps >= 450) await commitBatch();
           } catch (itemErr) {
             console.warn(`Cari import hatası (${cariKod}):`, itemErr);
             errors++;
@@ -1760,6 +1818,8 @@ async function startServer() {
         index += PAGE_SIZE;
         console.log(`Cari import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
       }
+
+      await commitBatch();
 
       const duration = Date.now() - t0;
       await writeSyncLog('ImportCari', 'lead', 'bulk', true, null, null, duration);
@@ -1995,7 +2055,7 @@ async function startServer() {
   // ── Mutabakat PDF Generation ─────────────────────────────────────────────────
   // GET /api/mutabakat/:leadId  — returns JSON data for client-side PDF generation
   // The client (MutabakatPanel) renders the PDF using jsPDF
-  app.get('/api/mutabakat/:leadId', async (req: Request, res: Response) => {
+  app.get('/api/mutabakat/:leadId', requireAuth, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin başlatılamadı.' });
     try {
       const leadId = req.params.leadId as string;
@@ -2125,7 +2185,7 @@ async function startServer() {
   });
 
   /** POST /api/trendyol/sync — pull recent orders → Firebase */
-  app.post('/api/trendyol/sync', async (req: Request, res: Response) => {
+  app.post('/api/trendyol/sync', requireAuth, async (req: Request, res: Response) => {
     const creds = await getTrendyolCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();
@@ -2212,7 +2272,7 @@ async function startServer() {
   });
 
   /** POST /api/hepsiburada/sync — pull recent orders → Firebase */
-  app.post('/api/hepsiburada/sync', async (req: Request, res: Response) => {
+  app.post('/api/hepsiburada/sync', requireAuth, async (req: Request, res: Response) => {
     const creds = await getHepsiburadaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();
@@ -2868,7 +2928,7 @@ async function startServer() {
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
-  app.post('/api/luca/sync/stok', async (_req: Request, res: Response) => {
+  app.post('/api/luca/sync/stok', requireAuth, async (_req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -2984,7 +3044,7 @@ async function startServer() {
   // Body: { orderId, amount, currency?, customerName, customerEmail, customerPhone?,
   //         shippingAddress?, taxId?, lineItems?, callbackUrl? }
   // On success: stores paymentPageUrl + iyzicoToken on orders/{orderId}
-  app.post('/api/iyzico/payment-link', async (req: Request, res: Response) => {
+  app.post('/api/iyzico/payment-link', requireAuth, async (req: Request, res: Response) => {
     const creds = await getIyzicoCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
 
@@ -3177,7 +3237,7 @@ async function startServer() {
   // POST /api/whatsapp/order-notification
   // Body: { orderId, status, phone, customerName, orderNo, lang }
   // Fire-and-forget safe — always 200 even if WA not configured
-  app.post('/api/whatsapp/order-notification', async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/order-notification', requireAuth, async (req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.json({ success: false, notConfigured: true });
 

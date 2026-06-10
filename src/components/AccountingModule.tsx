@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Trash2, Edit2, Download, Building2, BookOpen, TrendingUp, TrendingDown,
@@ -479,7 +480,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
 
   useEffect(() => {
     if (accountingTab === 'e-fatura') {
-      fetch('/api/luca/kontor')
+      authFetch('/api/luca/kontor')
         .then(res => res.json())
         .then(data => {
           if (data.success) {
@@ -501,7 +502,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     setVknLoading(true);
     setVknResult(null);
     try {
-      const res = await fetch(`/api/gib/vkn/${vknSearch}`, {
+      const res = await authFetch(`/api/gib/vkn/${vknSearch}`, {
         headers: {
           'x-gib-api-key': lucaApiKey,
           'x-gib-integrator-vkn': lucaCompanyId
@@ -536,7 +537,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
         setSendingInvoiceId(invId);
         try {
-          const res = await fetch('/api/luca/fatura-gonder', {
+          const res = await authFetch('/api/luca/fatura-gonder', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ invoiceId: invId, invoiceData: inv })

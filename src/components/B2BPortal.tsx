@@ -3,6 +3,7 @@
  * Handles quotations, dealers, and price lists for B2B/dealer users.
  */
 import React, { useState, useEffect } from 'react';
+import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, AlertTriangle, CheckCircle2, Download, Edit2, Eye,
@@ -169,7 +170,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
       onConfirm: async () => {
         setShopifySyncing(true);
         try {
-          const response = await fetch('/api/shopify/draft-order', {
+          const response = await authFetch('/api/shopify/draft-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

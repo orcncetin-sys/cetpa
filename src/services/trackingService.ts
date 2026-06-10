@@ -1,3 +1,5 @@
+import { authFetch } from './authFetch';
+
 export type CarrierCode = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
 export interface TrackingEvent {
@@ -137,7 +139,7 @@ export async function trackShipment(
 ): Promise<TrackingResult> {
   try {
     if (carrier === 'DHL') {
-      const res = await fetch(`/api/tracking/dhl/${encodeURIComponent(trackingNumber)}`);
+      const res = await authFetch(`/api/tracking/dhl/${encodeURIComponent(trackingNumber)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -145,7 +147,7 @@ export async function trackShipment(
     }
 
     if (carrier === 'UPS') {
-      const res = await fetch(`/api/tracking/ups/${encodeURIComponent(trackingNumber)}`);
+      const res = await authFetch(`/api/tracking/ups/${encodeURIComponent(trackingNumber)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -153,7 +155,7 @@ export async function trackShipment(
     }
 
     if (carrier === 'FedEx') {
-      const res = await fetch('/api/tracking/fedex', {
+      const res = await authFetch('/api/tracking/fedex', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackingNumber }),
@@ -172,7 +174,7 @@ export async function trackShipment(
       'PTT':     'ptt',
     };
     if (trCarriers[carrier]) {
-      const res = await fetch(`/api/tracking/${trCarriers[carrier]}/${encodeURIComponent(trackingNumber)}`);
+      const res = await authFetch(`/api/tracking/${trCarriers[carrier]}/${encodeURIComponent(trackingNumber)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as Record<string, unknown>;
       // Server already returns a normalized TrackingResult-compatible object

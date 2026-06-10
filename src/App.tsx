@@ -129,6 +129,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { auth, db, storage } from './firebase';
+import { authFetch } from './services/authFetch';
 import { 
   type Shipment, 
   UserRole, 
@@ -186,7 +187,7 @@ const QuotationForm           = React.lazy(() => import('./components/QuotationF
 const QuotationDetail         = React.lazy(() => import('./components/QuotationDetail'));
 const PriceListForm           = React.lazy(() => import('./components/PriceListForm'));
 const ProductForm             = React.lazy(() => import('./components/ProductForm'));
-const ProductDetail           = React.lazy(() => import('./components/ProductDetail'));
+import ProductDetail from './components/ProductDetail'; // static: already bundled via InventoryView
 const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
 const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
 const HRModule                = React.lazy(() => import('./components/HRModule'));
@@ -858,7 +859,7 @@ function AppContent() {
     setVknLookupLoading(true);
     setVknLookupMsg(null);
     try {
-      const res = await fetch(`/api/gib/vkn/${vkn}`);
+      const res = await authFetch(`/api/gib/vkn/${vkn}`);
       const json = await res.json();
       if (json.success && json.data) {
         const d = json.data;
@@ -3080,7 +3081,7 @@ function AppContent() {
 
         // WhatsApp notification (fire-and-forget)
         if (toPhone && ord) {
-          fetch('/api/whatsapp/order-notification', {
+          authFetch('/api/whatsapp/order-notification', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3148,7 +3149,7 @@ function AppContent() {
     setIyzicoLinkLoading(prev => ({ ...prev, [order.id]: true }));
     try {
       const lead = leads.find(l => l.id === order.leadId);
-      const r = await fetch('/api/iyzico/payment-link', {
+      const r = await authFetch('/api/iyzico/payment-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -13952,7 +13953,7 @@ function AppContent() {
                         if (!token) { toast(currentLanguage==='tr'?'Önce Access Token girin.':'Enter Access Token first.','error'); return; }
                         toast(currentLanguage==='tr'?'Shopify senkronizasyonu başlatıldı…':'Starting Shopify sync…','info');
                         try {
-                          const r = await fetch('/api/shopify/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
+                          const r = await authFetch('/api/shopify/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
                           const d = await r.json();
                           if (d.error) throw new Error(d.error);
                           toast(`${currentLanguage==='tr'?'Senkronize edildi':'Synced'} — ${d.products?.length ?? 0} ${currentLanguage==='tr'?'ürün':'products'}, ${d.orders?.length ?? 0} ${currentLanguage==='tr'?'sipariş':'orders'}`, 'success');
@@ -18963,7 +18964,7 @@ function AppContent() {
                               ? `Merhaba ${selectedLead.name}, Cetpa'dan yazıyoruz. Size nasıl yardımcı olabiliriz?`
                               : `Hello ${selectedLead.name}, reaching out from Cetpa. How can we help you?`;
                             try {
-                              const r = await fetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: selectedLead.phone, message: msg }) });
+                              const r = await authFetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: selectedLead.phone, message: msg }) });
                               const d = await r.json();
                               if (d.success) toast(currentLanguage === 'tr' ? 'WhatsApp mesajı gönderildi ✓' : 'WhatsApp message sent ✓', 'success');
                               else if (d.notConfigured) toast(currentLanguage === 'tr' ? 'WhatsApp sağlayıcısı yapılandırılmamış. Ayarlar\'dan WHATSAPP_360DIALOG_API_KEY ekleyin.' : 'WhatsApp provider not configured. Add WHATSAPP_360DIALOG_API_KEY in Settings.', 'error');

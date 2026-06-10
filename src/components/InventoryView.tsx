@@ -128,6 +128,38 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       return 0;
     });
 
+  // ── Pagination — keeps the DOM small with 3000+ SKUs ────────────────────────
+  const INV_PAGE_SIZE = 50;
+  const [invPage, setInvPage] = useState(0);
+  const invPageCount = Math.max(1, Math.ceil(filteredInventory.length / INV_PAGE_SIZE));
+  const safeInvPage = Math.min(invPage, invPageCount - 1);
+  const pagedInventory = filteredInventory.slice(safeInvPage * INV_PAGE_SIZE, (safeInvPage + 1) * INV_PAGE_SIZE);
+  useEffect(() => { setInvPage(0); }, [searchTerm, selectedCategory]);
+
+  const invPaginationControls = invPageCount > 1 ? (
+    <div className="flex items-center justify-between px-2 py-3">
+      <span className="text-xs text-[#86868B]">
+        {filteredInventory.length} {currentLanguage === 'tr' ? 'ürün' : 'items'} · {safeInvPage + 1}/{invPageCount}
+      </span>
+      <div className="flex gap-2">
+        <button
+          onClick={() => setInvPage(p => Math.max(0, p - 1))}
+          disabled={safeInvPage === 0}
+          className="apple-button-secondary px-4 py-1.5 text-xs font-semibold disabled:opacity-40"
+        >
+          {currentLanguage === 'tr' ? '← Önceki' : '← Prev'}
+        </button>
+        <button
+          onClick={() => setInvPage(p => Math.min(invPageCount - 1, p + 1))}
+          disabled={safeInvPage >= invPageCount - 1}
+          className="apple-button-secondary px-4 py-1.5 text-xs font-semibold disabled:opacity-40"
+        >
+          {currentLanguage === 'tr' ? 'Sonraki →' : 'Next →'}
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   const [autoReorderLoading, setAutoReorderLoading] = useState(false);
   const [autoReorderResult, setAutoReorderResult] = useState<string | null>(null);
   // Phase 546: inline notes quick-edit
@@ -664,7 +696,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredInventory.map((item) => (
+                  {pagedInventory.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50/50 transition-colors cursor-pointer group" onClick={() => setSelectedProduct(item)}>
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
@@ -904,11 +936,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 </tbody>
               </table>
             </div>
+            {invPaginationControls}
           </div>
 
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {filteredInventory.map((item) => (
+            {pagedInventory.map((item) => (
               <div key={item.id} className="apple-card p-4 space-y-4" onClick={() => setSelectedProduct(item)}>
                 <div className="flex justify-between items-start">
                   <div>
@@ -981,6 +1014,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               </div>
             ))}
+            {invPaginationControls}
           </div>
         </div>
 

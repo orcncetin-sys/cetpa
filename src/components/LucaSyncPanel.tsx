@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { authFetch } from '../services/authFetch';
 import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle,
   Package, FileText, Activity, Clock, ChevronDown, ChevronUp,
@@ -167,7 +168,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
     }
     setFaturaSync({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/luca/sync/fatura', {
+      const r = await authFetch('/api/luca/sync/fatura', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ orderId: id }),
@@ -188,7 +189,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   const runStokSync = async () => {
     setStokSync({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/luca/sync/stok', { method: 'POST' });
+      const r = await authFetch('/api/luca/sync/stok', { method: 'POST' });
       const d = await r.json() as { success: boolean; upserted?: number; notConfigured?: boolean; error?: string; duration?: number };
       if (d.notConfigured) {
         setStokSync({ running: false, result: null, error: lang ? 'Luca yapılandırılmamış.' : 'Luca not configured.' });
