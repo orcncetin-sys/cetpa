@@ -362,6 +362,7 @@ async function mikroPost(
     !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
   if (result.ok && isStub(result.data)) {
     console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
+    console.warn(`Mikro ${endpoint} debug body:`, JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }));
     mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
     result = await doCall();
   }
