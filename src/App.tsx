@@ -684,7 +684,10 @@ function AppContent() {
   };
 
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    const hash = window.location.hash.replace('#', '');
+    return hash || 'dashboard';
+  });
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
@@ -1142,6 +1145,11 @@ function AppContent() {
       end: endOfDay(new Date(dateRange.endDate))
     });
   });
+
+  // Keep URL hash in sync with active tab
+  useEffect(() => {
+    window.location.hash = activeTab;
+  }, [activeTab]);
 
   // Redirect to dashboard if userRole changes and current tab is no longer accessible
   useEffect(() => {
