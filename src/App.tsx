@@ -130,6 +130,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
+import { syncOrderWithCari } from './services/mikroService';
 import { 
   type Shipment, 
   UserRole, 
@@ -203,6 +204,7 @@ const SubscriptionPanel       = React.lazy(() => import('./components/Subscripti
 const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncPanel'));
 const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
 const ERPHubPanel             = React.lazy(() => import('./components/ERPHubPanel'));
+const SkuMappingPanel         = React.lazy(() => import('./components/SkuMappingPanel'));
 const MarketplacePanel        = React.lazy(() => import('./components/MarketplacePanel'));
 const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
 const MutabakatPanel          = React.lazy(() => import('./components/MutabakatPanel'));
@@ -473,6 +475,29 @@ const ReadOnlyBanner = ({ currentLanguage }: { currentLanguage: string }) => (
 );
 
 const ReportsDashboard = ReportsDashboardComponent;
+
+// ── Back to Top — sol altta, sayfa kaydırılınca görünür ───────────────────────
+const BackToTopButton: React.FC = () => {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 400);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  if (!visible) return null;
+  return (
+    <button
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      aria-label="Başa dön"
+      className="fixed bottom-6 left-6 z-[200] w-11 h-11 rounded-full bg-white/90 backdrop-blur border border-gray-200 shadow-lg flex items-center justify-center text-gray-600 hover:text-brand hover:border-brand/30 hover:shadow-xl transition-all"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 19V5M5 12l7-7 7 7" />
+      </svg>
+    </button>
+  );
+};
 
 // Fix Leaflet icons
 // @ts-expect-error Leaflet types don't include _getIconUrl
@@ -2968,6 +2993,36 @@ function AppContent() {
             }
           } catch (journalErr) {
             console.warn('Yevmiye kaydı oluşturulamadı:', journalErr);
+          }
+
+          // ── Resmi (faturalı) satış → Mikro'ya sipariş kaydı ─────────────────
+          // Faturasız işlemler Mikro'ya GİTMEZ — stok takibi yalnızca yerelde
+          // kalır (çift stok kontrolü: resmi stok Mikro'da, gayriresmi yerelde).
+          if (selectedLead) {
+            try {
+              const orderForMikro = {
+                ...newOrder,
+                customerName,
+                totalPrice:   finalTotal,
+                lineItems:    orderLineItems,
+                mikroCariKod: (selectedLead as unknown as Record<string, unknown>).mikroCariKod,
+              } as unknown as Record<string, unknown>;
+              const { cariResult, orderResult } = await syncOrderWithCari(
+                selectedLead as unknown as Record<string, unknown>,
+                selectedLead.id,
+                orderForMikro,
+                orderDocRef.id
+              );
+              if (orderResult.success) {
+                logAuditAction('Mikro Sipariş Kaydı', `${customerName} — resmi sipariş Mikro'ya kaydedildi (${orderResult.mikroEvrakNo ?? 'evrak no yok'})`);
+                toast(currentLanguage === 'tr' ? `Sipariş Mikro'ya kaydedildi ✓` : 'Order synced to Mikro ✓', 'success');
+              } else if (!orderResult.notConfigured) {
+                logAuditAction('Mikro Sipariş Hatası', `${customerName} — ${orderResult.error ?? cariResult.error ?? 'bilinmeyen hata'}`);
+                toast(currentLanguage === 'tr' ? `Mikro kaydı başarısız: ${orderResult.error ?? ''}` : `Mikro sync failed: ${orderResult.error ?? ''}`, 'error');
+              }
+            } catch (mikroErr) {
+              console.warn('Mikro sipariş kaydı başarısız:', mikroErr);
+            }
           }
         }
       } catch (error) {
@@ -13909,6 +13964,11 @@ function AppContent() {
                 </React.Suspense>
               </div>
 
+              {/* ── Stok Kodu Eşleştirme (Mikro ↔ Shopify ↔ Pazaryerleri) ── */}
+              <React.Suspense fallback={null}>
+                <SkuMappingPanel currentLanguage={currentLanguage} />
+              </React.Suspense>
+
               {/* ── Bağlı Servisler ── */}
               <div className="space-y-3">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -22459,6 +22519,30 @@ function AppContent() {
               <form onSubmit={handleAddOrder} className="flex flex-col flex-1 overflow-hidden">
                 <div className="overflow-y-auto flex-1 p-6 space-y-5">
 
+                  {/* Resmi / Faturasız toggle — resmi işlemler Mikro'ya kaydedilir */}
+                  <div className={`rounded-xl border p-3 flex items-center justify-between gap-3 ${newOrder.faturali ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className="min-w-0">
+                      <p className={`text-xs font-bold ${newOrder.faturali ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {newOrder.faturali
+                          ? (currentLanguage === 'tr' ? 'Resmi (Faturalı) İşlem' : 'Official (Invoiced) Sale')
+                          : (currentLanguage === 'tr' ? 'Faturasız İşlem' : 'Unofficial Sale')}
+                      </p>
+                      <p className={`text-[11px] mt-0.5 ${newOrder.faturali ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {newOrder.faturali
+                          ? (currentLanguage === 'tr' ? 'KDV hesaplanır, yevmiye kaydı atılır ve Mikro\'ya sipariş kaydı gönderilir.' : 'VAT applied, journal entry created, order pushed to Mikro.')
+                          : (currentLanguage === 'tr' ? 'Mikro\'ya kayıt GÖNDERİLMEZ — stok yalnızca yerel sistemde düşülür.' : 'NOT sent to Mikro — stock tracked locally only.')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNewOrder(prev => ({ ...prev, faturali: !prev.faturali }))}
+                      className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${newOrder.faturali ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                      aria-label="Resmi işlem"
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${newOrder.faturali ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+
                   {/* Customer */}
                   {!selectedLead && (
                     <div className="space-y-1">
@@ -23080,6 +23164,9 @@ function AppContent() {
           onClose={() => setLabelItems(null)}
         />
       )}
+
+      {/* ── Back to Top (sol alt) ── */}
+      <BackToTopButton />
 
       {/* ── Email Verification Banner ── */}
       {user && !user.isAnonymous && user.providerData?.[0]?.providerId === 'password' && !user.emailVerified && (

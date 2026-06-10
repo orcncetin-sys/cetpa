@@ -1674,10 +1674,10 @@ async function startServer() {
     let hasMore = true;
 
     try {
-      // Prefetch ALL existing inventory docs for this company → Map<sku, ref>
-      // (one query instead of one query per imported item)
-      const existingSnap = await adminDb.collection('inventory')
-        .where('companyId', '==', companyId).get();
+      // Prefetch ALL inventory docs → Map<sku, ref>. Deliberately NOT filtered
+      // by companyId: legacy docs imported before companyId existed must match
+      // by SKU and get healed (updated with companyId) instead of duplicated.
+      const existingSnap = await adminDb.collection('inventory').get();
       const existingBySku = new Map<string, FirebaseFirestore.DocumentReference>();
       for (const docSnap of existingSnap.docs) {
         const sku = (docSnap.data().sku as string)?.trim();
@@ -1689,6 +1689,11 @@ async function startServer() {
       const commitBatch = async () => {
         if (batchOps > 0) { await batch.commit(); batch = adminDb!.batch(); batchOps = 0; }
       };
+
+      // Mikro depo kodları (sto_yer_kod) → warehouses + wmsLocations + warehouseItems
+      const depotCodes = new Map<string, number>(); // kod → ürün sayısı
+      // Mikro'dan gelen gerçek kategoriler — import sonunda dummy chip'leri değiştirir
+      const categorySet = new Set<string>();
 
       while (hasMore) {
         const { ok, data } = await mikroPost('StokListesiV2', {
@@ -1750,7 +1755,28 @@ async function startServer() {
               created++;
             }
             batchOps++;
-            if (batchOps >= 450) await commitBatch();
+
+            categorySet.add(item.category);
+
+            // Depo kaydı: Depo sekmesi warehouseItems koleksiyonundan okur
+            const yerKod = String(s.sto_yer_kod ?? '').trim() || '1';
+            depotCodes.set(yerKod, (depotCodes.get(yerKod) ?? 0) + 1);
+            const whItemRef = adminDb.collection('warehouseItems')
+              .doc(`mikro-${sku.replace(/[/\\]/g, '_')}`);
+            batch.set(whItemRef, {
+              companyId,
+              productName: item.name,
+              sku,
+              quantity:    item.stockLevel,
+              warehouseId: `mikro-depo-${yerKod}`,
+              location:    `Depo ${yerKod}`,
+              category:    item.category,
+              source:      'mikro_import',
+              updatedAt:   admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            batchOps++;
+
+            if (batchOps >= 440) await commitBatch();
           } catch (itemErr) {
             console.warn(`Stok import hatası (${sku}):`, itemErr);
             errors++;
@@ -1758,11 +1784,54 @@ async function startServer() {
         }
 
         hasMore = stoklar.length === PAGE_SIZE;
-        index += PAGE_SIZE;
-        console.log(`Stok import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
+        index += 1; // Mikro Index = sayfa numarası (kayıt offseti DEĞİL)
+        console.log(`Stok import: sayfa ${index} tamamlandı — toplam ${created + updated} işlendi`);
       }
 
       await commitBatch();
+
+      // Depoları yaz: Depo sekmesi (warehouses) + Mobil WMS (wmsLocations)
+      for (const [kod, itemCount] of depotCodes) {
+        await adminDb.collection('warehouses').doc(`mikro-depo-${kod}`).set({
+          companyId,
+          name:      `Depo ${kod}`,
+          code:      kod,
+          source:    'mikro_import',
+          itemCount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        await adminDb.collection('wmsLocations').doc(`mikro-depo-${kod}`).set({
+          code:      `DEPO-${kod}`,
+          aisle:     kod, rack: '00', level: '00',
+          zone:      'storage',
+          active:    true,
+          source:    'mikro_import',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      // Kategorileri senkronize et: Mikro kategorilerini ekle, kullanılmayan
+      // (dummy seed) kategorileri kaldır. Chip listesi categories koleksiyonu +
+      // envanterdeki gerçek kategorilerden türediği için bu güvenlidir.
+      if (categorySet.size > 0) {
+        const catSnap = await adminDb.collection('categories').get();
+        const catBatch = adminDb.batch();
+        const seen = new Set<string>();
+        for (const catDoc of catSnap.docs) {
+          const name = (catDoc.data().name as string) || '';
+          if (!categorySet.has(name)) catBatch.delete(catDoc.ref); // dummy/unused
+          else seen.add(name);
+        }
+        for (const name of categorySet) {
+          if (!seen.has(name)) {
+            catBatch.set(adminDb.collection('categories').doc(), {
+              name, source: 'mikro_import',
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        }
+        await catBatch.commit();
+      }
 
       const duration = Date.now() - t0;
       await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel`, true, null, null, duration, reqActor(req));
@@ -1793,9 +1862,9 @@ async function startServer() {
     let hasMore = true;
 
     try {
-      // Prefetch existing leads for this company → Map<mikroCariKod, ref>
-      const existingSnap = await adminDb.collection('leads')
-        .where('companyId', '==', companyId).get();
+      // Prefetch ALL leads → Map<mikroCariKod, ref> (companyId filtresiz:
+      // eski kayıtlar cari koduyla eşleşip companyId ile iyileştirilir)
+      const existingSnap = await adminDb.collection('leads').get();
       const existingByKod = new Map<string, FirebaseFirestore.DocumentReference>();
       for (const docSnap of existingSnap.docs) {
         const kod = (docSnap.data().mikroCariKod as string)?.trim();
@@ -1867,8 +1936,8 @@ async function startServer() {
         }
 
         hasMore = cariler.length === PAGE_SIZE;
-        index += PAGE_SIZE;
-        console.log(`Cari import: sayfa ${index / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
+        index += 1; // Mikro Index = sayfa numarası
+        console.log(`Cari import: sayfa ${index} tamamlandı — toplam ${created + updated} işlendi`);
       }
 
       await commitBatch();
@@ -1884,6 +1953,82 @@ async function startServer() {
       await writeSyncLog('ImportCari', 'lead', 'bulk', false, null, errorMsg, duration, reqActor(req));
       console.error('Cari import genel hatası:', err);
       res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
+    }
+  });
+
+  // ── SKU Eşleştirme: Mikro ↔ Shopify ↔ pazaryerleri ──────────────────────────
+  /** POST /api/sku-mapping/auto-match — envanter SKU'larını Shopify ürünleriyle
+   *  normalize ederek eşleştirir, skuMappings koleksiyonuna yazar.
+   */
+  app.post('/api/sku-mapping/auto-match', requireAuth, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    try {
+      // 1. Envanterdeki Mikro SKU'ları
+      const invSnap = await adminDb.collection('inventory').get();
+      const invItems: { sku: string; name: string }[] = [];
+      for (const d of invSnap.docs) {
+        const sku = ((d.data().sku as string) || '').trim();
+        if (sku) invItems.push({ sku, name: (d.data().name as string) || sku });
+      }
+
+      // 2. Shopify ürün varyantları (varsa)
+      const shopifyToken  = process.env.SHOPIFY_ACCESS_TOKEN;
+      const shopifyDomain = process.env.SHOPIFY_STORE_DOMAIN || 'cetpa.myshopify.com';
+      const shopifyBySku = new Map<string, { sku: string; productId: number; variantId: number; title: string }>();
+      if (shopifyToken) {
+        let pageUrl: string | null = `https://${shopifyDomain}/admin/api/2024-01/products.json?limit=250&fields=id,title,variants`;
+        let pages = 0;
+        while (pageUrl && pages < 20) {
+          const r: globalThis.Response = await fetch(pageUrl, { headers: { 'X-Shopify-Access-Token': shopifyToken } });
+          if (!r.ok) break;
+          const pd = await r.json() as { products?: { id: number; title: string; variants?: { id: number; sku?: string }[] }[] };
+          for (const prod of pd.products ?? []) {
+            for (const v of prod.variants ?? []) {
+              const vsku = (v.sku || '').trim();
+              if (vsku) shopifyBySku.set(norm(vsku), { sku: vsku, productId: prod.id, variantId: v.id, title: prod.title });
+            }
+          }
+          const linkHeader = r.headers.get('link') || '';
+          const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+          pageUrl = nextMatch ? nextMatch[1] : null;
+          pages++;
+        }
+      }
+
+      // 3. Eşleştir + batched yaz
+      let matched = 0, unmatched = 0;
+      let batch = adminDb.batch();
+      let ops = 0;
+      for (const item of invItems) {
+        const key = norm(item.sku);
+        if (!key) continue;
+        const hit = shopifyBySku.get(key);
+        const ref = adminDb.collection('skuMappings').doc(key);
+        batch.set(ref, {
+          mikroSku:    item.sku,
+          productName: item.name,
+          ...(hit ? {
+            shopifySku:       hit.sku,
+            shopifyProductId: hit.productId,
+            shopifyVariantId: hit.variantId,
+            status:           'matched',
+            matchType:        'auto',
+          } : { status: 'unmatched' }),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        hit ? matched++ : unmatched++;
+        if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+
+      await writeAuditLog(reqActor(req), 'SKU Otomatik Eşleştirme',
+        `${matched} eşleşti, ${unmatched} eşleşmedi (Shopify: ${shopifyBySku.size} varyant)`);
+      res.json({ success: true, matched, unmatched, shopifyVariants: shopifyBySku.size, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 
