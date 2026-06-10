@@ -1325,10 +1325,11 @@ async function startServer() {
 
       const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] });
       const duration = Date.now() - t0;
-      const d = data as Record<string, unknown>;
-      const success = ok && d?.success !== false;
+      const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0 = envelope?.[0] as Record<string, unknown> | undefined;
+      const success = ok && !r0?.IsError;
       const mikroStoKod = stok.sto_kod;
-      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('StokKaydetV2', 'inventory', firebaseId, success, mikroStoKod, errorMsg, duration);
 
@@ -1445,9 +1446,10 @@ async function startServer() {
 
       const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] });
       const duration = Date.now() - t0;
-      const d = data as Record<string, unknown>;
-      const success = ok && d?.success !== false;
-      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+      const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0 = envelope?.[0] as Record<string, unknown> | undefined;
+      const success = ok && !r0?.IsError;
+      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('CariKaydetV2', 'lead', firebaseId, success, cariKod, errorMsg, duration);
 
@@ -1547,10 +1549,12 @@ async function startServer() {
       });
 
       const duration = Date.now() - t0;
-      const d = data as Record<string, unknown>;
-      const success = ok && d?.success !== false;
-      const mikroEvrakNo = (d?.evrakNo || d?.id || null) as string | null;
-      const errorMsg = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+      const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0 = envelope?.[0] as Record<string, unknown> | undefined;
+      const success = ok && !r0?.IsError;
+      const md = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
+      const mikroEvrakNo = (md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration);
 
@@ -1583,7 +1587,7 @@ async function startServer() {
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
-    const PAGE_SIZE = 100;
+    const PAGE_SIZE = 500;
     let index = 0;
     let hasMore = true;
 
@@ -1683,7 +1687,7 @@ async function startServer() {
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
-    const PAGE_SIZE = 100;
+    const PAGE_SIZE = 500;
     let index = 0;
     let hasMore = true;
 
@@ -1803,11 +1807,13 @@ async function startServer() {
 
       const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [{ satirlar }] });
       const duration   = Date.now() - t0;
-      const d          = data as Record<string, unknown>;
-      const success    = ok && d?.success !== false;
-      const mikroFaturaNo = (d?.faturaNo || d?.evrakNo || d?.id || null) as string | null;
-      const ettn          = (d?.ettn || d?.uuid || null) as string | null;
-      const errorMsg   = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+      const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0         = envelope?.[0] as Record<string, unknown> | undefined;
+      const success    = ok && !r0?.IsError;
+      const md         = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
+      const mikroFaturaNo = (md?.faturaNo || md?.FaturaNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      const ettn          = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration);
       if (adminDb && firebaseId && success) {
@@ -1873,11 +1879,13 @@ async function startServer() {
 
       const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [{ satirlar }] });
       const duration      = Date.now() - t0;
-      const d             = data as Record<string, unknown>;
-      const success       = ok && d?.success !== false;
-      const irsaliyeNo    = (d?.irsaliyeNo || d?.evrakNo || d?.id || null) as string | null;
-      const irsaliyeEttn  = (d?.ettn || d?.uuid || null) as string | null;
-      const errorMsg      = success ? null : ((d?.message || d?.error || `HTTP ${status}`) as string);
+      const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0            = envelope?.[0] as Record<string, unknown> | undefined;
+      const success       = ok && !r0?.IsError;
+      const md            = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
+      const irsaliyeNo    = (md?.irsaliyeNo || md?.IrsaliyeNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      const irsaliyeEttn  = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration);
       if (adminDb && firebaseId && success) {
@@ -1921,10 +1929,10 @@ async function startServer() {
             Index: 0,
           });
           if (!ok) { errors++; continue; }
-          const d = data as Record<string, unknown>;
+          const md = mikroData(data);
           // Mikro returns bakiye in various field names depending on version
-          const bakiye      = Number(d?.bakiye ?? d?.Bakiye ?? d?.cariBakiye ?? 0);
-          const vadeliBorc  = Number(d?.vadeliBorc ?? d?.VadeliBorc ?? 0);
+          const bakiye      = Number(md?.bakiye ?? md?.Bakiye ?? md?.cariBakiye ?? 0);
+          const vadeliBorc  = Number(md?.vadeliBorc ?? md?.VadeliBorc ?? 0);
           // Mirror to cariBalances collection AND update lead doc
           await adminDb.collection('cariBalances').doc(cariKod).set({
             cariKod, bakiye, vadeliBorc,
@@ -1964,8 +1972,8 @@ async function startServer() {
       });
 
       if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
-      const d      = data as Record<string, unknown>;
-      const rows   = (d?.hesaplar ?? d?.mizan ?? []) as Record<string, unknown>[];
+      const md     = mikroData(data);
+      const rows   = (md?.MizanListesi ?? md?.Hesaplar ?? md?.hesaplar ?? md?.mizan ?? []) as Record<string, unknown>[];
       const docId  = period;
 
       await adminDb.collection('accountingPeriods').doc(docId).set({
@@ -2058,16 +2066,16 @@ async function startServer() {
         IlkTarih: ilkTarih, SonTarih: sonTarih,
       });
       if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
-      const d = data as Record<string, unknown>;
+      const md = mikroData(data);
       await adminDb.collection('taxSummary').doc(period).set({
         period, yil, ay,
-        kdvHesaplanan: Number(d?.kdvHesaplanan ?? d?.hesaplananKdv ?? 0),
-        kdvIndirilecek: Number(d?.kdvIndirilecek ?? d?.indirilecekKdv ?? 0),
-        kdvOdenmesi: Number(d?.odenmesiGerekenKdv ?? d?.kdvFarki ?? 0),
-        rawData: d,
+        kdvHesaplanan: Number(md?.kdvHesaplanan ?? md?.KdvHesaplanan ?? md?.hesaplananKdv ?? 0),
+        kdvIndirilecek: Number(md?.kdvIndirilecek ?? md?.KdvIndirilecek ?? md?.indirilecekKdv ?? 0),
+        kdvOdenmesi: Number(md?.odenmesiGerekenKdv ?? md?.OdenmesiGerekenKdv ?? md?.kdvFarki ?? 0),
+        rawData: md,
         syncedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
-      res.json({ success: true, period, data: d, duration: Date.now() - t0 });
+      res.json({ success: true, period, data: md, duration: Date.now() - t0 });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
