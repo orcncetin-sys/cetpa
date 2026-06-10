@@ -3232,7 +3232,7 @@ async function startServer() {
   app.post('/api/ai/generate', requireAuth, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const { prompt, model = 'gemini-2.5-flash-preview-05-20', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
+    const { prompt, model = 'gemini-2.0-flash', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
       prompt: string; model?: string; systemInstruction?: string;
       thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
     };
@@ -3263,7 +3263,7 @@ async function startServer() {
   app.post('/api/ai/chat', requireAuth, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const { message, history = [], systemInstruction, model = 'gemini-2.5-flash-preview-05-20', highThinking = false } = req.body as {
+    const { message, history = [], systemInstruction, model = 'gemini-2.0-flash', highThinking = false } = req.body as {
       message: string;
       history?: { role: string; parts: { text: string }[] }[];
       systemInstruction?: string;

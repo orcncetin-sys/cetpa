@@ -75,7 +75,7 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
           message: userMessage,
           history,
           systemInstruction: buildSystemInstruction(),
-          model: isHighThinking ? 'gemini-2.5-pro-preview-05-06' : 'gemini-2.5-flash-preview-05-20',
+          model: isHighThinking ? 'gemini-2.0-flash' : 'gemini-2.0-flash',
           highThinking: isHighThinking,
         }),
       });

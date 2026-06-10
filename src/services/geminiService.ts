@@ -34,7 +34,7 @@ async function aiGenerate(payload: {
 export const scoreLead = async (lead: Record<string, unknown>): Promise<{ score: number; reasoning: string }> => {
   try {
     const text = await aiGenerate({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.0-flash',
       prompt: `Aşağıdaki potansiyel müşteriyi (lead) 0-100 arası puanla ve nedenini açıkla. Yanıtı JSON formatında ver: { "score": number, "reasoning": "string" }\n\nMüşteri Bilgileri:\n${JSON.stringify(lead, null, 2)}`,
       jsonSchema: {
         type: 'object',
@@ -54,7 +54,7 @@ export const scoreLead = async (lead: Record<string, unknown>): Promise<{ score:
 export const analyzeDashboard = async (data: unknown): Promise<string> => {
   try {
     return await aiGenerate({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.0-flash',
       thinkingLevel: 'HIGH',
       prompt: `Sen bir kurumsal veri analistisin. Aşağıdaki dashboard verilerini analiz et ve stratejik öneriler sun.\nAnalizinde şu konulara değin:\n1. Satış trendleri ve büyüme fırsatları.\n2. Envanter yönetimi ve stok riskleri.\n3. Finansal sağlık ve nakit akışı.\n4. İnsan kaynakları ve departman verimliliği.\n\nVeriler:\n${JSON.stringify(data, null, 2)}`,
     });
@@ -69,7 +69,7 @@ export const analyzeDashboard = async (data: unknown): Promise<string> => {
 export const suggestFMEAMitigation = async (failureMode: string, process: string): Promise<string> => {
   try {
     return await aiGenerate({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.0-flash',
       prompt: `FMEA Analizi için öneri sun.\nSüreç: ${process}\nHata Modu: ${failureMode}\n\nBu hata modu için olası kök nedenleri ve önleyici faaliyetleri (mitigation) maddeler halinde öner.`,
     });
   } catch (e) {
@@ -83,7 +83,7 @@ export const suggestFMEAMitigation = async (failureMode: string, process: string
 export const suggest8DRootCause = async (problem: string): Promise<string> => {
   try {
     return await aiGenerate({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.0-flash',
       prompt: `8D Problem Çözme Metodu için kök neden analizi önerisi sun.\nProblem: ${problem}\n\nBu problem için 5 Neden (5 Why) analizi taslağı ve olası kök nedenleri öner.`,
     });
   } catch (e) {
