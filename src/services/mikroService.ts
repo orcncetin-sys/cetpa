@@ -12,6 +12,8 @@
  * Swapping ERPs later = only server.ts routes change. This file stays.
  */
 
+import { auth } from '../firebase';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface MikroSyncResult {
@@ -67,10 +69,16 @@ export interface MikroCariItem {
 
 // ── Internal fetch helper ─────────────────────────────────────────────────────
 
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const token = await auth.currentUser?.getIdToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const authHeader = await getAuthHeader();
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeader },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
