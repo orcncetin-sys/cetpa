@@ -262,6 +262,10 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
 
 // In-memory token cache keyed by IDM email (invalidates if user changes creds)
 const mikroTokenCacheMap = new Map<string, { access_token: string; expiresAt: number }>();
+// Single-flight: Mikro IDM tek oturumludur — yeni token verilince eskisi sessizce
+// geçersizleşir. Eşzamanlı istekler ayrı token çekerse birbirini devirir; bu yüzden
+// aynı anda yalnızca BİR token isteği yapılır, diğerleri aynı promise'i bekler.
+const mikroTokenInflight = new Map<string, Promise<string>>();
 
 async function getMikroToken(creds: MikroCreds): Promise<string> {
   const cacheKey = `${creds.idmEmail}|${creds.alias}`;
@@ -272,29 +276,41 @@ async function getMikroToken(creds: MikroCreds): Promise<string> {
     return cached.access_token;
   }
 
-  const res = await fetch(MIKRO_AUTH_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id:  'mikro-rjf',
-      username:   creds.idmEmail,
-      password:   creds.idmPassword,
-      grant_type: 'password',
-    }).toString(),
-  });
+  const inflight = mikroTokenInflight.get(cacheKey);
+  if (inflight) return inflight;
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Mikro token alınamadı (${res.status}): ${errText.substring(0, 300)}`);
+  const fetchPromise = (async () => {
+    const res = await fetch(MIKRO_AUTH_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:  'mikro-rjf',
+        username:   creds.idmEmail,
+        password:   creds.idmPassword,
+        grant_type: 'password',
+      }).toString(),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Mikro token alınamadı (${res.status}): ${errText.substring(0, 300)}`);
+    }
+
+    const data = await res.json() as { access_token: string; expires_in: number };
+    mikroTokenCacheMap.set(cacheKey, {
+      access_token: data.access_token,
+      expiresAt:    Date.now() + (data.expires_in || 21600) * 1000,
+    });
+    // Token acquired — do not log alias or token details in production
+    return data.access_token;
+  })();
+
+  mikroTokenInflight.set(cacheKey, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    mikroTokenInflight.delete(cacheKey);
   }
-
-  const data = await res.json() as { access_token: string; expires_in: number };
-  mikroTokenCacheMap.set(cacheKey, {
-    access_token: data.access_token,
-    expiresAt:    now + (data.expires_in || 21600) * 1000,
-  });
-  // Token acquired — do not log alias or token details in production
-  return data.access_token;
 }
 
 /** Mikro Jump API requires a daily-rotating hash: MD5("YYYY-MM-DD " + plainPassword) */
@@ -362,7 +378,6 @@ async function mikroPost(
     !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
   if (result.ok && isStub(result.data)) {
     console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
-    console.warn(`Mikro ${endpoint} debug body:`, JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }));
     mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
     result = await doCall();
   }
