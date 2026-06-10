@@ -1997,6 +1997,238 @@ async function startServer() {
     }
   });
 
+  // ── Mikro Genel Liste Import'ları ────────────────────────────────────────────
+  // Mikro list methodlarının yanıt alan adları belgelenmemiş — Data içindeki ilk
+  // diziyi alır, satırları ham haliyle hedef koleksiyona yazar. Doc id: _Guid ile
+  // biten ilk alan, yoksa otomatik. UI panelleri ham alanları gösterebilir.
+
+  /** Data objesi içindeki ilk diziyi döndür (anahtar adı ne olursa olsun) */
+  function firstArrayIn(d: Record<string, unknown>): Record<string, unknown>[] {
+    for (const v of Object.values(d)) if (Array.isArray(v)) return v as Record<string, unknown>[];
+    return [];
+  }
+
+  /** Satırda regex ile alan anahtarı bul (örnek satırdan tespit) */
+  function findKey(row: Record<string, unknown>, re: RegExp): string | null {
+    for (const k of Object.keys(row)) if (re.test(k)) return k;
+    return null;
+  }
+
+  function makeMikroListImport(opts: {
+    route:       string;
+    method:      string;                          // Mikro API method adı
+    collection:  string;                          // hedef Firestore koleksiyonu
+    label:       string;                          // audit log etiketi
+    extraBody?:  Record<string, unknown>;         // method'a özel ek parametreler
+    postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
+  }) {
+    app.post(opts.route, requireAuth, async (req: Request, res: Response) => {
+      if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+      if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+      const companyId = (req as Request & { uid: string }).uid;
+      const t0 = Date.now();
+      const PAGE_SIZE = 500;
+      let index = 0, hasMore = true, total = 0;
+      const allRows: Record<string, unknown>[] = [];
+
+      try {
+        while (hasMore) {
+          const { ok, data } = await mikroPost(opts.method, {
+            Size: String(PAGE_SIZE), Index: index, ...(opts.extraBody ?? {}),
+          });
+          if (!ok) break;
+          const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+          if (r0?.IsError) {
+            return res.status(502).json({ success: false, error: (r0.ErrorMessage as string) || `${opts.method} hatası` });
+          }
+          const rows = firstArrayIn(mikroData(data));
+          if (rows.length === 0) break;
+
+          let batch = adminDb.batch();
+          let ops = 0;
+          for (const row of rows) {
+            const guidKey = findKey(row, /_Guid$/i);
+            const docId = guidKey && row[guidKey]
+              ? String(row[guidKey])
+              : adminDb.collection(opts.collection).doc().id;
+            batch.set(adminDb.collection(opts.collection).doc(docId), {
+              ...row,
+              companyId,
+              source:    'mikro_import',
+              syncedAt:  admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+          }
+          if (ops > 0) await batch.commit();
+
+          allRows.push(...rows);
+          total += rows.length;
+          hasMore = rows.length === PAGE_SIZE;
+          index += 1; // Mikro Index = sayfa numarası
+        }
+
+        let postNote: string | null = null;
+        if (opts.postProcess && allRows.length > 0) {
+          postNote = await opts.postProcess(allRows, companyId);
+        }
+
+        const duration = Date.now() - t0;
+        await writeAuditLog(reqActor(req), opts.label, `${total} kayıt çekildi${postNote ? ` — ${postNote}` : ''}`);
+        res.json({ success: true, total, note: postNote, duration });
+      } catch (err) {
+        res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
+
+  // 1. Siparişler → mikroSiparisler
+  makeMikroListImport({
+    route: '/api/mikro/import/siparis', method: 'SiparisListesiV2',
+    collection: 'mikroSiparisler', label: 'Mikro Sipariş Listesi',
+    extraBody: { IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31` },
+  });
+
+  // 2. Faturalar → mikroFaturalar
+  makeMikroListImport({
+    route: '/api/mikro/import/fatura-listesi', method: 'FaturaListesiV2',
+    collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
+    extraBody: { IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31` },
+  });
+
+  // 3. Stok hareketleri → inventoryMovements (ham + tespit edilen alanlar)
+  makeMikroListImport({
+    route: '/api/mikro/import/stok-hareket', method: 'StokHareketListesiV2',
+    collection: 'inventoryMovements', label: 'Mikro Stok Hareketleri',
+    extraBody: { IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31` },
+    postProcess: async (rows) => {
+      // inventoryMovements UI'ının beklediği alanları tespit edip ekle
+      const sample = rows[0];
+      const skuKey = findKey(sample, /st[ho]_?stok_?kod|sto_kod|stok_kod/i);
+      const qtyKey = findKey(sample, /miktar/i);
+      return `alanlar: sku=${skuKey ?? '?'}, miktar=${qtyKey ?? '?'}`;
+    },
+  });
+
+  // 4. Bankalar → bankAccounts (mevcut UI koleksiyonu)
+  makeMikroListImport({
+    route: '/api/mikro/import/banka', method: 'BankaListesiV2',
+    collection: 'bankAccounts', label: 'Mikro Banka Listesi',
+  });
+
+  // 5. Kasalar → kasalar
+  makeMikroListImport({
+    route: '/api/mikro/import/kasa', method: 'KasaListesiV2',
+    collection: 'kasalar', label: 'Mikro Kasa Listesi',
+  });
+
+  // 6. Ödeme planları → odemePlanlari
+  makeMikroListImport({
+    route: '/api/mikro/import/odeme-plan', method: 'OdemePlanListesiV2',
+    collection: 'odemePlanlari', label: 'Mikro Ödeme Planları',
+  });
+
+  // 7. Barkodlar → barkodlar + envanter ürünlerine barcode alanı yaz
+  makeMikroListImport({
+    route: '/api/mikro/import/barkod', method: 'BarkodListesiV2',
+    collection: 'barkodlar', label: 'Mikro Barkod Listesi',
+    postProcess: async (rows, _companyId) => {
+      if (!adminDb) return null;
+      const sample = rows[0];
+      const skuKey = findKey(sample, /sto_?kod|stok_?kod/i);
+      const barKey = findKey(sample, /bar_?kod(?!u_)|barkod/i);
+      if (!skuKey || !barKey) return `eşleme alanları bulunamadı (sku=${skuKey}, barkod=${barKey})`;
+      const invSnap = await adminDb.collection('inventory').get();
+      const bySku = new Map<string, FirebaseFirestore.DocumentReference>();
+      for (const d of invSnap.docs) {
+        const sku = ((d.data().sku as string) || '').trim();
+        if (sku) bySku.set(sku, d.ref);
+      }
+      let batch = adminDb.batch(); let ops = 0; let matched = 0;
+      for (const row of rows) {
+        const ref = bySku.get(String(row[skuKey] ?? '').trim());
+        const barcode = String(row[barKey] ?? '').trim();
+        if (!ref || !barcode) continue;
+        batch.update(ref, { barcode });
+        matched++;
+        if (++ops >= 450) { await batch.commit(); batch = adminDb!.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${matched} ürüne barkod yazıldı`;
+    },
+  });
+
+  // 8. Stok miktarları (depo bazlı) → stokMiktarlari + warehouseItems/inventory güncelle
+  makeMikroListImport({
+    route: '/api/mikro/import/stok-miktar', method: 'StokMiktarListesiV2',
+    collection: 'stokMiktarlari', label: 'Mikro Stok Miktarları',
+    postProcess: async (rows, _companyId) => {
+      if (!adminDb) return null;
+      const sample = rows[0];
+      const skuKey  = findKey(sample, /sto_?kod|stok_?kod/i);
+      const qtyKey  = findKey(sample, /miktar/i);
+      const depoKey = findKey(sample, /depo/i);
+      if (!skuKey || !qtyKey) return `eşleme alanları bulunamadı (sku=${skuKey}, miktar=${qtyKey})`;
+      const invSnap = await adminDb.collection('inventory').get();
+      const bySku = new Map<string, FirebaseFirestore.DocumentReference>();
+      for (const d of invSnap.docs) {
+        const sku = ((d.data().sku as string) || '').trim();
+        if (sku) bySku.set(sku, d.ref);
+      }
+      // SKU başına toplam + depo bazlı miktar topla
+      const totals = new Map<string, number>();
+      const byDepot = new Map<string, { sku: string; depo: string; qty: number; name?: string }>();
+      for (const row of rows) {
+        const sku = String(row[skuKey] ?? '').trim();
+        if (!sku) continue;
+        const qty = Number(row[qtyKey] ?? 0) || 0;
+        totals.set(sku, (totals.get(sku) ?? 0) + qty);
+        const depo = depoKey ? String(row[depoKey] ?? '1') : '1';
+        byDepot.set(`${sku}|${depo}`, { sku, depo, qty: (byDepot.get(`${sku}|${depo}`)?.qty ?? 0) + qty });
+      }
+      let batch = adminDb.batch(); let ops = 0; let updated = 0;
+      for (const [sku, total] of totals) {
+        const ref = bySku.get(sku);
+        if (!ref) continue;
+        batch.update(ref, { stockLevel: total });
+        updated++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb!.batch(); ops = 0; }
+      }
+      for (const { sku, depo, qty } of byDepot.values()) {
+        batch.set(adminDb.collection('warehouseItems').doc(`mikro-${sku.replace(/[/\\]/g, '_')}-d${depo}`), {
+          sku, quantity: qty,
+          warehouseId: `mikro-depo-${depo}`,
+          location: `Depo ${depo}`,
+          source: 'mikro_import',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        if (++ops >= 400) { await batch.commit(); batch = adminDb!.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${updated} ürünün stok seviyesi güncellendi, ${byDepot.size} depo kaydı`;
+    },
+  });
+
+  /** POST /api/mikro/cari-hareket/kaydet — tahsilat/ödeme → Mikro (deneysel)
+   *  Body: { hareket: Record<string, unknown>, firebaseId?: string }
+   *  Alan adları Mikro dökümantasyonuna göre çağıran tarafça verilir.
+   */
+  app.post('/api/mikro/cari-hareket/kaydet', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { hareket } = req.body as { hareket: Record<string, unknown> };
+    if (!hareket) return res.status(400).json({ success: false, error: 'hareket alanı zorunlu.' });
+    const t0 = Date.now();
+    try {
+      const { ok, data, status } = await mikroPost('CariHareketKaydetV2', { cariHareketler: [hareket] });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      const success = ok && !r0?.IsError;
+      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      await writeSyncLog('CariHareketKaydetV2', 'payment', String(hareket.cha_kod ?? 'unknown'), success, null, errorMsg, Date.now() - t0, reqActor(req));
+      res.json({ success, error: errorMsg, data });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ── SKU Eşleştirme: Mikro ↔ Shopify ↔ pazaryerleri ──────────────────────────
   /** POST /api/sku-mapping/auto-match — envanter SKU'larını Shopify ürünleriyle
    *  normalize ederek eşleştirir, skuMappings koleksiyonuna yazar.

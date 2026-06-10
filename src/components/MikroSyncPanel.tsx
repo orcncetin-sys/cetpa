@@ -195,6 +195,36 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     }
   }
 
+  // ── Diğer Mikro listeleri (genel import factory endpoint'leri) ─────────────
+  const [extraPulls, setExtraPulls] = useState<Record<string, PullState>>({});
+  async function handleExtraPull(key: string, route: string) {
+    setExtraPulls(p => ({ ...p, [key]: { running: true, result: null, error: null } }));
+    try {
+      const r = await fetch(route, { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
+      const d = await r.json() as { success: boolean; total?: number; note?: string | null; error?: string; notConfigured?: boolean };
+      if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
+      if (!d.success) throw new Error(d.error || 'Hata');
+      setExtraPulls(p => ({ ...p, [key]: {
+        running: false,
+        result: `${d.total ?? 0} ${t ? 'kayıt' : 'records'}${d.note ? ` · ${d.note}` : ''}`,
+        error: null,
+      } }));
+    } catch (e) {
+      setExtraPulls(p => ({ ...p, [key]: { running: false, result: null, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  }
+
+  const extraPullDefs: { key: string; route: string; title: string; desc: string }[] = [
+    { key: 'stok-miktar',  route: '/api/mikro/import/stok-miktar',    title: t ? 'Stok Miktarları (Depo)' : 'Stock Quantities (Depot)', desc: t ? 'Depo bazlı anlık miktarları çek; envanter ve depo kayıtlarını güncelle.' : 'Pull per-depot quantities; update inventory and warehouse records.' },
+    { key: 'siparis',      route: '/api/mikro/import/siparis',        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
+    { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
+    { key: 'stok-hareket', route: '/api/mikro/import/stok-hareket',   title: t ? 'Stok Hareketleri' : 'Stock Movements', desc: t ? 'Stok giriş/çıkış hareketlerini çek.' : 'Pull stock in/out movements.' },
+    { key: 'banka',        route: '/api/mikro/import/banka',          title: t ? 'Bankalar' : 'Banks',                   desc: t ? 'Banka hesap tanımlarını çek.' : 'Pull bank account definitions.' },
+    { key: 'kasa',         route: '/api/mikro/import/kasa',           title: t ? 'Kasalar' : 'Cash Registers',           desc: t ? 'Kasa tanımlarını çek.' : 'Pull cash register definitions.' },
+    { key: 'barkod',       route: '/api/mikro/import/barkod',         title: t ? 'Barkodlar' : 'Barcodes',               desc: t ? 'Barkodları çek ve ürünlere eşle.' : 'Pull barcodes and map to products.' },
+    { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan',     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
+  ];
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -344,6 +374,28 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             {t ? 'Pull işlemleri için Mikro bağlantısı gerekli.' : 'Mikro connection required for pull operations.'}
           </p>
         )}
+      </div>
+
+      {/* ── Diğer Mikro Verileri ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+          <Download className="w-4 h-4 text-[#1a3a5c]" />
+          {t ? 'Diğer Mikro Verileri' : 'Other Mikro Data'}
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {extraPullDefs.map(def => (
+            <PullCard
+              key={def.key}
+              icon={<Download className="w-4 h-4 text-[#1a3a5c]" />}
+              title={def.title}
+              description={def.desc}
+              state={extraPulls[def.key] ?? { running: false, result: null, error: null }}
+              disabled={!status?.connected}
+              onPull={() => handleExtraPull(def.key, def.route)}
+              lang={t}
+            />
+          ))}
+        </div>
       </div>
 
       {/* ── Sync Log ── */}
