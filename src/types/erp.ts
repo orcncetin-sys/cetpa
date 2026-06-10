@@ -68,7 +68,12 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
     features:      ['import_stok', 'export_stok', 'import_cari', 'export_cari', 'export_siparis', 'export_fatura', 'pull_bakiye', 'pull_mizan', 'pull_kdv'],
     statusPath:    '/api/mikro/status',
     docsUrl:       'https://jumpbulut.mikro.com.tr',
-    requiredEnvVars: ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'],
+    requiredEnvVars: [
+      'MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD',
+      'MIKRO_ALIAS', 'MIKRO_FIRMA_KODU', 'MIKRO_CALISMA_YILI',
+      'MIKRO_API_KEY', 'MIKRO_KULLANICI_KODU', 'MIKRO_SIFRE',
+      'MIKRO_FIRMA_NO', 'MIKRO_SUBE_NO',
+    ],
   },
   {
     id:            'luca',

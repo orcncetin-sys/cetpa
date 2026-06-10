@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
-import { createHmac } from "crypto";
+import { createHmac, createHash } from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
 import rateLimit from "express-rate-limit";
@@ -175,6 +175,14 @@ interface MikroCreds {
 }
 
 /**
+/** If value is already a 32-char hex MD5, return as-is; otherwise hash it. */
+function toMd5IfPlain(value: string): string {
+  if (!value) return '';
+  if (/^[0-9a-f]{32}$/i.test(value)) return value.toLowerCase();
+  return createHash('md5').update(value).digest('hex');
+}
+
+/**
  * Get Mikro credentials — env vars take priority, Firestore settings/mikro as fallback.
  * This allows the admin to configure Mikro from the Settings UI without needing env vars.
  */
@@ -222,7 +230,7 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
       calismaYili:   (d.calismaYili   as string) || String(new Date().getFullYear()),
       apiKey:        apiKey  || '',
       kullaniciKodu: (d.kullaniciKodu as string) || 'SRV',
-      sifre:         (d.sifre         as string) || '',
+      sifre:         toMd5IfPlain((d.sifre as string) || ''),
       firmaNo:       Number(d.firmaNo  ?? 0),
       subeNo:        Number(d.subeNo   ?? 0),
     };
