@@ -3083,7 +3083,7 @@ function AppContent() {
         const order = orders.find(o => o.id === orderId);
         if (order) {
           const lead = leads.find(l => l.id === order.leadId);
-          fetch('/api/mikro/irsaliye/kaydet', {
+          authFetch('/api/mikro/irsaliye/kaydet', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3162,7 +3162,7 @@ function AppContent() {
     setFaturaLoading(prev => ({ ...prev, [order.id]: true }));
     try {
       const lead = leads.find(l => l.id === order.leadId);
-      const r = await fetch('/api/mikro/fatura/kaydet', {
+      const r = await authFetch('/api/mikro/fatura/kaydet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
