@@ -308,6 +308,14 @@ function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
   };
 }
 
+/** Extract the Data payload from a Mikro API response.
+ *  Response shape: { result: [{ StatusCode, Data: {...}, IsError, ErrorMessage }] }
+ */
+function mikroData(raw: unknown): Record<string, unknown> {
+  const r = ((raw as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+  return (r?.Data ?? r?.data ?? {}) as Record<string, unknown>;
+}
+
 /** Call a Mikro Jump API endpoint — resolves creds, injects token + context. */
 async function mikroPost(
   endpoint: string,
@@ -380,7 +388,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
         Sort: 'sto_kod', Size: '500', Index: 0,
       });
-      const stoklar = ((stokRes.data as Record<string, unknown>)?.stoklar ?? []) as Record<string, unknown>[];
+      const stoklar = (mikroData(stokRes.data).StokListesi ?? []) as Record<string, unknown>[];
       let stokUpdated = 0;
       for (const s of stoklar) {
         const sku = s.sto_kod as string;
@@ -398,7 +406,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'",
         Sort: 'cari_kod', Size: '500', Index: 0,
       });
-      const cariler = ((cariRes.data as Record<string, unknown>)?.cariler ?? []) as Record<string, unknown>[];
+      const cariler = (mikroData(cariRes.data).CariListesi ?? []) as Record<string, unknown>[];
       let cariUpdated = 0;
       for (const c of cariler) {
         const cariKod = c.cari_kod as string;
@@ -1362,7 +1370,7 @@ async function startServer() {
 
       if (!ok) return res.status(status).json({ success: false, error: data });
 
-      const stoklar = ((data as Record<string, unknown>)?.stoklar ?? data) as Record<string, unknown>[];
+      const stoklar = (mikroData(data).StokListesi ?? []) as Record<string, unknown>[];
 
       // Mirror matched items back to Firebase
       if (adminDb && Array.isArray(stoklar)) {
@@ -1479,7 +1487,7 @@ async function startServer() {
 
       if (!ok) return res.status(status).json({ success: false, error: data });
 
-      const cariler = ((data as Record<string, unknown>)?.cariler ?? data) as Record<string, unknown>[];
+      const cariler = (mikroData(data).CariListesi ?? []) as Record<string, unknown>[];
 
       if (adminDb && Array.isArray(cariler)) {
         for (const c of cariler) {
@@ -1590,7 +1598,7 @@ async function startServer() {
 
         if (!ok) break;
 
-        const stoklar = ((data as Record<string, unknown>)?.stoklar ?? []) as Record<string, unknown>[];
+        const stoklar = (mikroData(data).StokListesi ?? []) as Record<string, unknown>[];
         if (!Array.isArray(stoklar) || stoklar.length === 0) break;
 
         for (const s of stoklar) {
@@ -1689,7 +1697,7 @@ async function startServer() {
 
         if (!ok) break;
 
-        const cariler = ((data as Record<string, unknown>)?.cariler ?? []) as Record<string, unknown>[];
+        const cariler = (mikroData(data).CariListesi ?? []) as Record<string, unknown>[];
         if (!Array.isArray(cariler) || cariler.length === 0) break;
 
         for (const c of cariler) {
