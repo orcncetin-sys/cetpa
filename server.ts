@@ -2229,6 +2229,23 @@ async function startServer() {
     }
   });
 
+  /** POST /api/mikro/token — IDM token al/yenile (env veya Firestore creds ile).
+   *  Token client'a DÖNDÜRÜLMEZ — yalnızca alınabildiği bilgisi + süre döner.
+   */
+  app.post('/api/mikro/token', requireAuth, async (req: Request, res: Response) => {
+    const creds = await getMikroCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      // Cache'i atla — kullanıcı bilinçli yenileme istedi
+      mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
+      const token = await getMikroToken(creds);
+      await writeAuditLog(reqActor(req), 'Mikro Token Yenileme', 'IDM access token yenilendi');
+      res.json({ success: true, tokenPreview: `${token.slice(0, 10)}…`, expiresInHours: 6 });
+    } catch (e) {
+      res.json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   /** POST /api/admin/cleanup-dummy-inventory — kaynaksız (dummy seed) ürünleri sil.
    *  source alanı OLAN her şey korunur: mikro_import, csv, manual, shopify vb.
    *  Body: { dryRun?: boolean } — dryRun=true yalnızca sayım döner, silmez.

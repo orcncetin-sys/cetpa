@@ -435,6 +435,8 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   // Mikro
   const [mikroEnabled, setMikroEnabled] = useState(true);
   const [mikroAccessToken, setMikroAccessToken] = useState('');
+  const [mikroTokenFetching, setMikroTokenFetching] = useState(false);
+  const [mikroTokenInfo, setMikroTokenInfo] = useState<string | null>(null);
   const [mikroEndpoint, setMikroEndpoint] = useState('https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods');
   const [mikroConnected, setMikroConnected] = useState(false);
   const [mikroTesting, setMikroTesting] = useState(false);
@@ -3221,6 +3223,41 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                     ? '* Online İşlem Merkezi\'nden oluşturulan şifre. Her request\'in header\'ına eklenir.'
                     : '* Password generated from Online İşlem Merkezi. Added to every request header.'}
                 </p>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <button
+                    onClick={async () => {
+                      setMikroTokenFetching(true);
+                      setMikroTokenInfo(null);
+                      try {
+                        const r = await authFetch('/api/mikro/token', { method: 'POST' });
+                        const d = await r.json() as { success: boolean; tokenPreview?: string; expiresInHours?: number; error?: string; notConfigured?: boolean };
+                        if (d.notConfigured) {
+                          setMikroTokenInfo(currentLanguage === 'tr' ? '⚠ Sunucuda Mikro kimlik bilgileri yapılandırılmamış.' : '⚠ Mikro credentials not configured on server.');
+                        } else if (d.success) {
+                          setMikroTokenInfo(currentLanguage === 'tr'
+                            ? `✓ Token alındı (${d.tokenPreview}) — ${d.expiresInHours ?? 6} saat geçerli, sunucu tarafında kullanılıyor.`
+                            : `✓ Token acquired (${d.tokenPreview}) — valid ${d.expiresInHours ?? 6}h, used server-side.`);
+                          showToast(currentLanguage === 'tr' ? 'Access token yenilendi ✓' : 'Access token refreshed ✓');
+                        } else {
+                          setMikroTokenInfo(`⚠ ${d.error || 'Token alınamadı'}`);
+                        }
+                      } catch (e) {
+                        setMikroTokenInfo(`⚠ ${e instanceof Error ? e.message : String(e)}`);
+                      } finally {
+                        setMikroTokenFetching(false);
+                      }
+                    }}
+                    disabled={mikroTokenFetching}
+                    className="apple-button-secondary py-1.5 px-3 text-xs disabled:opacity-50"
+                  >
+                    {mikroTokenFetching
+                      ? <RefreshCw size={12} className="animate-spin" />
+                      : (currentLanguage === 'tr' ? '🔑 Access Token Al' : '🔑 Get Access Token')}
+                  </button>
+                  {mikroTokenInfo && (
+                    <span className={`text-[10px] ${mikroTokenInfo.startsWith('✓') ? 'text-green-600' : 'text-amber-600'}`}>{mikroTokenInfo}</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">API Endpoint</label>
@@ -3257,12 +3294,21 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               <button
                 onClick={async () => {
                   if (!mikroEnabled) return showToast(currentLanguage === 'tr' ? 'Önce entegrasyonu etkinleştirin.' : 'Enable the integration first.', 'error');
-                  if (!mikroAccessToken) return showToast(currentLanguage === 'tr' ? 'Access Token gerekli.' : 'Access Token is required.', 'error');
                   setMikroTesting(true);
-                  await new Promise(r => setTimeout(r, 1000));
+                  // GERÇEK test: sunucu StokListesiV2 probe'u çalıştırır
+                  let ok = false;
+                  try {
+                    const r = await fetch('/api/mikro/status');
+                    const d = await r.json() as { configured: boolean; connected: boolean; error?: string };
+                    ok = d.configured && d.connected;
+                    if (ok) showToast(currentLanguage === 'tr' ? 'Mikro bağlantısı başarılı ✓' : 'Mikro connection successful ✓');
+                    else showToast(`${currentLanguage === 'tr' ? 'Bağlantı hatası' : 'Connection error'}: ${d.error || (d.configured ? 'API erişilemedi' : 'yapılandırılmamış')}`, 'error');
+                  } catch (e) {
+                    showToast(`${currentLanguage === 'tr' ? 'Bağlantı hatası' : 'Connection error'}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                  }
                   setMikroTesting(false);
-                  setMikroConnected(true);
-                  showToast(currentLanguage === 'tr' ? 'Mikro bağlantısı başarılı!' : 'Mikro connection successful!');
+                  setMikroConnected(ok);
+                  if (!ok) return;
                   const cfg = { accessToken: mikroAccessToken, endpoint: mikroEndpoint, lastSync: mikroLastSync, connected: true, enabled: mikroEnabled };
                   await updateDoc(doc(db, 'settings', 'mikro'), cfg).catch(async (err) => {
                     if ((err as { code?: string }).code === 'not-found') {
