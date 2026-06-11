@@ -231,6 +231,7 @@ const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMer
 const KasaModule              = React.lazy(() => import('./components/KasaModule'));
 const TahsilatModule          = React.lazy(() => import('./components/TahsilatModule'));
 const CargoTrackingTab        = React.lazy(() => import('./components/CargoTrackingTab'));
+import NewLeadModal, { type NewLeadData } from './components/NewLeadModal';
 const DocumentDesigner        = React.lazy(() => import('./components/DocumentDesigner'));
 import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
@@ -1305,7 +1306,6 @@ function AppContent() {
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   const [isAddingLead, setIsAddingLead] = useState(false);
-  const [newLead, setNewLead] = useState({ name: '', company: '', email: '', phone: '', address: '', taxOffice: '', taxId: '', sector: '', authorizedContact: '', notes: '' });
   const [isScoring, setIsScoring] = useState(false);
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -2726,33 +2726,30 @@ function AppContent() {
     setIsAddingShipment(true);
   };
 
-  const handleAddLead = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddLead = async (data: NewLeadData) => {
     if (!user) return;
     setIsScoring(true);
     try {
-      const scoreResult = await scoreLead(newLead);
+      const scoreResult = await scoreLead(data);
       const docRef = await addDoc(collection(db, 'leads'), {
-        ...newLead, status: 'New', score: scoreResult.score,
-        notes: `${newLead.notes}\n\nAI Insights: ${scoreResult.reasoning}`,
+        ...data, status: 'New', score: scoreResult.score,
+        notes: `${data.notes ?? ''}\n\nAI Insights: ${scoreResult.reasoning}`,
         companyId: user?.uid ?? 'guest',
         assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         customerType: 'B2B' as const,
       });
       createNotification(
         currentLanguage === 'tr' ? 'Yeni Müşteri Adayı' : 'New Lead',
-        `${newLead.name}${newLead.company ? ` — ${newLead.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'} (AI Skor: ${scoreResult.score}/100)`,
+        `${data.name}${data.company ? ` — ${data.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'} (AI Skor: ${scoreResult.score}/100)`,
         'info'
       ).catch(() => {});
-      // Phase 82: if opened from within order form, auto-select the new lead as customer
       if (leadFromOrderRef.current) {
-        const freshLead = { id: docRef.id, ...newLead, status: 'New' as const, score: scoreResult.score, assignedTo: user?.uid ?? 'guest', customerType: 'B2B' as const };
-        setNewOrder(prev => ({ ...prev, customerName: newLead.name, shippingAddress: newLead.company || '' }));
-        setOrderCustomerSearch(newLead.name);
+        const freshLead = { id: docRef.id, ...data, status: 'New' as const, score: scoreResult.score, assignedTo: user?.uid ?? 'guest', customerType: 'B2B' as const };
+        setNewOrder(prev => ({ ...prev, customerName: data.name, shippingAddress: data.company || '' }));
+        setOrderCustomerSearch(data.name);
         setSelectedLead(freshLead as unknown as Lead);
         leadFromOrderRef.current = false;
       }
-      setNewLead({ name: '', company: '', email: '', phone: '', address: '', taxOffice: '', taxId: '', sector: '', authorizedContact: '', notes: '' });
       setIsAddingLead(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'leads');
@@ -22417,90 +22414,16 @@ function AppContent() {
         onCancel={closeConfirm}
       />
 
-      {/* ── Add Lead Modal ── */}
-      <AnimatePresence>
-        {isAddingLead && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!isScoring) { leadFromOrderRef.current = false; setIsAddingLead(false); } }} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold">{currentT.add_new_sales_lead}</h3>
-                  {leadFromOrderRef.current && (
-                    <p className="text-[11px] text-brand mt-0.5 font-medium">
-                      {currentLanguage === 'tr' ? '↩ Sipariş formuna otomatik eklenecek' : '↩ Will auto-select in order form'}
-                    </p>
-                  )}
-                </div>
-                <button onClick={() => { if (!isScoring) { leadFromOrderRef.current = false; setIsAddingLead(false); } }} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
-              </div>
-              <form onSubmit={handleAddLead} className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.contact_name}</label>
-                  <input required value={newLead.name} onChange={e => setNewLead({ ...newLead, name: e.target.value })}
-                    className="apple-input w-full" placeholder="Ahmet Yılmaz" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.company}</label>
-                  <input required value={newLead.company} onChange={e => setNewLead({ ...newLead, company: e.target.value })}
-                    className="apple-input w-full" placeholder="ABC Ticaret A.Ş." />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.email}</label>
-                  <input type="email" value={newLead.email} onChange={e => setNewLead({ ...newLead, email: e.target.value })}
-                    className="apple-input w-full" placeholder="ornek@sirket.com" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.phone}</label>
-                  <input value={newLead.phone} onChange={e => setNewLead({ ...newLead, phone: e.target.value })}
-                    className="apple-input w-full" placeholder="+90 555 000 0000" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Adres' : 'Address'}</label>
-                  <input value={newLead.address} onChange={e => setNewLead({ ...newLead, address: e.target.value })}
-                    className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'İstanbul, Türkiye' : 'Istanbul, Turkey'} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office'}</label>
-                    <input value={newLead.taxOffice} onChange={e => setNewLead({ ...newLead, taxOffice: e.target.value })}
-                      className="apple-input w-full" placeholder="Boğaziçi V.D." />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Vergi No' : 'Tax No'}</label>
-                    <input value={newLead.taxId} onChange={e => setNewLead({ ...newLead, taxId: e.target.value })}
-                      className="apple-input w-full" placeholder="1234567890" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Sektör' : 'Sector'}</label>
-                    <input value={newLead.sector} onChange={e => setNewLead({ ...newLead, sector: e.target.value })}
-                      className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Teknoloji' : 'Technology'} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Yetkili Kişi' : 'Auth. Contact'}</label>
-                    <input value={newLead.authorizedContact} onChange={e => setNewLead({ ...newLead, authorizedContact: e.target.value })}
-                      className="apple-input w-full" placeholder="Mehmet Demir" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.notes}</label>
-                  <textarea value={newLead.notes} onChange={e => setNewLead({ ...newLead, notes: e.target.value })} rows={3}
-                    className="apple-input resize-none w-full" placeholder={currentT.describe_lead_interest} />
-                </div>
-                <div className="pt-2 border-t border-gray-100 flex gap-3">
-                  <button type="button" onClick={() => { if (!isScoring) { leadFromOrderRef.current = false; setIsAddingLead(false); } }}
-                    className="apple-button-secondary flex-1">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                  <button disabled={isScoring} type="submit" className="apple-button-primary flex-1 flex items-center justify-center gap-2">
-                    {isScoring ? (<><Clock className="w-4 h-4 animate-spin" />{currentT.ai_scoring_in_progress}</>) : currentT.create_lead_and_score}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* ── Add Lead Modal (Zod-validated) ── */}
+      <NewLeadModal
+        isOpen={isAddingLead}
+        isScoring={isScoring}
+        fromOrder={leadFromOrderRef.current}
+        currentLanguage={currentLanguage}
+        currentT={currentT}
+        onClose={() => { leadFromOrderRef.current = false; setIsAddingLead(false); }}
+        onSubmit={handleAddLead}
+      />
 
       {/* ── Add Order Modal ── */}
       <AnimatePresence>
