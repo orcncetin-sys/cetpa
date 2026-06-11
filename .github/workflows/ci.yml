@@ -1,0 +1,67 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Typecheck & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy to VDS
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # VDS_SSH_KEY secret'ı tanımlı değilse bu job atlanır (CI yine de çalışır)
+    steps:
+      - name: Check deploy secrets
+        id: check
+        run: |
+          if [ -n "${{ secrets.VDS_SSH_KEY }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VDS_SSH_KEY secret tanımlı değil — deploy atlandı (yalnızca CI çalıştı)."
+          fi
+
+      - name: Setup SSH
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pull & rebuild on VDS
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            'cd /opt/cetpa && git pull origin main && docker compose up -d --build'
+
+      - name: Health check
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          sleep 10
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://app.cetpa.com.tr/api/health)
+          echo "Health: HTTP $code"
+          [ "$code" = "200" ] || exit 1

@@ -192,11 +192,18 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     setImportLoading(true);
     let upserted = 0;
     try {
+      // Koleksiyonu BİR KEZ çek → SKU haritası (satır başına tam koleksiyon
+      // okumak 3000 üründe yüz binlerce gereksiz doküman okuması demekti)
+      const snap = await getDocs(collection(db, 'inventory'));
+      const bySku = new Map<string, string>(); // sku → doc id
+      snap.docs.forEach(d => {
+        const s = ((d.data().sku as string) || '').trim();
+        if (s && !bySku.has(s)) bySku.set(s, d.id);
+      });
       for (const row of importRows) {
         const sku = (row.sku ?? '').trim();
         if (!sku) continue;
-        const snap = await getDocs(collection(db, 'inventory'));
-        const existing = snap.docs.find(d => (d.data().sku as string) === sku);
+        const existingId = bySku.get(sku);
         const payload = {
           sku,
           source: 'csv',
@@ -214,10 +221,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           warehouseId: (row.warehouseId ?? '').trim(),
           updatedAt: serverTimestamp(),
         };
-        if (existing) {
-          await updateDoc(doc(db, 'inventory', existing.id), payload);
+        if (existingId) {
+          await updateDoc(doc(db, 'inventory', existingId), payload);
         } else {
-          await addDoc(collection(db, 'inventory'), { ...payload, createdAt: serverTimestamp() });
+          const newRef = await addDoc(collection(db, 'inventory'), { ...payload, createdAt: serverTimestamp() });
+          bySku.set(sku, newRef.id); // CSV içinde tekrar eden SKU duplike oluşturmasın
           logAudit('CSV Ürün Ekleme', `${payload.name ?? payload.sku ?? ''} CSV ile eklendi`);
         }
         upserted++;

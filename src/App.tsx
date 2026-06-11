@@ -849,12 +849,13 @@ function AppContent() {
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
   const [commissionRules, setCommissionRules] = useState<CommissionRuleApp[]>([]);
   useEffect(() => {
-    if (!user) return;
+    if (!user || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
     const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
       setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp))));
     });
     return () => unsub();
-  }, [user]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, activeTab]);
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -865,12 +866,13 @@ function AppContent() {
   const [newSupplier, setNewSupplier] = useState<Partial<Supplier>>({});
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !['satin-alma', 'muhasebe', 'lojistik'].includes(activeTab)) return;
     const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
       setSuppliers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))));
     }, err => console.error('suppliers:', err));
     return () => unsub();
-  }, [user]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, activeTab]);
 
   const [vknLookupLoading, setVknLookupLoading] = useState(false);
   const [vknLookupMsg, setVknLookupMsg] = useState<{text: string; ok: boolean} | null>(null);
@@ -1854,12 +1856,13 @@ function AppContent() {
 
   // ── Phase 649: Subscribe to webhookConfigs collection ────────────────────
   useEffect(() => {
-    if (!user) return;
+    if (!user || activeTab !== 'settings') return; // yalnızca Ayarlar ekranında gösterilir
     return onSnapshot(collection(db, 'webhookConfigs'), s =>
       setWebhookConfigs(s.docs.map(d => ({ id: d.id, ...d.data() } as WebhookConfig))),
       () => setWebhookConfigs([])
     );
-  }, [user?.uid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, activeTab]);
 
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   const [p632Consolidation] = useState([
@@ -2448,9 +2451,7 @@ function AppContent() {
       setShipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Shipment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'shipments', auth.currentUser?.uid));
 
-    const unsubAuditLogs = onSnapshot(query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)), (snapshot) => {
-      setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid));
+    // auditLog aboneliği ayrı, admin sekmesine gate'li bir effect'te (aşağıda)
 
     // ── Phase 110: Fetch purchaseOrders for AP Tracker ───────────────────────
     const unsubAPOrders = onSnapshot(collection(db, 'purchaseOrders'), (snapshot) => {
@@ -2528,7 +2529,6 @@ function AppContent() {
       unsubEmployees();
       unsubPayrolls();
       unsubShipments();
-      unsubAuditLogs();
       unsubAPOrders();
       unsubTickets();
       unsubContracts();
@@ -2541,6 +2541,19 @@ function AppContent() {
       unsubBudgets();
     };
   }, [user, userRole, isAuthReady]);
+
+  // ── auditLog: yalnızca Admin > Denetim Kaydı açıkken dinle ────────────────
+  useEffect(() => {
+    if (!user || activeTab !== 'admin') return;
+    const companyId = user.uid;
+    const unsub = onSnapshot(
+      query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)),
+      (snapshot) => setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid)
+    );
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, activeTab]);
 
   // ── Phase extended collections — Firestore subscriptions ─────────────────
   useEffect(() => {
