@@ -2234,6 +2234,30 @@ async function startServer() {
     }
   });
 
+  /** GET /api/integrations/health — tüm entegrasyonların anahtar/yapılandırma durumu.
+   *  Yalnızca boolean durum döner, anahtar değerleri asla dönmez.
+   */
+  app.get('/api/integrations/health', requireAuth, async (_req: Request, res: Response) => {
+    const has = (...keys: string[]) => keys.every(k => !!process.env[k]);
+    res.json({
+      integrations: [
+        { id: 'mikro',       name: 'Mikro ERP (JumpBulut)', configured: has('MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'), requiredKeys: ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'], affects: 'Stok/cari/sipariş senkronizasyonu' },
+        { id: 'shopify',     name: 'Shopify',               configured: has('SHOPIFY_ACCESS_TOKEN'),                 requiredKeys: ['SHOPIFY_ACCESS_TOKEN'],                 affects: 'Ürün/sipariş sync + SKU otomatik eşleştirme' },
+        { id: 'resend',      name: 'E-posta (Resend)',      configured: has('RESEND_API_KEY'),                       requiredKeys: ['RESEND_API_KEY'],                       affects: 'Sipariş onayı, davet ve bildirim e-postaları' },
+        { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
+        { id: 'iyzico',      name: 'İyzico',                configured: has('IYZICO_API_KEY', 'IYZICO_SECRET_KEY'),  requiredKeys: ['IYZICO_API_KEY', 'IYZICO_SECRET_KEY'],  affects: 'Ödeme linki oluşturma' },
+        { id: 'whatsapp',    name: 'WhatsApp',              configured: has('WHATSAPP_360DIALOG_API_KEY') || has('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'), requiredKeys: ['WHATSAPP_360DIALOG_API_KEY (veya Twilio çifti)'], affects: 'Müşteri mesajları ve sipariş bildirimleri' },
+        { id: 'luca',        name: 'Luca Muhasebe',         configured: has('LUCA_API_KEY'),                         requiredKeys: ['LUCA_API_KEY', 'LUCA_COMPANY_ID'],      affects: 'e-Fatura gönderim, yevmiye/stok sync' },
+        { id: 'trendyol',    name: 'Trendyol',              configured: has('TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'), requiredKeys: ['TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'], affects: 'Pazaryeri sipariş senkronizasyonu' },
+        { id: 'hepsiburada', name: 'Hepsiburada',           configured: has('HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'), requiredKeys: ['HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'], affects: 'Pazaryeri sipariş senkronizasyonu' },
+        { id: 'dhl',         name: 'DHL Takip',             configured: has('DHL_API_KEY'),                          requiredKeys: ['DHL_API_KEY'],                          affects: 'DHL kargo takibi' },
+        { id: 'ups',         name: 'UPS Takip',             configured: has('UPS_CLIENT_ID', 'UPS_CLIENT_SECRET'),   requiredKeys: ['UPS_CLIENT_ID', 'UPS_CLIENT_SECRET'],   affects: 'UPS kargo takibi' },
+        { id: 'fedex',       name: 'FedEx Takip',           configured: has('FEDEX_CLIENT_ID', 'FEDEX_CLIENT_SECRET'), requiredKeys: ['FEDEX_CLIENT_ID', 'FEDEX_CLIENT_SECRET'], affects: 'FedEx kargo takibi' },
+        { id: 'gemini',      name: 'Gemini AI',             configured: has('GEMINI_API_KEY'),                       requiredKeys: ['GEMINI_API_KEY'],                       affects: 'AI sohbet, lead skorlama, talep tahmini' },
+      ],
+    });
+  });
+
   /** POST /api/mikro/token — IDM token al/yenile (env veya Firestore creds ile).
    *  Token client'a DÖNDÜRÜLMEZ — yalnızca alınabildiği bilgisi + süre döner.
    */
@@ -3382,6 +3406,52 @@ async function startServer() {
       Accept: 'application/json',
     };
   }
+
+  /** POST /api/luca/sync/yevmiye — yevmiye fişlerini Luca'ya aktar.
+   *  Body: { entries: Array<{id, date, fiş, aciklama, debitHesap, alacakHesap, borc, alacak}> }
+   *  Yalnızca Luca'nın kabul ettiği kayıtların id'leri synced olarak döner —
+   *  client isSynced işaretini SADECE gerçek başarıda atar.
+   */
+  app.post('/api/luca/sync/yevmiye', requireAuth, async (req: Request, res: Response) => {
+    const creds = await getLucaCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    const { entries } = req.body as { entries: Record<string, unknown>[] };
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ success: false, error: 'entries dizisi zorunlu.' });
+    }
+    const t0 = Date.now();
+    const syncedIds: string[] = [];
+    const errors: { id: string; error: string }[] = [];
+    try {
+      for (const e of entries) {
+        try {
+          const r = await fetch(`${LUCA_API_URL}/yevmiye`, {
+            method: 'POST',
+            headers: lucaHeaders(creds),
+            body: JSON.stringify({
+              fisNo:       e.fiş ?? e.fisNo,
+              tarih:       e.date,
+              aciklama:    e.aciklama,
+              borcHesap:   e.debitHesap,
+              alacakHesap: e.alacakHesap,
+              borcTutar:   e.borc,
+              alacakTutar: e.alacak,
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (r.ok) syncedIds.push(String(e.id));
+          else errors.push({ id: String(e.id), error: `HTTP ${r.status}` });
+        } catch (err) {
+          errors.push({ id: String(e.id), error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      await writeAuditLog(reqActor(req), 'Luca Yevmiye Sync',
+        `${syncedIds.length}/${entries.length} fiş aktarıldı${errors.length ? `, ${errors.length} hata` : ''}`);
+      res.json({ success: errors.length === 0, syncedIds, errors, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err), syncedIds, errors });
+    }
+  });
 
   // GET /api/luca/status — test connection
   app.get('/api/luca/status', async (_req: Request, res: Response) => {

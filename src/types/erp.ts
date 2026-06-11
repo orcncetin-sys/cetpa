@@ -49,6 +49,8 @@ export interface ErpInfo {
   docsUrl?:      string;
   /** env var names that must be set on the server for this ERP */
   requiredEnvVars: string[];
+  /** true = sunucu adaptörü henüz yazılmadı (endpoint'ler notImplemented döner) */
+  comingSoon?: boolean;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
   },
   {
     id:            'logo',
+    comingSoon:    true,
     displayName:   'Logo Tiger / Go / Start',
     shortName:     'Logo',
     vendor:        'Logo Yazılım',
@@ -109,6 +112,7 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
   },
   {
     id:            'dynamics365',
+    comingSoon:    true,
     displayName:   'Microsoft Dynamics 365 BC',
     shortName:     'Dynamics',
     vendor:        'Microsoft',
@@ -125,6 +129,7 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
   },
   {
     id:            'sap',
+    comingSoon:    true,
     displayName:   'SAP Business One',
     shortName:     'SAP B1',
     vendor:        'SAP',

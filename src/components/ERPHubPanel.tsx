@@ -369,6 +369,11 @@ function ErpCard({
                 {t ? 'Aktif' : 'Active'}
               </span>
             )}
+            {erp.comingSoon && (
+              <span className="text-[10px] font-bold bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-full">
+                {t ? '🚧 Yakında' : '🚧 Coming Soon'}
+              </span>
+            )}
             {status?.fetching === false && (
               <>
                 {status.connected
@@ -410,9 +415,9 @@ function ErpCard({
 
           {/* Activate toggle */}
           <button
-            onClick={isActive ? undefined : onActivate}
-            disabled={saving || isActive}
-            title={isActive ? (t ? 'Zaten aktif' : 'Already active') : (t ? 'Bu ERP\'yi aktifleştir' : 'Activate this ERP')}
+            onClick={isActive || erp.comingSoon ? undefined : onActivate}
+            disabled={saving || isActive || erp.comingSoon}
+            title={erp.comingSoon ? (t ? 'Sunucu adaptörü henüz hazır değil' : 'Server adapter not ready yet') : isActive ? (t ? 'Zaten aktif' : 'Already active') : (t ? 'Bu ERP\'yi aktifleştir' : 'Activate this ERP')}
             className={`relative w-10 h-5 rounded-full transition-all flex-shrink-0 ${
               isActive ? 'bg-emerald-400 cursor-default' : 'bg-gray-200 hover:bg-gray-300 cursor-pointer'
             } disabled:opacity-50`}

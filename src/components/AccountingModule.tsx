@@ -818,9 +818,11 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
         accessToken: mikroAccessToken,
         enabled: mikroEnabled
       };
-      const res: any = await pullBankMovementsFromMikro({}, config);
-      if (res && res.Data) {
-        setMikroBankMovements(res.Data);
+      const res = await pullBankMovementsFromMikro({}, config) as { notImplemented?: boolean; Data?: unknown[] };
+      if (res?.notImplemented) {
+        showToast(currentLanguage === 'tr' ? 'Mikro JumpBulut API\'sinde banka hareketi servisi bulunmuyor. Banka hesap tanımları Ayarlar > Mikro > "Bankalar" ile çekilebilir.' : 'Mikro JumpBulut API has no bank movement service. Bank account definitions can be pulled via Settings > Mikro > Banks.', 'info');
+      } else if (res?.Data) {
+        setMikroBankMovements(res.Data as never[]);
         setMikroBankLastSync(new Date().toLocaleString());
         showToast(currentLanguage === 'tr' ? 'Banka hareketleri başarıyla çekildi.' : 'Bank movements successfully fetched.', 'success');
       } else {
@@ -915,6 +917,11 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       const today = format(new Date(), 'yyyy-MM-dd');
       const monthAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
       const result = await pullBankMovementsFromMikro({ baslangicTarihi: monthAgo, bitisTarihi: today }, config) as Record<string, unknown>;
+      if (result?.notImplemented) {
+        showToast(currentLanguage === 'tr' ? 'Mikro JumpBulut API\'sinde banka hareketi servisi bulunmuyor. Banka hesap tanımları Ayarlar > Mikro > "Bankalar" ile çekilebilir.' : 'Mikro JumpBulut API has no bank movement service. Bank account definitions can be pulled via Settings > Mikro > Banks.', 'info');
+        setBankTxPulling(false);
+        return;
+      }
       const rows = (result?.data ?? result?.items ?? result?.list ?? []) as Record<string, unknown>[];
 
       const newTxs: Omit<BankTransaction, 'id'>[] = rows.map((r) => ({
@@ -3090,9 +3097,18 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               <button
                 onClick={async () => {
                   setLucaTesting(true);
-                  await new Promise(r => setTimeout(r, 1000));
+                  // GERÇEK test: sunucu Luca status endpoint'ini sorgular
+                  let lucaOk = false;
+                  try {
+                    const r = await fetch('/api/luca/status');
+                    const d = await r.json() as { configured?: boolean; connected?: boolean; error?: string };
+                    lucaOk = !!(d.configured && d.connected);
+                    if (!lucaOk) showToast(`${currentLanguage === 'tr' ? 'Luca bağlantı hatası' : 'Luca connection error'}: ${d.error || (d.configured ? 'API erişilemedi' : 'LUCA_API_KEY yapılandırılmamış')}`, 'error');
+                  } catch (e) {
+                    showToast(`Luca: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                  }
                   setLucaTesting(false);
-                  if (lucaApiKey && lucaCompanyId) {
+                  if (lucaOk) {
                     setLucaConnected(true);
                     showToast(t.lucaSuccess);
                     const cfg = { apiKey: lucaApiKey, companyId: lucaCompanyId, baseUrl: lucaBaseUrl, lastSync: lucaLastSync, connected: true };
@@ -3116,8 +3132,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                 onClick={async () => {
                   if (!lucaConnected) return showToast(t.lucaNotConnected, 'error');
                   setLucaSyncing(true);
-                  
-                  // Realistically simulate syncing by updating Firestore
+
                   const unsynced = journalEntries.filter(e => !e.isSynced);
                   if (unsynced.length === 0) {
                     setLucaSyncing(false);
@@ -3125,28 +3140,41 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                     return;
                   }
 
-                  for (const entry of unsynced) {
-                    try {
-                      await updateDoc(doc(db, 'journalEntries', entry.id), { 
-                        isSynced: true,
-                        syncedAt: serverTimestamp()
-                      });
-                    } catch (err) {
-                      console.error("Luca sync error for entry:", entry.id, err);
+                  // GERÇEK aktarım: sunucu Luca yevmiye API'sine gönderir.
+                  // isSynced YALNIZCA Luca'nın kabul ettiği fişlerde işaretlenir.
+                  try {
+                    const r = await authFetch('/api/luca/sync/yevmiye', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ entries: unsynced.map(e => ({
+                        id: e.id, date: e.date, fiş: e.fiş, aciklama: e.aciklama,
+                        debitHesap: e.debitHesap, alacakHesap: e.alacakHesap,
+                        borc: e.borc, alacak: e.alacak,
+                      })) }),
+                    });
+                    const d = await r.json() as { success: boolean; notConfigured?: boolean; syncedIds?: string[]; errors?: { id: string; error: string }[]; error?: string };
+                    if (d.notConfigured) {
+                      showToast(currentLanguage === 'tr' ? 'Luca yapılandırılmamış (LUCA_API_KEY gerekli).' : 'Luca not configured (LUCA_API_KEY required).', 'error');
+                    } else {
+                      for (const id of d.syncedIds ?? []) {
+                        await updateDoc(doc(db, 'journalEntries', id), { isSynced: true, syncedAt: serverTimestamp() }).catch(() => {});
+                      }
+                      const okCount = (d.syncedIds ?? []).length;
+                      if (okCount > 0) {
+                        const now = format(new Date(), 'dd.MM.yyyy HH:mm');
+                        setLucaLastSync(now);
+                        const cfg = { apiKey: lucaApiKey, companyId: lucaCompanyId, baseUrl: lucaBaseUrl, lastSync: now, connected: true };
+                        await updateDoc(doc(db, 'settings', 'luca'), cfg).catch(() => {});
+                        showToast(t.lucaSynced(okCount));
+                      }
+                      if ((d.errors ?? []).length > 0) {
+                        showToast(`${(d.errors ?? []).length} ${currentLanguage === 'tr' ? 'fiş aktarılamadı' : 'entries failed'}: ${d.errors?.[0]?.error ?? ''}`, 'error');
+                      }
                     }
+                  } catch (e) {
+                    showToast(`Luca: ${e instanceof Error ? e.message : String(e)}`, 'error');
                   }
-
-                  await new Promise(r => setTimeout(r, 1500));
                   setLucaSyncing(false);
-                  const now = format(new Date(), 'dd.MM.yyyy HH:mm');
-                  setLucaLastSync(now);
-                  const cfg = { apiKey: lucaApiKey, companyId: lucaCompanyId, baseUrl: lucaBaseUrl, lastSync: now, connected: true };
-                  await updateDoc(doc(db, 'settings', 'luca'), cfg).catch(async (err) => {
-                    if (err.code === 'not-found') {
-                      await addDoc(collection(db, 'settings'), { ...cfg, id: 'luca' });
-                    }
-                  });
-                  showToast(t.lucaSynced(unsynced.length));
                 }}
                 disabled={lucaSyncing}
                 className="apple-button-primary py-2 px-4 text-sm disabled:opacity-50"
@@ -3325,30 +3353,15 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               <button
                 onClick={async () => {
                   if (!mikroEnabled) return showToast(currentLanguage === 'tr' ? 'Önce entegrasyonu etkinleştirin.' : 'Enable the integration first.', 'error');
-                  if (!mikroConnected) return showToast(currentLanguage === 'tr' ? 'Önce bağlantıyı test edin.' : 'Please test the connection first.', 'error');
-                  setMikroSyncing(true);
-                  const unsynced = journalEntries.filter(e => !e.isSynced);
-                  if (unsynced.length === 0) {
-                    setMikroSyncing(false);
-                    showToast(currentLanguage === 'tr' ? 'Senkronize edilecek yeni kayıt yok.' : 'No new records to sync.', 'info');
-                    return;
-                  }
-                  for (const entry of unsynced) {
-                    try {
-                      await updateDoc(doc(db, 'journalEntries', entry.id), { isSynced: true, syncedAt: serverTimestamp() });
-                    } catch (err) { console.error('Mikro sync error:', entry.id, err); }
-                  }
-                  await new Promise(r => setTimeout(r, 1500));
-                  setMikroSyncing(false);
-                  const now = format(new Date(), 'dd.MM.yyyy HH:mm');
-                  setMikroLastSync(now);
-                  const cfg = { accessToken: mikroAccessToken, endpoint: mikroEndpoint, lastSync: now, connected: true, enabled: mikroEnabled };
-                  await updateDoc(doc(db, 'settings', 'mikro'), cfg).catch(async (err) => {
-                    if ((err as { code?: string }).code === 'not-found') {
-                      await addDoc(collection(db, 'settings'), { ...cfg, id: 'mikro' });
-                    }
-                  });
-                  showToast(`${unsynced.length} ${currentLanguage === 'tr' ? 'kayıt Mikro\'ya aktarıldı.' : 'records pushed to Mikro.'}`);
+                  // DÜRÜST DURUM: Mikro JumpBulut API'sinde yevmiye/muhasebe fişi
+                  // endpoint'i YOK (YevmiyeKaydetV2, MuhasebeFisiKaydetV2, FisKaydetV2
+                  // probe edildi — "method not found"). Resmi satışlar zaten sipariş
+                  // akışıyla (SiparisKaydetV2) Mikro'ya gidiyor; yevmiye Mikro
+                  // tarafında otomatik oluşur. Sahte "aktarıldı" işaretlemek yerine
+                  // kullanıcıyı bilgilendiriyoruz.
+                  showToast(currentLanguage === 'tr'
+                    ? 'Mikro API yevmiye aktarımını desteklemiyor. Resmi satışlar sipariş akışıyla otomatik aktarılır; yevmiye Mikro tarafında oluşur.'
+                    : 'Mikro API does not support journal transfer. Official sales sync via the order flow; journals are generated on the Mikro side.', 'info');
                 }}
                 disabled={mikroSyncing}
                 className="apple-button-primary py-2 px-4 text-sm disabled:opacity-50"

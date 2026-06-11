@@ -205,6 +205,7 @@ const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncP
 const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
 const ERPHubPanel             = React.lazy(() => import('./components/ERPHubPanel'));
 const SkuMappingPanel         = React.lazy(() => import('./components/SkuMappingPanel'));
+const IntegrationHealthPanel  = React.lazy(() => import('./components/IntegrationHealthPanel'));
 const MarketplacePanel        = React.lazy(() => import('./components/MarketplacePanel'));
 const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
 const MutabakatPanel          = React.lazy(() => import('./components/MutabakatPanel'));
@@ -1865,11 +1866,7 @@ function AppContent() {
   }, [user?.uid, activeTab]);
 
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
-  const [p632Consolidation] = useState([
-    {entity:'Cetpa A.Ş.',revenue:0,opex:0,headcount:0},
-    {entity:'Cetpa Lojistik Ltd.',revenue:0,opex:0,headcount:0},
-    {entity:'Cetpa Dış Ticaret',revenue:0,opex:0,headcount:0},
-  ]);
+  // p632Consolidation kaldırıldı — hiç render edilmeyen hardcoded dummy veriydi.
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
@@ -13977,6 +13974,11 @@ function AppContent() {
                   <ERPHubPanel currentLanguage={currentLanguage} />
                 </React.Suspense>
               </div>
+
+              {/* ── Entegrasyon Sağlığı (eksik API anahtarları) ── */}
+              <React.Suspense fallback={null}>
+                <IntegrationHealthPanel currentLanguage={currentLanguage} />
+              </React.Suspense>
 
               {/* ── Stok Kodu Eşleştirme (Mikro ↔ Shopify ↔ Pazaryerleri) ── */}
               <React.Suspense fallback={null}>
