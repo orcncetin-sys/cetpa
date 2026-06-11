@@ -10,6 +10,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { logAudit } from '../services/auditLog';
+import MikroPushButton from './MikroPushButton';
+import { stokHareketPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   RefreshCw, Search, Upload, Download, ShoppingCart, Plus, Scan,
@@ -1093,7 +1095,24 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           {mov.timestamp && typeof (mov.timestamp as { toDate?: () => Date }).toDate === 'function' ? format((mov.timestamp as { toDate: () => Date }).toDate(), 'HH:mm') : ''}
                         </span>
                       </div>
-                      <p className="text-xs font-bold text-gray-900 truncate">{mov.productName}</p>
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-xs font-bold text-gray-900 truncate">{mov.productName}</p>
+                        <MikroPushButton
+                          compact
+                          method="DahiliStokHareketKaydetV2"
+                          entityType="inventoryMovement"
+                          entityId={mov.id}
+                          buildPayload={() => {
+                            const sku = (mov as unknown as { sku?: string }).sku;
+                            if (!sku) return null;
+                            return stokHareketPayload({
+                              sku,
+                              quantity: Number(mov.quantity) || 0,
+                              type: mov.type,
+                            });
+                          }}
+                        />
+                      </div>
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-[10px] text-gray-500">
                           {mov.timestamp ? format(typeof (mov.timestamp as { toDate?: () => Date }).toDate === 'function' ? (mov.timestamp as { toDate: () => Date }).toDate() : new Date(mov.timestamp as string | number | Date), 'dd MMM yyyy', { locale: currentLanguage === 'tr' ? trLocale : undefined }) : ''}

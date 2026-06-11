@@ -24,6 +24,8 @@ import {
   onSnapshot, serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import MikroPushButton from './MikroPushButton';
+import { uretimTalepPayload, satinAlmaTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt, byField } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 
@@ -712,6 +714,19 @@ export default function MRPModule({
                   <div className="text-right flex-shrink-0">
                     <p className="font-bold text-gray-900">{s.qty} {s.unit}</p>
                     <p className="text-xs text-gray-400">{tr ? 'Gerekli:' : 'By:'} {new Date(s.neededBy).toLocaleDateString('tr-TR')}</p>
+                    <MikroPushButton
+                      compact
+                      method={s.type === 'purchase' ? 'SatinAlmaTalepKaydetV2' : 'UretimTalepKaydetV2'}
+                      entityType="mrpSuggestion"
+                      entityId={`${s.type}-${i}`}
+                      buildPayload={() => {
+                        const sku = (s as unknown as { sku?: string }).sku ?? s.itemName;
+                        if (!sku) return null;
+                        return s.type === 'purchase'
+                          ? satinAlmaTalepPayload({ sku, quantity: s.qty, deliveryDate: s.neededBy })
+                          : uretimTalepPayload({ sku, quantity: s.qty, deliveryDate: s.neededBy });
+                      }}
+                    />
                   </div>
                 </div>
               ))}

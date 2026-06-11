@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
+import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, Search, X, Plus, ChevronRight, MapPin, BarChart3 } from 'lucide-react';
 
 interface MobileWMSModuleProps {
@@ -210,6 +211,15 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       discrepancyCount: discrepancies.length,
       createdAt: serverTimestamp(),
     });
+    // Sayım sonuçlarını Mikro'ya da gönder (SayimSonuclariKaydetV2) — hata
+    // lokal kaydı engellemez, syncLog'dan izlenir.
+    const counted = cycleItems.filter(i => i.counted && i.countedQty !== null && i.sku);
+    if (counted.length > 0) {
+      pushMikroEvrak('SayimSonuclariKaydetV2',
+        sayimPayload(counted.map(i => ({ sku: i.sku, counted: i.countedQty ?? 0 }))),
+        { entityType: 'cycleCount', entityId: new Date().toISOString().slice(0, 10) }
+      ).catch(() => { /* syncLog'da görünür */ });
+    }
     // Adjust inventory for discrepancies
     for (const item of discrepancies) {
       if (item.countedQty !== null) {

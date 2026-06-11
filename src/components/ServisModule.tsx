@@ -4,6 +4,8 @@ import {
   doc, serverTimestamp, query
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import MikroPushButton from './MikroPushButton';
+import { servisIsEmriPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
 import {
   HeadphonesIcon, ShieldCheck, Users, BarChart2,
@@ -276,7 +278,26 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
                     const rowCls = sla === 'breach' ? 'bg-red-50/40' : sla === 'warning' ? 'bg-amber-50/40' : '';
                     return (
                       <tr key={t.id} className={`hover:bg-gray-50/50 transition-colors ${rowCls}`}>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{t.talepNo}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                          <div className="flex items-center gap-1.5">
+                            {t.talepNo}
+                            <MikroPushButton
+                              compact
+                              method="ServisIsEmriKaydetV2"
+                              entityType="servisTalebi"
+                              entityId={t.id}
+                              buildPayload={() => servisIsEmriPayload({
+                                kod: t.talepNo,
+                                ad: `${t.kategori} — ${t.urunAd}`.slice(0, 40),
+                                cariKod: (t as unknown as { mikroCariKod?: string }).mikroCariKod ?? '',
+                                cihazSeriNo: t.seriNo,
+                                yetkili: t.atanan,
+                                aciklama: t.aciklama,
+                                date: t.acilisTarihi,
+                              })}
+                            />
+                          </div>
+                        </td>
                         <td className="px-4 py-3 font-medium text-gray-800">{t.musteriAd}</td>
                         <td className="px-4 py-3 text-gray-500">{t.urunAd}</td>
                         <td className="px-4 py-3 text-gray-500">{t.kategori}</td>

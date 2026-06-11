@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Download, Printer, Edit2, CheckCircle2, Clock, AlertTriangle, FileText, User, Calendar, ShoppingCart } from 'lucide-react';
 import { jsPDF } from 'jspdf';
+import MikroPushButton from './MikroPushButton';
+import { teklifPayload } from '../services/mikroEvrak';
 import autoTable from 'jspdf-autotable';
 import { formatInCurrency } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
@@ -279,6 +281,23 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <MikroPushButton
+              method="VerilenTeklifKaydetV2"
+              label="Mikro'ya Gönder"
+              entityType="quotation"
+              entityId={quotation.id}
+              buildPayload={() => {
+                const items = quotation.lineItems ?? quotation.items ?? [];
+                const cariKod = (quotation as Record<string, unknown>).mikroCariKod as string | undefined;
+                if (!cariKod || items.length === 0) return null; // cari kodu olmayan teklif Mikro'ya gidemez
+                return teklifPayload({
+                  cariKod,
+                  notes: quotation.notes,
+                  belgeNo: quotation.id.slice(0, 8).toUpperCase(),
+                  lineItems: items.map(i => ({ sku: i.sku, quantity: i.quantity, price: i.price, title: i.name })),
+                });
+              }}
+            />
             <button onClick={exportToPDF} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-600" title="PDF İndir">
               <Download className="w-5 h-5" />
             </button>

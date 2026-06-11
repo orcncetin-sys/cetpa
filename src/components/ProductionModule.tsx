@@ -10,6 +10,8 @@ import ModuleHeader from './ModuleHeader';
 import ConfirmModal from './ConfirmModal';
 import { cn } from '../lib/utils';
 import { db } from '../firebase';
+import MikroPushButton from './MikroPushButton';
+import { uretimIsEmriPayload } from '../services/mikroEvrak';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, runTransaction, getDocs,
@@ -866,7 +868,22 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                     const pct = order.quantity > 0 ? Math.min(100, Math.round((order.completedQuantity / order.quantity) * 100)) : 0;
                     return (
                       <tr key={order.id}>
-                        <td className="font-bold text-brand whitespace-nowrap">{order.orderNo}</td>
+                        <td className="font-bold text-brand whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            {order.orderNo}
+                            <MikroPushButton
+                              compact
+                              method="UretimIsEmriOlusturV2"
+                              entityType="productionOrder"
+                              entityId={order.id}
+                              buildPayload={() => {
+                                const sku = (order as unknown as { sku?: string }).sku;
+                                if (!sku) return null; // ürün SKU'suz iş emri Mikro'ya gidemez
+                                return uretimIsEmriPayload({ sku, quantity: order.quantity });
+                              }}
+                            />
+                          </div>
+                        </td>
                         <td className="font-medium">{order.productName}</td>
                         <td className="text-center whitespace-nowrap">
                           {order.completedQuantity} / {order.quantity}

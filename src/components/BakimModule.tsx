@@ -4,6 +4,8 @@ import {
   doc, serverTimestamp, query
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import MikroPushButton from './MikroPushButton';
+import { bakimTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
 import {
   Wrench, ClipboardList, CalendarDays, AlertTriangle,
@@ -317,7 +319,22 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
                   {isEmirleri.map(ie => (
                     <tr key={ie.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-3 font-mono text-xs text-gray-500">{(ie as any).emriNo ?? '—'}</td>
-                      <td className="px-4 py-3 font-medium text-gray-800">{ie.ekipmanAd}</td>
+                      <td className="px-4 py-3 font-medium text-gray-800">
+                        <div className="flex items-center gap-1.5">
+                          {ie.ekipmanAd}
+                          <MikroPushButton
+                            compact
+                            method="BakimTalepKaydetV2"
+                            entityType="bakimIsEmri"
+                            entityId={ie.id}
+                            buildPayload={() => bakimTalepPayload({
+                              stokKod: (ie as unknown as { sku?: string }).sku ?? '',
+                              note: `${ie.ekipmanAd} — ${ie.aciklama ?? ''}`.slice(0, 120),
+                              date: ie.planlananTarih,
+                            })}
+                          />
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-gray-500">{ie.isTipi}</td>
                       <td className="px-4 py-3"><DurumBadge durum={ie.oncelik} /></td>
                       <td className="px-4 py-3 text-gray-500">{ie.atanan || '—'}</td>

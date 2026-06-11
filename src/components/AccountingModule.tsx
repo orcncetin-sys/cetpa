@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { authFetch } from '../services/authFetch';
+import MikroPushButton from './MikroPushButton';
+import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Trash2, Edit2, Download, Building2, BookOpen, TrendingUp, TrendingDown,
@@ -4425,7 +4427,30 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                   )}
                   {displayedTransfers.map(tr => (
                     <tr key={tr.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{tr.productName}</td>
+                      <td className="py-2.5 px-3 font-medium text-gray-800">
+                        <div className="flex items-center gap-1.5">
+                          {tr.productName}
+                          <MikroPushButton
+                            compact
+                            method="DepolarArasiSiparisKaydetV2"
+                            entityType="transfer"
+                            entityId={tr.id}
+                            buildPayload={() => {
+                              const depoNo = (s: string) => parseInt((s.match(/\d+/) ?? ['1'])[0], 10);
+                              const sku = (tr as unknown as { sku?: string }).sku;
+                              if (!sku) return null; // SKU'suz transfer Mikro'ya gidemez
+                              return depoTransferPayload({
+                                sku,
+                                quantity: tr.quantity,
+                                fromDepo: depoNo(tr.fromWarehouse),
+                                toDepo: depoNo(tr.toWarehouse),
+                                date: tr.date,
+                                note: tr.notes,
+                              });
+                            }}
+                          />
+                        </div>
+                      </td>
                       <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.fromWarehouse}</td>
                       <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.toWarehouse}</td>
                       <td className="py-2.5 px-3 text-right font-semibold">{tr.quantity}</td>

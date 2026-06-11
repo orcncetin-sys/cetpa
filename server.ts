@@ -2269,6 +2269,51 @@ async function startServer() {
     }
   });
 
+  // ── Genel Mikro Evrak Push ────────────────────────────────────────────────
+  // V17 Kaydet endpoint'leri için tek kapı. Alan eşlemesi client'taki
+  // mikroEvrak.ts eşleyicilerinde yapılır; server yalnızca whitelist'i
+  // doğrular, Mikro'ya iletir (payload Mikro objesi İÇİNDE) ve loglar.
+  const MIKRO_PUSH_WHITELIST = new Set([
+    'VerilenTeklifKaydetV2', 'AlinanTeklifKaydetV2',
+    'SayimSonuclariKaydetV2', 'SayimKesinlestirmeV2',
+    'DahiliStokHareketKaydetV2',
+    'PersonelIzinTalepKaydetV2', 'PersonelizinKaydetV2', 'PersonelKaydetV2',
+    'SatinAlmaTalepKaydetV2',
+    'DepolarArasiSiparisKaydetV2',
+    'BakimTalepKaydetV2', 'BakimHareketleriKaydetV2', 'BakimSarfiyatlariKaydetV2', 'BakimSozlesmeKaydetV2',
+    'ServisIsEmriKaydetV2', 'ServisFormuKaydetV2', 'ServisMalzemePlanKaydetV2', 'ServisRotaPlanKaydetV2',
+    'UretimTalepKaydetV2', 'UrunReceteKaydetV2', 'UrunRotaKaydetV2', 'UretimIsEmriOlusturV2', 'UretimRotaPlanKaydetV2',
+    'EtiketBasimKaydetV2',
+    'ZiyaretKaydetV2',
+    'DekontKaydetV2',
+  ]);
+
+  app.post('/api/mikro/evrak/kaydet', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { method, payload, entityType, entityId } = req.body as {
+      method: string; payload: Record<string, unknown>; entityType?: string; entityId?: string;
+    };
+    if (!method || !MIKRO_PUSH_WHITELIST.has(method)) {
+      return res.status(400).json({ success: false, error: `Geçersiz veya izinsiz method: ${method}` });
+    }
+    if (!payload || typeof payload !== 'object') {
+      return res.status(400).json({ success: false, error: 'payload zorunlu.' });
+    }
+    const t0 = Date.now();
+    try {
+      const { ok, data, status } = await mikroPost(method, payload, true);
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      const success = ok && !!r0 && !r0.IsError;
+      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      await writeSyncLog(method, entityType || 'evrak', entityId || 'unknown', success, null, errorMsg, Date.now() - t0, reqActor(req));
+      res.json({ success, error: errorMsg, data: r0?.Data ?? null });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await writeSyncLog(method, entityType || 'evrak', entityId || 'unknown', false, null, msg, Date.now() - t0, reqActor(req));
+      res.status(500).json({ success: false, error: msg });
+    }
+  });
+
   /** POST /api/mikro/yevmiye/kaydet — yevmiye fişlerini Mikro'ya aktar (MuhasebeFisKaydetV2).
    *  Body: { entries: [{id, date(YYYY-MM-DD), aciklama, debitHesap, alacakHesap, borc, alacak}] }
    *  Her kayıt çift taraflı 2 satır olur: borç satırı (+meblag) ve alacak satırı (-meblag).

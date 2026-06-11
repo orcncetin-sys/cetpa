@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp, FileDown } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import MikroPushButton from './MikroPushButton';
+import { satinAlmaTalepPayload } from '../services/mikroEvrak';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -495,7 +497,25 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               {sortedOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-gray-50/50 transition-colors group">
                   <td className="px-6 py-4">
-                    <span className="text-sm font-bold text-gray-900">#{order.orderNumber}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-gray-900">#{order.orderNumber}</span>
+                      <MikroPushButton
+                        compact
+                        method="SatinAlmaTalepKaydetV2"
+                        entityType="purchaseOrder"
+                        entityId={order.id}
+                        buildPayload={() => {
+                          const it = order.items?.[0];
+                          if (!it?.sku) return null;
+                          return satinAlmaTalepPayload({
+                            sku: it.sku,
+                            quantity: it.quantity,
+                            belgeNo: order.orderNumber,
+                            requestedBy: order.supplier,
+                          });
+                        }}
+                      />
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

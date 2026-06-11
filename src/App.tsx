@@ -131,6 +131,7 @@ import L from 'leaflet';
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
 import { syncOrderWithCari } from './services/mikroService';
+import { pushMikroEvrak, izinTalepPayload, ziyaretPayload } from './services/mikroEvrak';
 import { 
   type Shipment, 
   UserRole, 
@@ -3338,6 +3339,17 @@ function AppContent() {
       const updatedActivities = [...(selectedLead.activities || []), activity];
       await updateDoc(doc(db, 'leads', selectedLead.id), { activities: updatedActivities, updatedAt: serverTimestamp() });
       setSelectedLead({ ...selectedLead, activities: updatedActivities });
+      // Saha ziyareti → Mikro'ya ZiyaretKaydetV2 (cari kodu varsa; hata lokali engellemez)
+      if (activity.type === 'Visit') {
+        const cariKod = (selectedLead as unknown as { mikroCariKod?: string }).mikroCariKod;
+        if (cariKod) {
+          pushMikroEvrak('ZiyaretKaydetV2', ziyaretPayload({
+            cariKod,
+            basZamani: new Date().toISOString(),
+            personelKod: (user?.email ?? '').split('@')[0].slice(0, 15),
+          }), { entityType: 'leadVisit', entityId: selectedLead.id }).catch(() => {});
+        }
+      }
       setIsAddingActivity(false);
       setNewActivity({ type: 'Note', description: '' });
     } catch (error) {
@@ -11937,7 +11949,17 @@ function AppContent() {
                               </div>
                               {lr.status === 'pending' && hasFullAccess('ik') ? (
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  <button onClick={async () => { await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'approved' }); toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success'); }}
+                                  <button onClick={async () => {
+                                    await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'approved' });
+                                    toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success');
+                                    // Onaylanan izni Mikro'ya da gönder (hata lokali engellemez, syncLog'da görünür)
+                                    pushMikroEvrak('PersonelIzinTalepKaydetV2', izinTalepPayload({
+                                      persKod: ((lr as unknown as { mikroPersKod?: string }).mikroPersKod ?? lr.employeeName ?? '').slice(0, 15),
+                                      startDate: lr.startDate,
+                                      days: Number(lr.days) || 1,
+                                      reason: `${lr.type ?? ''}`,
+                                    }), { entityType: 'leaveRequest', entityId: lr.id }).catch(() => {});
+                                  }}
                                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
                                     {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
                                   </button>

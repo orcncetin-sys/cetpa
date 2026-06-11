@@ -6,6 +6,7 @@ import {
   Filter, FileText, ChevronRight, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { db } from '../firebase';
+import { authFetch } from '../services/authFetch';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, serverTimestamp
@@ -561,6 +562,22 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
         notlar: paymentForm.notlar.trim(),
         createdAt: serverTimestamp(),
       });
+
+      // Tahsilatı Mikro'ya da gönder (kasa tahsilat — deneysel eşleme, syncLog'da izlenir)
+      const mikroCari = (paymentKaydi as unknown as { mikroCariKod?: string; cariKod?: string });
+      if (mikroCari.mikroCariKod || mikroCari.cariKod) {
+        authFetch('/api/mikro/tahsilat/kaydet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tahsilat: {
+            cariKod: mikroCari.mikroCariKod ?? mikroCari.cariKod,
+            tutar,
+            tarih: paymentForm.tarih,
+            aciklama: paymentForm.notlar || `Tahsilat — ${paymentKaydi.id}`,
+            tip: 'tahsilat',
+          } }),
+        }).catch(() => { /* syncLog'da görünür */ });
+      }
 
       const newTahsilEdilen = paymentKaydi.tahsilEdilen + tutar;
       const durum = calcDurum(paymentKaydi.toplamTutar, newTahsilEdilen, paymentKaydi.vadeTarihi);

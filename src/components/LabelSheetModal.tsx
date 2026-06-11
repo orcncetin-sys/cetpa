@@ -10,6 +10,8 @@
  */
 
 import React, { useRef } from 'react';
+import MikroPushButton from './MikroPushButton';
+import { etiketPayload } from '../services/mikroEvrak';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Printer } from 'lucide-react';
 
@@ -126,6 +128,20 @@ export default function LabelSheetModal({ items, currentLanguage = 'tr', onClose
             <p className="text-[11px] text-gray-400 mt-0.5">
               {items.length} {lang ? 'ürün etiketi — A4 kağıda 9 etiket/sayfa' : 'labels — 9 per A4 page'}
             </p>
+            <div className="mt-1.5">
+              <MikroPushButton
+                compact
+                label="Mikro Etiket Kuyruğu"
+                method="EtiketBasimKaydetV2"
+                entityType="labelBatch"
+                entityId={String(items.length)}
+                buildPayload={() => {
+                  const valid = items.filter(i => i.sku);
+                  if (valid.length === 0) return null;
+                  return etiketPayload(valid.map(i => ({ sku: i.sku, adet: 1 })));
+                }}
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
