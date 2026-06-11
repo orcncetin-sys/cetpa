@@ -247,6 +247,8 @@ import {
   daysRemaining,
   getPlanConfig,
 } from './types/subscription';
+import { useAppStore } from './store/appStore';
+import { useRouteSync } from './hooks/useRouteSync';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -641,6 +643,10 @@ function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
   const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
 
+  // ── Zustand store sync ────────────────────────────────────────────────────
+  const { setLanguage: storeSetLanguage, setExchangeRates: storeSetRates,
+          setUser: storeSetUser, setUserRole: storeSetRole, setCompanyId: storeSetCompanyId } = useAppStore();
+
   // ── Phase 25: Online / offline indicator ──────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   useEffect(() => {
@@ -713,9 +719,14 @@ function AppContent() {
 
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [activeTab, setActiveTab] = useState(() => {
+    // Prefer URL path (React Router), fall back to legacy hash
+    const path = window.location.pathname.replace(/^\//, '').split('/')[0];
     const hash = window.location.hash.replace('#', '');
-    return hash || 'dashboard';
+    return path || hash || 'dashboard';
   });
+  // URL ↔ activeTab bidirectional sync (React Router)
+  useRouteSync({ activeTab, setActiveTab });
+
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
@@ -1198,6 +1209,7 @@ function AppContent() {
           const eurPerUsd: number = data.rates?.EUR ?? 0.92;
           const tryPerEur = tryPerUsd / eurPerUsd;
           setExchangeRates({ USD: tryPerUsd, EUR: tryPerEur });
+          storeSetRates({ USD: tryPerUsd, EUR: tryPerEur });
         })
         .catch(err => console.error('Frankfurter API failed:', err));
 
@@ -1207,7 +1219,7 @@ function AppContent() {
         return res.json();
       })
       .then(data => {
-        if (data?.rates?.USD) setExchangeRates(data.rates);
+        if (data?.rates?.USD) { setExchangeRates(data.rates); storeSetRates(data.rates); }
         else setRatesFromFrankfurter();
       })
       .catch(() => setRatesFromFrankfurter());
@@ -2128,16 +2140,21 @@ function AppContent() {
             handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
           }
           setUserRole(role as UserRole);
+          storeSetRole(role as UserRole);
         } else {
           try {
             await updateDoc(userRef, userData);
           } catch (error) {
             handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
           }
-          setUserRole((u.isAnonymous ? 'Admin' : (userSnap.data().role || 'Sales')) as UserRole);
+          const resolvedRole = (u.isAnonymous ? 'Admin' : (userSnap.data().role || 'Sales')) as UserRole;
+          setUserRole(resolvedRole);
+          storeSetRole(resolvedRole);
         }
       }
       setUser(u);
+      storeSetUser(u);
+      storeSetCompanyId(u?.uid ?? null);
       setIsAuthReady(true);
     });
     return () => unsubscribe();
@@ -2368,6 +2385,7 @@ function AppContent() {
     if (isGuestMode) {
       setIsGuestMode(false);
       setUser(null);
+      storeSetUser(null);
     } else {
       signOut(auth);
     }

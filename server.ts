@@ -10,8 +10,78 @@ import { createHmac, createHash } from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
 import rateLimit from "express-rate-limit";
+import { z, ZodError } from "zod";
 
 dotenv.config();
+
+// ── Zod validation schemas & helper ────────────────────────────────────────
+function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | null {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    res.status(400).json({ success: false, error: 'Geçersiz istek gövdesi.', details: result.error.flatten() });
+    return null;
+  }
+  return result.data;
+}
+
+// E-posta gönderim şeması
+const EmailSendSchema = z.object({
+  to:      z.string().email('Geçerli bir e-posta adresi girin.'),
+  subject: z.string().min(1, 'Konu boş olamaz.').max(200),
+  html:    z.string().min(1, 'İçerik boş olamaz.'),
+  from:    z.string().email().optional(),
+  replyTo: z.string().email().optional(),
+});
+
+// Fatura kaydetme şeması
+const FaturaKaydetSchema = z.object({
+  firebaseId: z.string().optional(),
+  order: z.object({
+    mikroCariKod:  z.string().min(1, 'Cari kod zorunludur.'),
+    lineItems:     z.array(z.object({
+      sku:      z.string().optional(),
+      name:     z.string().min(1),
+      price:    z.number().nonnegative(),
+      quantity: z.number().int().positive(),
+    })).min(1, 'En az bir satır gerekli.'),
+    faturaTipi:   z.enum(['e-fatura', 'e-arsiv', 'ihracat']).optional(),
+    kdvOran:      z.number().min(0).max(100).optional(),
+    createdAt:    z.string().optional(),
+  }),
+});
+
+// İrsaliye kaydetme şeması
+const IrsaliyeKaydetSchema = z.object({
+  firebaseId: z.string().optional(),
+  shipment: z.object({
+    mikroCariKod:   z.string().min(1, 'Cari kod zorunludur.'),
+    customerName:   z.string().optional(),
+    destination:    z.string().optional(),
+    trackingNo:     z.string().optional(),
+    cargoFirm:      z.string().optional(),
+    items:          z.array(z.object({
+      sku:      z.string().optional(),
+      name:     z.string().min(1),
+      quantity: z.number().int().positive(),
+      price:    z.number().optional(),
+    })).optional(),
+    date:           z.string().optional(),
+  }),
+});
+
+// Gelen fatura kabul/ret şeması
+const GelenFaturaActionSchema = z.object({
+  faturaGuid:  z.string().min(1, 'faturaGuid zorunludur.'),
+  firebaseId:  z.string().optional(),
+  aciklama:    z.string().optional(),
+});
+
+// AI chat şeması
+const AiChatSchema = z.object({
+  message:    z.string().min(1).max(4000),
+  context:    z.string().max(8000).optional(),
+  language:   z.enum(['tr', 'en']).optional(),
+});
 
 // ── Firebase Admin SDK ──────────────────────────────────────────────────────
 let adminDb: admin.firestore.Firestore | null = null;
@@ -2653,11 +2723,12 @@ async function startServer() {
   // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
   app.post('/api/mikro/fatura/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
+    const parsed = validate(FaturaKaydetSchema, req.body, res);
+    if (!parsed) return;
+    const { order, firebaseId } = parsed;
     const t0 = Date.now();
     try {
-      const lineItems = (order.lineItems || []) as Record<string, unknown>[];
-      if (lineItems.length === 0) return res.status(400).json({ success: false, error: 'Fatura satırı bulunamadı.' });
+      const lineItems = order.lineItems;
 
       const rawDate    = order.createdAt ? new Date(order.createdAt as string) : new Date();
       const faturaDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
@@ -2717,10 +2788,12 @@ async function startServer() {
   // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
   app.post('/api/mikro/irsaliye/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const { shipment, firebaseId } = req.body as { shipment: Record<string, unknown>; firebaseId: string };
+    const parsed = validate(IrsaliyeKaydetSchema, req.body, res);
+    if (!parsed) return;
+    const { shipment, firebaseId } = parsed;
     const t0 = Date.now();
     try {
-      const rawDate   = shipment.date ? new Date(shipment.date as string) : new Date();
+      const rawDate   = shipment.date ? new Date(shipment.date) : new Date();
       const irsDate   = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
       const items = (shipment.items || []) as Record<string, unknown>[];
 
@@ -2967,8 +3040,9 @@ async function startServer() {
 
   app.post('/api/mikro/gelen-fatura/kabul', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const { faturaGuid, firebaseId } = req.body as { faturaGuid: string; firebaseId?: string };
-    if (!faturaGuid) return res.status(400).json({ success: false, error: 'faturaGuid zorunludur.' });
+    const parsed = validate(GelenFaturaActionSchema, req.body, res);
+    if (!parsed) return;
+    const { faturaGuid, firebaseId } = parsed;
     const t0 = Date.now();
     try {
       const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid });
@@ -2994,8 +3068,9 @@ async function startServer() {
 
   app.post('/api/mikro/gelen-fatura/ret', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const { faturaGuid, aciklama, firebaseId } = req.body as { faturaGuid: string; aciklama?: string; firebaseId?: string };
-    if (!faturaGuid) return res.status(400).json({ success: false, error: 'faturaGuid zorunludur.' });
+    const parsed = validate(GelenFaturaActionSchema, req.body, res);
+    if (!parsed) return;
+    const { faturaGuid, aciklama, firebaseId } = parsed;
     const t0 = Date.now();
     try {
       const { ok, data, status } = await mikroPost('GelenFaturalarRedV2', {
@@ -3332,13 +3407,19 @@ async function startServer() {
     return { apiKey: d.resendApiKey, from: d.fromAddress || from };
   }
 
-  async function sendEmail(to: string, subject: string, html: string): Promise<{ id?: string; error?: string }> {
+  async function sendEmail(to: string, subject: string, html: string, fromOverride?: string, replyTo?: string): Promise<{ id?: string; error?: string }> {
     const creds = await getResendKey();
     if (!creds) return { error: 'notConfigured' };
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${creds.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: creds.from, to: [to], subject, html }),
+      body: JSON.stringify({
+        from:     fromOverride ?? creds.from,
+        to:       [to],
+        subject,
+        html,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
       signal: AbortSignal.timeout(12000),
     });
     const d = await r.json() as { id?: string; name?: string; message?: string };
@@ -3355,9 +3436,9 @@ async function startServer() {
   // POST /api/email/send — generic send (used by UI, requires auth)
   // Body: { to, subject, html }
   app.post('/api/email/send', requireAuth, async (req: Request, res: Response) => {
-    const { to, subject, html } = req.body as { to: string; subject: string; html: string };
-    if (!to || !subject || !html) return res.status(400).json({ success: false, error: 'to, subject, html gerekli.' });
-    const result = await sendEmail(to, subject, html);
+    const body = validate(EmailSendSchema, req.body, res);
+    if (!body) return;
+    const result = await sendEmail(body.to, body.subject, body.html, body.from, body.replyTo);
     if (result.error === 'notConfigured') return res.status(503).json({ success: false, notConfigured: true });
     if (result.error) return res.status(500).json({ success: false, error: result.error });
     res.json({ success: true, id: result.id });
@@ -4301,6 +4382,8 @@ async function startServer() {
   app.post('/api/ai/chat', requireAuth, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
+    const chatValidated = validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
+    if (!chatValidated) return;
     const { message, history = [], systemInstruction, model = 'gemini-2.0-flash', highThinking = false } = req.body as {
       message: string;
       history?: { role: string; parts: { text: string }[] }[];

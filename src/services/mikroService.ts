@@ -75,27 +75,35 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 }
 
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const authHeader = await getAuthHeader();
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeader },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
-  return data as T;
+  try {
+    const authHeader = await getAuthHeader();
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
+    return data as T;
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) } as T;
+  }
 }
 
-async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(path);
-  const data = await res.json().catch(() => ({ configured: false, connected: false }));
-  return data as T;
+async function apiGet<T>(path: string, fallback: Partial<T> = {}): Promise<T> {
+  try {
+    const res = await fetch(path);
+    const data = await res.json().catch(() => fallback);
+    return data as T;
+  } catch (e) {
+    return { ...fallback, error: e instanceof Error ? e.message : String(e) } as T;
+  }
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
 /** Check if Mikro is configured and the token endpoint is reachable */
 export async function getMikroStatus(): Promise<MikroStatus> {
-  return apiGet<MikroStatus>('/api/mikro/status');
+  return apiGet<MikroStatus>('/api/mikro/status', { configured: false, connected: false });
 }
 
 // ── Stok (Inventory) ──────────────────────────────────────────────────────────
