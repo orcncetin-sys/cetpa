@@ -199,6 +199,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         const existing = snap.docs.find(d => (d.data().sku as string) === sku);
         const payload = {
           sku,
+          source: 'csv',
           name: (row.name ?? '').trim(),
           category: (row.category ?? '').trim(),
           stockLevel: Number(row.stockLevel) || 0,
@@ -638,7 +639,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         placeholder={currentLanguage === 'tr' ? 'SKU veya barkod girin...' : 'Enter SKU or barcode...'}
         onScan={(barcode) => {
           setSearchTerm(barcode);
-          const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase());
+          const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode);
           if (match) setSelectedProduct(match);
         }}
       />

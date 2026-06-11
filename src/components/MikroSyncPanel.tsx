@@ -225,6 +225,31 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan',     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
   ];
 
+  // ── Dummy ürün temizliği (kaynaksız seed kayıtları) ─────────────────────────
+  const [cleanupState, setCleanupState] = useState<{
+    running: boolean; pendingCount: number | null; sample: string[]; result: string | null; error: string | null;
+  }>({ running: false, pendingCount: null, sample: [], result: null, error: null });
+
+  async function handleCleanup(confirm: boolean) {
+    setCleanupState(s => ({ ...s, running: true, error: null }));
+    try {
+      const r = await fetch('/api/admin/cleanup-dummy-inventory', {
+        method: 'POST', headers: await authHeaders(), body: JSON.stringify({ dryRun: !confirm }),
+      });
+      const d = await r.json() as { success: boolean; dummyCount?: number; deleted?: number; sample?: string[]; kept?: Record<string, number>; error?: string };
+      if (!d.success) throw new Error(d.error || 'Hata');
+      if (!confirm) {
+        setCleanupState({ running: false, pendingCount: d.dummyCount ?? 0, sample: d.sample ?? [], result: null, error: null });
+      } else {
+        const keptStr = Object.entries(d.kept ?? {}).map(([s, n]) => `${s}: ${n}`).join(', ');
+        setCleanupState({ running: false, pendingCount: null, sample: [],
+          result: `${d.deleted ?? 0} ${t ? 'dummy ürün silindi' : 'dummy items deleted'}${keptStr ? ` · ${t ? 'korunan' : 'kept'}: ${keptStr}` : ''}`, error: null });
+      }
+    } catch (e) {
+      setCleanupState(s => ({ ...s, running: false, error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -396,6 +421,60 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             />
           ))}
         </div>
+      </div>
+
+      {/* ── Dummy Ürün Temizliği ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h4 className="font-bold text-sm text-gray-900">
+              {t ? 'Dummy Ürün Temizliği' : 'Dummy Product Cleanup'}
+            </h4>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {t
+                ? 'Kaynağı olmayan örnek/seed ürünleri siler. Mikro, Shopify, CSV ve manuel eklenen ürünler korunur.'
+                : 'Deletes seed products with no source. Mikro, Shopify, CSV and manually added products are kept.'}
+            </p>
+          </div>
+          {cleanupState.pendingCount === null ? (
+            <button
+              onClick={() => handleCleanup(false)}
+              disabled={cleanupState.running}
+              className="apple-button-secondary text-xs px-4 py-2 disabled:opacity-50"
+            >
+              {cleanupState.running ? (t ? 'Sayılıyor…' : 'Counting…') : (t ? 'Dummy Ürünleri Say' : 'Count Dummy Items')}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCleanupState(s => ({ ...s, pendingCount: null, sample: [] }))}
+                className="apple-button-secondary text-xs px-4 py-2"
+              >
+                {t ? 'Vazgeç' : 'Cancel'}
+              </button>
+              <button
+                onClick={() => handleCleanup(true)}
+                disabled={cleanupState.running || cleanupState.pendingCount === 0}
+                className="text-xs px-4 py-2 rounded-full font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50"
+              >
+                {cleanupState.running
+                  ? (t ? 'Siliniyor…' : 'Deleting…')
+                  : (t ? `${cleanupState.pendingCount} Ürünü Sil` : `Delete ${cleanupState.pendingCount} Items`)}
+              </button>
+            </div>
+          )}
+        </div>
+        {cleanupState.pendingCount !== null && cleanupState.sample.length > 0 && (
+          <p className="text-[11px] text-gray-500 bg-gray-50 rounded-xl px-3 py-2">
+            {t ? 'Örnek' : 'Sample'}: {cleanupState.sample.join(', ')}{cleanupState.pendingCount > cleanupState.sample.length ? '…' : ''}
+          </p>
+        )}
+        {cleanupState.result && (
+          <p className="text-[11px] text-green-700 bg-green-50 rounded-xl px-3 py-2">✓ {cleanupState.result}</p>
+        )}
+        {cleanupState.error && (
+          <p className="text-[11px] text-red-600 bg-red-50 rounded-xl px-3 py-2">⚠ {cleanupState.error}</p>
+        )}
       </div>
 
       {/* ── Sync Log ── */}

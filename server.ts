@@ -2229,6 +2229,47 @@ async function startServer() {
     }
   });
 
+  /** POST /api/admin/cleanup-dummy-inventory — kaynaksız (dummy seed) ürünleri sil.
+   *  source alanı OLAN her şey korunur: mikro_import, csv, manual, shopify vb.
+   *  Body: { dryRun?: boolean } — dryRun=true yalnızca sayım döner, silmez.
+   */
+  app.post('/api/admin/cleanup-dummy-inventory', requireAuth, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const dryRun = !!(req.body as { dryRun?: boolean })?.dryRun;
+    try {
+      const snap = await adminDb.collection('inventory').get();
+      const dummies: { ref: FirebaseFirestore.DocumentReference; name: string }[] = [];
+      const keptBySource = new Map<string, number>();
+      for (const d of snap.docs) {
+        const source = (d.data().source as string) || '';
+        if (!source) dummies.push({ ref: d.ref, name: (d.data().name as string) || d.id });
+        else keptBySource.set(source, (keptBySource.get(source) ?? 0) + 1);
+      }
+
+      if (!dryRun && dummies.length > 0) {
+        let batch = adminDb.batch(); let ops = 0;
+        for (const { ref } of dummies) {
+          batch.delete(ref);
+          if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+        }
+        if (ops > 0) await batch.commit();
+        await writeAuditLog(reqActor(req), 'Dummy Ürün Temizliği',
+          `${dummies.length} kaynaksız ürün silindi (korunan: ${[...keptBySource].map(([s, n]) => `${s}:${n}`).join(', ') || 'yok'})`);
+      }
+
+      res.json({
+        success: true,
+        dryRun,
+        dummyCount: dummies.length,
+        deleted: dryRun ? 0 : dummies.length,
+        kept: Object.fromEntries(keptBySource),
+        sample: dummies.slice(0, 10).map(d => d.name),
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ── SKU Eşleştirme: Mikro ↔ Shopify ↔ pazaryerleri ──────────────────────────
   /** POST /api/sku-mapping/auto-match — envanter SKU'larını Shopify ürünleriyle
    *  normalize ederek eşleştirir, skuMappings koleksiyonuna yazar.

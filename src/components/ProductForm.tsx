@@ -111,6 +111,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
         const newRef = await addDoc(collection(db, 'inventory'), {
           ...data,
           companyId,
+          source: 'manual',
           createdAt: serverTimestamp(),
         });
 

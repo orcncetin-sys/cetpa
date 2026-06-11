@@ -22635,7 +22635,7 @@ function AppContent() {
                       currentLanguage={currentLanguage as 'tr' | 'en'}
                       title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
                       onScan={(barcode) => {
-                        const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || i.name.toLowerCase().includes(barcode.toLowerCase()));
+                        const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
                         if (match) handleAddLineItem(match);
                         else setProductSearch(barcode);
                         setShowProductPicker(true);
