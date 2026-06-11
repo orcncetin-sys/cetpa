@@ -348,7 +348,8 @@ function mikroData(raw: unknown): Record<string, unknown> {
 /** Call a Mikro Jump API endpoint — resolves creds, injects token + context. */
 async function mikroPost(
   endpoint: string,
-  extraBody: Record<string, unknown>
+  extraBody: Record<string, unknown>,
+  inMikro = false // true → ekstra alanlar Mikro objesi İÇİNE konur (V17 evrak kalıbı)
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const creds = await getMikroCreds();
   if (!creds) throw new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.');
@@ -357,13 +358,16 @@ async function mikroPost(
 
   const doCall = async (): Promise<{ ok: boolean; status: number; data: unknown }> => {
     const token = await getMikroToken(creds);
+    const body = inMikro
+      ? { Mikro: { ...buildMikroContext(creds), ...extraBody } }
+      : { Mikro: buildMikroContext(creds), ...extraBody };
     const res = await fetch(url, {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ Mikro: buildMikroContext(creds), ...extraBody }),
+      body: JSON.stringify(body),
     });
     const text = await res.text();
     let data: unknown;
@@ -2259,6 +2263,99 @@ async function startServer() {
       const success = ok && !r0?.IsError;
       const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
       await writeSyncLog('CariHareketKaydetV2', 'payment', String(hareket.cha_kod ?? 'unknown'), success, null, errorMsg, Date.now() - t0, reqActor(req));
+      res.json({ success, error: errorMsg, data });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** POST /api/mikro/yevmiye/kaydet — yevmiye fişlerini Mikro'ya aktar (MuhasebeFisKaydetV2).
+   *  Body: { entries: [{id, date(YYYY-MM-DD), aciklama, debitHesap, alacakHesap, borc, alacak}] }
+   *  Her kayıt çift taraflı 2 satır olur: borç satırı (+meblag) ve alacak satırı (-meblag).
+   *  Yalnızca Mikro'nun kabul ettiği fişlerin id'leri syncedIds olarak döner.
+   */
+  app.post('/api/mikro/yevmiye/kaydet', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { entries } = req.body as { entries: Record<string, unknown>[] };
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ success: false, error: 'entries dizisi zorunlu.' });
+    }
+    const t0 = Date.now();
+    const toTrDate = (iso: string) => { const [y, m, d] = String(iso).split('-'); return `${d}.${m}.${y}`; };
+    const hesapKodu = (s: unknown) => String(s ?? '').trim().split(/\s|-/)[0] || '100';
+    const syncedIds: string[] = [];
+    const errors: { id: string; error: string }[] = [];
+    try {
+      for (const e of entries) {
+        const meblag = Number(e.borc ?? e.alacak ?? 0) || 0;
+        const satirBase = {
+          fis_firmano: 0, fis_subeno: 0,
+          fis_tarih: toTrDate(String(e.date ?? '')),
+          fis_tur: 0,
+          fis_sorumluluk_kodu: '', fis_ticari_tip: 0, fis_kurfarkifl: 0,
+          fis_ticari_evraktip: 0, fis_tic_belgeno: String(e.fiş ?? e.fisNo ?? ''),
+          fis_tic_belgetarihi: toTrDate(String(e.date ?? '')),
+          fis_katagori: 0, fis_fmahsup_tipi: 0, user_tablo: [],
+        };
+        const { ok, data, status } = await mikroPost('MuhasebeFisKaydetV2', {
+          evraklar: [{
+            evrak_aciklamalari: [{ aciklama: String(e.aciklama ?? '') }],
+            satirlar: [
+              { ...satirBase, fis_hesap_kod: hesapKodu(e.debitHesap),  fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0:  meblag },
+              { ...satirBase, fis_hesap_kod: hesapKodu(e.alacakHesap), fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0: -meblag },
+            ],
+          }],
+        }, true);
+        const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+        if (ok && r0 && !r0.IsError) syncedIds.push(String(e.id));
+        else errors.push({ id: String(e.id), error: (r0?.ErrorMessage as string) || `HTTP ${status}` });
+      }
+      await writeAuditLog(reqActor(req), 'Mikro Yevmiye Aktarımı',
+        `${syncedIds.length}/${entries.length} fiş aktarıldı${errors.length ? `, ${errors.length} hata: ${errors[0].error.slice(0, 80)}` : ''}`);
+      res.json({ success: errors.length === 0, syncedIds, errors, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err), syncedIds, errors });
+    }
+  });
+
+  /** POST /api/mikro/tahsilat/kaydet — kasa tahsilat/tediye → Mikro (TahsilatTediyeKaydetV2).
+   *  Body: { tahsilat: { cariKod, tutar, tarih(YYYY-MM-DD), aciklama?, tip: 'tahsilat'|'tediye' } }
+   *  Alan eşlemesi V17 örneğinden — DENEYSEL: ilk gerçek kayıtla doğrulanmalı.
+   */
+  app.post('/api/mikro/tahsilat/kaydet', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { tahsilat } = req.body as { tahsilat: Record<string, unknown> };
+    if (!tahsilat?.cariKod || !tahsilat?.tutar) {
+      return res.status(400).json({ success: false, error: 'cariKod ve tutar zorunlu.' });
+    }
+    const t0 = Date.now();
+    const toTrDate = (iso: string) => { const [y, m, d] = String(iso).split('-'); return `${d}.${m}.${y}`; };
+    const tip = tahsilat.tip === 'tediye' ? 'tediye' : 'tahsilat';
+    try {
+      const { ok, data, status } = await mikroPost('TahsilatTediyeKaydetV2', {
+        evraklar: [{
+          evrak_aciklamalari: [{ aciklama: String(tahsilat.aciklama ?? '') }],
+          satirlar: [{
+            cha_tarihi: toTrDate(String(tahsilat.tarih ?? new Date().toISOString().slice(0, 10))),
+            cha_tip: tip === 'tahsilat' ? 1 : 0,
+            cha_cinsi: 19,
+            cha_normal_Iade: 0,
+            cha_evrak_tip: 34,
+            cha_evrakno_seri: tip === 'tahsilat' ? 'KSTAH' : 'KSTED',
+            cha_cari_cins: 0,
+            cha_kod: String(tahsilat.cariKod),
+            cha_d_cins: 0, cha_d_kur: 1, cha_d_kurtar: null,
+            cha_srmrkkodu: '', cha_projekodu: '',
+            cha_kasa_hizmet: 4,
+            cha_meblag: Number(tahsilat.tutar),
+            cha_aciklama: String(tahsilat.aciklama ?? ''),
+          }],
+        }],
+      }, true);
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      const success = ok && !!r0 && !r0.IsError;
+      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      await writeSyncLog('TahsilatTediyeKaydetV2', 'payment', String(tahsilat.cariKod), success, null, errorMsg, Date.now() - t0, reqActor(req));
       res.json({ success, error: errorMsg, data });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });

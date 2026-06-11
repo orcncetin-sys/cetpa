@@ -3353,15 +3353,48 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               <button
                 onClick={async () => {
                   if (!mikroEnabled) return showToast(currentLanguage === 'tr' ? 'Önce entegrasyonu etkinleştirin.' : 'Enable the integration first.', 'error');
-                  // DÜRÜST DURUM: Mikro JumpBulut API'sinde yevmiye/muhasebe fişi
-                  // endpoint'i YOK (YevmiyeKaydetV2, MuhasebeFisiKaydetV2, FisKaydetV2
-                  // probe edildi — "method not found"). Resmi satışlar zaten sipariş
-                  // akışıyla (SiparisKaydetV2) Mikro'ya gidiyor; yevmiye Mikro
-                  // tarafında otomatik oluşur. Sahte "aktarıldı" işaretlemek yerine
-                  // kullanıcıyı bilgilendiriyoruz.
-                  showToast(currentLanguage === 'tr'
-                    ? 'Mikro API yevmiye aktarımını desteklemiyor. Resmi satışlar sipariş akışıyla otomatik aktarılır; yevmiye Mikro tarafında oluşur.'
-                    : 'Mikro API does not support journal transfer. Official sales sync via the order flow; journals are generated on the Mikro side.', 'info');
+                  // GERÇEK aktarım: V17 koleksiyonundaki MuhasebeFisKaydetV2 ile
+                  // yevmiye fişleri Mikro'ya gönderilir. isSynced yalnızca Mikro'nun
+                  // kabul ettiği fişlerde işaretlenir.
+                  if (!mikroConnected) return showToast(currentLanguage === 'tr' ? 'Önce bağlantıyı test edin.' : 'Test the connection first.', 'error');
+                  setMikroSyncing(true);
+                  const unsynced = journalEntries.filter(e => !e.isSynced);
+                  if (unsynced.length === 0) {
+                    setMikroSyncing(false);
+                    showToast(currentLanguage === 'tr' ? 'Senkronize edilecek yeni kayıt yok.' : 'No new records to sync.', 'info');
+                    return;
+                  }
+                  try {
+                    const r = await authFetch('/api/mikro/yevmiye/kaydet', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ entries: unsynced.map(e => ({
+                        id: e.id, date: e.date, fiş: e.fiş, aciklama: e.aciklama,
+                        debitHesap: e.debitHesap, alacakHesap: e.alacakHesap,
+                        borc: e.borc, alacak: e.alacak,
+                      })) }),
+                    });
+                    const d = await r.json() as { success: boolean; notConfigured?: boolean; syncedIds?: string[]; errors?: { id: string; error: string }[] };
+                    if (d.notConfigured) {
+                      showToast(currentLanguage === 'tr' ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.', 'error');
+                    } else {
+                      for (const id of d.syncedIds ?? []) {
+                        await updateDoc(doc(db, 'journalEntries', id), { isSynced: true, syncedAt: serverTimestamp() }).catch(() => {});
+                      }
+                      const okCount = (d.syncedIds ?? []).length;
+                      if (okCount > 0) {
+                        const now = format(new Date(), 'dd.MM.yyyy HH:mm');
+                        setMikroLastSync(now);
+                        showToast(`${okCount} ${currentLanguage === 'tr' ? 'fiş Mikro\'ya aktarıldı ✓' : 'entries pushed to Mikro ✓'}`);
+                      }
+                      if ((d.errors ?? []).length > 0) {
+                        showToast(`${(d.errors ?? []).length} ${currentLanguage === 'tr' ? 'fiş aktarılamadı' : 'entries failed'}: ${d.errors?.[0]?.error?.slice(0, 80) ?? ''}`, 'error');
+                      }
+                    }
+                  } catch (e) {
+                    showToast(`Mikro: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                  }
+                  setMikroSyncing(false);
                 }}
                 disabled={mikroSyncing}
                 className="apple-button-primary py-2 px-4 text-sm disabled:opacity-50"
