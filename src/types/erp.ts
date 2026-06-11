@@ -67,7 +67,8 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
     descTr:        'Türkiye\'nin önde gelen muhasebe ve ticari yazılımı. Bulut API üzerinden stok, cari ve sipariş senkronizasyonu.',
     descEn:        'Leading Turkish accounting & business software. Stock, customer and order sync via cloud API.',
     apiType:       'rest',
-    features:      ['import_stok', 'export_stok', 'import_cari', 'export_cari', 'export_siparis', 'export_fatura', 'pull_bakiye', 'pull_mizan', 'pull_kdv'],
+    // pull_bakiye/mizan/kdv kaldırıldı — JumpBulut API'sinde bu servisler yok (gateway doğrulandı)
+    features:      ['import_stok', 'export_stok', 'import_cari', 'export_cari', 'export_siparis', 'export_fatura'],
     statusPath:    '/api/mikro/status',
     docsUrl:       'https://jumpbulut.mikro.com.tr',
     requiredEnvVars: [

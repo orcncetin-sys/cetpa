@@ -343,84 +343,13 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         />
       </div>
 
-      {/* ── Pull Flows ── */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#1a3a5c]" />
-            {t ? 'Mikro\'dan Veri Çek' : 'Pull Data from Mikro'}
-          </h4>
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase">{t ? 'Dönem' : 'Period'}</label>
-            <input
-              type="month"
-              value={pullPeriod}
-              onChange={e => setPullPeriod(e.target.value)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-[#1a3a5c] bg-gray-50"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Cari Bakiye */}
-          <PullCard
-            icon={<Users className="w-4 h-4 text-[#1a3a5c]" />}
-            title={t ? 'Cari Bakiye' : 'Account Balances'}
-            description={t ? 'Tüm cari hesapların bakiyelerini Mikro\'dan çek.' : 'Pull AR/AP balances from Mikro for all accounts.'}
-            state={bakiyePull}
-            disabled={!status?.connected}
-            onPull={handlePullBakiye}
-            lang={t}
-          />
-          {/* Mizan */}
-          <PullCard
-            icon={<ShoppingCart className="w-4 h-4 text-indigo-600" />}
-            title={t ? 'Mizan' : 'Trial Balance'}
-            description={t ? `${pullPeriod} dönemine ait mizanı çek.` : `Pull trial balance for ${pullPeriod}.`}
-            state={mizanPull}
-            disabled={!status?.connected}
-            onPull={handlePullMizan}
-            lang={t}
-          />
-          {/* KDV Özet */}
-          <PullCard
-            icon={<Download className="w-4 h-4 text-amber-600" />}
-            title={t ? 'KDV Özeti' : 'VAT Summary'}
-            description={t ? `${pullPeriod} KDV matrahı ve hesaplanan KDV'yi çek.` : `Pull VAT base and calculated tax for ${pullPeriod}.`}
-            state={kdvPull}
-            disabled={!status?.connected}
-            onPull={handlePullKdv}
-            lang={t}
-          />
-        </div>
-
-        {!status?.connected && (
-          <p className="text-[10px] text-center text-gray-400">
-            {t ? 'Pull işlemleri için Mikro bağlantısı gerekli.' : 'Mikro connection required for pull operations.'}
-          </p>
-        )}
-      </div>
-
-      {/* ── Diğer Mikro Verileri ── */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-        <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-          <Download className="w-4 h-4 text-[#1a3a5c]" />
-          {t ? 'Diğer Mikro Verileri' : 'Other Mikro Data'}
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {extraPullDefs.map(def => (
-            <PullCard
-              key={def.key}
-              icon={<Download className="w-4 h-4 text-[#1a3a5c]" />}
-              title={def.title}
-              description={def.desc}
-              state={extraPulls[def.key] ?? { running: false, result: null, error: null }}
-              disabled={!status?.connected}
-              onPull={() => handleExtraPull(def.key, def.route)}
-              lang={t}
-            />
-          ))}
-        </div>
+      {/* ── API kapsamı notu ── */}
+      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-4">
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          {t
+            ? 'ℹ️ Mikro JumpBulut API\'si şu işlemleri destekler: stok listesi/kaydı, cari listesi/kaydı, sipariş, e-fatura ve irsaliye kaydı. Banka, kasa, barkod, ödeme planı, stok hareketi, sipariş/fatura listesi ve cari bakiye servisleri API\'de bulunmuyor (gateway doğrulandı) — bu veriler yalnızca Mikro masaüstünde yönetilir.'
+            : 'ℹ️ The Mikro JumpBulut API supports: stock list/save, customer list/save, order, e-invoice and dispatch note save. Bank, cash register, barcode, payment plan, stock movement, order/invoice list and balance services do not exist in the API (gateway verified).'}
+        </p>
       </div>
 
       {/* ── Dummy Ürün Temizliği ── */}
