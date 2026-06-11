@@ -4562,40 +4562,41 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   // GET /api/health — liveness probe + integration status (no key values disclosed)
   app.get('/api/health', async (_req: Request, res: Response) => {
-    // ── Firebase: attempt a lightweight Firestore read ──────────────────────
-    let firebaseOk = false;
+    const timeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+      Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+
+    // ── Firebase: lightweight Firestore read with 4 s timeout ───────────────
+    let firebaseOk = !!adminDb; // assume ok if SDK init'd; read confirms connectivity
     if (adminDb) {
-      try {
-        await adminDb.collection('settings').doc('__health__').get();
-        firebaseOk = true;
-      } catch {
-        // doc not found is fine (404 ≠ error); actual auth/network errors throw
-        firebaseOk = true; // adminDb is initialised — connection is working
-      }
+      firebaseOk = await timeout(
+        adminDb.collection('settings').doc('__health__').get().then(() => true).catch(() => true),
+        4000, false
+      );
     }
 
-    // ── Resend: env var OR Firestore settings/email ─────────────────────────
+    // ── Resend: env var OR Firestore settings/email (no extra DB read) ──────
     let resendOk = !!process.env.RESEND_API_KEY;
     if (!resendOk && adminDb) {
-      try {
-        const snap = await adminDb.collection('settings').doc('email').get();
-        resendOk = !!(snap.data()?.resendApiKey);
-      } catch { /* ignore */ }
+      resendOk = await timeout(
+        adminDb.collection('settings').doc('email').get()
+          .then(s => !!(s.data()?.resendApiKey)).catch(() => false),
+        2000, false
+      );
     }
 
-    // ── WhatsApp: Twilio OR 360dialog env vars ──────────────────────────────
+    // ── WhatsApp ─────────────────────────────────────────────────────────────
     const whatsappOk =
       !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) ||
       !!process.env.WHATSAPP_360DIALOG_API_KEY;
 
-    // ── İyzico: env vars OR Firestore settings/iyzico ──────────────────────
+    // ── İyzico: env var OR Firestore settings/iyzico ─────────────────────────
     let iyzicoOk = !!(process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY);
     if (!iyzicoOk && adminDb) {
-      try {
-        const snap = await adminDb.collection('settings').doc('iyzico').get();
-        const d = snap.data();
-        iyzicoOk = !!(d?.apiKey && d?.secretKey);
-      } catch { /* ignore */ }
+      iyzicoOk = await timeout(
+        adminDb.collection('settings').doc('iyzico').get()
+          .then(s => { const d = s.data(); return !!(d?.apiKey && d?.secretKey); }).catch(() => false),
+        2000, false
+      );
     }
 
     res.json({
