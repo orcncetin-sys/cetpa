@@ -738,7 +738,30 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsubs = [
-      onSnapshot(collection(db, 'customers'), s => setCustomers(s.docs.map(d => ({ id: d.id, ...d.data() } as Customer))), (error) => logFirestoreError(error, OperationType.LIST, 'customers')),
+      // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
+      // (type==='Supplier' olanlar Tedarikçiler sekmesine aittir, burada gizlenir.)
+      onSnapshot(collection(db, 'leads'), s => setCustomers(
+        s.docs
+          .filter(d => ((d.data().type as string) ?? 'Customer') !== 'Supplier')
+          .map(d => {
+            const x = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              name:        (x.name as string) || (x.company as string) || '—',
+              company:     (x.company as string) || '',
+              email:       (x.email as string) || '',
+              phone:       (x.phone as string) || '',
+              address:     (x.address as string) || '',
+              taxNo:       (x.taxId as string) || (x.taxNo as string) || '',
+              taxOffice:   (x.taxOffice as string) || '',
+              notes:       (x.notes as string) || '',
+              creditLimit: Number(x.creditLimit ?? 0),
+              balance:     Number(x.bakiye ?? x.balance ?? 0),
+              riskGroup:   (x.riskGroup as Customer['riskGroup']) || 'Düşük',
+              createdAt:   x.createdAt,
+            } as Customer;
+          })
+      ), (error) => logFirestoreError(error, OperationType.LIST, 'leads')),
       onSnapshot(collection(db, 'suppliers'), s => setSuppliers(s.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))), (error) => logFirestoreError(error, OperationType.LIST, 'suppliers')),
       onSnapshot(collection(db, 'services'), s => setServices(s.docs.map(d => ({ id: d.id, ...d.data() } as Service))), (error) => logFirestoreError(error, OperationType.LIST, 'services')),
       onSnapshot(collection(db, 'warehouseItems'), s => setWarehouseItems(s.docs.map(d => ({ id: d.id, ...d.data() } as WarehouseItem))), (error) => logFirestoreError(error, OperationType.LIST, 'warehouseItems')),
@@ -1087,11 +1110,34 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!customerForm.name.trim()) return showToast(t.bankNameRequired, 'error');
     try {
+      // leads koleksiyonuna yaz — CRM ile ortak kaynak (taxNo → taxId eşlemesi)
+      const leadPayload = {
+        name:        customerForm.name,
+        company:     customerForm.company,
+        email:       customerForm.email,
+        phone:       customerForm.phone,
+        address:     customerForm.address,
+        taxId:       customerForm.taxNo,
+        taxOffice:   customerForm.taxOffice,
+        notes:       customerForm.notes,
+        creditLimit: customerForm.creditLimit,
+        riskGroup:   customerForm.riskGroup,
+        type:        'Customer',
+        updatedAt:   serverTimestamp(),
+      };
       if (editingCustomer) {
-        await updateDoc(doc(db, 'customers', editingCustomer.id), { ...customerForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'leads', editingCustomer.id), leadPayload);
         showToast(t.accountUpdated);
       } else {
-        await addDoc(collection(db, 'customers'), { ...customerForm, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'leads'), {
+          ...leadPayload,
+          status:       'Active',
+          customerType: 'B2B',
+          source:       'manual',
+          companyId:    auth.currentUser?.uid ?? null,
+          assignedTo:   auth.currentUser?.uid ?? null,
+          createdAt:    serverTimestamp(),
+        });
         showToast(t.accountAdded);
       }
       setShowCustomerModal(false);
@@ -1107,7 +1153,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       message: t.confirmDeleteEntry,
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'customers', id));
+          await deleteDoc(doc(db, 'leads', id)); // ortak kaynak: leads
           showToast(t.accountDeleted);
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (error) {
