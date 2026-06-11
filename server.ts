@@ -1715,9 +1715,7 @@ async function startServer() {
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
-    const PAGE_SIZE = 500;
-    let index = 0;
-    let hasMore = true;
+    let skippedRecords = 0;
 
     try {
       // Prefetch ALL inventory docs → Map<sku, ref>. Deliberately NOT filtered
@@ -1741,18 +1739,53 @@ async function startServer() {
       // Mikro'dan gelen gerçek kategoriler — import sonunda dummy chip'leri değiştirir
       const categorySet = new Set<string>();
 
-      while (hasMore) {
+      // ── Adaptif sayfalama ───────────────────────────────────────────────────
+      // Mikro bazı sayfa aralıklarında düz metin "Api Server Error" döner
+      // (kayıt bazlı serileştirme hatası, sunucu tarafında). Bozuk aralık
+      // 100 → 20 → 5 → 1 şeklinde daraltılır; yalnızca gerçekten bozuk tekil
+      // kayıtlar atlanır. Index = offset / size (Mikro Index sayfa numarasıdır).
+      const fetchRange = async (offset: number, size: number): Promise<Record<string, unknown>[] | null> => {
         const { ok, data } = await mikroPost('StokListesiV2', {
           StokKod: '', TarihTipi: 2,
           IlkTarih: '2000-01-01',
           SonTarih: `${new Date().getFullYear() + 1}-12-31`,
-          Sort: 'sto_kod', Size: String(PAGE_SIZE), Index: index,
+          Sort: 'sto_kod', Size: String(size), Index: offset / size,
         });
+        if (!ok || typeof data === 'string') return null; // "Api Server Error" vb.
+        const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+        if (!r0 || r0.IsError) return null;
+        const rows = mikroData(data).StokListesi;
+        return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : null;
+      };
 
-        if (!ok) break;
+      const SUB: Record<number, number> = { 100: 20, 20: 5, 5: 1 };
+      const collectRange = async (offset: number, size: number): Promise<{ rows: Record<string, unknown>[]; end: boolean }> => {
+        const direct = await fetchRange(offset, size);
+        if (direct !== null) return { rows: direct, end: direct.length < size };
+        if (size === 1) {
+          skippedRecords++;
+          console.warn(`Stok import: kayıt #${offset} atlandı (Mikro Api Server Error)`);
+          return { rows: [], end: false };
+        }
+        const sub = SUB[size];
+        const out: Record<string, unknown>[] = [];
+        let end = false;
+        for (let o = offset; o < offset + size; o += sub) {
+          const r = await collectRange(o, sub);
+          out.push(...r.rows);
+          end = r.end; // son alt-aralığın end durumu belirleyicidir
+        }
+        return { rows: out, end };
+      };
 
-        const stoklar = (mikroData(data).StokListesi ?? []) as Record<string, unknown>[];
-        if (!Array.isArray(stoklar) || stoklar.length === 0) break;
+      const CHUNK = 100;
+      let offset = 0;
+      let reachedEnd = false;
+      while (!reachedEnd && offset < 50000) {
+        const { rows: stoklar, end } = await collectRange(offset, CHUNK);
+        reachedEnd = end;
+        offset += CHUNK;
+        if (stoklar.length === 0) { if (end) break; else continue; }
 
         for (const s of stoklar) {
           const sku = (s.sto_kod as string)?.trim();
@@ -1829,9 +1862,7 @@ async function startServer() {
           }
         }
 
-        hasMore = stoklar.length === PAGE_SIZE;
-        index += 1; // Mikro Index = sayfa numarası (kayıt offseti DEĞİL)
-        console.log(`Stok import: sayfa ${index} tamamlandı — toplam ${created + updated} işlendi`);
+        console.log(`Stok import: offset ${offset} — toplam ${created + updated} işlendi${skippedRecords ? `, ${skippedRecords} bozuk kayıt atlandı` : ''}`);
       }
 
       await commitBatch();
@@ -1880,9 +1911,9 @@ async function startServer() {
       }
 
       const duration = Date.now() - t0;
-      await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel`, true, null, null, duration, reqActor(req));
-      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, duration });
+      await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, reqActor(req));
+      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
+      res.json({ success: true, created, updated, errors, skippedRecords, duration });
 
     } catch (err) {
       const duration = Date.now() - t0;
