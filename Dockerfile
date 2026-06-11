@@ -41,6 +41,7 @@ COPY server.ts startup.cjs tsconfig.json package.json ./
 
 # Public assets (if any)
 COPY public ./public
+COPY scripts ./scripts
 
 USER cetpa
 
