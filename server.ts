@@ -2265,6 +2265,49 @@ async function startServer() {
     }
   });
 
+  /** POST /api/mikro/import/faturalar — kesilen + gelen faturaları SqlVeriOkuV2 ile çek.
+   *  Mikro şeması: CARI_HESAP_HAREKETLERI, cha_evrak_tip=63 (fatura).
+   *  cha_tip: 0 = borç (satış/kestiğimiz), 1 = alacak (alış/gelen).
+   *  NOT: Mikro test ortamında 'MikroApiLoginForSelect' SQL kullanıcısı eksikse
+   *  401 döner — Mikro destek tenant DB'de tanımlayınca çalışır.
+   */
+  app.post('/api/mikro/import/faturalar', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const companyId = (req as Request & { uid: string }).uid;
+    const t0 = Date.now();
+    try {
+      const sql =
+        "SELECT TOP 2000 cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, " +
+        "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, cha_ebelge_turu, cha_belge_no " +
+        "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_iptal = 0 ORDER BY cha_tarihi DESC";
+      const { ok, data, status } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sql });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      if (!ok || !r0 || r0.IsError) {
+        return res.status(502).json({ success: false, error: (r0?.ErrorMessage as string) || `HTTP ${status}` });
+      }
+      const rows = firstArrayIn(mikroData(data));
+      let satis = 0, alis = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      for (const row of rows) {
+        const guid = String(row.cha_Guid ?? '') || adminDb.collection('mikroFaturalar').doc().id;
+        const yon = Number(row.cha_tip ?? 0) === 0 ? 'satis' : 'alis';
+        yon === 'satis' ? satis++ : alis++;
+        batch.set(adminDb.collection('mikroFaturalar').doc(guid), {
+          ...row, yon, companyId,
+          source: 'mikro_import',
+          syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      await writeAuditLog(reqActor(req), 'Mikro Fatura Çekme', `${satis} satış + ${alis} alış faturası çekildi`);
+      res.json({ success: true, total: rows.length, satis, alis, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   /** GET /api/integrations/health — tüm entegrasyonların anahtar/yapılandırma durumu.
    *  Yalnızca boolean durum döner, anahtar değerleri asla dönmez.
    */
