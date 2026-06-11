@@ -313,9 +313,14 @@ async function getMikroToken(creds: MikroCreds): Promise<string> {
   }
 }
 
-/** Mikro Jump API requires a daily-rotating hash: MD5("YYYY-MM-DD " + plainPassword) */
+/** Mikro Jump API requires a daily-rotating hash: MD5("YYYY-MM-DD " + plainPassword).
+ *  Tarih TÜRKİYE saatine göre hesaplanır — UTC kullanılırsa her gece 00:00–03:00 TR
+ *  arasında bir önceki günün hash'i üretilir ve tüm çağrılar reddedilir.
+ */
 function buildMikroDailySifre(plainPassword: string): string {
-  const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()); // "YYYY-MM-DD"
   return createHash('md5').update(`${today} ${plainPassword}`).digest('hex');
 }
 
