@@ -10,6 +10,8 @@ services:
     volumes:
       # Mount service account so it survives container rebuilds
       - /opt/cetpa/firebase-service-account.json:/app/service-account.json:ro
+      # Firestore yedekleri host'ta kalıcı olsun
+      - /opt/cetpa/backups:/app/backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/api/health"]
