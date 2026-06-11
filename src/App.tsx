@@ -2,12 +2,10 @@ import DashboardAnalysis from './components/DashboardAnalysis';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import AIInlineNudge from './components/AIInlineNudge';
-import InventoryViewComponent from './components/InventoryView';
-import ReportsDashboardComponent from './components/ReportsDashboard';
+const InventoryViewComponent = React.lazy(() => import('./components/InventoryView'));
+const ReportsDashboardComponent = React.lazy(() => import('./components/ReportsDashboard'));
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -126,8 +124,7 @@ import {
   TrendingDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import L from 'leaflet';
+const LogisticsMapLazy = React.lazy(() => import('./components/LogisticsMap'));
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
 import { syncOrderWithCari } from './services/mikroService';
@@ -163,10 +160,10 @@ import {
 } from 'recharts';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-// ── Eager imports (critical path — needed before first render) ────────────────
-import LandingPage from './components/LandingPage';
-import OnboardingFlow from './components/OnboardingFlow';
-import PricingPage from './components/PricingPage';
+// ── Lazy auth/marketing pages (not needed on initial render) ─────────────────
+const LandingPage = React.lazy(() => import('./components/LandingPage'));
+const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
+const PricingPage = React.lazy(() => import('./components/PricingPage'));
 import UpgradeModal from './components/UpgradeModal';
 import ConfirmModal from './components/ConfirmModal';
 import OnboardingChecklist from './components/OnboardingChecklist';
@@ -177,13 +174,12 @@ import DateRangePicker from './components/DateRangePicker';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { translations, type Language } from './translations';
-import { exportOrderPDF, exportCustomerStatement } from './utils/pdf';
 import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, exportStockMovementsCSV, downloadInventoryImportTemplate, type MonthlySummaryRow, type StockMovementRow } from './utils/export';
 import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
-import B2BPortalComponent from './components/B2BPortal';
+const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
 import SortHeaderComponent from './components/SortHeader';
 const QuotationForm           = React.lazy(() => import('./components/QuotationForm'));
 const QuotationDetail         = React.lazy(() => import('./components/QuotationDetail'));
@@ -503,63 +499,7 @@ const BackToTopButton: React.FC = () => {
   );
 };
 
-// Fix Leaflet icons
-// @ts-expect-error Leaflet types don't include _getIconUrl
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-const LogisticsMap = ({ orders, routeStops, depot, currentT }: { orders: Order[]; routeStops: RouteStop[]; depot: { lat: number; lng: number }; currentT: Record<string, string> }) => {
-  const routePositions: [number, number][] = routeStops.length > 0
-    ? [[depot.lat, depot.lng], ...routeStops.map(s => [s.location.lat, s.location.lng] as [number, number])]
-    : [];
-
-  return (
-    <div className="h-[400px] md:h-[600px] w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm relative z-0">
-      <MapContainer
-        center={[depot.lat, depot.lng]}
-        zoom={12}
-        style={{ height: '100%', width: '100%' }}
-        scrollWheelZoom={false}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {/* Route polyline */}
-        {routePositions.length > 1 && (
-          <Polyline positions={routePositions} color="#ff4000" weight={3} dashArray="8 4" />
-        )}
-        {orders.filter(o => o.location).map(order => {
-          const routeStop = routeStops.find(s => s.orderId === order.id);
-          return (
-            <Marker
-              key={order.id}
-              position={[order.location!.lat, order.location!.lng]}
-            >
-              <Popup>
-                <div className="p-1">
-                  <h4 className="font-bold text-sm text-[#1D2226]">{order.customerName}</h4>
-                  <p className="text-xs text-gray-500 mt-1">{currentT.order}: {order.shopifyOrderId}</p>
-                  <p className="text-xs font-medium text-brand mt-1">{currentT.status}: {currentT[order.status.toLowerCase()] || order.status}</p>
-                  {routeStop && (
-                    <p className="text-xs font-bold text-brand mt-1">
-                      {currentT.stop} #{routeStop.sequence} — {currentT.eta}: {routeStop.estimatedMinutes} {currentT.min}
-                    </p>
-                  )}
-                  <p className="text-[10px] text-gray-400 mt-2">{order.shippingAddress}</p>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-      </MapContainer>
-    </div>
-  );
-};
+const LogisticsMap = LogisticsMapLazy;
 
 // ── Order Status Timeline ────────────────────────────────────────────────────
 
@@ -3418,6 +3358,7 @@ function AppContent() {
 
       return (
         <>
+          <React.Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-white"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
           <LandingPage
             currentLanguage={currentLanguage}
             onLoginClick={() => setShowLoginPage(true)}
@@ -3432,6 +3373,7 @@ function AppContent() {
             darkMode={darkMode}
             onDarkModeToggle={() => setDarkMode(!darkMode)}
           />
+          </React.Suspense>
 
           {/* Demo Request Modal */}
           <AnimatePresence>
@@ -3823,30 +3765,34 @@ function AppContent() {
   // ─── Onboarding Gate: Show onboarding for new users ───────────────────
   if (user && subscriptionLoaded && !userSubscription && !isGuestMode && !showPricingPage && !isOwnerAdmin) {
     return (
-      <OnboardingFlow
-        currentLanguage={currentLanguage}
-        onComplete={handleOnboardingComplete}
-      />
+      <React.Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-white"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+        <OnboardingFlow
+          currentLanguage={currentLanguage}
+          onComplete={handleOnboardingComplete}
+        />
+      </React.Suspense>
     );
   }
 
   // ─── Pricing Page (full screen) ───────────────────────────────────────
   if (showPricingPage) {
     return (
-      <PricingPage
-        currentLanguage={currentLanguage}
-        onSelectPlan={handleSelectPlan}
-        onStartTrial={handleStartTrial}
-        showBackButton={true}
-        onBack={() => {
-          if (userSubscription) setShowPricingPage(false);
-          else {
-            setShowPricingPage(false);
-            setEnteredApp(false);
-            if (!userSubscription) setShowOnboarding(true);
-          }
-        }}
-      />
+      <React.Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-white"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+        <PricingPage
+          currentLanguage={currentLanguage}
+          onSelectPlan={handleSelectPlan}
+          onStartTrial={handleStartTrial}
+          showBackButton={true}
+          onBack={() => {
+            if (userSubscription) setShowPricingPage(false);
+            else {
+              setShowPricingPage(false);
+              setEnteredApp(false);
+              if (!userSubscription) setShowOnboarding(true);
+            }
+          }}
+        />
+      </React.Suspense>
     );
   }
 
@@ -19122,10 +19068,11 @@ function AppContent() {
                         </button>
                       )}
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const leadOrders = orders.filter(o =>
                             o.leadId === selectedLead.id || o.customerName === selectedLead.name
                           );
+                          const { exportCustomerStatement } = await import('./utils/pdf');
                           exportCustomerStatement(
                             selectedLead,
                             leadOrders,
@@ -21094,8 +21041,9 @@ function AppContent() {
                       </button>
                       {/* Phase 505: Print Order Receipt PDF */}
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const o = selectedOrder;
+                          const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
                           const doc505 = new jsPDF({ format: 'a4', unit: 'mm' });
                           const W = doc505.internal.pageSize.getWidth();
                           doc505.setFillColor(255, 64, 0);
@@ -22404,7 +22352,9 @@ function AppContent() {
               {/* Map + Shipments */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 order-2 lg:order-1">
-                  <LogisticsMap orders={orders} routeStops={routeStops} depot={DEPOTS[selectedDepot]} currentT={currentT} />
+                  <React.Suspense fallback={<div className="h-[400px] md:h-[600px] w-full rounded-xl bg-gray-100 flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+                    <LogisticsMap orders={orders} routeStops={routeStops} depot={DEPOTS[selectedDepot]} currentT={currentT} />
+                  </React.Suspense>
                 </div>
                 <div className="apple-card flex flex-col order-1 lg:order-2">
                   <div className="p-4 border-b border-gray-100 flex items-center justify-between">
@@ -23680,7 +23630,7 @@ function AppContent() {
                 {/* Footer */}
                 <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
                   <button
-                    onClick={() => { const stmtLead2 = leads.find(l => l.id === showStmtModal); if (stmtLead2) exportCustomerStatement(stmtLead2, stmtOrders, currentLanguage as 'tr' | 'en'); }}
+                    onClick={async () => { const stmtLead2 = leads.find(l => l.id === showStmtModal); if (stmtLead2) { const { exportCustomerStatement } = await import('./utils/pdf'); exportCustomerStatement(stmtLead2, stmtOrders, currentLanguage as 'tr' | 'en'); } }}
                     className="apple-button-secondary flex items-center gap-2 text-sm"
                   >
                     <FileDown className="w-4 h-4" />
