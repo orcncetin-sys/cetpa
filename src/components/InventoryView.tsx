@@ -129,6 +129,16 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       return 0;
     });
 
+  // ── Duplicate SKU tespiti ───────────────────────────────────────────────────
+  const duplicateSkus = (() => {
+    const counts = new Map<string, number>();
+    for (const i of inventory) {
+      const s = (i.sku || '').trim();
+      if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return [...counts.entries()].filter(([, c]) => c > 1).map(([s]) => s);
+  })();
+
   // ── Pagination — keeps the DOM small with 3000+ SKUs ────────────────────────
   const INV_PAGE_SIZE = 50;
   const [invPage, setInvPage] = useState(0);
@@ -667,6 +677,20 @@ const InventoryView: React.FC<InventoryViewProps> = ({
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 space-y-6">
+          {/* Duplicate SKU uyarısı */}
+          {duplicateSkus.length > 0 && (
+            <div className="flex items-start gap-2 px-4 py-3 mb-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-700">
+                <b>{duplicateSkus.length}</b> {currentLanguage === 'tr' ? 'SKU birden fazla üründe kullanılıyor:' : 'SKUs are used by multiple products:'}{' '}
+                {duplicateSkus.slice(0, 5).map(s => (
+                  <button key={s} onClick={() => setSearchTerm(s)} className="font-mono font-bold underline decoration-dotted mr-1.5 hover:text-amber-900">{s}</button>
+                ))}
+                {duplicateSkus.length > 5 && '…'}
+              </div>
+            </div>
+          )}
+
           {/* Desktop Table View */}
           <div className="apple-card overflow-hidden hidden md:block border border-gray-100 shadow-sm">
             <div className="overflow-x-auto">
@@ -834,14 +858,14 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {/* Phase 54: Quick Stock Adjustment */}
                           <button
-                            onClick={async (e) => { e.stopPropagation(); const newStock = Math.max(0, (item.stockLevel ?? 0) - 1); await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); }}
+                            onClick={async (e) => { e.stopPropagation(); const newStock = Math.max(0, (item.stockLevel ?? 0) - 1); await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); if (newStock !== (item.stockLevel ?? 0)) await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'out', quantity: 1, note: 'Hızlı düzeltme (-1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
                             className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-all font-bold text-xs"
                             title={currentLanguage === 'tr' ? 'Stok azalt' : 'Decrease stock'}
                           >
                             −
                           </button>
                           <button
-                            onClick={async (e) => { e.stopPropagation(); const newStock = (item.stockLevel ?? 0) + 1; await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); }}
+                            onClick={async (e) => { e.stopPropagation(); const newStock = (item.stockLevel ?? 0) + 1; await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'in', quantity: 1, note: 'Hızlı düzeltme (+1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
                             className="p-1.5 rounded-lg hover:bg-emerald-50 text-gray-300 hover:text-emerald-600 transition-all font-bold text-xs"
                             title={currentLanguage === 'tr' ? 'Stok artır' : 'Increase stock'}
                           >
