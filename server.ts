@@ -2197,55 +2197,93 @@ async function startServer() {
     },
   });
 
-  // 8. Stok miktarları (depo bazlı) → stokMiktarlari + warehouseItems/inventory güncelle
-  makeMikroListImport({
-    route: '/api/mikro/import/stok-miktar', method: 'StokMiktarListesiV2',
-    collection: 'stokMiktarlari', label: 'Mikro Stok Miktarları',
-    postProcess: async (rows, _companyId) => {
-      if (!adminDb) return null;
-      const sample = rows[0];
-      const skuKey  = findKey(sample, /sto_?kod|stok_?kod/i);
-      const qtyKey  = findKey(sample, /miktar/i);
-      const depoKey = findKey(sample, /depo/i);
-      if (!skuKey || !qtyKey) return `eşleme alanları bulunamadı (sku=${skuKey}, miktar=${qtyKey})`;
-      const invSnap = await adminDb.collection('inventory').get();
-      const bySku = new Map<string, FirebaseFirestore.DocumentReference>();
-      for (const d of invSnap.docs) {
-        const sku = ((d.data().sku as string) || '').trim();
-        if (sku) bySku.set(sku, d.ref);
+
+  /** POST /api/mikro/import/stok-miktar — stok miktarlarını Mikro'dan çek.
+   *  StokListesiV2 miktar DÖNDÜRMEZ; tek kaynak GenelAmacliMaliyetListesiV2
+   *  (SKU başına tek çağrı, EldekiMiktar + MaliyetBedeli döner).
+   *  1700+ SKU = uzun iş → hemen { started: true } döner, ilerleme
+   *  jobs/stokMiktarImport dokümanına canlı yazılır (panel onSnapshot ile izler).
+   */
+  let stokMiktarJobRunning = false;
+  app.post('/api/mikro/import/stok-miktar', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    if (stokMiktarJobRunning) return res.json({ success: true, started: false, alreadyRunning: true });
+
+    const actor = reqActor(req);
+    const jobRef = adminDb.collection('jobs').doc('stokMiktarImport');
+    stokMiktarJobRunning = true;
+
+    // Arka plan işi — yanıt hemen döner
+    (async () => {
+      const t0 = Date.now();
+      let processed = 0, updated = 0, failed = 0;
+      try {
+        const invSnap = await adminDb!.collection('inventory').where('source', '==', 'mikro_import').get();
+        const items = invSnap.docs
+          .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
+          .filter(x => x.sku);
+        const total = items.length;
+        await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: admin.firestore.FieldValue.serverTimestamp(), finishedAt: null, error: null });
+
+        const sonTarih = `${new Date().getFullYear() + 1}-12-31`;
+        const CONCURRENCY = 8;
+        let batch = adminDb!.batch(); let ops = 0;
+        const commitBatch = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+
+        for (let i = 0; i < items.length; i += CONCURRENCY) {
+          const slice = items.slice(i, i + CONCURRENCY);
+          const results = await Promise.all(slice.map(async (it) => {
+            try {
+              const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
+                StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: '1,2,3,4,5',
+              });
+              const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+              if (!ok || !r0 || r0.IsError) return { it, qty: null as number | null, cost: null as number | null };
+              const d = (r0.Data ?? {}) as Record<string, unknown>;
+              const qty = Number(d.EldekiMiktar ?? 0);
+              const totalCost = Number(d.MaliyetBedeli ?? 0);
+              return { it, qty, cost: qty > 0 ? totalCost / qty : null };
+            } catch { return { it, qty: null, cost: null }; }
+          }));
+
+          for (const r of results) {
+            processed++;
+            if (r.qty === null) { failed++; continue; }
+            batch.update(r.it.ref, {
+              stockLevel: r.qty,
+              ...(r.cost !== null ? { costPrice: Math.round(r.cost * 100) / 100 } : {}),
+              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            ops++;
+            // Depo sekmesindeki kayıt da güncellensin
+            batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
+              quantity: r.qty, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            ops++;
+            updated++;
+            if (ops >= 400) await commitBatch();
+          }
+          if (processed % 48 === 0 || processed === total) {
+            await commitBatch();
+            await jobRef.set({ running: true, processed, updated, failed, total }, { merge: true });
+          }
+        }
+        await commitBatch();
+        const duration = Date.now() - t0;
+        await jobRef.set({ running: false, processed, updated, failed, finishedAt: admin.firestore.FieldValue.serverTimestamp(), durationMs: duration }, { merge: true });
+        await writeAuditLog(actor, 'Mikro Stok Miktarları', `${updated} ürünün miktarı güncellendi, ${failed} hata (${Math.round(duration / 1000)}sn)`);
+        console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, ${duration}ms`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await jobRef.set({ running: false, error: msg, finishedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+        console.error('Stok miktar import hatası:', err);
+      } finally {
+        stokMiktarJobRunning = false;
       }
-      // SKU başına toplam + depo bazlı miktar topla
-      const totals = new Map<string, number>();
-      const byDepot = new Map<string, { sku: string; depo: string; qty: number; name?: string }>();
-      for (const row of rows) {
-        const sku = String(row[skuKey] ?? '').trim();
-        if (!sku) continue;
-        const qty = Number(row[qtyKey] ?? 0) || 0;
-        totals.set(sku, (totals.get(sku) ?? 0) + qty);
-        const depo = depoKey ? String(row[depoKey] ?? '1') : '1';
-        byDepot.set(`${sku}|${depo}`, { sku, depo, qty: (byDepot.get(`${sku}|${depo}`)?.qty ?? 0) + qty });
-      }
-      let batch = adminDb.batch(); let ops = 0; let updated = 0;
-      for (const [sku, total] of totals) {
-        const ref = bySku.get(sku);
-        if (!ref) continue;
-        batch.update(ref, { stockLevel: total });
-        updated++;
-        if (++ops >= 400) { await batch.commit(); batch = adminDb!.batch(); ops = 0; }
-      }
-      for (const { sku, depo, qty } of byDepot.values()) {
-        batch.set(adminDb.collection('warehouseItems').doc(`mikro-${sku.replace(/[/\\]/g, '_')}-d${depo}`), {
-          sku, quantity: qty,
-          warehouseId: `mikro-depo-${depo}`,
-          location: `Depo ${depo}`,
-          source: 'mikro_import',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        if (++ops >= 400) { await batch.commit(); batch = adminDb!.batch(); ops = 0; }
-      }
-      if (ops > 0) await batch.commit();
-      return `${updated} ürünün stok seviyesi güncellendi, ${byDepot.size} depo kaydı`;
-    },
+    })();
+
+    res.json({ success: true, started: true });
   });
 
   /** POST /api/mikro/cari-hareket/kaydet — tahsilat/ödeme → Mikro (deneysel)
@@ -2916,6 +2954,70 @@ async function startServer() {
       }, { merge: true });
       await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', `${period} dönemi KDV özeti alındı`);
       res.json({ success: true, period, data: md, duration: Date.now() - t0 });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Mikro Gelen e-Fatura Kabul / Ret ────────────────────────────────────────
+  // POST /api/mikro/gelen-fatura/kabul  — GİB üzerinden gelen e-faturayı kabul et
+  // POST /api/mikro/gelen-fatura/ret    — GİB üzerinden gelen e-faturayı reddet
+  // Body: { faturaGuid: string, firebaseId?: string }   (ret için: aciklama?: string)
+  // Endpoint'ler Mikro destek tarafından 2026-06-11'de onaylandı.
+
+  app.post('/api/mikro/gelen-fatura/kabul', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { faturaGuid, firebaseId } = req.body as { faturaGuid: string; firebaseId?: string };
+    if (!faturaGuid) return res.status(400).json({ success: false, error: 'faturaGuid zorunludur.' });
+    const t0 = Date.now();
+    try {
+      const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid });
+      const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0       = envelope?.[0] as Record<string, unknown> | undefined;
+      const isOk     = ok && !r0?.IsError;
+      const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+
+      await writeSyncLog('GelenFaturalarKabulV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, reqActor(req));
+
+      if (adminDb && firebaseId && isOk) {
+        await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
+          gibDurumu: 'kabul',
+          gibKabulAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      res.json({ success: isOk, data: r0?.Data ?? null, duration: Date.now() - t0, error: errorMsg });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/mikro/gelen-fatura/ret', requireAuth, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const { faturaGuid, aciklama, firebaseId } = req.body as { faturaGuid: string; aciklama?: string; firebaseId?: string };
+    if (!faturaGuid) return res.status(400).json({ success: false, error: 'faturaGuid zorunludur.' });
+    const t0 = Date.now();
+    try {
+      const { ok, data, status } = await mikroPost('GelenFaturalarRedV2', {
+        FaturaGuid: faturaGuid,
+        Aciklama:   aciklama || 'Fatura reddedildi.',
+      });
+      const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0       = envelope?.[0] as Record<string, unknown> | undefined;
+      const isOk     = ok && !r0?.IsError;
+      const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+
+      await writeSyncLog('GelenFaturalarRedV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, reqActor(req));
+
+      if (adminDb && firebaseId && isOk) {
+        await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
+          gibDurumu: 'ret',
+          gibRetAciklama: aciklama || null,
+          gibRetAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      res.json({ success: isOk, data: r0?.Data ?? null, duration: Date.now() - t0, error: errorMsg });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }

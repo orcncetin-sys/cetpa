@@ -3,7 +3,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle, Download,
   Package, Users, ShoppingCart, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { collection, query, limit, onSnapshot } from 'firebase/firestore';
+import { collection, doc, query, limit, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -97,6 +97,80 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const [bakiyePull, setBakiyePull] = useState<PullState>({ running: false, result: null, error: null });
   const [mizanPull,  setMizanPull]  = useState<PullState>({ running: false, result: null, error: null });
   const [kdvPull,    setKdvPull]    = useState<PullState>({ running: false, result: null, error: null });
+
+  // Stok miktar işi (jobs/stokMiktarImport canlı izlenir)
+  const [miktarJob, setMiktarJob] = useState<{ running?: boolean; processed?: number; updated?: number; failed?: number; total?: number; error?: string | null } | null>(null);
+  const [miktarStarting, setMiktarStarting] = useState(false);
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'jobs', 'stokMiktarImport'), snap => {
+      setMiktarJob(snap.exists() ? snap.data() as typeof miktarJob : null);
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  async function handleStartMiktar() {
+    setMiktarStarting(true);
+    try {
+      const r = await fetch('/api/mikro/import/stok-miktar', { method: 'POST', headers: await authHeaders() });
+      const d = await r.json() as { success: boolean; started?: boolean; alreadyRunning?: boolean; error?: string };
+      if (!d.success) throw new Error(d.error || 'Hata');
+    } catch (e) {
+      setMiktarJob(prev => ({ ...prev, error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setMiktarStarting(false);
+    }
+  }
+
+  // ── Gelen e-Fatura Kabul / Ret ────────────────────────────────────────────
+  interface GelenFatura { id: string; cha_Guid?: string; cha_evrakno_seri?: string; cha_evrakno_sira?: string; cha_tarihi?: string; cha_kod?: string; cha_meblag?: number; gibDurumu?: string; gibKabulAt?: unknown; gibRetAt?: unknown; gibRetAciklama?: string; }
+  const [gelenFaturalar, setGelenFaturalar] = useState<GelenFatura[]>([]);
+  const [gibAction, setGibAction] = useState<Record<string, { running: boolean; error: string | null }>>({});
+  const [retModal, setRetModal] = useState<{ id: string; guid: string } | null>(null);
+  const [retAciklama, setRetAciklama] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, 'mikroFaturalar'), limit(50));
+    const unsub = onSnapshot(q, snap => {
+      const alis = snap.docs
+        .filter(d => (d.data() as GelenFatura & { yon?: string }).yon === 'alis')
+        .map(d => ({ id: d.id, ...(d.data() as GelenFatura) }));
+      setGelenFaturalar(alis);
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  async function handleGibKabul(id: string, guid: string) {
+    setGibAction(p => ({ ...p, [id]: { running: true, error: null } }));
+    try {
+      const r = await fetch('/api/mikro/gelen-fatura/kabul', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ faturaGuid: guid, firebaseId: id }),
+      });
+      const d = await r.json() as { success: boolean; error?: string };
+      if (!d.success) throw new Error(d.error || 'Kabul başarısız');
+      setGibAction(p => ({ ...p, [id]: { running: false, error: null } }));
+    } catch (e) {
+      setGibAction(p => ({ ...p, [id]: { running: false, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  }
+
+  async function handleGibRet(id: string, guid: string, aciklama: string) {
+    setGibAction(p => ({ ...p, [id]: { running: true, error: null } }));
+    setRetModal(null);
+    try {
+      const r = await fetch('/api/mikro/gelen-fatura/ret', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ faturaGuid: guid, firebaseId: id, aciklama }),
+      });
+      const d = await r.json() as { success: boolean; error?: string };
+      if (!d.success) throw new Error(d.error || 'Red başarısız');
+      setGibAction(p => ({ ...p, [id]: { running: false, error: null } }));
+    } catch (e) {
+      setGibAction(p => ({ ...p, [id]: { running: false, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  }
 
   // Sync log
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
@@ -343,12 +417,141 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         />
       </div>
 
+      {/* ── Stok Miktarları (GenelAmacliMaliyetListesiV2 — SKU başına) ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h4 className="font-bold text-sm text-gray-900">{t ? 'Stok Miktarlarını Çek' : 'Pull Stock Quantities'}</h4>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {t
+                ? 'Mikro stok listesi miktar içermez — miktarlar SKU başına maliyet servisinden çekilir (1700+ ürün ≈ 3-6 dk, arka planda çalışır). Birim maliyet de güncellenir.'
+                : 'Mikro stock list has no quantities — pulled per-SKU from the cost service (runs in background). Unit cost updated too.'}
+            </p>
+          </div>
+          <button
+            onClick={handleStartMiktar}
+            disabled={miktarStarting || miktarJob?.running || !status?.connected}
+            className="apple-button-primary text-xs px-4 py-2 disabled:opacity-50"
+            style={{ background: '#1a3a5c' }}
+          >
+            {miktarJob?.running ? (t ? 'Çalışıyor…' : 'Running…') : miktarStarting ? '…' : (t ? 'Miktarları Çek' : 'Pull Quantities')}
+          </button>
+        </div>
+        {miktarJob && (miktarJob.running || miktarJob.processed) ? (
+          <div className="space-y-1.5">
+            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${miktarJob.running ? 'bg-[#1a3a5c]' : 'bg-emerald-500'}`}
+                style={{ width: `${miktarJob.total ? Math.round(((miktarJob.processed ?? 0) / miktarJob.total) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-gray-500">
+              {miktarJob.processed ?? 0}/{miktarJob.total ?? '?'} {t ? 'işlendi' : 'processed'} · ✓ {miktarJob.updated ?? 0} {t ? 'güncellendi' : 'updated'}
+              {(miktarJob.failed ?? 0) > 0 && <span className="text-amber-600"> · ⚠ {miktarJob.failed} {t ? 'hata' : 'failed'}</span>}
+              {!miktarJob.running && <span className="text-emerald-600 font-semibold"> · {t ? 'tamamlandı' : 'done'}</span>}
+            </p>
+          </div>
+        ) : null}
+        {miktarJob?.error && <p className="text-[11px] text-red-600 bg-red-50 rounded-xl px-3 py-2">⚠ {miktarJob.error}</p>}
+      </div>
+
+      {/* ── Gelen e-Fatura GİB Onay / Red ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+        <div>
+          <h4 className="font-bold text-sm text-gray-900">{t ? 'Gelen e-Faturalar — GİB Onay / Red' : 'Incoming e-Invoices — Accept / Reject'}</h4>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            {t
+              ? 'Mikro\'ya gelen e-faturaları GİB üzerinden kabul veya reddeder (GelenFaturalarKabulV2 / GelenFaturalarRedV2). Faturalar "Faturaları Çek" ile önce Mikro\'dan çekilmelidir.'
+              : 'Accept or reject incoming e-invoices via GİB through Mikro. Invoices must first be pulled via "Pull Invoices".'}
+          </p>
+        </div>
+        {gelenFaturalar.length === 0 ? (
+          <p className="text-[11px] text-gray-400 bg-gray-50 rounded-xl px-3 py-2">
+            {t ? 'Henüz gelen fatura yok. "Ekstra Çekme" bölümünden "Faturalar" çekmeyi deneyin.' : 'No incoming invoices yet. Try pulling "Invoices" from the Extra Pulls section.'}
+          </p>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {gelenFaturalar.map(f => {
+              const guid = f.cha_Guid || f.id;
+              const no   = [f.cha_evrakno_seri, f.cha_evrakno_sira].filter(Boolean).join('-') || f.id.slice(0, 8);
+              const act  = gibAction[f.id];
+              const done = f.gibDurumu === 'kabul' || f.gibDurumu === 'ret';
+              return (
+                <div key={f.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <div className="min-w-0">
+                    <span className="font-mono text-xs text-gray-800">{no}</span>
+                    {f.cha_kod && <span className="text-[11px] text-gray-400 ml-2">{f.cha_kod}</span>}
+                    {f.cha_tarihi && <span className="text-[10px] text-gray-400 ml-2">{String(f.cha_tarihi).slice(0, 10)}</span>}
+                    {f.cha_meblag != null && <span className="text-[10px] font-semibold text-gray-700 ml-2">{Number(f.cha_meblag).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>}
+                    {done && (
+                      <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${f.gibDurumu === 'kabul' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        {f.gibDurumu === 'kabul' ? (t ? 'Kabul edildi' : 'Accepted') : (t ? 'Reddedildi' : 'Rejected')}
+                      </span>
+                    )}
+                    {act?.error && <p className="text-[10px] text-red-600 mt-0.5">⚠ {act.error}</p>}
+                  </div>
+                  {!done && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => handleGibKabul(f.id, guid)}
+                        disabled={act?.running || !status?.connected}
+                        className="text-[11px] font-semibold px-3 py-1.5 rounded-full bg-emerald-600 text-white disabled:opacity-50 hover:bg-emerald-700 transition-colors"
+                      >
+                        {act?.running ? '…' : (t ? 'Kabul' : 'Accept')}
+                      </button>
+                      <button
+                        onClick={() => { setRetModal({ id: f.id, guid }); setRetAciklama(''); }}
+                        disabled={act?.running || !status?.connected}
+                        className="text-[11px] font-semibold px-3 py-1.5 rounded-full bg-red-500 text-white disabled:opacity-50 hover:bg-red-600 transition-colors"
+                      >
+                        {t ? 'Reddet' : 'Reject'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Ret açıklama modalı */}
+      {retModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setRetModal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4 z-10">
+            <h3 className="font-bold text-gray-900">{t ? 'Fatura Reddet' : 'Reject Invoice'}</h3>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">{t ? 'Red açıklaması' : 'Rejection reason'}</label>
+              <textarea
+                value={retAciklama}
+                onChange={e => setRetAciklama(e.target.value)}
+                rows={3}
+                placeholder={t ? 'Açıklama girin…' : 'Enter reason…'}
+                className="w-full text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none resize-none border border-gray-200 focus:border-gray-400"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setRetModal(null)} className="flex-1 apple-button-secondary text-sm py-2">
+                {t ? 'İptal' : 'Cancel'}
+              </button>
+              <button
+                onClick={() => handleGibRet(retModal.id, retModal.guid, retAciklama || (t ? 'Fatura reddedildi.' : 'Invoice rejected.'))}
+                className="flex-1 text-sm font-semibold py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+              >
+                {t ? 'Reddet' : 'Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── API kapsamı notu ── */}
       <div className="bg-gray-50 rounded-2xl border border-gray-100 p-4">
         <p className="text-[11px] text-gray-500 leading-relaxed">
           {t
-            ? 'ℹ️ Mikro JumpBulut API\'si şu işlemleri destekler: stok listesi/kaydı, cari listesi/kaydı, sipariş, e-fatura ve irsaliye kaydı. Banka, kasa, barkod, ödeme planı, stok hareketi, sipariş/fatura listesi ve cari bakiye servisleri API\'de bulunmuyor (gateway doğrulandı) — bu veriler yalnızca Mikro masaüstünde yönetilir.'
-            : 'ℹ️ The Mikro JumpBulut API supports: stock list/save, customer list/save, order, e-invoice and dispatch note save. Bank, cash register, barcode, payment plan, stock movement, order/invoice list and balance services do not exist in the API (gateway verified).'}
+            ? 'ℹ️ Mikro JumpBulut API\'si şu işlemleri destekler: stok listesi/kaydı, cari listesi/kaydı, sipariş, e-fatura/irsaliye kaydı, gelen fatura GİB kabul/ret. Banka, kasa, barkod, ödeme planı, stok hareketi, sipariş/fatura listesi ve cari bakiye servisleri API\'de bulunmuyor (gateway doğrulandı) — bu veriler yalnızca Mikro masaüstünde yönetilir.'
+            : 'ℹ️ The Mikro JumpBulut API supports: stock list/save, customer list/save, order, e-invoice/dispatch note save, incoming invoice GİB accept/reject. Bank, cash register, barcode, payment plan, stock movement, order/invoice list and balance services do not exist in the API (gateway verified).'}
         </p>
       </div>
 
