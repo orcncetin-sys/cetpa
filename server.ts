@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import compression from "compression";
+import helmet from "helmet";
 import pg from "pg";
 import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
@@ -142,6 +143,69 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
 function reqActor(req: Request): { uid: string; email: string } {
   const r = req as Request & { uid?: string; userEmail?: string };
   return { uid: r.uid || 'system', email: r.userEmail || '' };
+}
+
+// ── Sunucu tarafı RBAC (rol bazlı erişim kontrolü) ───────────────────────────
+// PostgreSQL göçüyle Firestore güvenlik kuralları kalktı; yetki artık burada
+// uygulanır. Rol, users/{uid} dokümanından okunur (60 sn önbellek).
+
+type AppRole = 'Admin' | 'Manager' | 'Sales' | 'Logistics' | 'Accounting'
+  | 'HR' | 'Purchasing' | 'B2B' | 'Dealer' | 'Legal' | 'Corporate' | 'Quality';
+
+const ADMIN_ROLES: AppRole[] = ['Admin', 'Manager'];
+const STAFF_ROLES: AppRole[] = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'Legal', 'Corporate', 'Quality'];
+const EXTERNAL_ROLES: AppRole[] = ['B2B', 'Dealer'];
+
+// Yalnız Admin/Manager'ın okuyup yazabileceği hassas koleksiyonlar.
+const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory']);
+// Append-only: yalnız ekleme (POST). Güncelleme/silme kimseye yok — değiştirilemez denetim izi.
+const APPEND_ONLY_COLLECTIONS = new Set(['auditLog', 'syncLog', 'clientErrors']);
+
+const roleCache = new Map<string, { role: AppRole; exp: number }>();
+async function getUserRole(uid: string): Promise<AppRole | null> {
+  const cached = roleCache.get(uid);
+  if (cached && cached.exp > Date.now()) return cached.role;
+  if (!adminDb) return null;
+  try {
+    const snap = await adminDb.collection('users').doc(uid).get();
+    const role = (snap.exists ? (snap.data()?.role as AppRole) : null) || null;
+    if (role) roleCache.set(uid, { role, exp: Date.now() + 60_000 });
+    return role;
+  } catch { return null; }
+}
+
+/** Admin/Manager zorunlu middleware — /api/admin/* için. */
+async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const uid = (req as Request & { uid?: string }).uid;
+  const role = uid ? await getUserRole(uid) : null;
+  if (role && ADMIN_ROLES.includes(role)) { next(); return; }
+  res.status(403).json({ error: 'Bu işlem için yönetici yetkisi gerekir.' });
+}
+
+/** Belirli koleksiyon+operasyon için kullanıcının yetkili olup olmadığını döner. */
+async function canAccessCollection(
+  uid: string, coll: string, op: 'read' | 'write' | 'delete',
+): Promise<boolean> {
+  const role = await getUserRole(uid);
+  if (!role) return false;
+  if (role === 'Admin') return true; // Admin her şeye yetkili
+
+  // Append-only: güncelleme/silme kimseye yok (Admin hariç, yukarıda döndü)
+  if (APPEND_ONLY_COLLECTIONS.has(coll) && op !== 'read') {
+    return op === 'write' && STAFF_ROLES.includes(role); // yalnız POST (ekleme)
+  }
+  // Hassas koleksiyonlar: yalnız Admin/Manager
+  if (ADMIN_ONLY_COLLECTIONS.has(coll)) return ADMIN_ROLES.includes(role);
+
+  // Dış roller (B2B/Dealer): yalnız okuma
+  if (EXTERNAL_ROLES.includes(role)) return op === 'read';
+
+  // Personel rolleri: iş koleksiyonlarında okuma+yazma; silme yalnız Admin/Manager
+  if (STAFF_ROLES.includes(role)) {
+    if (op === 'delete') return ADMIN_ROLES.includes(role);
+    return true;
+  }
+  return false;
 }
 
 // ── PostgreSQL document store (Firestore replacement) ───────────────────────
@@ -1535,9 +1599,34 @@ validateEnv();
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '5173', 10);
+  const isProd = process.env.NODE_ENV === 'production';
 
   // Trust the first proxy (nginx/Cloudflare) so express-rate-limit reads real IP
   app.set('trust proxy', 1);
+
+  // ── Güvenlik başlıkları (helmet) ──────────────────────────────────────────
+  // CSP: React + inline runtime + Firebase Auth/Storage + SSE (self) + harici
+  // CDN'lere (gstatic, googleapis) izin verir. Geliştirmede Vite HMR için gevşek.
+  app.use(helmet({
+    contentSecurityPolicy: isProd ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'https://apis.google.com', 'https://www.gstatic.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
+        connectSrc: ["'self'", 'https://*.googleapis.com', 'https://*.firebaseio.com',
+          'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com',
+          'wss://*.firebaseio.com', 'https://api.tcmb.gov.tr'],
+        frameSrc: ["'self'", 'https://*.firebaseapp.com'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    } : false, // dev'de CSP kapalı (Vite HMR/eval)
+    crossOriginEmbedderPolicy: false, // harici görseller/Firebase için
+    hsts: isProd ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+  }));
 
   // Gzip compression for all responses (API + static)
   app.use(compression());
@@ -1595,28 +1684,62 @@ async function startServer() {
       req.on('close', () => { clearInterval(heartbeat); dbEvents.off('change', onChange); });
     });
 
+    // Ham hata mesajlarını sunucu loglarında tut, istemciye generic döndür.
+    const dbErr = (e: unknown, res: Response, op: string, coll: string) => {
+      console.error(`[/api/db ${op} ${coll}]`, (e as Error).message);
+      res.status(500).json({ error: 'Veritabanı işlemi başarısız.' });
+    };
+    // Yetki kapısı — yetkisizse 403 döner ve true verir (çağıran return etmeli).
+    // docId verilirse 'kendi kaydı' istisnası uygulanır (users/{uid}).
+    const denied = async (
+      req: Request, res: Response, coll: string, op: 'read' | 'write' | 'delete', docId?: string,
+    ): Promise<boolean> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      // Kendi kullanıcı dokümanı: her kullanıcı kendi users/{uid}'ini okuyup
+      // yazabilir (login profil senkronu) — ama 'role' alanını DEĞİŞTİREMEZ
+      // (yetki yükseltme engeli; rol kontrolü yazma route'unda yapılır).
+      if (coll === 'users' && docId && docId === uid && op !== 'delete') return false;
+      if (await canAccessCollection(uid, coll, op)) return false;
+      res.status(403).json({ error: `Bu koleksiyon üzerinde '${op}' yetkiniz yok.` });
+      return true;
+    };
+    // Yetki yükseltme engeli: kendi users dokümanına 'role' yazılmasını,
+    // yazan kişi Admin değilse reddet.
+    const guardRoleEscalation = async (req: Request, res: Response, coll: string, docId: string, body: Record<string, unknown>): Promise<boolean> => {
+      if (coll !== 'users') return false;
+      if (!('role' in body)) return false;
+      const uid = (req as Request & { uid?: string }).uid || '';
+      const role = await getUserRole(uid);
+      if (role === 'Admin') return false; // yalnız Admin rol atayabilir
+      res.status(403).json({ error: 'Rol değişikliği için yönetici yetkisi gerekir.' });
+      return true;
+    };
+
     app.get('/api/db/:coll', dbLimiter, requireAuth, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
+      if (await denied(req, res, coll, 'read')) return;
       try {
         const { rows } = await docsDb.query('SELECT id, data FROM docs WHERE coll = $1', [coll]);
         res.json({ docs: rows });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
     app.get('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (await denied(req, res, coll, 'read', id)) return;
       try {
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) { res.status(404).json({ error: 'Not found.' }); return; }
         res.json({ data: rows[0].data });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
     app.post('/api/db/:coll', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
+      if (await denied(req, res, coll, 'write')) return;
       try {
         const id = genDocId();
         const data = resolveSentinels(req.body ?? {});
@@ -1626,13 +1749,17 @@ async function startServer() {
         );
         broadcastDocChange(coll, 'set', id, data);
         res.json({ id, data });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'POST', coll); }
     });
 
     // setDoc — full replace, or deep-ish merge with ?merge=1
     app.put('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      // Append-only koleksiyonlarda mevcut kaydın üzerine yazma yok
+      if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      if (await denied(req, res, coll, 'write', id)) return;
+      if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const incoming = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         let data = incoming;
@@ -1647,13 +1774,16 @@ async function startServer() {
         );
         broadcastDocChange(coll, 'set', id, data);
         res.json({ id, data });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'PUT', coll); }
     });
 
     // updateDoc — shallow merge with dot-path support (lenient upsert)
     app.patch('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      if (await denied(req, res, coll, 'write', id)) return;
+      if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
@@ -1665,17 +1795,19 @@ async function startServer() {
         );
         broadcastDocChange(coll, 'set', id, data);
         res.json({ id, data });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'PATCH', coll); }
     });
 
     app.delete('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon silinemez (append-only).' }); return; }
+      if (await denied(req, res, coll, 'delete')) return;
       try {
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         broadcastDocChange(coll, 'delete', id);
         res.json({ ok: true });
-      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+      } catch (e) { dbErr(e, res, 'DELETE', coll); }
     });
   }
 
@@ -1696,17 +1828,40 @@ async function startServer() {
     message: { error: 'Too many authentication attempts, please try again later.' },
   });
 
-  /** Stripe / payment — very strict: 10 req / 10 min per IP */
+  // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
+  // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
+  // boğmasını önler; saldırgan token başına da sınırlanır.
+  const userOrIpKey = (req: Request): string => {
+    const uid = (req as Request & { uid?: string }).uid;
+    return uid ? `u:${uid}` : `ip:${req.ip}`;
+  };
+
+  /** Stripe / payment — very strict: 10 req / 10 min per kullanıcı (veya IP) */
   const paymentLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 10,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: userOrIpKey,
     message: { error: 'Too many payment requests, please try again later.' },
+  });
+
+  /** Mikro ERP senkron işlemleri — 30 req / 5 dk per kullanıcı (ağır API çağrıları) */
+  const mikroLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    message: { error: 'Çok fazla Mikro senkron isteği, lütfen biraz bekleyin.' },
   });
 
   // Apply general limiter to all /api/* routes
   app.use('/api', apiLimiter);
+  // Mikro yazma/senkron uçlarına ek kullanıcı-bazlı limit (import/kaydet/pull)
+  app.use(['/api/mikro/import', '/api/mikro/stok', '/api/mikro/cari', '/api/mikro/fatura',
+    '/api/mikro/irsaliye', '/api/mikro/siparis', '/api/mikro/yevmiye', '/api/mikro/tahsilat',
+    '/api/mikro/pull', '/api/mikro/cari-hareket', '/api/mikro/evrak'], mikroLimiter);
 
   // Capture raw body for Shopify webhook HMAC verification (must come before express.json)
   app.use(express.json({
@@ -3587,7 +3742,7 @@ async function startServer() {
    *  source alanı OLAN her şey korunur: mikro_import, csv, manual, shopify vb.
    *  Body: { dryRun?: boolean } — dryRun=true yalnızca sayım döner, silmez.
    */
-  app.post('/api/admin/cleanup-dummy-inventory', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/admin/cleanup-dummy-inventory', requireAuth, requireAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const dryRun = !!(req.body as { dryRun?: boolean })?.dryRun;
     try {
@@ -4565,7 +4720,7 @@ async function startServer() {
   // ── Admin: User Invite ────────────────────────────────────────────────────
   // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
   // Body: { email, role }
-  app.post('/api/admin/invite', authLimiter, requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/admin/invite', authLimiter, requireAuth, requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email) return res.status(400).json({ success: false, error: 'email gerekli.' });
 
@@ -5746,7 +5901,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   // GET /api/admin/stats — Firestore collection doc counts (admin only)
-  app.get('/api/admin/stats', requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/admin/stats', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const COLLECTIONS = [
       'inventory', 'orders', 'leads', 'shipments', 'purchaseOrders',
