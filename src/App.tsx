@@ -12567,61 +12567,6 @@ function AppContent() {
                   {!hasFullAccess('kurumsal') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <CorporateGovernanceModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kurumsal')} userRole={userRole} onNavigate={setActiveTab} />
 
-                  {/* ── Phase 632: Konsolidasyon & Holding Raporu ──────────────── */}
-                  {(() => {
-                    const tr632 = currentLanguage === 'tr';
-                    const totalRev632 = orders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+(o.totalPrice||0),0);
-                    const totalEmployees = employees.filter(e=>e.status==='Aktif').length;
-                    const consolidation632 = [
-                      {entity:tr632?'Cetpa A.Ş. (Ana)':'Cetpa Inc. (Parent)',revenue:totalRev632*0.65,opex:totalRev632*0.4,headcount:Math.round(totalEmployees*0.6)},
-                      {entity:tr632?'Cetpa Lojistik Ltd.':'Cetpa Logistics Ltd.',revenue:totalRev632*0.25,opex:totalRev632*0.18,headcount:Math.round(totalEmployees*0.3)},
-                      {entity:tr632?'Cetpa Dış Ticaret':'Cetpa International',revenue:totalRev632*0.1,opex:totalRev632*0.07,headcount:Math.round(totalEmployees*0.1)},
-                    ];
-                    const totalRevAll = consolidation632.reduce((s,e)=>s+e.revenue,0);
-                    const totalOpexAll = consolidation632.reduce((s,e)=>s+e.opex,0);
-                    return (
-                      <div className="apple-card p-5 space-y-4">
-                        <h3 className="font-bold text-gray-900 text-sm">🏛️ {tr632?'Konsolidasyon & Holding Raporu':'Consolidation & Holding Report'}</h3>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Konsolide Ciro':'Consol. Revenue'}</p><p className="text-lg font-black text-blue-600">₺{Math.round(totalRevAll).toLocaleString('tr-TR')}</p></div>
-                          <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Konsolide Opex':'Consol. Opex'}</p><p className="text-lg font-black text-red-600">₺{Math.round(totalOpexAll).toLocaleString('tr-TR')}</p></div>
-                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr632?'Toplam Çalışan':'Total Headcount'}</p><p className="text-xl font-black text-emerald-600">{totalEmployees}</p></div>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {[tr632?'Şirket':'Entity',tr632?'Ciro':'Revenue',tr632?'Opex':'Opex',tr632?'EBIT':'EBIT',tr632?'Çalışan':'Headcount'].map(h=>(
-                                <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
-                              ))}
-                            </tr></thead>
-                            <tbody className="divide-y divide-gray-50">
-                              {consolidation632.map(e=>{
-                                const ebit=e.revenue-e.opex;
-                                const ebitPct=e.revenue>0?(ebit/e.revenue*100):0;
-                                return (
-                                  <tr key={e.entity} className="hover:bg-gray-50/50">
-                                    <td className="px-3 py-2.5 font-medium text-gray-800">{e.entity}</td>
-                                    <td className="px-3 py-2.5 tabular-nums text-gray-700">₺{Math.round(e.revenue).toLocaleString('tr-TR')}</td>
-                                    <td className="px-3 py-2.5 tabular-nums text-red-600">₺{Math.round(e.opex).toLocaleString('tr-TR')}</td>
-                                    <td className={`px-3 py-2.5 font-bold ${ebit>=0?'text-emerald-600':'text-red-600'}`}>₺{Math.round(ebit).toLocaleString('tr-TR')} ({ebitPct.toFixed(0)}%)</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{e.headcount}</td>
-                                  </tr>
-                                );
-                              })}
-                              <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
-                                <td className="px-3 py-2 text-gray-700">{tr632?'Konsolide Toplam':'Consolidated'}</td>
-                                <td className="px-3 py-2 tabular-nums">₺{Math.round(totalRevAll).toLocaleString('tr-TR')}</td>
-                                <td className="px-3 py-2 tabular-nums text-red-600">₺{Math.round(totalOpexAll).toLocaleString('tr-TR')}</td>
-                                <td className={`px-3 py-2 ${totalRevAll-totalOpexAll>=0?'text-emerald-600':'text-red-600'}`}>₺{Math.round(totalRevAll-totalOpexAll).toLocaleString('tr-TR')}</td>
-                                <td className="px-3 py-2">{totalEmployees}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                        <p className="text-[10px] text-gray-400">* {tr632?'Ciro dağılımı tahminidir. Gerçek kurumsal yapınıza göre özelleştirin.':'Revenue split is estimated. Customize to your actual corporate structure.'}</p>
-                      </div>
-                    );
-                  })()}
                 </>
               )}
             </motion.div>
