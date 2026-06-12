@@ -38,6 +38,9 @@ COPY --from=build /app/dist ./dist
 
 # Server source files
 COPY server.ts startup.cjs tsconfig.json package.json ./
+# server.ts'in paylaştığı saf modüller (RBAC politikası) — src/ runtime'a
+# kopyalanmadığı için bunlar ayrıca alınmalı, yoksa "Cannot find module".
+COPY src/lib/rbac.ts ./src/lib/rbac.ts
 
 # Public assets (if any)
 COPY public ./public
