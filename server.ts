@@ -1236,16 +1236,45 @@ async function writeSyncLog(
 /** Write an entry to the auditLog collection — same schema the client's
  *  logAuditAction uses, so server-side operations appear in the audit screen.
  */
+// Değişiklik denetimi yapılacak hassas koleksiyonlar (before/after diff).
+const AUDITED_COLLECTIONS = new Set(['orders', 'leads', 'inventory', 'users', 'settings', 'priceLists', 'quotations']);
+// Gürültü/PII azaltmak için diff dışı tutulan alanlar.
+const DIFF_IGNORE = new Set(['updatedAt', 'mikroSyncedAt', 'lastLogin', 'createdAt', 'timestamp', 'device', 'photoURL']);
+
+type FieldDiff = Record<string, { from: unknown; to: unknown }>;
+/** İki dokümanın üst-seviye alan farkını döner (en çok 20 alan). */
+function computeFieldDiff(before: Record<string, unknown>, after: Record<string, unknown>): FieldDiff {
+  const diff: FieldDiff = {};
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  let n = 0;
+  for (const k of keys) {
+    if (DIFF_IGNORE.has(k) || n >= 20) continue;
+    const a = before?.[k], b = after?.[k];
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      // Uzun değerleri kırp; hassas alanları maskele
+      const clip = (v: unknown) => {
+        if (typeof v === 'string' && v.length > 120) return v.slice(0, 120) + '…';
+        return v;
+      };
+      diff[k] = { from: clip(a), to: clip(b) };
+      n++;
+    }
+  }
+  return diff;
+}
+
 async function writeAuditLog(
   actor:   { uid: string; email: string },
   action:  string,
-  details: string
+  details: string,
+  diff?:   FieldDiff
 ): Promise<void> {
   if (!adminDb) return;
   try {
     await adminDb.collection('auditLog').add({
       action,
       details,
+      ...(diff && Object.keys(diff).length ? { diff } : {}),
       userId:    actor.uid,
       companyId: actor.uid,
       userName:  actor.email || 'Sunucu',
@@ -1772,9 +1801,12 @@ async function startServer() {
       try {
         const incoming = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         let data = incoming;
-        if (req.query.merge === '1') {
+        let before: Record<string, unknown> = {};
+        const audited = AUDITED_COLLECTIONS.has(coll);
+        if (req.query.merge === '1' || audited) {
           const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
-          data = mergeDocData((rows[0]?.data as Record<string, unknown>) ?? {}, incoming);
+          before = (rows[0]?.data as Record<string, unknown>) ?? {};
+          if (req.query.merge === '1') data = mergeDocData(before, incoming);
         }
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
@@ -1782,6 +1814,10 @@ async function startServer() {
           [coll, id, JSON.stringify(data)],
         );
         broadcastDocChange(coll, 'set', id, data);
+        if (audited) {
+          const fd = computeFieldDiff(before, data);
+          if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} kaydedildi`, `${coll}/${id}`, fd);
+        }
         res.json({ id, data });
       } catch (e) { dbErr(e, res, 'PUT', coll); }
     });
@@ -1796,13 +1832,19 @@ async function startServer() {
       try {
         const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
-        const data = mergeDocData((rows[0]?.data as Record<string, unknown>) ?? {}, patch);
+        const before = (rows[0]?.data as Record<string, unknown>) ?? {};
+        const data = mergeDocData(before, patch);
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           [coll, id, JSON.stringify(data)],
         );
         broadcastDocChange(coll, 'set', id, data);
+        // Hassas koleksiyonlarda 'kim neyi değiştirdi' diff'i kaydet (bloklamadan)
+        if (AUDITED_COLLECTIONS.has(coll)) {
+          const fd = computeFieldDiff(before, data);
+          if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} güncellendi`, `${coll}/${id}`, fd);
+        }
         res.json({ id, data });
       } catch (e) { dbErr(e, res, 'PATCH', coll); }
     });

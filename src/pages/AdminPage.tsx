@@ -15,7 +15,7 @@ import {
 import { db, auth, storage } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp,
+  collection, serverTimestamp, onSnapshot,
 } from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
@@ -111,6 +111,21 @@ export default function AdminPage({
   const [healthLoading, setHealthLoading] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  // ── Son client hataları (clientErrors koleksiyonu, append-only) ──────────
+  type ClientError = { id: string; kind?: string; message?: string; url?: string;
+    userEmail?: string | null; source?: string; timestamp?: { toMillis?: () => number } };
+  const [clientErrors, setClientErrors] = useState<ClientError[]>([]);
+  useEffect(() => {
+    if (adminTab !== 'system') return;
+    const unsub = onSnapshot(collection(db, 'clientErrors'), snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClientError));
+      rows.sort((a, b) => (b.timestamp?.toMillis?.() ?? 0) - (a.timestamp?.toMillis?.() ?? 0));
+      setClientErrors(rows.slice(0, 50));
+    }, () => { /* RBAC reddi / offline — sessiz */ });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminTab]);
 
   const fetchSystemHealth = useCallback(async () => {
     setHealthLoading(true);
@@ -597,7 +612,27 @@ export default function AdminPage({
                           <td className="py-2.5 px-3">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${actionColor}`}>{action}</span>
                           </td>
-                          <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell max-w-[220px] truncate">{(log.details as string)||(log.description as string)||'—'}</td>
+                          <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell max-w-[320px]">
+                            <span className="block truncate">{(log.details as string)||(log.description as string)||'—'}</span>
+                            {(() => {
+                              const diff = log.diff as Record<string, { from: unknown; to: unknown }> | undefined;
+                              if (!diff || !Object.keys(diff).length) return null;
+                              const fmt = (v: unknown) => v === undefined || v === null || v === '' ? '∅' : typeof v === 'object' ? JSON.stringify(v).slice(0, 40) : String(v).slice(0, 40);
+                              return (
+                                <div className="mt-1 space-y-0.5">
+                                  {Object.entries(diff).slice(0, 5).map(([field, ch]) => (
+                                    <div key={field} className="text-[10px] flex items-center gap-1 flex-wrap">
+                                      <span className="font-semibold text-gray-600">{field}:</span>
+                                      <span className="text-red-500 line-through">{fmt(ch.from)}</span>
+                                      <span className="text-gray-300">→</span>
+                                      <span className="text-emerald-600">{fmt(ch.to)}</span>
+                                    </div>
+                                  ))}
+                                  {Object.keys(diff).length > 5 && <span className="text-[10px] text-gray-400">+{Object.keys(diff).length - 5} alan</span>}
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td className="py-2.5 px-3 text-xs text-gray-400 hidden lg:table-cell font-mono">{(log.ip as string)||'—'}</td>
                         </tr>
                       );
@@ -791,6 +826,53 @@ export default function AdminPage({
             </div>
           );
         })()}
+
+        {/* ── Son Client Hataları (clientErrors, append-only, salt-okuma) ── */}
+        <div className="apple-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+              <span>🐛</span> {currentLanguage === 'tr' ? 'Son Uygulama Hataları' : 'Recent Client Errors'}
+            </h3>
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${clientErrors.length > 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              {clientErrors.length > 0
+                ? `${clientErrors.length} ${currentLanguage === 'tr' ? 'kayıt' : 'records'}`
+                : (currentLanguage === 'tr' ? 'Temiz' : 'Clean')}
+            </span>
+          </div>
+          {clientErrors.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">
+              {currentLanguage === 'tr' ? 'Kayıtlı hata yok. 👍' : 'No errors logged. 👍'}
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {clientErrors.map(e => {
+                const ts = e.timestamp?.toMillis?.();
+                const when = ts ? new Date(ts).toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US') : '—';
+                return (
+                  <div key={e.id} className="border border-gray-100 rounded-xl p-3 hover:bg-gray-50/60 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-gray-900 break-words">{e.message || '—'}</p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px] text-gray-400">
+                          {e.kind && <span className="font-bold uppercase text-red-500">{e.kind}</span>}
+                          {e.source && <span className="font-mono">{e.source}</span>}
+                          {e.url && <span className="truncate max-w-[200px]">{e.url.replace(/^https?:\/\/[^/]+/, '')}</span>}
+                          {e.userEmail && <span>{e.userEmail}</span>}
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap shrink-0">{when}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[10px] text-gray-400 mt-3">
+            * {currentLanguage === 'tr'
+              ? 'Son 50 kayıt. Hata kayıtları değiştirilemez/silinemez (append-only denetim).'
+              : 'Last 50 records. Error logs are immutable (append-only audit).'}
+          </p>
+        </div>
       </div>
     )}
 

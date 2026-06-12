@@ -58,6 +58,12 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
   const [casesFilter, setCasesFilter] = useState<'Tümü' | 'Devam Ediyor' | 'Kazanılan' | 'Kaybedilen' | 'Temyiz'>('Tümü');
   const [complianceFilter, setComplianceFilter] = useState<'Tümü' | 'Uyumlu' | 'Uyumsuz' | 'İncelemede'>('Tümü');
   const [approvalsFilter, setApprovalsFilter] = useState<'Tümü' | 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'İncelemede'>('Tümü');
+  // KVKK politika paneli + veri talebi formu
+  const [kvkkPolicyOpen, setKvkkPolicyOpen] = useState(false);
+  const [kvkkReqEmail, setKvkkReqEmail] = useState('');
+  const [kvkkReqType, setKvkkReqType] = useState<'erasure' | 'access' | 'rectification'>('erasure');
+  const [kvkkReqSaving, setKvkkReqSaving] = useState(false);
+  const [kvkkReqDone, setKvkkReqDone] = useState(false);
   const [docsFilter, setDocsFilter] = useState<string>('Tümü');
   const [docUploadCategory, setDocUploadCategory] = useState<string>('Diğer');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -596,7 +602,95 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
         {/* COMPLIANCE TAB */}
         {activeTab === 'compliance' && (
           <motion.div key="compliance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
-            
+
+            {/* ── KVKK Aydınlatma & Veri Saklama Politikası (belgelenmiş) ── */}
+            {(() => {
+              const tr = currentLanguage === 'tr';
+              return (
+                <div className="apple-card p-5 border border-blue-100 bg-blue-50/30">
+                  <button
+                    onClick={() => setKvkkPolicyOpen(o => !o)}
+                    className="w-full flex items-center justify-between text-left"
+                  >
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-blue-600" />
+                      {tr ? 'KVKK Aydınlatma & Veri Saklama Politikası' : 'KVKK/GDPR Notice & Data Retention Policy'}
+                    </h3>
+                    <span className="text-xs text-blue-600 font-bold">{kvkkPolicyOpen ? (tr ? 'Gizle ▲' : 'Hide ▲') : (tr ? 'Göster ▼' : 'Show ▼')}</span>
+                  </button>
+                  {kvkkPolicyOpen && (
+                    <div className="mt-4 space-y-4 text-xs text-gray-700 leading-relaxed">
+                      <div>
+                        <p className="font-bold text-gray-900 mb-1">{tr ? '1. Veri Sorumlusu' : '1. Data Controller'}</p>
+                        <p>{tr
+                          ? 'CETPA, 6698 sayılı KVKK kapsamında veri sorumlusudur. Veriler Google Firebase (Frankfurt, AB) altyapısında ve kendi PostgreSQL sunucumuzda saklanır.'
+                          : 'CETPA is the data controller under KVKK Law 6698. Data is stored on Google Firebase (Frankfurt, EU) and our self-hosted PostgreSQL server.'}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900 mb-1">{tr ? '2. İşlenen Veri Kategorileri' : '2. Processed Data Categories'}</p>
+                        <p>{tr
+                          ? 'Kimlik (ad, e-posta), iletişim (telefon, adres), müşteri/tedarikçi cari bilgileri (vergi no, bakiye), işlem güvenliği (IP, cihaz, oturum kayıtları).'
+                          : 'Identity (name, email), contact (phone, address), customer/supplier account data (tax ID, balance), transaction security (IP, device, session logs).'}</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900 mb-1">{tr ? '3. Saklama Süreleri' : '3. Retention Periods'}</p>
+                        <ul className="list-disc pl-5 space-y-0.5">
+                          <li>{tr ? 'Ticari kayıtlar (fatura, sipariş, cari): 10 yıl (VUK/TTK gereği)' : 'Commercial records (invoices, orders): 10 years (Tax/Commercial Code)'}</li>
+                          <li>{tr ? 'Denetim/erişim kayıtları (auditLog): 2 yıl' : 'Audit/access logs: 2 years'}</li>
+                          <li>{tr ? 'Hata kayıtları (clientErrors): 90 gün' : 'Error logs: 90 days'}</li>
+                          <li>{tr ? 'Oturum çerezleri: 5 gün' : 'Session cookies: 5 days'}</li>
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900 mb-1">{tr ? '4. İlgili Kişi Hakları' : '4. Data Subject Rights'}</p>
+                        <p>{tr
+                          ? 'KVKK m.11 uyarınca: verilerinize erişme, düzeltilmesini/silinmesini isteme, işlemeye itiraz etme hakkınız vardır. Talepler için aşağıdaki formu kullanın.'
+                          : 'Under KVKK Art.11: you have the right to access, rectify/erase your data and object to processing. Use the form below for requests.'}</p>
+                      </div>
+                      <div className="border-t border-blue-100 pt-4">
+                        <p className="font-bold text-gray-900 mb-2">{tr ? 'Veri Silme / Erişim Talebi Oluştur' : 'Create Data Deletion / Access Request'}</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="email"
+                            placeholder={tr ? 'İlgili kişi e-postası' : 'Data subject email'}
+                            value={kvkkReqEmail}
+                            onChange={e => setKvkkReqEmail(e.target.value)}
+                            className="apple-input text-xs flex-1"
+                          />
+                          <select value={kvkkReqType} onChange={e => setKvkkReqType(e.target.value as 'erasure' | 'access' | 'rectification')} className="apple-input text-xs">
+                            <option value="erasure">{tr ? 'Silme' : 'Erasure'}</option>
+                            <option value="access">{tr ? 'Erişim' : 'Access'}</option>
+                            <option value="rectification">{tr ? 'Düzeltme' : 'Rectification'}</option>
+                          </select>
+                          <button
+                            disabled={!kvkkReqEmail || kvkkReqSaving}
+                            onClick={async () => {
+                              if (!kvkkReqEmail) return;
+                              setKvkkReqSaving(true);
+                              try {
+                                await addDoc(collection(db, 'dataRequests'), {
+                                  subjectEmail: kvkkReqEmail, type: kvkkReqType, status: 'Bekliyor',
+                                  requestedBy: auth.currentUser?.email ?? null, createdAt: serverTimestamp(),
+                                });
+                                setKvkkReqEmail(''); setKvkkReqDone(true); setTimeout(() => setKvkkReqDone(false), 2500);
+                              } catch (err) { logFirestoreError(err, OperationType.CREATE, 'dataRequests', auth.currentUser?.uid); }
+                              setKvkkReqSaving(false);
+                            }}
+                            className="apple-button-primary text-xs whitespace-nowrap"
+                          >
+                            {kvkkReqDone ? (tr ? '✓ Kaydedildi' : '✓ Saved') : (tr ? 'Talep Oluştur' : 'Create Request')}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-2">{tr
+                          ? 'Talep, 30 gün içinde sonuçlandırılmalıdır (KVKK m.13). Kayıtlar dataRequests koleksiyonunda izlenir.'
+                          : 'Requests must be resolved within 30 days (KVKK Art.13). Tracked in dataRequests collection.'}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
