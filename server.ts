@@ -227,6 +227,11 @@ function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, da
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type PgDocData = Record<string, any>;
 
+/** Mikro Jump kurulum sürümü — V16'da SqlVeriOkuV2 ve cha_ebelge_turu YOK.
+ *  (V16/V17 Postman koleksiyonları diff'i, 2026-06-12). Müşteri V17'ye
+ *  geçtiğinde .env.production'a MIKRO_JUMP_SURUM=17 eklemek yeterli. */
+const MIKRO_JUMP_SURUM = Number(process.env.MIKRO_JUMP_SURUM || 16);
+
 /** Drop-in for admin.firestore.FieldValue.serverTimestamp() — resolved by resolveSentinels. */
 function pgServerTimestamp(): any {
   return pgPool ? { __op: 'serverTimestamp' } : admin.firestore.FieldValue.serverTimestamp();
@@ -3374,6 +3379,14 @@ async function startServer() {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const companyId = (req as Request & { uid: string }).uid;
+    if (MIKRO_JUMP_SURUM < 17) {
+      return res.status(501).json({
+        success: false,
+        error: 'SqlVeriOkuV2 yalnız Mikro Jump V17+ kurulumlarında mevcut (V16 koleksiyonunda yok). ' +
+               'Fatura çekimi için Mikro Jump V17 güncellemesi gerekir; sonrasında .env\'e MIKRO_JUMP_SURUM=17 ekleyin.',
+        requiresVersion: 17, currentVersion: MIKRO_JUMP_SURUM,
+      });
+    }
     const t0 = Date.now();
     try {
       const sql =
@@ -3623,9 +3636,11 @@ async function startServer() {
         cha_normal_Iade:  0,
         cha_evrak_tip:    63,  // fatura
         cha_cari_cins:    0,
-        // cha_ebelge_turu: V17 örneğinde 8 — e-fatura/e-arşiv kod eşlemesi ilk
-        // gerçek kayıtla doğrulanmalı (faturaType: 1=e-Fatura 2=e-Arşiv 3=İhracat)
-        cha_ebelge_turu:  faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1,
+        // cha_ebelge_turu V17'de eklendi (V16 gövdesinde YOK) — yalnız V17+
+        // kurulumlarda gönderilir. Kod eşlemesi ilk gerçek kayıtla doğrulanmalı.
+        ...(MIKRO_JUMP_SURUM >= 17
+          ? { cha_ebelge_turu: faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1 }
+          : {}),
         cha_d_cins:       0,
         cha_d_kur:        1,
         cha_tarihi:       faturaDate,
