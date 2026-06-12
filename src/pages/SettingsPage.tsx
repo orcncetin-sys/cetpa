@@ -632,7 +632,7 @@ export default function SettingsPage({
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="font-bold text-gray-900 text-sm">🔍 {tr641 ? 'Denetim İzi (Audit Trail)' : 'Audit Trail'}</h3>
-                <p className="text-xs text-gray-400">{tr641 ? `Firestore auditLog — son ${auditLogs.length} kayıt` : `Firestore auditLog — ${auditLogs.length} recent entries`}</p>
+                <p className="text-xs text-gray-400">{tr641 ? `Veritabanı auditLog — son ${auditLogs.length} kayıt` : `Database auditLog — ${auditLogs.length} recent entries`}</p>
               </div>
               <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
                 {entityOptions.map(t => (

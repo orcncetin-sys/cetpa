@@ -8046,7 +8046,7 @@ function AppContent() {
                             </div>
                           </div>
                         </div>
-                        <p className="text-[10px] text-gray-400 text-center">{tr547?'Veriler Firestore\'dan anlık hesaplanmaktadır. Muhasebe yazılımı çıktısı olarak kullanmayınız.':'Data is calculated live from Firestore. Do not use as official accounting output.'}</p>
+                        <p className="text-[10px] text-gray-400 text-center">{tr547?'Veriler veritabanından anlık hesaplanmaktadır. Muhasebe yazılımı çıktısı olarak kullanmayınız.':'Data is calculated live from the database. Do not use as official accounting output.'}</p>
                       </motion.div>
                     );
                   })()}
@@ -10473,7 +10473,7 @@ function AppContent() {
                             </tbody>
                           </table>
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-3">{tr567?'Puanlar sadece bu oturumda saklanır. Kalıcı kayıt için Firestore entegrasyonu gereklidir.':'Ratings are session-only. Firestore integration needed for persistent storage.'}</p>
+                        <p className="text-[10px] text-gray-400 mt-3">{tr567?'Puanlar sadece bu oturumda saklanır. Kalıcı kayıt için veritabanı entegrasyonu gereklidir.':'Ratings are session-only. Database integration needed for persistent storage.'}</p>
                       </div>
                     );
                   })()}

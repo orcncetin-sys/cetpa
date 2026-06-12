@@ -586,10 +586,11 @@ async function initMikroTables(): Promise<void> {
       sip_stok_kod: 'sku', sip_miktar: 'quantity', sip_b_fiyat: 'unitPrice',
       sip_tutar: 'total', sip_musteri_kod: 'order.mikroCariKod', sip_tarih: 'order.createdAt',
     }, 'SiparisKaydetV2 push'],
-    ['IRSALIYELER (API)', 'mikro_irsaliyeler', 'shipments', {
-      irs_musteri_kod: 'shipment.mikroCariKod', irs_stok_kod: 'items[].sku',
-      irs_miktar: 'items[].quantity', irs_kargo_firma: 'cargoFirm', irs_plaka: 'trackingNo',
-    }, 'IrsaliyeKaydetV2 push — Mikro DB tarafında STOK_HAREKETLERI üzerinde tutulur'],
+    ['IRSALIYELER (API)', 'mikro_stok_hareketleri', 'shipments', {
+      sth_cari_kodu: 'shipment.mikroCariKod', sth_stok_kod: 'items[].sku',
+      sth_miktar: 'items[].quantity', sth_evraktip: '1=irsaliye (kaynak=irsaliye_push)',
+      eir_tasiyici_firma_kodu: 'cargoFirm', eir_tasiyici_arac_plaka: 'trackingNo',
+    }, 'IrsaliyeKaydetV2 push — V17 doğrulandı: satırlar sth_*, STOK_HAREKETLERI (mikro_irsaliyeler tablosu kullanım dışı)'],
     ['MUHASEBE_FISLERI', 'mikro_muhasebe_fisleri', 'journalEntries (docs)', {
       fis_hesap_kod: 'debitHesap/alacakHesap', fis_meblag0: '+borc / -alacak',
       fis_tarih: 'date', fis_aciklama1: 'aciklama', fis_tic_belgeno: 'fisNo',
@@ -3586,22 +3587,60 @@ async function startServer() {
       const faturaType = order.faturaTipi === 'e-arsiv' ? 2 : order.faturaTipi === 'ihracat' ? 3 : 1;
       const kdvOran    = Number(order.kdvOran ?? 20);
 
-      const satirlar = lineItems.map((item: Record<string, unknown>) => ({
-        fat_tarih:        faturaDate,
-        fat_tip:          faturaType,
-        fat_cins:         1,   // Satış faturası
-        fat_evrakno_seri: 'F',
-        fat_musteri_kod:  (order.mikroCariKod as string) || '',
-        fat_stok_kod:     (item.sku  as string) || '',
-        fat_isim:         (item.name as string) || '',
-        fat_birim_fiyat:  Number(item.price    ?? 0),
-        fat_miktar:       Number(item.quantity ?? 1),
-        fat_tutar:        Number(item.price ?? 0) * Number(item.quantity ?? 1),
-        fat_vergi_pntr:   kdvOran >= 20 ? 4 : kdvOran >= 10 ? 3 : 1,
-        fat_vergisiz_fl:  false,
-      }));
+      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
+      // 2026-06-12): evrak başlığı cha_* (CARI_HESAP_HAREKETLERI), satırlar
+      // detay[] içinde sth_* (STOK_HAREKETLERI, sth_evraktip=4). Payload Mikro
+      // zarfının İÇİNDE gönderilir (inMikro=true).
+      const satirlar = lineItems.map((item: Record<string, unknown>) => {
+        const tutar = Number(item.price ?? 0) * Number(item.quantity ?? 1);
+        return {
+          sth_tarih:           faturaDate,
+          sth_tip:             1,
+          sth_cins:            0,
+          sth_normal_iade:     0,
+          sth_evraktip:        4,   // fatura
+          sth_evrakno_seri:    'F',
+          sth_stok_kod:        (item.sku as string) || '',
+          sth_cari_cinsi:      0,
+          sth_cari_kodu:       (order.mikroCariKod as string) || '',
+          sth_miktar:          Number(item.quantity ?? 1),
+          sth_birim_pntr:      1,
+          sth_tutar:           tutar,
+          sth_vergi:           Math.round(tutar * kdvOran) / 100,
+          sth_vergi_pntr:      kdvOran >= 20 ? 4 : kdvOran >= 10 ? 3 : 1,
+          sth_vergisiz_fl:     false,
+          sth_aciklama:        (item.name as string) || '',
+          sth_cari_srm_merkezi: '', sth_stok_srm_merkezi: '',
+          sth_subeno:          0,
+          sth_giris_depo_no:   1,
+          sth_cikis_depo_no:   1,
+        };
+      });
+      const toplamTutar = satirlar.reduce((t, s) => t + s.sth_tutar, 0);
+      const evrak = {
+        cha_tip:          0,   // satış
+        cha_cinsi:        7,   // V17 örnek değeri (toptan satış faturası)
+        cha_normal_Iade:  0,
+        cha_evrak_tip:    63,  // fatura
+        cha_cari_cins:    0,
+        // cha_ebelge_turu: V17 örneğinde 8 — e-fatura/e-arşiv kod eşlemesi ilk
+        // gerçek kayıtla doğrulanmalı (faturaType: 1=e-Fatura 2=e-Arşiv 3=İhracat)
+        cha_ebelge_turu:  faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1,
+        cha_d_cins:       0,
+        cha_d_kur:        1,
+        cha_tarihi:       faturaDate,
+        cha_evrakno_seri: 'F',
+        cha_kod:          (order.mikroCariKod as string) || '',
+        cha_projekodu:    '',
+        cha_srmrkkodu:    '',
+        cha_vade:         0,
+        cha_subeno:       0,
+        cha_aciklama:     '',
+        kdv_istisna_kodu: '',
+        detay:            satirlar,
+      };
 
-      const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [{ satirlar }] });
+      const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true);
       const duration   = Date.now() - t0;
       const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0         = envelope?.[0] as Record<string, unknown> | undefined;
@@ -3615,12 +3654,8 @@ async function startServer() {
       if (success) {
         void mirrorMikroInsert('mikro_stok_hareketleri',
           (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS);
-        void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{
-          cha_kod: order.mikroCariKod, cha_evrak_tip: 63, cha_tip: 0,
-          cha_tarihi: faturaDate, cha_evrakno_seri: 'F',
-          cha_meblag: satirlar.reduce((t, s) => t + Number(s.fat_tutar || 0), 0),
-          cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push',
-        }], CHA_COLS);
+        void mirrorMikroInsert('mikro_cari_hesap_hareketleri',
+          [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS);
       }
       if (adminDb && firebaseId && success) {
         await adminDb.collection('orders').doc(firebaseId).set({
@@ -3657,35 +3692,49 @@ async function startServer() {
       const irsDate   = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
       const items = (shipment.items || []) as Record<string, unknown>[];
 
-      // If no line items, create a placeholder row for the delivery note
-      const satirlar = items.length > 0 ? items.map((item: Record<string, unknown>) => ({
-        irs_tarih:        irsDate,
-        irs_tip:          7,   // Satış irsaliyesi
-        irs_cins:         1,
-        irs_evrakno_seri: 'I',
-        irs_musteri_kod:  (shipment.mikroCariKod as string) || '',
-        irs_stok_kod:     (item.sku  as string) || '',
-        irs_isim:         (item.name as string) || (shipment.customerName as string) || '',
-        irs_miktar:       Number(item.quantity ?? 1),
-        irs_birim_fiyat:  Number(item.price    ?? 0),
-        irs_tutar:        Number(item.price ?? 0) * Number(item.quantity ?? 1),
-        irs_kargo_firma:  (shipment.cargoFirm as string) || '',
-        irs_plaka:        (shipment.trackingNo as string) || '',
-      })) : [{
-        irs_tarih:        irsDate,
-        irs_tip:          7,
-        irs_cins:         1,
-        irs_evrakno_seri: 'I',
-        irs_musteri_kod:  (shipment.mikroCariKod as string) || '',
-        irs_isim:         (shipment.customerName as string) || '',
-        irs_miktar:       1,
-        irs_birim_fiyat:  0,
-        irs_tutar:        0,
-        irs_kargo_firma:  (shipment.cargoFirm as string) || '',
-        irs_plaka:        (shipment.trackingNo as string) || '',
-      }];
+      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
+      // 2026-06-12): irsaliye satırları sth_* alanlarıdır (STOK_HAREKETLERI,
+      // sth_evraktip=1); kargo/araç bilgisi e_irsaliye_detaylari'nda taşınır.
+      // Payload Mikro zarfının İÇİNDE gönderilir (inMikro=true).
+      const irsSatir = (item: Record<string, unknown> | null) => ({
+        sth_tarih:            irsDate,
+        sth_tip:              1,
+        sth_cins:             0,
+        sth_normal_iade:      0,
+        sth_evraktip:         1,   // irsaliye
+        sth_evrakno_seri:     'I',
+        sth_stok_kod:         item ? ((item.sku as string) || '') : '',
+        sth_cari_cinsi:       0,
+        sth_cari_kodu:        (shipment.mikroCariKod as string) || '',
+        sth_miktar:           item ? Number(item.quantity ?? 1) : 1,
+        sth_birim_pntr:       1,
+        sth_tutar:            item ? Number(item.price ?? 0) * Number(item.quantity ?? 1) : 0,
+        sth_vergi_pntr:       4,
+        sth_vergi:            0,
+        sth_vergisiz_fl:      false,
+        sth_iskonto1:         0,
+        sth_iskonto2:         0,
+        sth_aciklama:         item ? ((item.name as string) || '') : ((shipment.customerName as string) || ''),
+        sth_giris_depo_no:    1,
+        sth_cikis_depo_no:    1,
+        sth_subeno:           0,
+        sth_malkbl_sevk_tarihi: irsDate,
+      });
+      const satirlar = items.length > 0
+        ? items.map((item: Record<string, unknown>) => irsSatir(item))
+        : [irsSatir(null)];
 
-      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [{ satirlar }] });
+      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', {
+        evraklar: [{
+          evrak_aciklamalari: [{ aciklama: (shipment.destination as string) || '' }],
+          e_irsaliye_detaylari: {
+            eir_tasiyici_firma_kodu: (shipment.cargoFirm as string) || '',
+            eir_tasiyici_arac_plaka: (shipment.trackingNo as string) || '',
+            eir_eirs_olrk_gonderilsin: 0,
+          },
+          satirlar,
+        }],
+      }, true);
       const duration      = Date.now() - t0;
       const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0            = envelope?.[0] as Record<string, unknown> | undefined;
@@ -3696,7 +3745,8 @@ async function startServer() {
       const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, reqActor(req));
-      if (success) void mirrorMikroInsert('mikro_irsaliyeler', satirlar as unknown as Record<string, unknown>[], IRS_COLS);
+      if (success) void mirrorMikroInsert('mikro_stok_hareketleri',
+        (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'irsaliye_push' })), STH_COLS);
       if (adminDb && firebaseId && success) {
         await adminDb.collection('shipments').doc(firebaseId).set({
           irsaliyeNo,
@@ -5509,14 +5559,18 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const timeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
-    // ── Firebase: lightweight Firestore read with 4 s timeout ───────────────
-    let firebaseOk = !!adminDb; // assume ok if SDK init'd; read confirms connectivity
+    // ── Veritabanı: hafif okuma, 4 s timeout (adminDb = PostgreSQL shim) ────
+    let firebaseOk = !!adminDb; // assume ok if init'd; read confirms connectivity
     if (adminDb) {
       firebaseOk = await timeout(
         adminDb.collection('settings').doc('__health__').get().then(() => true).catch(() => true),
         4000, false
       );
     }
+    // ── PostgreSQL: doğrudan ping ───────────────────────────────────────────
+    const postgresOk = pgPool
+      ? await timeout(pgPool.query('SELECT 1').then(() => true).catch(() => false), 4000, false)
+      : false;
 
     // ── Resend: env var OR Firestore settings/email (no extra DB read) ──────
     let resendOk = !!process.env.RESEND_API_KEY;
@@ -5549,6 +5603,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       uptime: Math.floor(process.uptime()),
       env: process.env.NODE_ENV ?? 'development',
       firebase: firebaseOk,
+      postgres: postgresOk,
       resend: resendOk,
       whatsapp: whatsappOk,
       iyzico: iyzicoOk,

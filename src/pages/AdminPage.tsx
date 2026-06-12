@@ -104,7 +104,7 @@ export default function AdminPage({
   const [p571AuditAction, setP571AuditAction] = useState<string>('all');
   const [healthData, setHealthData] = useState<{
     status: string; uptime: number; env: string;
-    firebase: boolean; resend: boolean; whatsapp: boolean; iyzico: boolean;
+    firebase: boolean; postgres?: boolean; resend: boolean; whatsapp: boolean; iyzico: boolean;
     timestamp: string;
   } | null>(null);
   const [statsData, setStatsData] = useState<Record<string, number> | null>(null);
@@ -368,7 +368,7 @@ export default function AdminPage({
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-xs">{currentLanguage==='tr'?'Firestore\'da kullanıcı kaydı bulunamadı. Kullanıcılar ilk giriş yaptıklarında buraya eklenir.':'No user records in Firestore. Users are added here when they first log in.'}</td></tr>
+                  <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-xs">{currentLanguage==='tr'?'Veritabanında kullanıcı kaydı bulunamadı. Kullanıcılar ilk giriş yaptıklarında buraya eklenir.':'No user records in the database. Users are added here when they first log in.'}</td></tr>
                 )}
               </tbody>
             </table>
@@ -472,7 +472,7 @@ export default function AdminPage({
             ))}
           </div>
           <p className="text-[10px] text-amber-600 mt-3 bg-amber-50 rounded-lg px-2 py-1.5">
-            ⚠️ {currentLanguage==='tr'?'Bu simülasyon sadece UI görünümünü değiştirir. Gerçek Firestore erişim kuralları bu panelden bağımsızdır.':'This simulation only changes UI appearance. Actual Firestore security rules are independent of this panel.'}
+            ⚠️ {currentLanguage==='tr'?'Bu simülasyon sadece UI görünümünü değiştirir. Gerçek erişim kuralları sunucu tarafında uygulanır.':'This simulation only changes UI appearance. Actual access rules are enforced server-side.'}
           </p>
         </div>
       </div>
@@ -633,10 +633,10 @@ export default function AdminPage({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {([
             {
-              name: 'Firebase Firestore',
-              ok: healthData ? healthData.firebase : null,
-              status: !healthData ? (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending') : healthData.firebase ? (currentLanguage==='tr' ? 'Aktif' : 'Active') : (currentLanguage==='tr' ? 'Bağlantı Hatası' : 'Connection Error'),
-              desc: currentLanguage==='tr' ? 'Gerçek zamanlı veritabanı' : 'Real-time database',
+              name: 'PostgreSQL',
+              ok: healthData ? (healthData.postgres ?? healthData.firebase) : null,
+              status: !healthData ? (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending') : (healthData.postgres ?? healthData.firebase) ? (currentLanguage==='tr' ? 'Aktif' : 'Active') : (currentLanguage==='tr' ? 'Bağlantı Hatası' : 'Connection Error'),
+              desc: currentLanguage==='tr' ? 'Gerçek zamanlı veritabanı (kendi sunucumuz)' : 'Real-time database (self-hosted)',
               optional: false,
               settingsTab: null as string|null,
             },
