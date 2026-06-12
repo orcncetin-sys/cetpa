@@ -7,14 +7,14 @@ services:
       - "127.0.0.1:5173:5173"
     env_file:
       - .env.production
-    extra_hosts:
-      # Host üzerindeki PostgreSQL'e erişim: DATABASE_URL host.docker.internal kullanır
-      - "host.docker.internal:host-gateway"
     volumes:
       # Mount service account so it survives container rebuilds
       - /opt/cetpa/firebase-service-account.json:/app/service-account.json:ro
       # Firestore yedekleri host'ta kalıcı olsun
       - /opt/cetpa/backups:/app/backups
+      # PostgreSQL Unix socket — TCP yerine socket üzerinden bağlanır (ağ maruziyeti yok)
+      # DATABASE_URL: postgresql://cetpa:PAROLA@/cetpa_db?host=/var/run/postgresql
+      - /var/run/postgresql:/var/run/postgresql
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/api/health"]
