@@ -16,7 +16,7 @@ import admin from "firebase-admin";
 import { createHmac, createHash } from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z, ZodError } from "zod";
 
 dotenv.config();
@@ -1884,7 +1884,9 @@ async function startServer() {
   // boğmasını önler; saldırgan token başına da sınırlanır.
   const userOrIpKey = (req: Request): string => {
     const uid = (req as Request & { uid?: string }).uid;
-    return uid ? `u:${uid}` : `ip:${req.ip}`;
+    // IPv6 güvenliği: ham req.ip yerine kütüphanenin ipKeyGenerator helper'ı
+    // (express-rate-limit v7 ham IP'yi reddeder — ERR_ERL_KEY_GEN_IPV6).
+    return uid ? `u:${uid}` : ipKeyGenerator(req.ip ?? '');
   };
 
   /** Stripe / payment — very strict: 10 req / 10 min per kullanıcı (veya IP) */
