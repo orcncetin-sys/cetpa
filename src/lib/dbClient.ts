@@ -278,15 +278,39 @@ class StreamManager {
     this.reconnectTimer = setTimeout(() => void this.connect(force), 120);
   }
 
+  private sessionReady = false;
+
+  /** SSE öncesi httpOnly oturum çerezini kur — token URL'de taşınmaz (#8). */
+  private async ensureSession(): Promise<boolean> {
+    if (this.sessionReady) return true;
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/db/session', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: token }),
+        credentials: 'same-origin',
+      });
+      this.sessionReady = res.ok;
+      return res.ok;
+    } catch { return false; }
+  }
+
   private async connect(force: boolean): Promise<void> {
     const colls = Array.from(this.listeners.keys()).sort().join(',');
     if (!colls) { this.es?.close(); this.es = null; this.connectedColls = ''; return; }
     if (!force && colls === this.connectedColls && this.es && this.es.readyState !== EventSource.CLOSED) return;
-    let token: string;
-    try { token = await getToken(); } catch { this.retryLater(); return; }
+    // Önce oturum çerezini kur; başarısızsa eski token-query yoluna düş.
+    const haveSession = await this.ensureSession();
     this.es?.close();
     this.connectedColls = colls;
-    const es = new EventSource(`/api/db/stream?colls=${encodeURIComponent(colls)}&token=${encodeURIComponent(token)}`);
+    let url = `/api/db/stream?colls=${encodeURIComponent(colls)}`;
+    if (!haveSession) {
+      let token: string;
+      try { token = await getToken(); } catch { this.retryLater(); return; }
+      url += `&token=${encodeURIComponent(token)}`;
+    }
+    const es = new EventSource(url, { withCredentials: true });
     this.es = es;
     es.addEventListener('init', ev => {
       this.retryDelay = 1000;
@@ -307,6 +331,8 @@ class StreamManager {
     });
     es.onerror = () => {
       es.close();
+      // Oturum çerezi süresi dolmuş olabilir — yeniden bağlanmadan önce tazele.
+      this.sessionReady = false;
       if (this.es === es) { this.es = null; this.connectedColls = ''; this.retryLater(); }
     };
   }

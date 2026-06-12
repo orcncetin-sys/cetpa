@@ -1,6 +1,10 @@
 import express, { Request, Response, NextFunction } from "express";
 import compression from "compression";
 import helmet from "helmet";
+import {
+  type AppRole, type DbOp, ADMIN_ROLES, APPEND_ONLY_COLLECTIONS,
+  isAllowed, isSelfDocAccess, blocksRoleEscalation,
+} from "./src/lib/rbac.js";
 import pg from "pg";
 import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
@@ -147,19 +151,8 @@ function reqActor(req: Request): { uid: string; email: string } {
 
 // ── Sunucu tarafı RBAC (rol bazlı erişim kontrolü) ───────────────────────────
 // PostgreSQL göçüyle Firestore güvenlik kuralları kalktı; yetki artık burada
-// uygulanır. Rol, users/{uid} dokümanından okunur (60 sn önbellek).
-
-type AppRole = 'Admin' | 'Manager' | 'Sales' | 'Logistics' | 'Accounting'
-  | 'HR' | 'Purchasing' | 'B2B' | 'Dealer' | 'Legal' | 'Corporate' | 'Quality';
-
-const ADMIN_ROLES: AppRole[] = ['Admin', 'Manager'];
-const STAFF_ROLES: AppRole[] = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'Legal', 'Corporate', 'Quality'];
-const EXTERNAL_ROLES: AppRole[] = ['B2B', 'Dealer'];
-
-// Yalnız Admin/Manager'ın okuyup yazabileceği hassas koleksiyonlar.
-const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory']);
-// Append-only: yalnız ekleme (POST). Güncelleme/silme kimseye yok — değiştirilemez denetim izi.
-const APPEND_ONLY_COLLECTIONS = new Set(['auditLog', 'syncLog', 'clientErrors']);
+// uygulanır. Politika src/lib/rbac.ts'te (saf, test edilir); rol users/{uid}
+// dokümanından okunur (60 sn önbellek).
 
 const roleCache = new Map<string, { role: AppRole; exp: number }>();
 async function getUserRole(uid: string): Promise<AppRole | null> {
@@ -182,30 +175,9 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
   res.status(403).json({ error: 'Bu işlem için yönetici yetkisi gerekir.' });
 }
 
-/** Belirli koleksiyon+operasyon için kullanıcının yetkili olup olmadığını döner. */
-async function canAccessCollection(
-  uid: string, coll: string, op: 'read' | 'write' | 'delete',
-): Promise<boolean> {
-  const role = await getUserRole(uid);
-  if (!role) return false;
-  if (role === 'Admin') return true; // Admin her şeye yetkili
-
-  // Append-only: güncelleme/silme kimseye yok (Admin hariç, yukarıda döndü)
-  if (APPEND_ONLY_COLLECTIONS.has(coll) && op !== 'read') {
-    return op === 'write' && STAFF_ROLES.includes(role); // yalnız POST (ekleme)
-  }
-  // Hassas koleksiyonlar: yalnız Admin/Manager
-  if (ADMIN_ONLY_COLLECTIONS.has(coll)) return ADMIN_ROLES.includes(role);
-
-  // Dış roller (B2B/Dealer): yalnız okuma
-  if (EXTERNAL_ROLES.includes(role)) return op === 'read';
-
-  // Personel rolleri: iş koleksiyonlarında okuma+yazma; silme yalnız Admin/Manager
-  if (STAFF_ROLES.includes(role)) {
-    if (op === 'delete') return ADMIN_ROLES.includes(role);
-    return true;
-  }
-  return false;
+/** Koleksiyon+operasyon için kullanıcının yetkili olup olmadığını döner. */
+async function canAccessCollection(uid: string, coll: string, op: DbOp): Promise<boolean> {
+  return isAllowed(await getUserRole(uid), coll, op);
 }
 
 // ── PostgreSQL document store (Firestore replacement) ───────────────────────
@@ -1655,9 +1627,49 @@ async function startServer() {
 
     // SSE stream — EventSource cannot set headers, so the ID token arrives as
     // a query param. Verified the same way requireAuth does.
+    // httpOnly session cookie — SSE token'ını URL'den çıkarır (güvenlik #8).
+    // POST /api/db/session {idToken} → Firebase session cookie (httpOnly+Secure+
+    // SameSite) set eder; SSE bunu okur, token query'de taşınmaz.
+    const SESSION_COOKIE = '__cetpa_session';
+    const SESSION_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün
+    const parseCookie = (header: string | undefined, name: string): string | null => {
+      if (!header) return null;
+      for (const part of header.split(';')) {
+        const [k, ...v] = part.trim().split('=');
+        if (k === name) return decodeURIComponent(v.join('='));
+      }
+      return null;
+    };
+    app.post('/api/db/session', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const idToken = (req.body?.idToken as string) || '';
+      try {
+        const cookie = await admin.auth().createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE });
+        res.cookie(SESSION_COOKIE, cookie, {
+          httpOnly: true, secure: isProd, sameSite: 'strict',
+          maxAge: SESSION_MAX_AGE, path: '/api/db',
+        });
+        res.json({ ok: true });
+      } catch {
+        res.status(401).json({ error: 'Oturum çerezi oluşturulamadı.' });
+      }
+    });
+    app.post('/api/db/session/logout', dbLimiter, (_req: Request, res: Response) => {
+      res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
+      res.json({ ok: true });
+    });
+
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
-      try { await admin.auth().verifyIdToken(String(req.query.token || '')); }
-      catch { res.status(401).json({ error: 'Invalid or expired token.' }); return; }
+      // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
+      // için query token. İkincisi rollout sonrası kaldırılabilir.
+      const sessionCookie = parseCookie(req.headers.cookie, SESSION_COOKIE);
+      let authed = false;
+      if (sessionCookie) {
+        try { await admin.auth().verifySessionCookie(sessionCookie, true); authed = true; } catch { /* düş */ }
+      }
+      if (!authed) {
+        try { await admin.auth().verifyIdToken(String(req.query.token || '')); authed = true; } catch { /* düş */ }
+      }
+      if (!authed) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
       const colls = String(req.query.colls || '').split(',').filter(c => COLL_RE.test(c));
       if (!colls.length) { res.status(400).json({ error: 'colls query param required.' }); return; }
       res.writeHead(200, {
@@ -1695,22 +1707,19 @@ async function startServer() {
       req: Request, res: Response, coll: string, op: 'read' | 'write' | 'delete', docId?: string,
     ): Promise<boolean> => {
       const uid = (req as Request & { uid?: string }).uid || '';
-      // Kendi kullanıcı dokümanı: her kullanıcı kendi users/{uid}'ini okuyup
-      // yazabilir (login profil senkronu) — ama 'role' alanını DEĞİŞTİREMEZ
-      // (yetki yükseltme engeli; rol kontrolü yazma route'unda yapılır).
-      if (coll === 'users' && docId && docId === uid && op !== 'delete') return false;
+      // Kendi kullanıcı dokümanı istisnası (login profil senkronu) — 'role'
+      // alanı guardRoleEscalation ile ayrıca korunur.
+      if (isSelfDocAccess(coll, docId, uid, op)) return false;
       if (await canAccessCollection(uid, coll, op)) return false;
       res.status(403).json({ error: `Bu koleksiyon üzerinde '${op}' yetkiniz yok.` });
       return true;
     };
     // Yetki yükseltme engeli: kendi users dokümanına 'role' yazılmasını,
     // yazan kişi Admin değilse reddet.
-    const guardRoleEscalation = async (req: Request, res: Response, coll: string, docId: string, body: Record<string, unknown>): Promise<boolean> => {
-      if (coll !== 'users') return false;
-      if (!('role' in body)) return false;
+    const guardRoleEscalation = async (req: Request, res: Response, coll: string, _docId: string, body: Record<string, unknown>): Promise<boolean> => {
       const uid = (req as Request & { uid?: string }).uid || '';
       const role = await getUserRole(uid);
-      if (role === 'Admin') return false; // yalnız Admin rol atayabilir
+      if (!blocksRoleEscalation(coll, role, body)) return false;
       res.status(403).json({ error: 'Rol değişikliği için yönetici yetkisi gerekir.' });
       return true;
     };
