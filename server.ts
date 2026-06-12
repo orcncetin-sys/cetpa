@@ -1254,7 +1254,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
 
       // Pull cari
       const cariRes = await mikroPost('CariListesiV2', {
-        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl',
+        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
         WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'",
         Sort: 'cari_kod', Size: '500', Index: 0,
       });
@@ -2517,7 +2517,7 @@ async function startServer() {
 
     try {
       const { ok, data, status } = await mikroPost('CariListesiV2', {
-        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl',
+        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
         WhereStr:  whereStr,
         Sort:      'cari_kod',
         Size:      String(size),
@@ -3123,6 +3123,14 @@ async function startServer() {
   app.post('/api/mikro/import/stok-miktar', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    if (MIKRO_JUMP_SURUM < 17) {
+      return res.status(501).json({
+        success: false,
+        error: 'Stok miktarı/maliyet çekimi GenelAmacliMaliyetListesiV2 gerektirir — bu method yalnız Mikro Jump V17+ kurulumlarında var. ' +
+               'Mikro Jump V17 güncellemesi sonrası .env\'e MIKRO_JUMP_SURUM=17 ekleyin.',
+        requiresVersion: 17, currentVersion: MIKRO_JUMP_SURUM,
+      });
+    }
     if (stokMiktarJobRunning) return res.json({ success: true, started: false, alreadyRunning: true });
 
     const actor = reqActor(req);

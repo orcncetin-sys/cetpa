@@ -6679,19 +6679,12 @@ function AppContent() {
                         employees={employees}
                         allowedTabs={[
                           'faturalar','e-fatura','evrak_tasarimi','banka','yevmiye','mizan',
-                          'gelir','kdv','luca','mikro','banka_hareketleri','satislar',
+                          'gelir','kdv','banka_hareketleri','satislar',
                           'musteriler','tedarikciler','urunler','depo','warehouses',
                           'transfer','cekler','calisanlar','giden_irsaliye','gelen_irsaliye',
                           'isletme_sermayesi','kasa'
                         ]}
                       />
-                      {/* ── Vade Analizi (AR Aging) ── */}
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
-                          <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
-                        </h4>
-                        <CariEkstrePanel currentLanguage={currentLanguage} />
-                      </div>
                     </motion.div>
                   )}
 
@@ -8562,6 +8555,16 @@ function AppContent() {
                       </motion.div>
                     );
                   })()}
+
+                  {/* ── Vade Analizi & Cari Ekstre — Cari Hesap sekmesinin doğal yeri ── */}
+                  {muhasebeTab === 'cari' && (
+                    <div className="mb-6">
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
+                        <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
+                      </h4>
+                      <CariEkstrePanel currentLanguage={currentLanguage} />
+                    </div>
+                  )}
 
                   {/* ── Phase 559: Müşteri Cari Hesap Ekstresi ────────────────────────── */}
                   {muhasebeTab === 'cari' && (() => {

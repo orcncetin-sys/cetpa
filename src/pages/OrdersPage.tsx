@@ -2163,16 +2163,16 @@ export default function OrdersPage({
               )}
               {/* Lojistik sub-tab: Depo/Transfer/İrsaliye via AccountingModule */}
               {lojistikTab === 'depo' && (
-                <AccountingModule key="loj-depo" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-depo" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'transfer' && (
-                <AccountingModule key="loj-transfer" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-transfer" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'giden_irsaliye' && (
-                <AccountingModule key="loj-giden" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-giden" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'gelen_irsaliye' && (
-                <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* ── Phase 554: WMS Bin/Location Management ─────────────────────────── */}

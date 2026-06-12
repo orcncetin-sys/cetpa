@@ -390,138 +390,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {/* ── Phase 31: Low-Stock Watchlist Panel ── */}
-      {(() => {
-        const critical = inventory.filter(i => (i.stockLevel ?? 0) === 0);
-        const warning = inventory.filter(i => (i.stockLevel ?? 0) > 0 && (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
-        if (critical.length === 0 && warning.length === 0) return null;
-        return (
-          <div className="rounded-2xl border overflow-hidden" style={{ borderColor: critical.length > 0 ? '#fca5a5' : '#fde68a' }}>
-            <div className={`px-4 py-3 flex items-center justify-between ${critical.length > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
-              <div className="flex items-center gap-2">
-                <AlertTriangle className={`w-4 h-4 ${critical.length > 0 ? 'text-red-500' : 'text-amber-500'}`} />
-                <span className={`text-xs font-bold ${critical.length > 0 ? 'text-red-700' : 'text-amber-700'}`}>
-                  {currentLanguage === 'tr'
-                    ? `${critical.length > 0 ? `${critical.length} kritik (0 stok)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} uyarı (düşük stok)` : ''}`
-                    : `${critical.length > 0 ? `${critical.length} critical (out of stock)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} low stock warning` : ''}`}
-                </span>
-              </div>
-              <button onClick={() => void handleAutoReorder()} disabled={autoReorderLoading}
-                className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors ${critical.length > 0 ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
-                {autoReorderLoading ? '…' : (currentLanguage === 'tr' ? '⚡ Otomatik SAS' : '⚡ Auto-Reorder')}
-              </button>
-            </div>
-            <div className="bg-white divide-y divide-gray-50 max-h-48 overflow-y-auto">
-              {[...critical, ...warning].slice(0, 10).map(item => {
-                const pct = item.lowStockThreshold > 0 ? Math.min((item.stockLevel ?? 0) / item.lowStockThreshold, 1) : 0;
-                const isCrit = (item.stockLevel ?? 0) === 0;
-                return (
-                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
-                      <p className="text-[10px] text-gray-400">{item.sku}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all ${isCrit ? 'bg-red-500' : 'bg-amber-400'}`} style={{ width: `${pct * 100}%` }} />
-                      </div>
-                      <span className={`text-[10px] font-bold w-10 text-right ${isCrit ? 'text-red-600' : 'text-amber-600'}`}>
-                        {item.stockLevel ?? 0}/{item.lowStockThreshold ?? 5}
-                      </span>
-                      {onQuickPO && (
-                        <button
-                          onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
-                          title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create Purchase Order'}
-                          className={`text-[9px] font-bold px-2 py-1 rounded-full transition-colors flex items-center gap-0.5 ${isCrit ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
-                          <ShoppingCart className="w-3 h-3" />
-                          {currentLanguage === 'tr' ? 'SAS' : 'PO'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── Phase 107: Smart Reorder Suggestions ── */}
-      {movements.length > 0 && (() => {
-        const now107 = Date.now();
-        const MS_30D = 30 * 24 * 60 * 60 * 1000;
-        const consMap: Record<string, number> = {};
-        for (const m of movements) {
-          if (m.type !== 'out') continue;
-          const ts = (() => {
-            const t = m.timestamp;
-            if (!t) return 0;
-            if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
-            return new Date(t as string | number).getTime();
-          })();
-          if (now107 - ts > MS_30D) continue;
-          const key = (m as unknown as { productId?: string }).productId || m.productName;
-          consMap[key] = (consMap[key] || 0) + m.quantity;
-        }
-        type Suggestion = { item: InventoryItem; monthlyOut: number; suggested: number };
-        const suggestions: Suggestion[] = [];
-        for (const item of inventory) {
-          const key = item.id || item.name;
-          const monthlyOut = consMap[key] ?? consMap[item.name] ?? 0;
-          if (monthlyOut === 0) continue;
-          const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
-          if (!isLow) continue;
-          const suggested = Math.max(Math.ceil(monthlyOut * 2), (item.lowStockThreshold ?? 5) - (item.stockLevel ?? 0));
-          suggestions.push({ item, monthlyOut, suggested });
-        }
-        suggestions.sort((a, b) => b.suggested - a.suggested);
-        if (suggestions.length === 0) return null;
-        return (
-          <div className="rounded-2xl border border-violet-100 bg-violet-50/40 overflow-hidden">
-            <div className="px-4 py-3 flex items-center gap-2 bg-violet-50 border-b border-violet-100">
-              <span className="text-[11px]">🧠</span>
-              <span className="text-xs font-bold text-violet-700">
-                {currentLanguage === 'tr' ? 'Akıllı Sipariş Önerileri' : 'Smart Reorder Suggestions'}
-              </span>
-              <span className="ml-auto text-[10px] text-violet-500">
-                {currentLanguage === 'tr' ? 'Son 30 gün tüketimine göre' : 'Based on last 30-day usage'}
-              </span>
-            </div>
-            <div className="divide-y divide-violet-100/60 max-h-44 overflow-y-auto">
-              {suggestions.slice(0, 8).map(({ item, monthlyOut, suggested }) => (
-                <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 bg-white/50">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
-                    <p className="text-[10px] text-gray-400">
-                      {currentLanguage === 'tr'
-                        ? `Aylık tüketim: ${monthlyOut} adet · Stok: ${item.stockLevel ?? 0}`
-                        : `Monthly usage: ${monthlyOut} units · Stock: ${item.stockLevel ?? 0}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <div className="text-right">
-                      <p className="text-[10px] text-violet-500 font-bold uppercase">
-                        {currentLanguage === 'tr' ? 'Önerilen sipariş' : 'Suggested order'}
-                      </p>
-                      <p className="text-sm font-black text-violet-700">{suggested} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
-                    </div>
-                    {onQuickPO && (
-                      <button
-                        onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
-                        title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create PO'}
-                        className="text-[9px] font-bold px-2 py-1 rounded-full bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors flex items-center gap-0.5">
-                        <ShoppingCart className="w-3 h-3" />
-                        SAS
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-
       {/* CSV Import Preview Modal */}
       <AnimatePresence>
         {importModalOpen && (
@@ -1132,6 +1000,140 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* ── Düşük stok uyarıları & akıllı sipariş önerileri (tablonun altına alındı) ── */}
+      {/* ── Phase 31: Low-Stock Watchlist Panel ── */}
+      {(() => {
+        const critical = inventory.filter(i => (i.stockLevel ?? 0) === 0);
+        const warning = inventory.filter(i => (i.stockLevel ?? 0) > 0 && (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
+        if (critical.length === 0 && warning.length === 0) return null;
+        return (
+          <div className="rounded-2xl border overflow-hidden" style={{ borderColor: critical.length > 0 ? '#fca5a5' : '#fde68a' }}>
+            <div className={`px-4 py-3 flex items-center justify-between ${critical.length > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle className={`w-4 h-4 ${critical.length > 0 ? 'text-red-500' : 'text-amber-500'}`} />
+                <span className={`text-xs font-bold ${critical.length > 0 ? 'text-red-700' : 'text-amber-700'}`}>
+                  {currentLanguage === 'tr'
+                    ? `${critical.length > 0 ? `${critical.length} kritik (0 stok)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} uyarı (düşük stok)` : ''}`
+                    : `${critical.length > 0 ? `${critical.length} critical (out of stock)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} low stock warning` : ''}`}
+                </span>
+              </div>
+              <button onClick={() => void handleAutoReorder()} disabled={autoReorderLoading}
+                className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors ${critical.length > 0 ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
+                {autoReorderLoading ? '…' : (currentLanguage === 'tr' ? '⚡ Otomatik SAS' : '⚡ Auto-Reorder')}
+              </button>
+            </div>
+            <div className="bg-white divide-y divide-gray-50 max-h-48 overflow-y-auto">
+              {[...critical, ...warning].slice(0, 10).map(item => {
+                const pct = item.lowStockThreshold > 0 ? Math.min((item.stockLevel ?? 0) / item.lowStockThreshold, 1) : 0;
+                const isCrit = (item.stockLevel ?? 0) === 0;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
+                      <p className="text-[10px] text-gray-400">{item.sku}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${isCrit ? 'bg-red-500' : 'bg-amber-400'}`} style={{ width: `${pct * 100}%` }} />
+                      </div>
+                      <span className={`text-[10px] font-bold w-10 text-right ${isCrit ? 'text-red-600' : 'text-amber-600'}`}>
+                        {item.stockLevel ?? 0}/{item.lowStockThreshold ?? 5}
+                      </span>
+                      {onQuickPO && (
+                        <button
+                          onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
+                          title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create Purchase Order'}
+                          className={`text-[9px] font-bold px-2 py-1 rounded-full transition-colors flex items-center gap-0.5 ${isCrit ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
+                          <ShoppingCart className="w-3 h-3" />
+                          {currentLanguage === 'tr' ? 'SAS' : 'PO'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Phase 107: Smart Reorder Suggestions ── */}
+      {movements.length > 0 && (() => {
+        const now107 = Date.now();
+        const MS_30D = 30 * 24 * 60 * 60 * 1000;
+        const consMap: Record<string, number> = {};
+        for (const m of movements) {
+          if (m.type !== 'out') continue;
+          const ts = (() => {
+            const t = m.timestamp;
+            if (!t) return 0;
+            if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
+            return new Date(t as string | number).getTime();
+          })();
+          if (now107 - ts > MS_30D) continue;
+          const key = (m as unknown as { productId?: string }).productId || m.productName;
+          consMap[key] = (consMap[key] || 0) + m.quantity;
+        }
+        type Suggestion = { item: InventoryItem; monthlyOut: number; suggested: number };
+        const suggestions: Suggestion[] = [];
+        for (const item of inventory) {
+          const key = item.id || item.name;
+          const monthlyOut = consMap[key] ?? consMap[item.name] ?? 0;
+          if (monthlyOut === 0) continue;
+          const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
+          if (!isLow) continue;
+          const suggested = Math.max(Math.ceil(monthlyOut * 2), (item.lowStockThreshold ?? 5) - (item.stockLevel ?? 0));
+          suggestions.push({ item, monthlyOut, suggested });
+        }
+        suggestions.sort((a, b) => b.suggested - a.suggested);
+        if (suggestions.length === 0) return null;
+        return (
+          <div className="rounded-2xl border border-violet-100 bg-violet-50/40 overflow-hidden">
+            <div className="px-4 py-3 flex items-center gap-2 bg-violet-50 border-b border-violet-100">
+              <span className="text-[11px]">🧠</span>
+              <span className="text-xs font-bold text-violet-700">
+                {currentLanguage === 'tr' ? 'Akıllı Sipariş Önerileri' : 'Smart Reorder Suggestions'}
+              </span>
+              <span className="ml-auto text-[10px] text-violet-500">
+                {currentLanguage === 'tr' ? 'Son 30 gün tüketimine göre' : 'Based on last 30-day usage'}
+              </span>
+            </div>
+            <div className="divide-y divide-violet-100/60 max-h-44 overflow-y-auto">
+              {suggestions.slice(0, 8).map(({ item, monthlyOut, suggested }) => (
+                <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 bg-white/50">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {currentLanguage === 'tr'
+                        ? `Aylık tüketim: ${monthlyOut} adet · Stok: ${item.stockLevel ?? 0}`
+                        : `Monthly usage: ${monthlyOut} units · Stock: ${item.stockLevel ?? 0}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="text-right">
+                      <p className="text-[10px] text-violet-500 font-bold uppercase">
+                        {currentLanguage === 'tr' ? 'Önerilen sipariş' : 'Suggested order'}
+                      </p>
+                      <p className="text-sm font-black text-violet-700">{suggested} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                    </div>
+                    {onQuickPO && (
+                      <button
+                        onClick={() => onQuickPO({ name: item.name, sku: item.sku })}
+                        title={currentLanguage === 'tr' ? 'Satın Alma Talebi Oluştur' : 'Create PO'}
+                        className="text-[9px] font-bold px-2 py-1 rounded-full bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors flex items-center gap-0.5">
+                        <ShoppingCart className="w-3 h-3" />
+                        SAS
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       <ConfirmModal
         isOpen={confirmState.isOpen}
         title={confirmState.title}

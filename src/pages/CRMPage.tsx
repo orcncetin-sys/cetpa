@@ -403,7 +403,7 @@ export default function CRMPage({
 
               {/* CRM sub-tab: Müşteriler */}
               {crmTab === 'musteriler' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* CRM sub-tab: Siparişler */}

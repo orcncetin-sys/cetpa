@@ -448,6 +448,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
 
   // New tab states
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
@@ -742,7 +743,28 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     const unsubs = [
       // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
       // (type==='Supplier' olanlar Tedarikçiler sekmesine aittir, burada gizlenir.)
-      onSnapshot(collection(db, 'leads'), s => setCustomers(
+      onSnapshot(collection(db, 'leads'), s => {
+        // Mikro'dan gelen tedarikçiler (type==='Supplier') Tedarikçiler sekmesini besler
+        setMikroSuppliers(
+          s.docs
+            .filter(d => (d.data().type as string) === 'Supplier')
+            .map(d => {
+              const x = d.data() as Record<string, unknown>;
+              return {
+                id: d.id,
+                name:    (x.name as string) || (x.company as string) || '—',
+                company: (x.company as string) || '',
+                email:   (x.email as string) || '',
+                phone:   (x.phone as string) || '',
+                address: (x.address as string) || '',
+                taxNo:   (x.taxId as string) || (x.taxNo as string) || '',
+                taxOffice: (x.taxOffice as string) || '',
+                notes:   (x.notes as string) || '',
+                createdAt: x.createdAt,
+              } as Supplier;
+            })
+        );
+        setCustomers(
         s.docs
           .filter(d => ((d.data().type as string) ?? 'Customer') !== 'Supplier')
           .map(d => {
@@ -763,7 +785,7 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
               createdAt:   x.createdAt,
             } as Customer;
           })
-      ), (error) => logFirestoreError(error, OperationType.LIST, 'leads')),
+      ); }, (error) => logFirestoreError(error, OperationType.LIST, 'leads')),
       onSnapshot(collection(db, 'suppliers'), s => setSuppliers(s.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))), (error) => logFirestoreError(error, OperationType.LIST, 'suppliers')),
       onSnapshot(collection(db, 'services'), s => setServices(s.docs.map(d => ({ id: d.id, ...d.data() } as Service))), (error) => logFirestoreError(error, OperationType.LIST, 'services')),
       onSnapshot(collection(db, 'warehouseItems'), s => setWarehouseItems(s.docs.map(d => ({ id: d.id, ...d.data() } as WarehouseItem))), (error) => logFirestoreError(error, OperationType.LIST, 'warehouseItems')),
@@ -1554,7 +1576,11 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   };
 
   // Tedarikçiler computed
-  const displayedTedarikciler = suppliers
+  const allSuppliers = [
+    ...suppliers,
+    ...mikroSuppliers.filter(m => !suppliers.some(s => s.name === m.name)),
+  ];
+  const displayedTedarikciler = allSuppliers
     .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company || '').toLowerCase().includes(supplierSearch.toLowerCase()))
     .sort((a, b) => {
       const av = (a[tedarikciSortKey] || '') as string;
@@ -1731,8 +1757,6 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
     { key: 'mizan', label: t.trialBalance, icon: ArrowUpDown },
     { key: 'gelir', label: t.incomeExpense, icon: BarChart3 },
     { key: 'kdv', label: t.vat, icon: Calculator },
-    { key: 'luca', label: t.luca, icon: Link },
-    { key: 'mikro', label: 'Mikro ERP', icon: Link },
     { key: 'banka_hareketleri', label: currentLanguage === 'tr' ? 'Banka Hareketleri' : 'Bank Movements', icon: Landmark },
     { key: 'satislar', label: t.satislar, icon: ShoppingCart },
     { key: 'musteriler', label: t.musteriler, icon: Users },
