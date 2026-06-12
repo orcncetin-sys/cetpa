@@ -394,11 +394,15 @@ export async function addDoc(coll: CollectionReference, data: DocData): Promise<
 }
 
 export async function setDoc(ref: DocumentReference, data: DocData, opts?: { merge?: boolean }): Promise<void> {
+  stream.applyLocal(ref.coll, opts?.merge ? 'merge' : 'set', ref.id, data);
   const res = await api('PUT', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}?merge=${opts?.merge ? '1' : '0'}`, data);
   stream.applyLocal(ref.coll, opts?.merge ? 'merge' : 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
 }
 
 export async function updateDoc(ref: DocumentReference, data: DocData): Promise<void> {
+  // Optimistic: UI sunucu yanıtını beklemeden güncellenir (toggle'lar anında
+  // tepki verir); yanıt gelince sunucunun birleştirdiği nihai veri yazılır.
+  stream.applyLocal(ref.coll, 'merge', ref.id, data);
   const res = await api('PATCH', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}`, data);
   stream.applyLocal(ref.coll, 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
 }

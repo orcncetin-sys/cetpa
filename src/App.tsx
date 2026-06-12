@@ -1213,6 +1213,14 @@ function AppContent() {
       } catch { /* silent */ }
     };
 
+    // İstek fırtınası koruması: inventory/orders her SSE güncellemesinde yeni
+    // referans üretir ve bu effect'i tetikler; throttle olmadan her tetikte
+    // notifications'a 2-3 GET atılıp tarayıcı havuzu tükeniyordu
+    // (ERR_INSUFFICIENT_RESOURCES). Otomatik bildirimler saatte bir koşar.
+    const lastRun = Number(sessionStorage.getItem('autoNotifyLastRun') || 0);
+    if (now - lastRun < 60 * 60 * 1000) return;
+    sessionStorage.setItem('autoNotifyLastRun', String(now));
+
     const run = async () => {
       const lang = currentLanguage;
 
@@ -14695,8 +14703,8 @@ function AppContent() {
 
 
           {/* ── Orders List ── */}
-          {/* ── Orders ── */}
-          {activeTab === 'orders' && (
+          {/* ── Orders + Lojistik (her ikisi de OrdersPage içinde) ── */}
+          {(activeTab === 'orders' || activeTab === 'lojistik') && (
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <OrdersPage
                 selectedOrder={selectedOrder}
