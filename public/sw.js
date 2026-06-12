@@ -1,6 +1,6 @@
 // ── CETPA Service Worker — Offline-first with stale-while-revalidate ─────────
 // Version bump triggers cache refresh on deploy
-const CACHE_VERSION = 'cetpa-v3';
+const CACHE_VERSION = 'cetpa-v4';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 
@@ -52,8 +52,26 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/api/')
   ) return;
 
-  // Static shell assets → Cache First (fast, offline-safe)
-  if (PRECACHE_ASSETS.includes(url.pathname) || url.pathname === '/') {
+  // HTML shell → NETWORK FIRST. Cache-first here is what broke every deploy:
+  // the cached index.html kept referencing deleted chunk hashes forever.
+  // Offline'da cache'e düşer; online'da her zaman taze index.html gelir.
+  if (url.pathname === '/' || url.pathname === '/index.html' || request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(STATIC_CACHE).then(cache => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request).then(c => c || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // Diğer shell varlıkları (ikon/manifest) → Cache First (içerikleri değişmez)
+  if (PRECACHE_ASSETS.includes(url.pathname)) {
     event.respondWith(
       caches.match(request).then(cached => cached || fetch(request))
     );
@@ -73,7 +91,13 @@ self.addEventListener('fetch', (event) => {
       caches.open(DYNAMIC_CACHE).then(cache =>
         cache.match(request).then(cached => {
           const networkFetch = fetch(request).then(response => {
-            if (response.ok) cache.put(request, response.clone());
+            // Zehirlenme koruması: .js isteğine HTML dönerse (eski sunucu SPA
+            // fallback'i) ASLA cache'leme — yoksa bozuk yanıt kalıcılaşır.
+            const ct = response.headers.get('content-type') || '';
+            const isJsCss = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+            if (response.ok && !(isJsCss && ct.includes('text/html'))) {
+              cache.put(request, response.clone());
+            }
             return response;
           }).catch(() => cached); // offline fallback to cached version
           return cached || networkFetch;

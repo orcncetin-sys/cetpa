@@ -5943,7 +5943,14 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }));
     // Everything else (index.html, icons) — no cache so new deploys are picked up
     app.use(express.static(distPath, { maxAge: 0 }));
-    app.use((_req, res) => {
+    app.use((req, res) => {
+      // Missing hashed assets MUST 404 — returning index.html here poisons
+      // browsers/service workers with HTML-as-JS ("Unexpected token '<'")
+      // after every deploy that changes chunk hashes.
+      if (req.path.startsWith('/assets/') || /\.(js|css|map|woff2?)$/.test(req.path)) {
+        res.status(404).type('text/plain').send('Not found');
+        return;
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
