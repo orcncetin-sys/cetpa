@@ -1695,6 +1695,11 @@ function AppContent() {
     }
   }, [user, userSubscription, kvkkAccepted]);
   const acceptKvkk = () => { sessionStorage.setItem('cetpa_kvkk','1'); setKvkkAccepted(true); setShowKvkkModal(false); };
+  const [kvkkConcern, setKvkkConcern] = useState(false);
+  const [kvkkCopied, setKvkkCopied] = useState(false);
+  const copyKvkkContact = async () => {
+    try { await navigator.clipboard.writeText('info@cetpa.com.tr'); setKvkkCopied(true); setTimeout(() => setKvkkCopied(false), 2000); } catch { /* clipboard yok */ }
+  };
 
   // ── Stripe Checkout return handler ───────────────────────────────────────
   useEffect(() => {
@@ -4440,14 +4445,38 @@ function AppContent() {
                       : '⚠️ Public sector & financial institutions: inquire about on-premise hosting at info@cetpa.com.tr'}
                   </p>
                 </div>
-                <div className="flex flex-col gap-3">
-                  <button onClick={acceptKvkk} className="apple-button-primary w-full py-3 text-sm font-bold">
-                    {currentLanguage === 'tr' ? 'Okudum, Kabul Ediyorum' : 'I Understand & Accept'}
-                  </button>
-                  <a href="mailto:info@cetpa.com.tr?subject=KVKK" className="apple-button-secondary w-full py-3 text-sm font-bold text-center">
-                    {currentLanguage === 'tr' ? 'Sorun Var?' : 'Concerns?'}
-                  </a>
-                </div>
+                {kvkkConcern ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2">
+                      <p className="text-sm text-gray-700">
+                        {currentLanguage === 'tr'
+                          ? 'KVKK, veri saklama veya yerli sunucu talepleriniz için ekibimize ulaşın:'
+                          : 'Reach our team for data residency, retention or on-premise requests:'}
+                      </p>
+                      <div className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                        <span className="text-sm font-semibold text-gray-900 select-all">info@cetpa.com.tr</span>
+                        <button onClick={copyKvkkContact} className="text-xs font-bold text-brand hover:underline whitespace-nowrap">
+                          {kvkkCopied ? (currentLanguage === 'tr' ? '✓ Kopyalandı' : '✓ Copied') : (currentLanguage === 'tr' ? 'Kopyala' : 'Copy')}
+                        </button>
+                      </div>
+                      <a href="mailto:info@cetpa.com.tr?subject=KVKK%20Talebi" className="block text-xs text-brand hover:underline">
+                        {currentLanguage === 'tr' ? 'E-posta uygulamasında aç →' : 'Open in mail app →'}
+                      </a>
+                    </div>
+                    <button onClick={() => setKvkkConcern(false)} className="apple-button-secondary w-full py-3 text-sm font-bold">
+                      {currentLanguage === 'tr' ? '← Geri' : '← Back'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <button onClick={acceptKvkk} className="apple-button-primary w-full py-3 text-sm font-bold">
+                      {currentLanguage === 'tr' ? 'Okudum, Kabul Ediyorum' : 'I Understand & Accept'}
+                    </button>
+                    <button onClick={() => setKvkkConcern(true)} className="apple-button-secondary w-full py-3 text-sm font-bold text-center">
+                      {currentLanguage === 'tr' ? 'Sorun Var?' : 'Concerns?'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
