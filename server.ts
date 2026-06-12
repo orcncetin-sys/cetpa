@@ -1223,64 +1223,176 @@ async function writeAuditLog(
 }
 
 // ── Mikro periodic sync (cron) ───────────────────────────────────────────────
-// Every hour: pull updated cari + stok from Mikro → Firebase
+// Saatte bir: TÜM cari + stok kartlarını sayfalı çeker, UPSERT eder (yeni
+// kayıt ekler, mevcutları günceller, tedarikçi tipini işler) ve mikro_*
+// aynasına yazar. Gece 04:00: V17+ kurulumlarda stok miktar/maliyet senkronu.
 if (process.env.MIKRO_CRON_SYNC === 'true') {
+  /** Koleksiyondaki ilk dokümanın companyId'si — cron'da req.uid yok. */
+  const cronCompanyId = async (): Promise<string> => {
+    if (!adminDb) return '';
+    const snap = await adminDb.collection('inventory').limit(1).get();
+    return (snap.docs[0]?.data()?.companyId as string) || '';
+  };
+
+  const cronPullAll = async (
+    method: string, listKey: string, body: Record<string, unknown>,
+  ): Promise<Record<string, unknown>[]> => {
+    const out: Record<string, unknown>[] = [];
+    for (let index = 0; index < 100; index++) {
+      const { ok, data } = await mikroPost(method, { ...body, Size: '500', Index: index });
+      if (!ok || typeof data === 'string') break;
+      const rows = (mikroData(data)[listKey] ?? []) as Record<string, unknown>[];
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      out.push(...rows);
+      if (rows.length < 500) break;
+    }
+    return out;
+  };
+
   cron.schedule('0 * * * *', async () => {
     const cronCreds = await getMikroCreds();
     if (!cronCreds || !adminDb) return;
-    console.log('Mikro cron: stok + cari sync başlatıldı');
+    console.log('Mikro cron: stok + cari tam senkron başlatıldı');
     try {
-      // Pull stok
-      const stokRes = await mikroPost('StokListesiV2', {
+      const companyId = await cronCompanyId();
+
+      // ── Stok kartları: tam sayfalama + upsert ──────────────────────────────
+      const stoklar = await cronPullAll('StokListesiV2', 'StokListesi', {
         StokKod: '', TarihTipi: 2,
-        IlkTarih: '2020-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
-        Sort: 'sto_kod', Size: '500', Index: 0,
+        IlkTarih: '2000-01-01', SonTarih: `${new Date().getFullYear() + 1}-12-31`,
+        Sort: 'sto_kod',
       });
-      const stoklar = (mikroData(stokRes.data).StokListesi ?? []) as Record<string, unknown>[];
       void mirrorMikroStoklar(stoklar);
-      let stokUpdated = 0;
+      const invSnap = await adminDb.collection('inventory').get();
+      const invBySku = new Map<string, PgDocRef>();
+      for (const d of invSnap.docs) {
+        const sku = (d.data().sku as string)?.trim();
+        if (sku && !invBySku.has(sku)) invBySku.set(sku, d.ref);
+      }
+      let stokYeni = 0, stokGuncel = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      const seenSku = new Set<string>();
       for (const s of stoklar) {
-        const sku = s.sto_kod as string;
-        if (!sku) continue;
-        const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
-        if (!snap.empty) {
-          await snap.docs[0].ref.update({
-            stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
-            mikroSyncedAt: pgServerTimestamp(),
+        const sku = (s.sto_kod as string)?.trim();
+        if (!sku || seenSku.has(sku)) continue;
+        seenSku.add(sku);
+        const fields = {
+          name: (s.sto_isim as string) || sku,
+          unit: (s.sto_birim1_ad as string) || 'ADET',
+          vatRate: Number(s.sto_perakende_vergi) || 20,
+          mikroStoKod: sku, mikroSynced: true,
+          mikroSyncedAt: pgServerTimestamp(),
+        };
+        const ref = invBySku.get(sku);
+        if (ref) { batch.update(ref, fields); stokGuncel++; }
+        else {
+          batch.set(adminDb.collection('inventory').doc(), {
+            ...fields, companyId, sku, category: 'Genel', stockLevel: 0,
+            lowStockThreshold: 5, prices: {}, price: 0,
+            source: 'mikro_cron', createdAt: pgServerTimestamp(),
           });
-          stokUpdated++;
+          stokYeni++;
         }
+        if (++ops >= 400) await flush();
       }
+      await flush();
 
-      // Pull cari
-      const cariRes = await mikroPost('CariListesiV2', {
+      // ── Cariler: tam sayfalama + upsert (tedarikçi tipi dahil) ─────────────
+      const cariler = await cronPullAll('CariListesiV2', 'CariListesi', {
         FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
-        WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'",
-        Sort: 'cari_kod', Size: '500', Index: 0,
+        WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'",
+        Sort: 'cari_kod',
       });
-      const cariler = (mikroData(cariRes.data).CariListesi ?? []) as Record<string, unknown>[];
       void mirrorMikroCariler(cariler);
-      let cariUpdated = 0;
-      for (const c of cariler) {
-        const cariKod = c.cari_kod as string;
-        if (!cariKod) continue;
-        const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
-        if (!snap.empty) {
-          await snap.docs[0].ref.update({
-            email:         (c.cari_EMail  as string) || '',
-            phone:         (c.cari_CepTel as string) || '',
-            mikroSyncedAt: pgServerTimestamp(),
-          });
-          cariUpdated++;
-        }
+      const leadSnap = await adminDb.collection('leads').get();
+      const leadByKod = new Map<string, PgDocRef>();
+      for (const d of leadSnap.docs) {
+        const kod = (d.data().mikroCariKod as string)?.trim();
+        if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
       }
+      let cariYeni = 0, cariGuncel = 0;
+      for (const c of cariler) {
+        const kod = (c.cari_kod as string)?.trim();
+        if (!kod) continue;
+        const leadType = Number(c.cari_hareket_tipi ?? 0) === 1 ? 'Supplier' : 'Customer';
+        const fields = {
+          name: (c.cari_unvan1 as string) || kod,
+          company: (c.cari_unvan1 as string) || '',
+          email: (c.cari_EMail as string) || '',
+          phone: (c.cari_CepTel as string) || '',
+          taxId: (c.cari_vdaire_no as string) || '',
+          taxOffice: (c.cari_vdaire_adi as string) || '',
+          eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
+          type: leadType, mikroCariKod: kod,
+          mikroSynced: true, mikroSyncedAt: pgServerTimestamp(),
+        };
+        const ref = leadByKod.get(kod);
+        if (ref) { batch.update(ref, fields); cariGuncel++; }
+        else {
+          batch.set(adminDb.collection('leads').doc(), {
+            ...fields, companyId, status: 'Active', source: 'mikro_cron',
+            createdAt: pgServerTimestamp(),
+          });
+          cariYeni++;
+        }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
 
-      console.log(`Mikro cron tamamlandı — stok: ${stokUpdated}, cari: ${cariUpdated} güncellendi`);
+      console.log(`Mikro cron tamamlandı — stok: ${stokYeni} yeni/${stokGuncel} güncel, cari: ${cariYeni} yeni/${cariGuncel} güncel`);
     } catch (err) {
       console.error('Mikro cron sync hatası:', err);
     }
   });
-  console.log('Mikro cron sync aktif (saatte bir çalışır) ✓');
+
+  // ── Gece 04:00: stok miktar + maliyet senkronu (yalnız V17+) ──────────────
+  cron.schedule('0 4 * * *', async () => {
+    if (MIKRO_JUMP_SURUM < 17) return; // GenelAmacliMaliyetListesiV2 V16'da yok
+    const cronCreds = await getMikroCreds();
+    if (!cronCreds || !adminDb) return;
+    console.log('Mikro cron: gece stok miktar senkronu başlatıldı (V17)');
+    try {
+      const invSnap = await adminDb.collection('inventory').get();
+      const items = invSnap.docs
+        .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
+        .filter(x => x.sku);
+      const sonTarih = `${new Date().getFullYear() + 1}-12-31`;
+      let updated = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (let i = 0; i < items.length; i += 8) {
+        const results = await Promise.all(items.slice(i, i + 8).map(async (it) => {
+          try {
+            const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
+              StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: '1,2,3,4,5',
+            });
+            const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+            if (!ok || !r0 || r0.IsError) return null;
+            const d = (r0.Data ?? {}) as Record<string, unknown>;
+            const qty = Number(d.EldekiMiktar ?? 0);
+            const totalCost = Number(d.MaliyetBedeli ?? 0);
+            return { it, qty, cost: qty > 0 ? totalCost / qty : null };
+          } catch { return null; }
+        }));
+        for (const r of results) {
+          if (!r) continue;
+          batch.update(r.it.ref, {
+            stockLevel: r.qty,
+            ...(r.cost !== null ? { costPrice: Math.round(r.cost * 100) / 100 } : {}),
+            mikroSyncedAt: pgServerTimestamp(),
+          });
+          updated++;
+          if (++ops >= 400) await flush();
+        }
+      }
+      await flush();
+      console.log(`Mikro gece senkronu tamamlandı — ${updated} ürün miktarı güncellendi`);
+    } catch (err) {
+      console.error('Mikro gece senkron hatası:', err);
+    }
+  });
+  console.log('Mikro cron sync aktif (saatlik kart senkronu + 04:00 miktar senkronu) ✓');
 }
 
 // ── Weekly email report cron ────────────────────────────────────────────────
