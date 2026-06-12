@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, RefreshCw, Search, Truck, MapPin, ChevronRight } from 'lucide-react';
-import { collection, onSnapshot, query, limit, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, limit, addDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';

@@ -10,7 +10,7 @@ import { db } from '../firebase';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer

@@ -6,7 +6,7 @@
  * failures are logged to console, never block the UI.
  */
 
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from '../lib/dbClient';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
 

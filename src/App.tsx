@@ -41,7 +41,7 @@ import {
   limit,
   orderBy,
   Timestamp
-} from 'firebase/firestore';
+} from './lib/dbClient';
 import { sortByCreatedAt, byField } from './utils/fsSort';
 import {
   ref,

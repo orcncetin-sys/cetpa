@@ -7,6 +7,9 @@ services:
       - "127.0.0.1:5173:5173"
     env_file:
       - .env.production
+    extra_hosts:
+      # Host üzerindeki PostgreSQL'e erişim: DATABASE_URL host.docker.internal kullanır
+      - "host.docker.internal:host-gateway"
     volumes:
       # Mount service account so it survives container rebuilds
       - /opt/cetpa/firebase-service-account.json:/app/service-account.json:ro

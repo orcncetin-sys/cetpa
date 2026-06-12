@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, query, orderBy as fsOrderBy,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { Building2, Plus, ChevronDown, ChevronRight, BarChart3, FileText, ArrowLeftRight, Settings, TrendingUp, TrendingDown, Minus, AlertCircle, CheckCircle2, X } from 'lucide-react';
 

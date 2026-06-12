@@ -8,7 +8,7 @@ import {
   query,
   where,
   limit,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
 

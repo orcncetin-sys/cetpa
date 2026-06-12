@@ -11,7 +11,7 @@ import {
 import { 
   collection, onSnapshot, addDoc, deleteDoc, 
   doc, updateDoc, serverTimestamp, query, where, getDocs 
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { 

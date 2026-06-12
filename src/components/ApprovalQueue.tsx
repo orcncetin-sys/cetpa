@@ -18,7 +18,7 @@ import {
 import {
   collection, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, query, where
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import ModuleHeader from './ModuleHeader';

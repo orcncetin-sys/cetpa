@@ -15,7 +15,7 @@ import { db, auth, storage } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, serverTimestamp, Timestamp,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';

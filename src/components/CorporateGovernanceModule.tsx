@@ -6,7 +6,7 @@ import {
 import { 
   collection, addDoc, updateDoc, deleteDoc, doc, 
   onSnapshot, query, serverTimestamp 
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';

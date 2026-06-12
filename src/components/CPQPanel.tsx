@@ -19,7 +19,7 @@ import {
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { byField, sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';

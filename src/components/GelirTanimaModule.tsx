@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, AlertCircle, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
 

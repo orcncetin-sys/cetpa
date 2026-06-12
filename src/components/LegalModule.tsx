@@ -10,7 +10,7 @@ import { db, auth, storage } from '../firebase';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, where
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import {

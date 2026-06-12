@@ -9,7 +9,7 @@ import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

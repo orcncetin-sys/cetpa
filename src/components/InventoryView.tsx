@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import {
   collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import Papa from 'papaparse';

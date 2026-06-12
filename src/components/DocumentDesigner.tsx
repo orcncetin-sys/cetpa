@@ -5,7 +5,7 @@ import {
   Receipt, ClipboardList, Truck, ShoppingCart, CheckCircle, Loader2,
   Trash2, Edit2, RotateCcw
 } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from '../lib/dbClient';
 import { db } from '../firebase';
 
 interface DocumentDesignerProps {

@@ -12,7 +12,7 @@ import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Edit2, Package, Tag, Layers, DollarSign, History, TrendingUp, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ProductForm from './ProductForm';
-import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit } from '../lib/dbClient';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { logFirestoreError, OperationType } from '../utils/firebase';

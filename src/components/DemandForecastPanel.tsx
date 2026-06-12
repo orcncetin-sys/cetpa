@@ -16,7 +16,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from '../lib/dbClient';
 import { auth, db } from '../firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────

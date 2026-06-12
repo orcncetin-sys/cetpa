@@ -10,7 +10,7 @@ import { authFetch } from '../services/authFetch';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
 import { byField } from '../utils/fsSort';
 

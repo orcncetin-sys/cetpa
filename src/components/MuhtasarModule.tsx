@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { FileText, Download, Send, CheckCircle2, AlertCircle, Clock, Plus, X, ChevronDown, ChevronRight, Users, Calculator } from 'lucide-react';
 

@@ -11,7 +11,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, ShoppingBag, Package,
   AlertCircle, Settings, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from '../lib/dbClient';
 import { db } from '../firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────

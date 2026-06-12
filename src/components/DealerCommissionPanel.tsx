@@ -7,7 +7,7 @@ import {
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';

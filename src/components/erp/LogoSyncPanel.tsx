@@ -19,7 +19,7 @@ import {
   Package, Users, ShoppingCart, Activity, Clock,
   ChevronDown, ChevronUp, Download, ArrowUpRight,
 } from 'lucide-react';
-import { collection, query, limit, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot, orderBy } from '../../lib/dbClient';
 import { db } from '../../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';

@@ -13,7 +13,7 @@ import {
 import {
   collection, doc, query, where, onSnapshot,
   addDoc, updateDoc, deleteDoc,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import type { User } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import type {

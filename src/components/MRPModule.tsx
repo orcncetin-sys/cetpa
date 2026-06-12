@@ -22,7 +22,7 @@ import {
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { uretimTalepPayload, satinAlmaTalepPayload } from '../services/mikroEvrak';

@@ -7,7 +7,7 @@ import {
   serverTimestamp,
   writeBatch,
   doc,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 
 // ─── Props ────────────────────────────────────────────────────────────────────

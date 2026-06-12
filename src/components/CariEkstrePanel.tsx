@@ -13,7 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   collection, query, where, onSnapshot, Timestamp,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';

@@ -9,7 +9,7 @@ import { db, auth } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, serverTimestamp, Timestamp,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import ModuleHeader from '../components/ModuleHeader';

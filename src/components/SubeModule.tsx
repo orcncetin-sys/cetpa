@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc,
   doc, serverTimestamp, query, where, limit
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import {

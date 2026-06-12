@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import {
   doc, onSnapshot, setDoc, getDoc,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { SUPPORTED_ERPS, type ErpId, type ErpInfo, type ErpStatusResult } from '../types/erp';
 

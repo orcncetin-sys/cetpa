@@ -15,7 +15,7 @@ import { uretimIsEmriPayload } from '../services/mikroEvrak';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, runTransaction, getDocs,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';
 import {

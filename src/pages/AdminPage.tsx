@@ -16,7 +16,7 @@ import { db, auth, storage } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, serverTimestamp,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { clsx, type ClassValue } from 'clsx';

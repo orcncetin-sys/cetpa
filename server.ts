@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import compression from "compression";
+import pg from "pg";
+import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
 import { fileURLToPath } from "url";
@@ -84,7 +86,10 @@ const AiChatSchema = z.object({
 });
 
 // ── Firebase Admin SDK ──────────────────────────────────────────────────────
-let adminDb: admin.firestore.Firestore | null = null;
+// adminDb is assigned after the PgFirestore class definition below: PostgreSQL
+// shim when DATABASE_URL is set, real Firestore otherwise (local-dev fallback).
+let adminDb: PgFirestore | null = null;
+let adminFirestoreFallback: admin.firestore.Firestore | null = null;
 const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
 const PROJECT_ID = "gen-lang-client-0628151245";
 
@@ -105,8 +110,8 @@ try {
     ? admin.initializeApp({ credential, projectId: PROJECT_ID })
     : admin.initializeApp({ projectId: PROJECT_ID });
 
-  adminDb = adminApp.firestore();
-  adminDb.settings({ databaseId: FIRESTORE_DB_ID });
+  adminFirestoreFallback = adminApp.firestore();
+  adminFirestoreFallback.settings({ databaseId: FIRESTORE_DB_ID });
   console.log("Firebase Admin SDK initialised ✓");
 } catch (e) {
   console.warn("Firebase Admin SDK not initialised:", (e as Error).message);
@@ -138,6 +143,287 @@ function reqActor(req: Request): { uid: string; email: string } {
   const r = req as Request & { uid?: string; userEmail?: string };
   return { uid: r.uid || 'system', email: r.userEmail || '' };
 }
+
+// ── PostgreSQL document store (Firestore replacement) ───────────────────────
+// One generic `docs` table: (coll, id, data jsonb). The React client talks to
+// /api/db/* through src/lib/dbClient.ts, which mimics the Firestore API.
+// Realtime fan-out is in-process (single server) via an EventEmitter feeding
+// the /api/db/stream SSE endpoint.
+
+const pgPool: pg.Pool | null = process.env.DATABASE_URL
+  ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 })
+  : null;
+
+const dbEvents = new EventEmitter();
+dbEvents.setMaxListeners(0);
+
+async function initDocsTable(): Promise<void> {
+  if (!pgPool) { console.warn('DATABASE_URL not set — /api/db routes disabled.'); return; }
+  await pgPool.query(`CREATE TABLE IF NOT EXISTS docs (
+    coll text NOT NULL,
+    id   text NOT NULL,
+    data jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (coll, id)
+  )`);
+  console.log('PostgreSQL docs table ready ✓');
+}
+initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
+
+/** Firestore-admin-compatible timestamp shape ({_seconds,_nanoseconds}). */
+function pgNowTimestamp(): { _seconds: number; _nanoseconds: number } {
+  const ms = Date.now();
+  return { _seconds: Math.floor(ms / 1000), _nanoseconds: (ms % 1000) * 1e6 };
+}
+
+/** Replace {__op:'serverTimestamp'} sentinels (deep) with a concrete timestamp. */
+function resolveSentinels(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(resolveSentinels);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (o.__op === 'serverTimestamp') return pgNowTimestamp();
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) out[k] = resolveSentinels(val);
+    return out;
+  }
+  return v;
+}
+
+/** Shallow merge with Firestore-style dot-path keys ('a.b.c': v sets data.a.b.c). */
+function mergeDocData(existing: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...existing };
+  for (const [key, value] of Object.entries(patch)) {
+    if (!key.includes('.')) { out[key] = value; continue; }
+    const parts = key.split('.');
+    let cursor = out;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      const next = cursor[p];
+      cursor[p] = (next && typeof next === 'object' && !Array.isArray(next)) ? { ...(next as Record<string, unknown>) } : {};
+      cursor = cursor[p] as Record<string, unknown>;
+    }
+    cursor[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+
+const DOC_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function genDocId(): string {
+  let s = '';
+  for (let i = 0; i < 20; i++) s += DOC_ID_CHARS[Math.floor(Math.random() * DOC_ID_CHARS.length)];
+  return s;
+}
+
+function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, data?: unknown): void {
+  dbEvents.emit('change', { coll, type, id, ...(data !== undefined ? { data } : {}) });
+}
+
+// ── firebase-admin Firestore compatible shim over PostgreSQL ─────────────────
+// server.ts's 170+ adminDb call sites (Shopify/Mikro sync, audit log, crons)
+// keep their code shape; only the backing store changes. Writes broadcast over
+// SSE so connected browsers update live, exactly like client-initiated writes.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type PgDocData = Record<string, any>;
+
+/** Drop-in for admin.firestore.FieldValue.serverTimestamp() — resolved by resolveSentinels. */
+function pgServerTimestamp(): any {
+  return pgPool ? { __op: 'serverTimestamp' } : admin.firestore.FieldValue.serverTimestamp();
+}
+
+class PgTimestampValue {
+  constructor(public _seconds: number, public _nanoseconds: number) {}
+  get seconds(): number { return this._seconds; }
+  get nanoseconds(): number { return this._nanoseconds; }
+  toDate(): Date { return new Date(this._seconds * 1000 + Math.floor(this._nanoseconds / 1e6)); }
+  toMillis(): number { return this._seconds * 1000 + Math.floor(this._nanoseconds / 1e6); }
+}
+
+/** Revive stored {_seconds,_nanoseconds} JSON into objects with toDate()/toMillis(). */
+function pgReviveTimestamps(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(pgReviveTimestamps);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 2 && typeof o._seconds === 'number' && typeof o._nanoseconds === 'number') {
+      return new PgTimestampValue(o._seconds as number, o._nanoseconds as number);
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) out[k] = pgReviveTimestamps(val);
+    return out;
+  }
+  return v;
+}
+
+interface PgWhereFilter { field: string; op: string; value: unknown }
+
+function pgFieldValueOf(data: PgDocData, field: string): unknown {
+  if (!field.includes('.')) return data[field];
+  let v: unknown = data;
+  for (const part of field.split('.')) {
+    if (v == null || typeof v !== 'object') return undefined;
+    v = (v as PgDocData)[part];
+  }
+  return v;
+}
+
+function pgCmp(a: unknown, b: unknown): number {
+  const norm = (x: unknown): number | string => {
+    if (x instanceof PgTimestampValue) return x.toMillis();
+    if (x && typeof x === 'object' && typeof (x as PgDocData)._seconds === 'number') {
+      return (x as PgDocData)._seconds * 1000;
+    }
+    if (typeof x === 'number') return x;
+    if (typeof x === 'boolean') return x ? 1 : 0;
+    return String(x ?? '');
+  };
+  const na = norm(a), nb = norm(b);
+  if (typeof na === 'number' && typeof nb === 'number') return na - nb;
+  return String(na) < String(nb) ? -1 : String(na) > String(nb) ? 1 : 0;
+}
+
+class PgDocSnapshot {
+  constructor(public id: string, private _data: PgDocData | undefined, public ref: PgDocRef) {}
+  get exists(): boolean { return this._data !== undefined; }
+  data(): PgDocData | undefined { return this._data; }
+}
+
+class PgDocRef {
+  constructor(private pool: pg.Pool, public coll: string, public id: string) {}
+  get path(): string { return `${this.coll}/${this.id}`; }
+  async get(): Promise<PgDocSnapshot> {
+    const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
+    const data = rows.length ? pgReviveTimestamps(rows[0].data) as PgDocData : undefined;
+    return new PgDocSnapshot(this.id, data, this);
+  }
+  async set(data: PgDocData, opts?: { merge?: boolean }): Promise<void> {
+    const incoming = resolveSentinels(data) as PgDocData;
+    let final = incoming;
+    if (opts?.merge) {
+      const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
+      final = mergeDocData((rows[0]?.data as PgDocData) ?? {}, incoming);
+    }
+    await this.pool.query(
+      `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+       ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [this.coll, this.id, JSON.stringify(final)],
+    );
+    broadcastDocChange(this.coll, 'set', this.id, final);
+  }
+  async update(data: PgDocData): Promise<void> {
+    const patch = resolveSentinels(data) as PgDocData;
+    const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
+    const final = mergeDocData((rows[0]?.data as PgDocData) ?? {}, patch);
+    await this.pool.query(
+      `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+       ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [this.coll, this.id, JSON.stringify(final)],
+    );
+    broadcastDocChange(this.coll, 'set', this.id, final);
+  }
+  async delete(): Promise<void> {
+    await this.pool.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
+    broadcastDocChange(this.coll, 'delete', this.id);
+  }
+}
+
+class PgQueryBuilder {
+  constructor(
+    protected pool: pg.Pool,
+    public collName: string,
+    protected filters: PgWhereFilter[] = [],
+    protected orderField: { field: string; dir: 'asc' | 'desc' } | null = null,
+    protected limitN: number | null = null,
+  ) {}
+  where(field: string, op: string, value: unknown): PgQueryBuilder {
+    return new PgQueryBuilder(this.pool, this.collName, [...this.filters, { field, op, value }], this.orderField, this.limitN);
+  }
+  orderBy(field: string, dir: 'asc' | 'desc' = 'asc'): PgQueryBuilder {
+    return new PgQueryBuilder(this.pool, this.collName, this.filters, { field, dir }, this.limitN);
+  }
+  limit(n: number): PgQueryBuilder {
+    return new PgQueryBuilder(this.pool, this.collName, this.filters, this.orderField, n);
+  }
+  /** Aggregate count — note: ignores where() filters (no call site uses filters with count). */
+  count(): { get: () => Promise<{ data: () => { count: number } }> } {
+    return {
+      get: async () => {
+        const { rows } = await this.pool.query('SELECT count(*)::int AS n FROM docs WHERE coll = $1', [this.collName]);
+        return { data: () => ({ count: rows[0].n as number }) };
+      },
+    };
+  }
+  async get(): Promise<{ docs: PgDocSnapshot[]; empty: boolean; size: number; forEach: (cb: (d: PgDocSnapshot) => void) => void }> {
+    const { rows } = await this.pool.query('SELECT id, data FROM docs WHERE coll = $1', [this.collName]);
+    let items = rows.map((r: { id: string; data: unknown }) => ({ id: r.id, data: pgReviveTimestamps(r.data) as PgDocData }));
+    for (const f of this.filters) {
+      items = items.filter((it: { id: string; data: PgDocData }) => {
+        const v = pgFieldValueOf(it.data, f.field);
+        switch (f.op) {
+          case '==': return v === f.value;
+          case '!=': return v !== f.value;
+          case '<': return pgCmp(v, f.value) < 0;
+          case '<=': return pgCmp(v, f.value) <= 0;
+          case '>': return pgCmp(v, f.value) > 0;
+          case '>=': return pgCmp(v, f.value) >= 0;
+          case 'in': return Array.isArray(f.value) && (f.value as unknown[]).includes(v);
+          case 'array-contains': return Array.isArray(v) && (v as unknown[]).includes(f.value);
+          default: return true;
+        }
+      });
+    }
+    if (this.orderField) {
+      const { field, dir } = this.orderField;
+      items = [...items].sort((a: { data: PgDocData }, b: { data: PgDocData }) => {
+        const r = pgCmp(pgFieldValueOf(a.data, field), pgFieldValueOf(b.data, field));
+        return dir === 'desc' ? -r : r;
+      });
+    }
+    if (this.limitN != null) items = items.slice(0, this.limitN);
+    const docs = items.map((it: { id: string; data: PgDocData }) => new PgDocSnapshot(it.id, it.data, new PgDocRef(this.pool, this.collName, it.id)));
+    return { docs, empty: docs.length === 0, size: docs.length, forEach: (cb: (d: PgDocSnapshot) => void) => docs.forEach(cb) };
+  }
+}
+
+class PgCollectionRef extends PgQueryBuilder {
+  doc(id?: string): PgDocRef { return new PgDocRef(this.pool, this.collName, id ?? genDocId()); }
+  async add(data: PgDocData): Promise<PgDocRef> {
+    const id = genDocId();
+    const final = resolveSentinels(data) as PgDocData;
+    await this.pool.query('INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)', [this.collName, id, JSON.stringify(final)]);
+    broadcastDocChange(this.collName, 'set', id, final);
+    return new PgDocRef(this.pool, this.collName, id);
+  }
+}
+
+interface PgBatchOp { kind: 'set' | 'update' | 'delete'; ref: PgDocRef; data?: PgDocData; opts?: { merge?: boolean } }
+
+class PgFirestore {
+  constructor(private pool: pg.Pool) {}
+  collection(name: string): PgCollectionRef { return new PgCollectionRef(this.pool, name); }
+  /** Sequential, not atomic — acceptable for this app's sync flows. */
+  batch(): { set: (ref: PgDocRef, data: PgDocData, opts?: { merge?: boolean }) => void; update: (ref: PgDocRef, data: PgDocData) => void; delete: (ref: PgDocRef) => void; commit: () => Promise<void> } {
+    const ops: PgBatchOp[] = [];
+    return {
+      set: (ref, data, opts) => { ops.push({ kind: 'set', ref, data, opts }); },
+      update: (ref, data) => { ops.push({ kind: 'update', ref, data }); },
+      delete: (ref) => { ops.push({ kind: 'delete', ref }); },
+      commit: async () => {
+        for (const op of ops) {
+          if (op.kind === 'set') await op.ref.set(op.data as PgDocData, op.opts);
+          else if (op.kind === 'update') await op.ref.update(op.data as PgDocData);
+          else await op.ref.delete();
+        }
+      },
+    };
+  }
+  settings(_opts: unknown): void { /* no-op — kept for call-site compatibility */ }
+}
+
+adminDb = pgPool
+  ? new PgFirestore(pgPool)
+  : (adminFirestoreFallback as unknown as PgFirestore | null);
+console.log(pgPool ? 'adminDb → PostgreSQL shim ✓' : 'adminDb → Firestore fallback (DATABASE_URL yok)');
 
 // ── Luca API helpers ────────────────────────────────────────────────────────
 const LUCA_API_URL = process.env.LUCA_API_URL || "https://api.luca.com.tr/v1";
@@ -492,7 +778,7 @@ async function writeSyncLog(
   if (!adminDb) return;
   try {
     await adminDb.collection('syncLog').add({
-      timestamp:  admin.firestore.FieldValue.serverTimestamp(),
+      timestamp:  pgServerTimestamp(),
       operation,
       entityType,
       entityId,
@@ -530,7 +816,7 @@ async function writeAuditLog(
       userName:  actor.email || 'Sunucu',
       userEmail: actor.email,
       source:    'server',
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: pgServerTimestamp(),
     });
   } catch (e) {
     console.warn('auditLog write failed:', e);
@@ -560,7 +846,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (!snap.empty) {
           await snap.docs[0].ref.update({
             stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
-            mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            mikroSyncedAt: pgServerTimestamp(),
           });
           stokUpdated++;
         }
@@ -582,7 +868,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           await snap.docs[0].ref.update({
             email:         (c.cari_EMail  as string) || '',
             phone:         (c.cari_CepTel as string) || '',
-            mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            mikroSyncedAt: pgServerTimestamp(),
           });
           cariUpdated++;
         }
@@ -745,6 +1031,141 @@ async function startServer() {
 
   // ── Rate Limiters ────────────────────────────────────────────────────────────
   /** General API — 300 req / 15 min per IP */
+  // ── /api/db — PostgreSQL-backed document store ────────────────────────────
+  // Registered BEFORE the global apiLimiter: every UI interaction hits these
+  // routes, so they get their own (much higher) limit.
+  if (pgPool) {
+    const docsDb = pgPool;
+    const dbLimiter = rateLimit({
+      windowMs: 60 * 1000,
+      max: 2000,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many database requests.' },
+    });
+    const dbJson = express.json({ limit: '10mb' });
+    const COLL_RE = /^[A-Za-z0-9_-]{1,64}$/;
+    const validColl = (c: string, res: Response): boolean => {
+      if (COLL_RE.test(c)) return true;
+      res.status(400).json({ error: 'Invalid collection name.' });
+      return false;
+    };
+
+    // SSE stream — EventSource cannot set headers, so the ID token arrives as
+    // a query param. Verified the same way requireAuth does.
+    app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
+      try { await admin.auth().verifyIdToken(String(req.query.token || '')); }
+      catch { res.status(401).json({ error: 'Invalid or expired token.' }); return; }
+      const colls = String(req.query.colls || '').split(',').filter(c => COLL_RE.test(c));
+      if (!colls.length) { res.status(400).json({ error: 'colls query param required.' }); return; }
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write('retry: 3000\n\n');
+      try {
+        const { rows } = await docsDb.query('SELECT coll, id, data FROM docs WHERE coll = ANY($1)', [colls]);
+        const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
+        for (const c of colls) byColl[c] = [];
+        for (const r of rows) byColl[r.coll].push({ id: r.id, data: r.data });
+        for (const c of colls) res.write(`event: init\ndata: ${JSON.stringify({ coll: c, docs: byColl[c] })}\n\n`);
+      } catch (e) {
+        res.write(`event: err\ndata: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
+      }
+      const onChange = (ev: { coll: string }) => {
+        if (colls.includes(ev.coll)) res.write(`event: change\ndata: ${JSON.stringify(ev)}\n\n`);
+      };
+      dbEvents.on('change', onChange);
+      const heartbeat = setInterval(() => res.write(': hb\n\n'), 25000);
+      req.on('close', () => { clearInterval(heartbeat); dbEvents.off('change', onChange); });
+    });
+
+    app.get('/api/db/:coll', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll);
+      if (!validColl(coll, res)) return;
+      try {
+        const { rows } = await docsDb.query('SELECT id, data FROM docs WHERE coll = $1', [coll]);
+        res.json({ docs: rows });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+
+    app.get('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      try {
+        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        if (!rows.length) { res.status(404).json({ error: 'Not found.' }); return; }
+        res.json({ data: rows[0].data });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+
+    app.post('/api/db/:coll', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll);
+      if (!validColl(coll, res)) return;
+      try {
+        const id = genDocId();
+        const data = resolveSentinels(req.body ?? {});
+        await docsDb.query(
+          'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)',
+          [coll, id, JSON.stringify(data)],
+        );
+        broadcastDocChange(coll, 'set', id, data);
+        res.json({ id, data });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+
+    // setDoc — full replace, or deep-ish merge with ?merge=1
+    app.put('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      try {
+        const incoming = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
+        let data = incoming;
+        if (req.query.merge === '1') {
+          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+          data = mergeDocData((rows[0]?.data as Record<string, unknown>) ?? {}, incoming);
+        }
+        await docsDb.query(
+          `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+          [coll, id, JSON.stringify(data)],
+        );
+        broadcastDocChange(coll, 'set', id, data);
+        res.json({ id, data });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+
+    // updateDoc — shallow merge with dot-path support (lenient upsert)
+    app.patch('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      try {
+        const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
+        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        const data = mergeDocData((rows[0]?.data as Record<string, unknown>) ?? {}, patch);
+        await docsDb.query(
+          `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+          [coll, id, JSON.stringify(data)],
+        );
+        broadcastDocChange(coll, 'set', id, data);
+        res.json({ id, data });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+
+    app.delete('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      try {
+        await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        broadcastDocChange(coll, 'delete', id);
+        res.json({ ok: true });
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
+  }
+
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 300,
@@ -969,7 +1390,7 @@ async function startServer() {
           totalPrice: parseFloat(body.total_price || '0'),
           status: body.financial_status === 'paid' ? 'Processing' : 'Pending',
           shippingAddress: body.shipping_address?.address1 || '',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: pgServerTimestamp(),
           shopifyRaw: {
             fulfillmentStatus: body.fulfillment_status,
             financialStatus: body.financial_status,
@@ -989,7 +1410,7 @@ async function startServer() {
               price: parseFloat(String(li.price || '0')),
               sku: li.sku || '',
             })),
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: pgServerTimestamp(),
             source: 'shopify_webhook',
           });
           console.log(`Created Cetpa order from Shopify webhook ${shopifyOrderId}`);
@@ -1006,7 +1427,7 @@ async function startServer() {
         if (!snap.empty) {
           await snap.docs[0].ref.update({
             status: 'Cancelled',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: pgServerTimestamp(),
           });
           console.log(`Cancelled Cetpa order for Shopify ${shopifyOrderId}`);
         }
@@ -1024,7 +1445,7 @@ async function startServer() {
           await snap.docs[0].ref.update({
             status: 'Shipped',
             ...(trackingNumber && { trackingNumber }),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: pgServerTimestamp(),
           });
           console.log(`Fulfilled Cetpa order ${shopifyOrderId}, tracking: ${trackingNumber}`);
         }
@@ -1447,7 +1868,7 @@ async function startServer() {
           quantity:    reorderQty,
           currentStock: item.stockLevel,
           threshold:   item.lowStockThreshold,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+          createdAt:   pgServerTimestamp(),
         });
         created.push(newRef.id);
       }
@@ -1532,7 +1953,7 @@ async function startServer() {
         await adminDb.collection('inventory').doc(firebaseId).update({
           mikroStoKod,
           mikroSynced:   true,
-          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          mikroSyncedAt: pgServerTimestamp(),
         });
       }
 
@@ -1579,7 +2000,7 @@ async function startServer() {
               mikroStoKod:   sku,
               mikroSynced:   true,
               stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
-              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              mikroSyncedAt: pgServerTimestamp(),
             });
           }
         }
@@ -1653,7 +2074,7 @@ async function startServer() {
         await adminDb.collection('leads').doc(firebaseId).update({
           mikroCariKod:  cariKod,
           mikroSynced:   true,
-          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          mikroSyncedAt: pgServerTimestamp(),
         });
       }
 
@@ -1696,7 +2117,7 @@ async function startServer() {
             await snap.docs[0].ref.update({
               email:         (c.cari_EMail  as string) || '',
               phone:         (c.cari_CepTel as string) || '',
-              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              mikroSyncedAt: pgServerTimestamp(),
             });
           }
         }
@@ -1760,7 +2181,7 @@ async function startServer() {
         await adminDb.collection('orders').doc(firebaseId).update({
           mikroEvrakNo,
           mikroSynced:   true,
-          mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          mikroSyncedAt: pgServerTimestamp(),
         });
       }
 
@@ -1796,7 +2217,7 @@ async function startServer() {
       // by companyId: legacy docs imported before companyId existed must match
       // by SKU and get healed (updated with companyId) instead of duplicated.
       const existingSnap = await adminDb.collection('inventory').get();
-      const existingBySku = new Map<string, FirebaseFirestore.DocumentReference>();
+      const existingBySku = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
         const sku = (docSnap.data().sku as string)?.trim();
         if (sku && !existingBySku.has(sku)) existingBySku.set(sku, docSnap.ref);
@@ -1893,7 +2314,7 @@ async function startServer() {
               mikroStoKod:      sku,
               mikroSynced:      true,
               source:           'mikro_import',
-              mikroSyncedAt:    admin.firestore.FieldValue.serverTimestamp(),
+              mikroSyncedAt:    pgServerTimestamp(),
             };
 
             // Upsert via batch: update if exists, create if not
@@ -1903,7 +2324,7 @@ async function startServer() {
               updated++;
             } else {
               const newRef = adminDb.collection('inventory').doc();
-              batch.set(newRef, { ...item, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+              batch.set(newRef, { ...item, createdAt: pgServerTimestamp() });
               existingBySku.set(sku, newRef); // guard against duplicate SKUs across pages
               created++;
             }
@@ -1925,7 +2346,7 @@ async function startServer() {
               location:    `Depo ${yerKod}`,
               category:    item.category,
               source:      'mikro_import',
-              updatedAt:   admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt:   pgServerTimestamp(),
             }, { merge: true });
             batchOps++;
 
@@ -1949,7 +2370,7 @@ async function startServer() {
           code:      kod,
           source:    'mikro_import',
           itemCount,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: pgServerTimestamp(),
         }, { merge: true });
         await adminDb.collection('wmsLocations').doc(`mikro-depo-${kod}`).set({
           code:      `DEPO-${kod}`,
@@ -1957,7 +2378,7 @@ async function startServer() {
           zone:      'storage',
           active:    true,
           source:    'mikro_import',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: pgServerTimestamp(),
         }, { merge: true });
       }
 
@@ -1977,7 +2398,7 @@ async function startServer() {
           if (!seen.has(name)) {
             catBatch.set(adminDb.collection('categories').doc(), {
               name, source: 'mikro_import',
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              createdAt: pgServerTimestamp(),
             });
           }
         }
@@ -2016,7 +2437,7 @@ async function startServer() {
       // Prefetch ALL leads → Map<mikroCariKod, ref> (companyId filtresiz:
       // eski kayıtlar cari koduyla eşleşip companyId ile iyileştirilir)
       const existingSnap = await adminDb.collection('leads').get();
-      const existingByKod = new Map<string, FirebaseFirestore.DocumentReference>();
+      const existingByKod = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
         const kod = (docSnap.data().mikroCariKod as string)?.trim();
         if (kod && !existingByKod.has(kod)) existingByKod.set(kod, docSnap.ref);
@@ -2064,7 +2485,7 @@ async function startServer() {
               status:         'Active',
               mikroSynced:    true,
               source:         'mikro_import',
-              mikroSyncedAt:  admin.firestore.FieldValue.serverTimestamp(),
+              mikroSyncedAt:  pgServerTimestamp(),
             };
 
             // Upsert by mikroCariKod via batch
@@ -2074,7 +2495,7 @@ async function startServer() {
               updated++;
             } else {
               const newRef = adminDb.collection('leads').doc();
-              batch.set(newRef, { ...lead, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+              batch.set(newRef, { ...lead, createdAt: pgServerTimestamp() });
               existingByKod.set(cariKod, newRef);
               created++;
             }
@@ -2165,7 +2586,7 @@ async function startServer() {
               ...row,
               companyId,
               source:    'mikro_import',
-              syncedAt:  admin.firestore.FieldValue.serverTimestamp(),
+              syncedAt:  pgServerTimestamp(),
             }, { merge: true });
             if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
           }
@@ -2248,7 +2669,7 @@ async function startServer() {
       const barKey = findKey(sample, /bar_?kod(?!u_)|barkod/i);
       if (!skuKey || !barKey) return `eşleme alanları bulunamadı (sku=${skuKey}, barkod=${barKey})`;
       const invSnap = await adminDb.collection('inventory').get();
-      const bySku = new Map<string, FirebaseFirestore.DocumentReference>();
+      const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
         const sku = ((d.data().sku as string) || '').trim();
         if (sku) bySku.set(sku, d.ref);
@@ -2294,7 +2715,7 @@ async function startServer() {
           .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
           .filter(x => x.sku);
         const total = items.length;
-        await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: admin.firestore.FieldValue.serverTimestamp(), finishedAt: null, error: null });
+        await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
 
         const sonTarih = `${new Date().getFullYear() + 1}-12-31`;
         const CONCURRENCY = 8;
@@ -2323,12 +2744,12 @@ async function startServer() {
             batch.update(r.it.ref, {
               stockLevel: r.qty,
               ...(r.cost !== null ? { costPrice: Math.round(r.cost * 100) / 100 } : {}),
-              mikroSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+              mikroSyncedAt: pgServerTimestamp(),
             });
             ops++;
             // Depo sekmesindeki kayıt da güncellensin
             batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
-              quantity: r.qty, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              quantity: r.qty, updatedAt: pgServerTimestamp(),
             }, { merge: true });
             ops++;
             updated++;
@@ -2341,12 +2762,12 @@ async function startServer() {
         }
         await commitBatch();
         const duration = Date.now() - t0;
-        await jobRef.set({ running: false, processed, updated, failed, finishedAt: admin.firestore.FieldValue.serverTimestamp(), durationMs: duration }, { merge: true });
+        await jobRef.set({ running: false, processed, updated, failed, finishedAt: pgServerTimestamp(), durationMs: duration }, { merge: true });
         await writeAuditLog(actor, 'Mikro Stok Miktarları', `${updated} ürünün miktarı güncellendi, ${failed} hata (${Math.round(duration / 1000)}sn)`);
         console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, ${duration}ms`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        await jobRef.set({ running: false, error: msg, finishedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+        await jobRef.set({ running: false, error: msg, finishedAt: pgServerTimestamp() }, { merge: true }).catch(() => {});
         console.error('Stok miktar import hatası:', err);
       } finally {
         stokMiktarJobRunning = false;
@@ -2546,7 +2967,7 @@ async function startServer() {
         batch.set(adminDb.collection('mikroFaturalar').doc(guid), {
           ...row, yon, companyId,
           source: 'mikro_import',
-          syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          syncedAt: pgServerTimestamp(),
         }, { merge: true });
         if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
       }
@@ -2608,7 +3029,7 @@ async function startServer() {
     const dryRun = !!(req.body as { dryRun?: boolean })?.dryRun;
     try {
       const snap = await adminDb.collection('inventory').get();
-      const dummies: { ref: FirebaseFirestore.DocumentReference; name: string }[] = [];
+      const dummies: { ref: PgDocRef; name: string }[] = [];
       const keptBySource = new Map<string, number>();
       for (const d of snap.docs) {
         const source = (d.data().source as string) || '';
@@ -2701,7 +3122,7 @@ async function startServer() {
             status:           'matched',
             matchType:        'auto',
           } : { status: 'unmatched' }),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: pgServerTimestamp(),
         }, { merge: true });
         hit ? matched++ : unmatched++;
         if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
@@ -2769,7 +3190,7 @@ async function startServer() {
           hasInvoice:      true,
           mikroFaturaDate: faturaDate,
           mikroSynced:     true,
-          mikroSyncedAt:   admin.firestore.FieldValue.serverTimestamp(),
+          mikroSyncedAt:   pgServerTimestamp(),
         }, { merge: true });
       }
       res.json({ success, mikroFaturaNo, ettn, data, duration });
@@ -2841,7 +3262,7 @@ async function startServer() {
           irsaliyeNo,
           irsaliyeEttn,
           mikroSynced:     true,
-          mikroSyncedAt:   admin.firestore.FieldValue.serverTimestamp(),
+          mikroSyncedAt:   pgServerTimestamp(),
         }, { merge: true });
       }
       res.json({ success, irsaliyeNo, irsaliyeEttn, data, duration });
@@ -2884,7 +3305,7 @@ async function startServer() {
           // Mirror to cariBalances collection AND update lead doc
           await adminDb.collection('cariBalances').doc(cariKod).set({
             cariKod, bakiye, vadeliBorc,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: pgServerTimestamp(),
           }, { merge: true });
           await leadDoc.ref.set({ bakiye, vadeliBorc }, { merge: true });
           updated++;
@@ -2928,7 +3349,7 @@ async function startServer() {
       await adminDb.collection('accountingPeriods').doc(docId).set({
         period, yil, ay, rows,
         toplam: { borc: rows.reduce((s, r) => s + Number(r.borc ?? 0), 0), alacak: rows.reduce((s, r) => s + Number(r.alacak ?? 0), 0) },
-        syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
       await writeAuditLog(reqActor(req), 'Mikro Mizan Çekme', `${period} dönemi — ${rows.length} hesap satırı`);
@@ -3023,7 +3444,7 @@ async function startServer() {
         kdvIndirilecek: Number(md?.kdvIndirilecek ?? md?.KdvIndirilecek ?? md?.indirilecekKdv ?? 0),
         kdvOdenmesi: Number(md?.odenmesiGerekenKdv ?? md?.OdenmesiGerekenKdv ?? md?.kdvFarki ?? 0),
         rawData: md,
-        syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        syncedAt: pgServerTimestamp(),
       }, { merge: true });
       await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', `${period} dönemi KDV özeti alındı`);
       res.json({ success: true, period, data: md, duration: Date.now() - t0 });
@@ -3056,7 +3477,7 @@ async function startServer() {
       if (adminDb && firebaseId && isOk) {
         await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
           gibDurumu: 'kabul',
-          gibKabulAt: admin.firestore.FieldValue.serverTimestamp(),
+          gibKabulAt: pgServerTimestamp(),
         }, { merge: true });
       }
 
@@ -3088,7 +3509,7 @@ async function startServer() {
         await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
           gibDurumu: 'ret',
           gibRetAciklama: aciklama || null,
-          gibRetAt: admin.firestore.FieldValue.serverTimestamp(),
+          gibRetAt: pgServerTimestamp(),
         }, { merge: true });
       }
 
@@ -3170,10 +3591,10 @@ async function startServer() {
             customerType:    'Retail' as const,
             source:          'Trendyol',
             rawData:         o,
-            updatedAt:       admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt:       pgServerTimestamp(),
           };
           if (existing.empty) {
-            await adminDb.collection('orders').add({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            await adminDb.collection('orders').add({ ...payload, createdAt: pgServerTimestamp() });
             created++;
           } else {
             await existing.docs[0].ref.set(payload, { merge: true });
@@ -3257,10 +3678,10 @@ async function startServer() {
             customerType:       'Retail' as const,
             source:             'Hepsiburada',
             rawData:            o,
-            updatedAt:          admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt:          pgServerTimestamp(),
           };
           if (existing.empty) {
-            await adminDb.collection('orders').add({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            await adminDb.collection('orders').add({ ...payload, createdAt: pgServerTimestamp() });
             created++;
           } else {
             await existing.docs[0].ref.set(payload, { merge: true });
@@ -3315,7 +3736,7 @@ async function startServer() {
           await adminDb.collection('whatsappMessages').add({
             to: phone, message: message ?? templateName ?? '', status: 'sent',
             provider: '360dialog', messageId: (data as Record<string, unknown>).messages,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: pgServerTimestamp(),
           });
         }
         await writeAuditLog(reqActor(req), 'WhatsApp Mesaj', `${phone} numarasına gönderildi (360dialog)`);
@@ -3342,7 +3763,7 @@ async function startServer() {
           await adminDb.collection('whatsappMessages').add({
             to: phone, message: message ?? '', status: 'sent',
             provider: 'twilio', messageId: (data as Record<string, unknown>).sid,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: pgServerTimestamp(),
           });
         }
         await writeAuditLog(reqActor(req), 'WhatsApp Mesaj', `${phone} numarasına gönderildi (Twilio)`);
@@ -3510,7 +3931,7 @@ async function startServer() {
     // Log to Firestore
     if (adminDb) {
       await adminDb.collection('emailLog').add({
-        orderId, to: customerEmail, subject: subjectText, status, sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        orderId, to: customerEmail, subject: subjectText, status, sentAt: pgServerTimestamp(),
       });
     }
     res.json({ success: true, id: result.id });
@@ -3532,7 +3953,7 @@ async function startServer() {
       try {
         await adminDb.collection('invites').doc(token).set({
           email, role, token, expiresAt,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: pgServerTimestamp(),
           used: false,
         });
       } catch (e) {
@@ -3631,7 +4052,7 @@ async function startServer() {
       await adminDb.collection('campaigns').doc(campaignId).update({
         sent,
         failed,
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: pgServerTimestamp(),
         status: 'sent',
       }).catch(() => {});
     }
@@ -3926,7 +4347,7 @@ async function startServer() {
         await adminDb.collection('orders').doc(orderId).set({
           lucaFaturaNo,
           lucaSynced:   true,
-          lucaSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          lucaSyncedAt: pgServerTimestamp(),
           hasInvoice:   true,
         }, { merge: true });
       }
@@ -3967,10 +4388,10 @@ async function startServer() {
           quantity:   Number(item.miktar ?? item.stock ?? 0),
           source:     'luca',
           lucaSynced: true,
-          updatedAt:  admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt:  pgServerTimestamp(),
         };
         if (snap.exists) { batch.update(ref, data2); updated++; }
-        else             { batch.set(ref, { ...data2, createdAt: admin.firestore.FieldValue.serverTimestamp() }); created++; }
+        else             { batch.set(ref, { ...data2, createdAt: pgServerTimestamp() }); created++; }
       }
       await batch.commit();
       await writeAuditLog(reqActor(req), 'Luca Stok Sync', `${items.length} ürün — ${created} yeni, ${updated} güncellendi`);
@@ -4152,7 +4573,7 @@ async function startServer() {
         await adminDb.collection('orders').doc(orderId).set({
           iyzicoPaymentUrl:   d.paymentPageUrl,
           iyzicoToken:        d.token,
-          iyzicoCreatedAt:    admin.firestore.FieldValue.serverTimestamp(),
+          iyzicoCreatedAt:    pgServerTimestamp(),
           iyzicoSandbox:      creds.baseUrl.includes('sandbox'),
         }, { merge: true });
       }
@@ -4284,7 +4705,7 @@ async function startServer() {
           to: phone, orderId: orderId ?? null, orderNo: no, status,
           messageId:  result.messageId ?? null,
           error:      result.error ?? null,
-          sentAt:     admin.firestore.FieldValue.serverTimestamp(),
+          sentAt:     pgServerTimestamp(),
         });
       }
       if (!result.error) await writeAuditLog(reqActor(req), 'WhatsApp Sipariş Bildirimi', `${phone} — sipariş durumu: ${status}`);
@@ -4599,7 +5020,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
           stripeSessionId: session.id,
           stripeCustomerId: session.customer ?? '',
           date: now.toISOString(),
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: pgServerTimestamp(),
         });
 
         console.log(`[Stripe] Subscription activated for uid=${firebaseUid} plan=${plan}/${cycle}`);

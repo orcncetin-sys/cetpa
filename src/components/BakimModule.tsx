@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { bakimTalepPayload } from '../services/mikroEvrak';

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { AlertTriangle, TrendingUp, ShieldCheck, DollarSign, Users } from 'lucide-react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { logFirestoreError, OperationType } from '../utils/firebase';

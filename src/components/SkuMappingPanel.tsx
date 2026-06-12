@@ -10,7 +10,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { logAudit } from '../services/auditLog';

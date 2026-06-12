@@ -3,7 +3,7 @@ import { logAudit } from '../services/auditLog';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Save, Package, Tag, Layers, MapPin, DollarSign, Barcode } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, where } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';

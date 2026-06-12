@@ -23,7 +23,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
   collection, onSnapshot, query, where,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
 import { sortByCreatedAt } from '../utils/fsSort';

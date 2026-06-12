@@ -22,7 +22,7 @@ import {
 } from '../services/mikroService';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, query, serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import {
   type Order,

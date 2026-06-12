@@ -18,7 +18,7 @@ import {
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, getDocs, query,
-} from 'firebase/firestore';
+} from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import ConfirmModal from './ConfirmModal';

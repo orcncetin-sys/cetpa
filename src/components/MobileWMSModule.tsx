@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, runTransaction } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, runTransaction } from '../lib/dbClient';
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, Search, X, Plus, ChevronRight, MapPin, BarChart3 } from 'lucide-react';

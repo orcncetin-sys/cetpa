@@ -6,7 +6,7 @@
  * Aynı hata mesajı 5 dakika içinde bir kez yazılır (flood koruması).
  */
 
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from '../lib/dbClient';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
 
