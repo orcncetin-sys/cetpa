@@ -9,6 +9,8 @@ const AdminPage               = React.lazy(() => import('./pages/AdminPage'));
 const CRMPage                 = React.lazy(() => import('./pages/CRMPage'));
 const OrdersPage              = React.lazy(() => import('./pages/OrdersPage'));
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
+import { MfaSettings, MfaChallengeModal } from './components/MfaSettings';
+import { isMfaRequired, getMfaResolver } from './lib/mfa';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   onAuthStateChanged,
@@ -621,6 +623,9 @@ function AppContent() {
   const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
   const [resetSent, setResetSent] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  // 2FA: giriş çok faktör isteyince resolver burada tutulur, challenge modalı sürer.
+  const [mfaResolver, setMfaResolver] = useState<import('firebase/auth').MultiFactorResolver | null>(null);
+  const [showMfaSettings, setShowMfaSettings] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
 
   // Permission helpers
@@ -2157,6 +2162,11 @@ function AppContent() {
     try {
       await signInWithPopup(auth, provider);
     } catch (error) {
+      // 2FA gerekiyorsa challenge modalını sür.
+      if (isMfaRequired(error)) {
+        setMfaResolver(getMfaResolver(auth, error));
+        return;
+      }
       const code = (error as Record<string, unknown>)?.code as string | undefined;
 
       // Popup flow can fail in Safari/strict privacy/adblock contexts.
@@ -2210,6 +2220,12 @@ function AppContent() {
     try {
       await signInWithEmailAndPassword(auth, emailLogin.email.trim(), emailLogin.password);
     } catch (error) {
+      // 2FA gerekiyorsa challenge modalını sür — onAuthStateChanged çözümden sonra çalışır.
+      if (isMfaRequired(error)) {
+        setMfaResolver(getMfaResolver(auth, error));
+        setIsEmailLoginLoading(false);
+        return;
+      }
       const code = (error as Record<string, unknown>)?.code as string | undefined;
       if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setAuthError(currentLanguage === 'tr' ? 'E-posta veya sifre hatali.' : 'Invalid email or password.');
@@ -4001,6 +4017,12 @@ function AppContent() {
                   <span className="text-xs font-bold text-brand">{(user?.displayName || 'M')[0].toUpperCase()}</span>
                 </div>
               )}
+              {user && (
+                <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
+                  className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
+                  <ShieldCheck className="w-4 h-4" />
+                </button>
+              )}
               <button onClick={handleLogout} className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-red-400 hover:bg-white/10" : "text-gray-400 hover:text-red-500 hover:bg-red-50")}>
                 <LogOut className="w-4 h-4" />
               </button>
@@ -4418,6 +4440,28 @@ function AppContent() {
                 {currentLanguage === 'tr' ? 'Yükle' : 'Install'}
               </button>
               <button onClick={() => setShowPwaBanner(false)} className="text-blue-400 hover:text-blue-600 ml-1 text-sm font-bold leading-none">✕</button>
+            </div>
+          )}
+
+          {/* ── 2FA: girişte challenge ── */}
+          {mfaResolver && (
+            <MfaChallengeModal
+              resolver={mfaResolver}
+              currentLanguage={currentLanguage as 'tr' | 'en'}
+              onSuccess={() => setMfaResolver(null)}
+              onCancel={() => { setMfaResolver(null); setIsEmailLoginLoading(false); }}
+            />
+          )}
+
+          {/* ── 2FA: kullanıcı güvenlik ayarları ── */}
+          {showMfaSettings && user && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowMfaSettings(false)}>
+              <div className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <MfaSettings user={user} currentLanguage={currentLanguage as 'tr' | 'en'} />
+                <button onClick={() => setShowMfaSettings(false)} className="mt-3 w-full apple-button-secondary justify-center py-2.5 text-sm">
+                  {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                </button>
+              </div>
             </div>
           )}
 
