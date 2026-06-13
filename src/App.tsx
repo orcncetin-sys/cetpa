@@ -2516,8 +2516,13 @@ function AppContent() {
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {
     if (!user || leads.length === 0) return;
+    // Günlük throttle: SSE her snapshot'ta leads referansını yeniler; throttle
+    // olmadan her yüklemede 187 PUT atılıp gereksiz yük oluşuyordu.
+    const lastRisk = Number(sessionStorage.getItem('riskScoreAt') || 0);
+    if (Date.now() - lastRisk < 24 * 60 * 60 * 1000) return;
     // Debounce: only run 3 s after last lead/order change to avoid write storms
     const timer = setTimeout(async () => {
+      sessionStorage.setItem('riskScoreAt', String(Date.now()));
       const now = new Date();
       for (const lead of leads) {
         try {
@@ -2554,6 +2559,10 @@ function AppContent() {
             Math.round(utilisation * 50 + overdueCount * 20 + (customerOrders.length > 10 ? 10 : 0)),
             100
           );
+
+          // İzlenecek bir şey yoksa (sipariş yok + bakiye 0 + limit 0) yazma —
+          // gereksiz kayıt/PUT'tan kaçın.
+          if (customerOrders.length === 0 && totalBalance === 0 && creditLimit === 0) continue;
 
           await setDoc(doc(db, 'customerRisks', lead.id), {
             customerId: lead.id,
