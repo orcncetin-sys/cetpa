@@ -1,75 +1,58 @@
 /**
- * mfa.ts — Firebase çok faktörlü kimlik doğrulama (2FA) yardımcıları.
+ * mfa.ts — Kendi sunucumuz üzerinden TOTP 2FA istemci yardımcıları.
  *
- * TOTP (authenticator app) tabanlı — SMS maliyeti/telefon sağlayıcısı
- * gerektirmez. Firebase Console'da Authentication > MFA etkin olmalı
- * (Identity Platform). Kayıt taze oturum gerektirir (recent login).
+ * Firebase MFA (Blaze + Identity Platform gerektirir) YERİNE kendi Express +
+ * PostgreSQL altyapımızı kullanır — Spark planında ücretsiz çalışır.
+ * Secret'lar yalnız sunucuda (mfa_secrets tablosu); istemci hiç görmez.
+ * Doğrulama httpOnly __cetpa_mfa çerezi ile taşınır.
  */
-import {
-  multiFactor,
-  getMultiFactorResolver,
-  TotpMultiFactorGenerator,
-  TotpSecret,
-  type MultiFactorResolver,
-  type MultiFactorError,
-  type User,
-  type Auth,
-} from 'firebase/auth';
+import { auth } from '../firebase';
 
-/** Kullanıcının kayıtlı 2FA faktörlerini döner. */
-export function getEnrolledFactors(user: User): { uid: string; displayName: string | null; factorId: string }[] {
-  return multiFactor(user).enrolledFactors.map(f => ({
-    uid: f.uid, displayName: f.displayName, factorId: f.factorId,
-  }));
+async function authedFetch(path: string, body?: unknown): Promise<Response> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Oturum yok.');
+  const token = await user.getIdToken();
+  return fetch(path, {
+    method: body !== undefined ? 'POST' : 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    credentials: 'same-origin',
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
 }
 
-export function hasMfa(user: User): boolean {
-  return multiFactor(user).enrolledFactors.length > 0;
+/** MFA durumu: açık mı + bu oturum doğrulanmış mı? */
+export async function getMfaStatus(): Promise<{ enabled: boolean; verified: boolean }> {
+  try {
+    const res = await authedFetch('/api/mfa/status');
+    if (!res.ok) return { enabled: false, verified: true };
+    return await res.json();
+  } catch { return { enabled: false, verified: true }; }
 }
 
-/**
- * TOTP kayıt akışı 1. adım: gizli anahtar üret + otpauth URL döner
- * (QR kod ve manuel giriş için). Kullanıcı authenticator'a ekler.
- */
-export async function startTotpEnrollment(user: User, issuer = 'CETPA'): Promise<{ secret: TotpSecret; qrUrl: string; secretKey: string }> {
-  const session = await multiFactor(user).getSession();
-  const secret = await TotpMultiFactorGenerator.generateSecret(session);
-  const qrUrl = secret.generateQrCodeUrl(user.email || user.uid, issuer);
-  return { secret, qrUrl, secretKey: secret.secretKey };
+/** Kayıt 1. adım: otpauth URL + manuel secret döner (QR için). */
+export async function startEnrollment(): Promise<{ otpauth: string; secretKey: string }> {
+  const res = await authedFetch('/api/mfa/enroll/start', {});
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Kayıt başlatılamadı.');
+  return res.json();
 }
 
-/**
- * TOTP kayıt akışı 2. adım: kullanıcının authenticator'dan girdiği 6 haneli
- * kodu doğrula ve faktörü kaydet.
- */
-export async function finishTotpEnrollment(
-  user: User, secret: TotpSecret, code: string, displayName = 'Authenticator',
-): Promise<void> {
-  const assertion = TotpMultiFactorGenerator.assertionForEnrollment(secret, code.trim());
-  await multiFactor(user).enroll(assertion, displayName);
+/** Kayıt 2. adım: kodu doğrula → 2FA aktif + oturum doğrulanır. */
+export async function finishEnrollment(code: string): Promise<void> {
+  const res = await authedFetch('/api/mfa/enroll/verify', { code });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Kod hatalı.');
 }
 
-/** Kayıtlı bir 2FA faktörünü kaldırır (factor uid ile). */
-export async function unenrollFactor(user: User, factorUid: string): Promise<void> {
-  await multiFactor(user).unenroll(factorUid);
+/** Girişte 2FA challenge: kodu doğrula → oturum doğrulanır. */
+export async function verifyLogin(code: string): Promise<void> {
+  const res = await authedFetch('/api/mfa/verify', { code });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Kod hatalı.');
 }
 
-/** Login hatası 2FA gerektiriyor mu? */
-export function isMfaRequired(error: unknown): boolean {
-  return (error as { code?: string })?.code === 'auth/multi-factor-auth-required';
-}
-
-/** Login sırasında 2FA çözücü (resolver) al — challenge modalını sürer. */
-export function getMfaResolver(auth: Auth, error: unknown): MultiFactorResolver {
-  return getMultiFactorResolver(auth, error as MultiFactorError);
-}
-
-/**
- * Login 2FA challenge'ı: kullanıcının girdiği TOTP kodunu doğrulayıp
- * oturumu tamamlar. resolver.hints[0] TOTP faktörü varsayılır.
- */
-export async function resolveTotpSignIn(resolver: MultiFactorResolver, code: string): Promise<void> {
-  const totpHint = resolver.hints.find(h => h.factorId === TotpMultiFactorGenerator.FACTOR_ID) ?? resolver.hints[0];
-  const assertion = TotpMultiFactorGenerator.assertionForSignIn(totpHint.uid, code.trim());
-  await resolver.resolveSignIn(assertion);
+/** 2FA'yı kapat (mevcut kod doğrulamasıyla). */
+export async function disableMfa(code: string): Promise<void> {
+  const res = await authedFetch('/api/mfa/disable', { code });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'İşlem başarısız.');
 }

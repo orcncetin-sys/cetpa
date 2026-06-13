@@ -14,6 +14,7 @@ import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
 import { createHmac, createHash } from "crypto";
+import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
@@ -204,8 +205,62 @@ async function initDocsTable(): Promise<void> {
   )`);
   console.log('PostgreSQL docs table ready ✓');
   await initMikroTables();
+  await initMfaTable();
 }
 initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
+
+// ── Kendi TOTP 2FA katmanımız (Firebase MFA Blaze gerektirdiği için) ─────────
+// Secret'lar yalnız bu server-only tabloda; /api/db hiçbir zaman expose etmez.
+async function initMfaTable(): Promise<void> {
+  if (!pgPool) return;
+  await pgPool.query(`CREATE TABLE IF NOT EXISTS mfa_secrets (
+    uid text PRIMARY KEY,
+    secret text NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  console.log('MFA (TOTP) tablosu hazır ✓');
+}
+
+// MFA doğrulama çerezi için imzalama anahtarı (restart'larda stabil olmalı).
+const MFA_COOKIE_SECRET = process.env.MFA_COOKIE_SECRET
+  || createHash('sha256').update(process.env.FIREBASE_PRIVATE_KEY || 'cetpa-mfa-fallback').digest('hex');
+const MFA_COOKIE = '__cetpa_mfa';
+const MFA_COOKIE_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün (session ile aynı)
+
+/** uid + exp için HMAC-imzalı token üretir. */
+function signMfaToken(uid: string): string {
+  const exp = Date.now() + MFA_COOKIE_MAX_AGE;
+  const payload = Buffer.from(`${uid}|${exp}`).toString('base64url');
+  const sig = createHmac('sha256', MFA_COOKIE_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+/** Token geçerli + uid eşleşiyor + süresi dolmamış mı? */
+function verifyMfaToken(token: string | null, uid: string): boolean {
+  if (!token) return false;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return false;
+  const expected = createHmac('sha256', MFA_COOKIE_SECRET).update(payload).digest('base64url');
+  if (sig !== expected) return false;
+  try {
+    const [tUid, tExp] = Buffer.from(payload, 'base64url').toString().split('|');
+    return tUid === uid && Number(tExp) > Date.now();
+  } catch { return false; }
+}
+
+// Kullanıcının MFA durumu (60sn önbellek).
+const mfaStatusCache = new Map<string, { enabled: boolean; exp: number }>();
+async function userHasMfa(uid: string): Promise<boolean> {
+  const c = mfaStatusCache.get(uid);
+  if (c && c.exp > Date.now()) return c.enabled;
+  if (!pgPool) return false;
+  try {
+    const { rows } = await pgPool.query('SELECT enabled FROM mfa_secrets WHERE uid = $1', [uid]);
+    const enabled = !!rows[0]?.enabled;
+    mfaStatusCache.set(uid, { enabled, exp: Date.now() + 60_000 });
+    return enabled;
+  } catch { return false; }
+}
 
 /** Firestore-admin-compatible timestamp shape ({_seconds,_nanoseconds}). */
 function pgNowTimestamp(): { _seconds: number; _nanoseconds: number } {
@@ -1684,21 +1739,110 @@ async function startServer() {
     });
     app.post('/api/db/session/logout', dbLimiter, (_req: Request, res: Response) => {
       res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
+      res.clearCookie(MFA_COOKIE, { path: '/' });
       res.json({ ok: true });
     });
+
+    // ── TOTP 2FA endpoint'leri (kendi sunucumuz, Spark-uyumlu) ──────────────
+    // otplib v13: verifySync {valid} döner; window:1 = ±30sn saat kayması toleransı.
+    const totpCheck = (token: string, secret: string): boolean =>
+      (totpVerifyRaw({ secret, token, window: 1 } as Parameters<typeof totpVerifyRaw>[0]).valid === true);
+
+    // Durum: kullanıcının MFA'sı açık mı + bu oturum doğrulanmış mı?
+    app.get('/api/mfa/status', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+      const uid = (req as Request & { uid: string }).uid;
+      const enabled = await userHasMfa(uid);
+      const verified = enabled ? verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), uid) : true;
+      res.json({ enabled, verified });
+    });
+
+    // Kayıt 1. adım: secret üret (pending), otpauth URL döner.
+    app.post('/api/mfa/enroll/start', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+      const r = req as Request & { uid: string; userEmail?: string };
+      try {
+        const secret = totpSecret();
+        await pgPool!.query(
+          `INSERT INTO mfa_secrets (uid, secret, enabled) VALUES ($1, $2, false)
+           ON CONFLICT (uid) DO UPDATE SET secret = $2, enabled = false, updated_at = now()`,
+          [r.uid, secret],
+        );
+        mfaStatusCache.delete(r.uid);
+        const otpauth = totpURI({ strategy: 'totp', issuer: 'CETPA', label: r.userEmail || r.uid, secret });
+        res.json({ otpauth, secretKey: secret });
+      } catch (e) { console.error('[mfa/enroll/start]', (e as Error).message); res.status(500).json({ error: 'MFA kaydı başlatılamadı.' }); }
+    });
+
+    // Kayıt 2. adım: kodu doğrula → enabled=true + bu oturumu doğrula.
+    app.post('/api/mfa/enroll/verify', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const uid = (req as Request & { uid: string }).uid;
+      const code = String(req.body?.code || '').trim();
+      try {
+        const { rows } = await pgPool!.query('SELECT secret FROM mfa_secrets WHERE uid = $1', [uid]);
+        if (!rows[0]?.secret || !totpCheck(code, rows[0].secret)) {
+          return res.status(400).json({ error: 'Kod hatalı veya süresi doldu.' });
+        }
+        await pgPool!.query('UPDATE mfa_secrets SET enabled = true, updated_at = now() WHERE uid = $1', [uid]);
+        mfaStatusCache.delete(uid);
+        res.cookie(MFA_COOKIE, signMfaToken(uid), { httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: MFA_COOKIE_MAX_AGE, path: '/' });
+        res.json({ ok: true });
+      } catch (e) { console.error('[mfa/enroll/verify]', (e as Error).message); res.status(500).json({ error: 'Doğrulama başarısız.' }); }
+    });
+
+    // Girişte 2FA challenge: kodu doğrula → bu oturumu doğrula (cookie).
+    app.post('/api/mfa/verify', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const uid = (req as Request & { uid: string }).uid;
+      const code = String(req.body?.code || '').trim();
+      try {
+        const { rows } = await pgPool!.query('SELECT secret, enabled FROM mfa_secrets WHERE uid = $1', [uid]);
+        if (!rows[0]?.enabled || !totpCheck(code, rows[0].secret)) {
+          return res.status(400).json({ error: 'Kod hatalı veya süresi doldu.' });
+        }
+        res.cookie(MFA_COOKIE, signMfaToken(uid), { httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: MFA_COOKIE_MAX_AGE, path: '/' });
+        res.json({ ok: true });
+      } catch (e) { console.error('[mfa/verify]', (e as Error).message); res.status(500).json({ error: 'Doğrulama başarısız.' }); }
+    });
+
+    // MFA'yı kapat (mevcut koddoğrulamasıyla).
+    app.post('/api/mfa/disable', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+      const uid = (req as Request & { uid: string }).uid;
+      const code = String(req.body?.code || '').trim();
+      try {
+        const { rows } = await pgPool!.query('SELECT secret, enabled FROM mfa_secrets WHERE uid = $1', [uid]);
+        if (!rows[0]?.enabled || !totpCheck(code, rows[0].secret)) {
+          return res.status(400).json({ error: 'Kod hatalı.' });
+        }
+        await pgPool!.query('DELETE FROM mfa_secrets WHERE uid = $1', [uid]);
+        mfaStatusCache.delete(uid);
+        res.clearCookie(MFA_COOKIE, { path: '/' });
+        res.json({ ok: true });
+      } catch (e) { console.error('[mfa/disable]', (e as Error).message); res.status(500).json({ error: 'İşlem başarısız.' }); }
+    });
+
+    // ── MFA gate: MFA açık kullanıcılar için veri rotaları doğrulanana dek 403 ──
+    const requireMfaVerified = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (!(await userHasMfa(uid))) { next(); return; } // MFA kapalı → geç
+      if (verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), uid)) { next(); return; }
+      res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true });
+    };
 
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
       // için query token. İkincisi rollout sonrası kaldırılabilir.
       const sessionCookie = parseCookie(req.headers.cookie, SESSION_COOKIE);
       let authed = false;
+      let streamUid = '';
       if (sessionCookie) {
-        try { await admin.auth().verifySessionCookie(sessionCookie, true); authed = true; } catch { /* düş */ }
+        try { const d = await admin.auth().verifySessionCookie(sessionCookie, true); authed = true; streamUid = d.uid; } catch { /* düş */ }
       }
       if (!authed) {
-        try { await admin.auth().verifyIdToken(String(req.query.token || '')); authed = true; } catch { /* düş */ }
+        try { const d = await admin.auth().verifyIdToken(String(req.query.token || '')); authed = true; streamUid = d.uid; } catch { /* düş */ }
       }
       if (!authed) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
+      // MFA açıksa stream de doğrulanmış oturum ister.
+      if (await userHasMfa(streamUid) && !verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), streamUid)) {
+        res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true }); return;
+      }
       const colls = String(req.query.colls || '').split(',').filter(c => COLL_RE.test(c));
       if (!colls.length) { res.status(400).json({ error: 'colls query param required.' }); return; }
       res.writeHead(200, {
@@ -1753,7 +1897,7 @@ async function startServer() {
       return true;
     };
 
-    app.get('/api/db/:coll', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+    app.get('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
       if (await denied(req, res, coll, 'read')) return;
@@ -1763,7 +1907,7 @@ async function startServer() {
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
-    app.get('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+    app.get('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       if (await denied(req, res, coll, 'read', id)) return;
@@ -1774,7 +1918,7 @@ async function startServer() {
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
-    app.post('/api/db/:coll', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+    app.post('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
       if (await denied(req, res, coll, 'write')) return;
@@ -1791,7 +1935,7 @@ async function startServer() {
     });
 
     // setDoc — full replace, or deep-ish merge with ?merge=1
-    app.put('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+    app.put('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       // Append-only koleksiyonlarda mevcut kaydın üzerine yazma yok
@@ -1823,7 +1967,7 @@ async function startServer() {
     });
 
     // updateDoc — shallow merge with dot-path support (lenient upsert)
-    app.patch('/api/db/:coll/:id', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
+    app.patch('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
@@ -1849,7 +1993,7 @@ async function startServer() {
       } catch (e) { dbErr(e, res, 'PATCH', coll); }
     });
 
-    app.delete('/api/db/:coll/:id', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+    app.delete('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon silinemez (append-only).' }); return; }

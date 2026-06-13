@@ -10,7 +10,7 @@ const CRMPage                 = React.lazy(() => import('./pages/CRMPage'));
 const OrdersPage              = React.lazy(() => import('./pages/OrdersPage'));
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
 import { MfaSettings, MfaChallengeModal } from './components/MfaSettings';
-import { isMfaRequired, getMfaResolver } from './lib/mfa';
+import { getMfaStatus } from './lib/mfa';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   onAuthStateChanged,
@@ -623,8 +623,8 @@ function AppContent() {
   const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
   const [resetSent, setResetSent] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  // 2FA: giriş çok faktör isteyince resolver burada tutulur, challenge modalı sürer.
-  const [mfaResolver, setMfaResolver] = useState<import('firebase/auth').MultiFactorResolver | null>(null);
+  // 2FA: kullanıcının 2FA'sı açık ama bu oturum doğrulanmamışsa challenge sürülür.
+  const [mfaChallenge, setMfaChallenge] = useState(false);
   const [showMfaSettings, setShowMfaSettings] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
 
@@ -2026,6 +2026,12 @@ function AppContent() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
+        // 2FA: kullanıcının 2FA'sı açık ama oturum doğrulanmamışsa challenge sür.
+        // (Veri yükleyiciler /api/db'ye erişmeden önce doğrulama gerekir.)
+        try {
+          const mfa = await getMfaStatus();
+          setMfaChallenge(mfa.enabled && !mfa.verified);
+        } catch { /* status alınamazsa engelleme */ }
         // Sync user profile to Firestore
         const userRef = doc(db, 'users', u.uid);
         const userSnap = await getDoc(userRef);
@@ -2162,11 +2168,6 @@ function AppContent() {
     try {
       await signInWithPopup(auth, provider);
     } catch (error) {
-      // 2FA gerekiyorsa challenge modalını sür.
-      if (isMfaRequired(error)) {
-        setMfaResolver(getMfaResolver(auth, error));
-        return;
-      }
       const code = (error as Record<string, unknown>)?.code as string | undefined;
 
       // Popup flow can fail in Safari/strict privacy/adblock contexts.
@@ -2220,12 +2221,6 @@ function AppContent() {
     try {
       await signInWithEmailAndPassword(auth, emailLogin.email.trim(), emailLogin.password);
     } catch (error) {
-      // 2FA gerekiyorsa challenge modalını sür — onAuthStateChanged çözümden sonra çalışır.
-      if (isMfaRequired(error)) {
-        setMfaResolver(getMfaResolver(auth, error));
-        setIsEmailLoginLoading(false);
-        return;
-      }
       const code = (error as Record<string, unknown>)?.code as string | undefined;
       if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setAuthError(currentLanguage === 'tr' ? 'E-posta veya sifre hatali.' : 'Invalid email or password.');
@@ -4443,13 +4438,12 @@ function AppContent() {
             </div>
           )}
 
-          {/* ── 2FA: girişte challenge ── */}
-          {mfaResolver && (
+          {/* ── 2FA: girişte challenge (oturum doğrulanana dek veri yüklenmez) ── */}
+          {mfaChallenge && (
             <MfaChallengeModal
-              resolver={mfaResolver}
               currentLanguage={currentLanguage as 'tr' | 'en'}
-              onSuccess={() => setMfaResolver(null)}
-              onCancel={() => { setMfaResolver(null); setIsEmailLoginLoading(false); }}
+              onSuccess={() => { setMfaChallenge(false); window.location.reload(); }}
+              onCancel={() => { setMfaChallenge(false); handleLogout(); }}
             />
           )}
 
@@ -4457,7 +4451,7 @@ function AppContent() {
           {showMfaSettings && user && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowMfaSettings(false)}>
               <div className="w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <MfaSettings user={user} currentLanguage={currentLanguage as 'tr' | 'en'} />
+                <MfaSettings currentLanguage={currentLanguage as 'tr' | 'en'} />
                 <button onClick={() => setShowMfaSettings(false)} className="mt-3 w-full apple-button-secondary justify-center py-2.5 text-sm">
                   {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
                 </button>

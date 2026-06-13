@@ -43,6 +43,7 @@
     "lucide-react": "^0.577.0",
     "motion": "^12.38.0",
     "node-cron": "^4.2.1",
+    "otplib": "^13.4.1",
     "papaparse": "^5.5.3",
     "pg": "^8.21.0",
     "qrcode.react": "^4.2.0",
