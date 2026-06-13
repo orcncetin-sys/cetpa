@@ -275,7 +275,10 @@ class StreamManager {
   /** Reconnect the SSE channel when the subscribed-collection set changed. */
   private scheduleReconnect(force: boolean): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => void this.connect(force), 120);
+    // 400ms debounce: uygulama açılışında ~33 koleksiyon dinleyicisi kademeli
+    // kaydoluyor; kısa debounce SSE'yi 2-3 kez açıp kapatıp geçici 503'lere
+    // yol açıyordu. Daha uzun debounce ilk patlamayı TEK bağlantıda toplar.
+    this.reconnectTimer = setTimeout(() => void this.connect(force), 400);
   }
 
   private sessionReady = false;
