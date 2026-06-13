@@ -248,6 +248,34 @@ function verifyMfaToken(token: string | null, uid: string): boolean {
   } catch { return false; }
 }
 
+// ── Kendi HMAC oturum token'ımız (Firebase session cookie yerine) ───────────
+// requireAuth uid'yi zaten lokal verifyIdToken ile doğruladığından, oturumu
+// kendi imzalı token'ımızla taşırız: SSE doğrulaması TAMAMEN LOKAL olur,
+// Firebase'e çalışma-zamanı ağ çağrısı kalmaz (createSessionCookie/
+// verifySessionCookie gitti). MFA'dan ayrı anahtar.
+const SESSION_TOKEN_SECRET = process.env.SESSION_TOKEN_SECRET
+  || createHash('sha256').update((process.env.FIREBASE_PRIVATE_KEY || 'cetpa-session-fallback') + ':session').digest('hex');
+const SESSION_TOKEN_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün
+
+function signSessionToken(uid: string): string {
+  const exp = Date.now() + SESSION_TOKEN_MAX_AGE;
+  const payload = Buffer.from(`${uid}|${exp}`).toString('base64url');
+  const sig = createHmac('sha256', SESSION_TOKEN_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+/** Token geçerli + süresi dolmamışsa uid döner, yoksa null. */
+function verifySessionTokenUid(token: string | null): string | null {
+  if (!token) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = createHmac('sha256', SESSION_TOKEN_SECRET).update(payload).digest('base64url');
+  if (sig !== expected) return null;
+  try {
+    const [tUid, tExp] = Buffer.from(payload, 'base64url').toString().split('|');
+    return Number(tExp) > Date.now() ? tUid : null;
+  } catch { return null; }
+}
+
 // Kullanıcının MFA durumu (60sn önbellek).
 const mfaStatusCache = new Map<string, { enabled: boolean; exp: number }>();
 async function userHasMfa(uid: string): Promise<boolean> {
@@ -1724,18 +1752,15 @@ async function startServer() {
       }
       return null;
     };
-    app.post('/api/db/session', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
-      const idToken = (req.body?.idToken as string) || '';
-      try {
-        const cookie = await admin.auth().createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE });
-        res.cookie(SESSION_COOKIE, cookie, {
-          httpOnly: true, secure: isProd, sameSite: 'strict',
-          maxAge: SESSION_MAX_AGE, path: '/api/db',
-        });
-        res.json({ ok: true });
-      } catch {
-        res.status(401).json({ error: 'Oturum çerezi oluşturulamadı.' });
-      }
+    app.post('/api/db/session', dbLimiter, requireAuth, dbJson, (req: Request, res: Response) => {
+      // requireAuth uid'yi zaten lokal verifyIdToken ile doğruladı — Firebase'e
+      // ek çağrı (createSessionCookie) YOK. Kendi imzalı token'ımızı veririz.
+      const uid = (req as Request & { uid: string }).uid;
+      res.cookie(SESSION_COOKIE, signSessionToken(uid), {
+        httpOnly: true, secure: isProd, sameSite: 'strict',
+        maxAge: SESSION_MAX_AGE, path: '/api/db',
+      });
+      res.json({ ok: true });
     });
     app.post('/api/db/session/logout', dbLimiter, (_req: Request, res: Response) => {
       res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
@@ -1829,16 +1854,13 @@ async function startServer() {
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
       // için query token. İkincisi rollout sonrası kaldırılabilir.
-      const sessionCookie = parseCookie(req.headers.cookie, SESSION_COOKIE);
-      let authed = false;
-      let streamUid = '';
-      if (sessionCookie) {
-        try { const d = await admin.auth().verifySessionCookie(sessionCookie, true); authed = true; streamUid = d.uid; } catch { /* düş */ }
+      // Kendi HMAC oturum token'ımızı LOKAL doğrula (Firebase ağ çağrısı yok).
+      // Geriye-uyumluluk: çerez yoksa query idToken (yine lokal verifyIdToken).
+      let streamUid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
+      if (!streamUid) {
+        try { const d = await admin.auth().verifyIdToken(String(req.query.token || '')); streamUid = d.uid; } catch { /* düş */ }
       }
-      if (!authed) {
-        try { const d = await admin.auth().verifyIdToken(String(req.query.token || '')); authed = true; streamUid = d.uid; } catch { /* düş */ }
-      }
-      if (!authed) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
+      if (!streamUid) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
       // MFA açıksa stream de doğrulanmış oturum ister.
       if (await userHasMfa(streamUid) && !verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), streamUid)) {
         res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true }); return;
