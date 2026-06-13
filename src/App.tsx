@@ -2338,33 +2338,27 @@ function AppContent() {
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'orders', auth.currentUser?.uid));
 
-    // Track previously-known low-stock IDs so we only fire once per drop
-    const prevLowStockIds = new Set<string>();
-
     const unsubInventory = onSnapshot(query(collection(db, 'inventory'), where('companyId', '==', companyId)), (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
       setInventory(items);
 
-      // Detect newly-low-stock items and create bell notifications
+      // Düşük stok bildirimi: ürün-başına DEĞİL, TEK ÖZET bildirim (günde bir).
+      // Önceki sürüm her düşük-stok ürün için ayrı POST atıyordu; 2000+ ürün
+      // kritik olunca sunucuyu boğan bir fırtına yaratıyordu (429/503).
       const uid = auth.currentUser?.uid;
-      if (uid) {
-        for (const item of items) {
-          const isLow = (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5);
-          if (isLow && !prevLowStockIds.has(item.id)) {
-            prevLowStockIds.add(item.id);
-            // Fire-and-forget: write to flat notifications collection (matches listener)
-            addDoc(collection(db, 'notifications'), {
-              userId: uid,
-              title: currentLanguage === 'tr' ? 'Düşük Stok Uyarısı' : 'Low Stock Alert',
-              message: `${item.name} — ${currentLanguage === 'tr' ? 'stok kritik seviyede' : 'stock is critically low'}: ${item.stockLevel ?? 0} ${currentLanguage === 'tr' ? 'adet' : 'units'}`,
-              type: 'warning',
-              read: false,
-              createdAt: serverTimestamp(),
-            }).catch(() => { /* non-critical */ });
-          } else if (!isLow) {
-            prevLowStockIds.delete(item.id);
-          }
-        }
+      const lowCount = items.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length;
+      const DAY = 24 * 60 * 60 * 1000;
+      const last = Number(sessionStorage.getItem('lowStockNotifyAt') || 0);
+      if (uid && lowCount > 0 && Date.now() - last > DAY) {
+        sessionStorage.setItem('lowStockNotifyAt', String(Date.now()));
+        void addDoc(collection(db, 'notifications'), {
+          userId: uid,
+          title: currentLanguage === 'tr' ? 'Düşük Stok Uyarısı' : 'Low Stock Alert',
+          message: currentLanguage === 'tr'
+            ? `${lowCount} ürün kritik stok seviyesinde.`
+            : `${lowCount} product(s) at critical stock level.`,
+          type: 'warning', read: false, createdAt: serverTimestamp(),
+        }).catch(() => { /* non-critical */ });
       }
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventory', auth.currentUser?.uid));
 
