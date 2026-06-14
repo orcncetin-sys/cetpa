@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, ArrowRight, Building2, Users, Rocket, Sparkles } from 'lucide-react';
+import { Check, ArrowRight, Building2, Users, Rocket, Sparkles, Plug, Server, Cloud, Download } from 'lucide-react';
 import { PLANS, type SubscriptionPlan, type BillingCycle, createTrialSubscription, type UserSubscription } from '../types/subscription';
+import { doc, setDoc, serverTimestamp } from '../lib/dbClient';
+import { db } from '../firebase';
 
 interface OnboardingFlowProps {
   currentLanguage: 'tr' | 'en';
@@ -24,16 +26,74 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
   const [sector, setSector] = useState('');
   const [companySize, setCompanySize] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('professional');
+  // Entegrasyon & dağıtım (yeni adım)
+  const [erpChoice, setErpChoice] = useState<'mikro' | 'parasut' | 'none'>('none');
+  const [deployMode, setDeployMode] = useState<'saas' | 'self-hosted'>('saas');
+  const [vps, setVps] = useState({ host: '', domain: '', dbPassword: '' });
   const lang = currentLanguage;
 
   const steps = [
     { icon: Sparkles, title: lang === 'tr' ? 'Hoş Geldiniz!' : 'Welcome!' },
     { icon: Building2, title: lang === 'tr' ? 'Şirket Bilgileri' : 'Company Info' },
     { icon: Rocket, title: lang === 'tr' ? 'Plan Seçimi' : 'Choose Plan' },
+    { icon: Plug, title: lang === 'tr' ? 'Entegrasyon & Kurulum' : 'Integration & Setup' },
     { icon: Check, title: lang === 'tr' ? 'Hazırsınız!' : 'You\'re Ready!' },
   ];
 
+  // Self-hosted için deploy paketi (.env + docker-compose) üret ve indir
+  const downloadDeployBundle = () => {
+    const dbPass = vps.dbPassword || 'CHANGE_ME_' + Math.random().toString(36).slice(2, 10);
+    const env = [
+      `# CETPA — ${companyName || 'firma'} kurulum env'i (${new Date().toISOString().slice(0, 10)})`,
+      `NODE_ENV=production`,
+      `PORT=5173`,
+      `DATABASE_URL=postgresql://cetpa:${dbPass}@/cetpa_db?host=/var/run/postgresql`,
+      `# Firebase Auth + Storage (kendi projenizi girin)`,
+      `FIREBASE_CLIENT_EMAIL=`,
+      `FIREBASE_PRIVATE_KEY=`,
+      `SESSION_TOKEN_SECRET=${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
+      `MFA_COOKIE_SECRET=${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
+      erpChoice === 'mikro' ? `# Mikro ERP creds\nMIKRO_IDM_EMAIL=\nMIKRO_IDM_PASSWORD=\nMIKRO_ALIAS=\nMIKRO_API_KEY=` : '',
+      erpChoice === 'parasut' ? `# Paraşüt creds\nPARASUT_CLIENT_ID=\nPARASUT_CLIENT_SECRET=\nPARASUT_USERNAME=\nPARASUT_PASSWORD=\nPARASUT_COMPANY_ID=` : '',
+    ].filter(Boolean).join('\n');
+    const compose = `services:
+  app:
+    build: .
+    container_name: cetpa-app
+    ports: ["127.0.0.1:5173:5173"]
+    env_file: [.env.production]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - /var/run/postgresql:/var/run/postgresql
+      - ./backups:/app/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/api/health"]
+      interval: 30s
+`;
+    const readme = `# ${companyName || 'CETPA'} — Self-Hosted Kurulum\n\nHedef: ${vps.host || 'VPS'} → ${vps.domain || 'alan adınız'}\n\n1. VPS'e Docker + PostgreSQL 15 kurun (cetpa_db + cetpa kullanıcısı).\n2. .env.production'ı doldurun (Firebase + ERP creds).\n3. docker compose up -d --build\n4. Nginx reverse proxy + SSL (certbot) ayarlayın → ${vps.domain || 'domain'}.\n`;
+    const bundle = `===== .env.production =====\n${env}\n\n===== docker-compose.yml =====\n${compose}\n===== KURULUM.md =====\n${readme}`;
+    const blob = new Blob([bundle], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cetpa-deploy-${(companyName || 'firma').toLowerCase().replace(/\s+/g, '-')}.txt`;
+    a.click();
+  };
+
   const handleComplete = () => {
+    // Entegrasyon + dağıtım seçimini kaydet (settings — App'i değiştirmeden)
+    void (async () => {
+      try {
+        await setDoc(doc(db, 'settings', 'companyProfile'), {
+          name: companyName, sector, size: companySize,
+          deployMode, erp: erpChoice, onboardedAt: serverTimestamp(),
+        }, { merge: true });
+        if (erpChoice !== 'none') {
+          await setDoc(doc(db, 'settings', 'erpHub'), { activeErp: erpChoice }, { merge: true });
+          await setDoc(doc(db, 'settings', erpChoice), { enabled: true }, { merge: true });
+        }
+      } catch { /* non-critical */ }
+    })();
     const subscription = createTrialSubscription(selectedPlan);
     onComplete(subscription, { name: companyName, sector, size: companySize });
   };
@@ -262,14 +322,78 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                   onClick={() => setStep(3)}
                   className="bg-[#ff4000] hover:bg-[#ff4000]/90 active:scale-[0.98] text-white font-bold py-3 px-8 rounded-2xl transition-all shadow-lg shadow-[#ff4000]/30 inline-flex items-center gap-2"
                 >
+                  {lang === 'tr' ? 'Devam' : 'Continue'} <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 3: Entegrasyon & Kurulum */}
+          {step === 3 && (
+            <motion.div key="erp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+              className="bg-white/[0.06] backdrop-blur-2xl border border-white/10 rounded-3xl p-8 sm:p-10">
+              <h2 className="text-2xl font-black text-white mb-1">{lang === 'tr' ? 'Entegrasyon & Kurulum' : 'Integration & Setup'}</h2>
+              <p className="text-white/50 text-sm mb-6">{lang === 'tr' ? 'Muhasebe entegrasyonunuzu ve dağıtım modelinizi seçin.' : 'Choose your accounting integration and deployment model.'}</p>
+
+              {/* ERP seçimi */}
+              <p className="text-xs font-bold text-white/40 uppercase mb-2">{lang === 'tr' ? 'Muhasebe Entegrasyonu' : 'Accounting Integration'}</p>
+              <div className="grid grid-cols-3 gap-2 mb-6">
+                {([['mikro', '💼 Mikro'], ['parasut', '🪂 Paraşüt'], ['none', lang === 'tr' ? '⏭ Sonra' : '⏭ Later']] as const).map(([id, label]) => (
+                  <button key={id} onClick={() => setErpChoice(id)}
+                    className={`py-3 rounded-xl text-sm font-bold transition-all border ${erpChoice === id ? 'bg-[#ff4000] text-white border-[#ff4000]' : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Dağıtım modeli */}
+              <p className="text-xs font-bold text-white/40 uppercase mb-2">{lang === 'tr' ? 'Dağıtım Modeli' : 'Deployment Model'}</p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <button onClick={() => setDeployMode('saas')}
+                  className={`p-4 rounded-xl text-left transition-all border ${deployMode === 'saas' ? 'bg-[#ff4000]/20 border-[#ff4000]' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                  <Cloud className="w-5 h-5 text-white mb-1" />
+                  <p className="text-sm font-bold text-white">{lang === 'tr' ? 'Bulut (SaaS)' : 'Cloud (SaaS)'}</p>
+                  <p className="text-[11px] text-white/50">{lang === 'tr' ? 'Anında hazır, bizim sunucumuzda' : 'Instant, on our servers'}</p>
+                </button>
+                <button onClick={() => setDeployMode('self-hosted')}
+                  className={`p-4 rounded-xl text-left transition-all border ${deployMode === 'self-hosted' ? 'bg-[#ff4000]/20 border-[#ff4000]' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                  <Server className="w-5 h-5 text-white mb-1" />
+                  <p className="text-sm font-bold text-white">{lang === 'tr' ? 'Kendi Sunucum' : 'Self-Hosted'}</p>
+                  <p className="text-[11px] text-white/50">{lang === 'tr' ? 'Kendi VPS\'inize Docker ile' : 'Your own VPS via Docker'}</p>
+                </button>
+              </div>
+
+              {/* Self-hosted alanları + deploy paketi */}
+              {deployMode === 'self-hosted' && (
+                <div className="bg-white/5 rounded-xl p-4 space-y-2 mb-4">
+                  <input value={vps.host} onChange={e => setVps(v => ({ ...v, host: e.target.value }))}
+                    placeholder={lang === 'tr' ? 'VPS IP / host (örn. 1.2.3.4)' : 'VPS IP / host'}
+                    className="w-full px-3 py-2 text-sm bg-white/10 border border-white/10 rounded-lg text-white placeholder-white/30 outline-none" />
+                  <input value={vps.domain} onChange={e => setVps(v => ({ ...v, domain: e.target.value }))}
+                    placeholder={lang === 'tr' ? 'Alan adı (örn. erp.firmaniz.com)' : 'Domain'}
+                    className="w-full px-3 py-2 text-sm bg-white/10 border border-white/10 rounded-lg text-white placeholder-white/30 outline-none" />
+                  <button onClick={downloadDeployBundle}
+                    className="w-full apple-button-secondary justify-center py-2.5 text-sm bg-white/10 text-white border-white/20 hover:bg-white/20">
+                    <Download className="w-4 h-4" /> {lang === 'tr' ? 'Deploy Paketini İndir (.env + docker-compose)' : 'Download Deploy Bundle'}
+                  </button>
+                  <p className="text-[10px] text-white/40">{lang === 'tr' ? 'Paketi VPS\'inize kopyalayıp docker compose up ile başlatın. SSH otomasyonu yakında.' : 'Copy to your VPS and run docker compose up. SSH automation coming soon.'}</p>
+                </div>
+              )}
+
+              <div className="flex justify-between mt-4">
+                <button onClick={() => setStep(2)} className="text-white/40 hover:text-white/70 text-sm font-medium transition-colors">
+                  {lang === 'tr' ? '← Geri' : '← Back'}
+                </button>
+                <button onClick={() => setStep(4)}
+                  className="bg-[#ff4000] hover:bg-[#ff4000]/90 active:scale-[0.98] text-white font-bold py-3 px-8 rounded-2xl transition-all shadow-lg shadow-[#ff4000]/30 inline-flex items-center gap-2">
                   {lang === 'tr' ? '14 Gün Ücretsiz Başla' : 'Start 14-Day Trial'} <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </motion.div>
           )}
 
-          {/* Step 3: Done — Confetti */}
-          {step === 3 && (
+          {/* Step 4: Done — Confetti */}
+          {step === 4 && (
             <motion.div
               key="done"
               initial={{ opacity: 0, scale: 0.9 }}
