@@ -335,7 +335,47 @@ function genDocId(): string {
 }
 
 function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, data?: unknown): void {
-  dbEvents.emit('change', { coll, type, id, ...(data !== undefined ? { data } : {}) });
+  // Kiracı/kullanıcı filtreleme için companyId + userId'yi olaya iliştir.
+  const d = (data ?? {}) as Record<string, unknown>;
+  dbEvents.emit('change', {
+    coll, type, id,
+    cid: d.companyId as string | undefined,
+    uid: d.userId as string | undefined,
+    ...(data !== undefined ? { data } : {}),
+  });
+}
+
+// ── Çoklu kiracı izolasyonu (companyId / userId kapsamı) ─────────────────────
+// İş verisi koleksiyonları companyId ile, kullanıcı verisi userId ile izole
+// edilir. Diğerleri (settings global, users RBAC, append-only loglar) filtresiz.
+const TENANT_COLLECTIONS = new Set([
+  'inventory', 'leads', 'orders', 'quotations', 'shipments', 'warehouseItems',
+  'warehouses', 'employees', 'customerRisks', 'inventoryMovements', 'priceLists',
+  'priceOverrides', 'suppliers', 'purchaseOrders', 'returns', 'recurringOrders',
+  'recurringBilling', 'revenueContracts', 'contracts', 'supportTickets',
+  'demandRequests', 'productionOrders', 'projectCosts', 'projectTimelines',
+  'capacityLines', 'letterOfCredit', 'intercompanyTxns', 'approvalRequests',
+  'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
+  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
+  'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
+  'wmsLocations', 'dataRequests',
+]);
+const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding']);
+
+// Kullanıcının firma kimliği: users/{uid}.companyId, yoksa uid (sahip = kendi firması).
+const companyIdCache = new Map<string, { cid: string; exp: number }>();
+async function getUserCompanyId(uid: string): Promise<string> {
+  const c = companyIdCache.get(uid);
+  if (c && c.exp > Date.now()) return c.cid;
+  let cid = uid;
+  if (adminDb) {
+    try {
+      const snap = await adminDb.collection('users').doc(uid).get();
+      cid = (snap.exists ? (snap.data()?.companyId as string) : '') || uid;
+    } catch { /* uid fallback */ }
+  }
+  companyIdCache.set(uid, { cid, exp: Date.now() + 60_000 });
+  return cid;
 }
 
 // ── firebase-admin Firestore compatible shim over PostgreSQL ─────────────────
@@ -1874,17 +1914,29 @@ async function startServer() {
         'X-Accel-Buffering': 'no',
       });
       res.write('retry: 3000\n\n');
+      // Kiracı/kullanıcı görünürlüğü (lenient — etiketsiz legacy görünür).
+      const streamCid = await getUserCompanyId(streamUid);
+      const rowVisible = (coll: string, data: Record<string, unknown> | undefined): boolean => {
+        if (!data) return true;
+        if (TENANT_COLLECTIONS.has(coll)) { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; }
+        if (USER_SCOPED_COLLECTIONS.has(coll)) { const du = data.userId as string | undefined; return !du || du === streamUid; }
+        return true;
+      };
       try {
         const { rows } = await docsDb.query('SELECT coll, id, data FROM docs WHERE coll = ANY($1)', [colls]);
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
         for (const c of colls) byColl[c] = [];
-        for (const r of rows) byColl[r.coll].push({ id: r.id, data: r.data });
+        for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: r.data });
         for (const c of colls) res.write(`event: init\ndata: ${JSON.stringify({ coll: c, docs: byColl[c] })}\n\n`);
       } catch (e) {
         res.write(`event: err\ndata: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
       }
-      const onChange = (ev: { coll: string }) => {
-        if (colls.includes(ev.coll)) res.write(`event: change\ndata: ${JSON.stringify(ev)}\n\n`);
+      const onChange = (ev: { coll: string; cid?: string; uid?: string }) => {
+        if (!colls.includes(ev.coll)) return;
+        // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
+        if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
+        if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
+        res.write(`event: change\ndata: ${JSON.stringify(ev)}\n\n`);
       };
       dbEvents.on('change', onChange);
       const heartbeat = setInterval(() => res.write(': hb\n\n'), 25000);
@@ -1919,12 +1971,47 @@ async function startServer() {
       return true;
     };
 
+    // Kiracı/kullanıcı kapsam WHERE eki — lenient (etiketsiz legacy docs sahibe görünür).
+    // Dönen params $2'den başlar.
+    const tenantWhere = async (req: Request, coll: string): Promise<{ sql: string; params: unknown[] }> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (TENANT_COLLECTIONS.has(coll)) {
+        return { sql: " AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))", params: [await getUserCompanyId(uid)] };
+      }
+      if (USER_SCOPED_COLLECTIONS.has(coll)) {
+        return { sql: " AND (data->>'userId' = $2 OR NOT (data ? 'userId'))", params: [uid] };
+      }
+      return { sql: '', params: [] };
+    };
+    // Yazmada companyId/userId enjekte et (client değerini geçersiz kıl).
+    const injectTenant = async (req: Request, coll: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (TENANT_COLLECTIONS.has(coll)) return { ...data, companyId: await getUserCompanyId(uid) };
+      if (USER_SCOPED_COLLECTIONS.has(coll) && !('userId' in data)) return { ...data, userId: uid };
+      return data;
+    };
+    // Mevcut doc sahibin mi? (etiketsiz legacy → erişilebilir)
+    const ownsDoc = async (req: Request, coll: string, docData: Record<string, unknown> | undefined): Promise<boolean> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (!docData) return true; // yeni kayıt
+      if (TENANT_COLLECTIONS.has(coll)) {
+        const dc = (docData.companyId as string) || null;
+        return dc === null || dc === await getUserCompanyId(uid);
+      }
+      if (USER_SCOPED_COLLECTIONS.has(coll)) {
+        const du = (docData.userId as string) || null;
+        return du === null || du === uid;
+      }
+      return true;
+    };
+
     app.get('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
       if (await denied(req, res, coll, 'read')) return;
       try {
-        const { rows } = await docsDb.query('SELECT id, data FROM docs WHERE coll = $1', [coll]);
+        const t = await tenantWhere(req, coll);
+        const { rows } = await docsDb.query(`SELECT id, data FROM docs WHERE coll = $1${t.sql}`, [coll, ...t.params]);
         res.json({ docs: rows });
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
@@ -1935,7 +2022,7 @@ async function startServer() {
       if (await denied(req, res, coll, 'read', id)) return;
       try {
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
-        if (!rows.length) { res.status(404).json({ error: 'Not found.' }); return; }
+        if (!rows.length || !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(404).json({ error: 'Not found.' }); return; }
         res.json({ data: rows[0].data });
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
@@ -1946,7 +2033,7 @@ async function startServer() {
       if (await denied(req, res, coll, 'write')) return;
       try {
         const id = genDocId();
-        const data = resolveSentinels(req.body ?? {});
+        const data = await injectTenant(req, coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
         await docsDb.query(
           'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)',
           [coll, id, JSON.stringify(data)],
@@ -1969,11 +2056,15 @@ async function startServer() {
         let data = incoming;
         let before: Record<string, unknown> = {};
         const audited = AUDITED_COLLECTIONS.has(coll);
-        if (req.query.merge === '1' || audited) {
+        const scoped = TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll);
+        // Sahiplik: kapsamlı/audit/merge için mevcut kaydı çek
+        if (req.query.merge === '1' || audited || scoped) {
           const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
           before = (rows[0]?.data as Record<string, unknown>) ?? {};
+          if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
           if (req.query.merge === '1') data = mergeDocData(before, incoming);
         }
+        data = await injectTenant(req, coll, data); // companyId/userId enjekte
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -1999,7 +2090,9 @@ async function startServer() {
         const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
-        const data = mergeDocData(before, patch);
+        if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        let data = mergeDocData(before, patch);
+        data = await injectTenant(req, coll, data); // companyId/userId enjekte
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -2021,6 +2114,11 @@ async function startServer() {
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon silinemez (append-only).' }); return; }
       if (await denied(req, res, coll, 'delete')) return;
       try {
+        // Sahiplik: başka firmanın kaydı silinemez
+        if (TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) {
+          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+          if (rows.length && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        }
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         broadcastDocChange(coll, 'delete', id);
         res.json({ ok: true });
