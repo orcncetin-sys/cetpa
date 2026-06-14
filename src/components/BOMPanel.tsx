@@ -22,6 +22,8 @@ import {
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import ConfirmModal from './ConfirmModal';
+import MikroPushButton from './MikroPushButton';
+import { recetePayload } from '../services/mikroEvrak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -268,6 +270,21 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {bom.productSku && bom.components.length > 0 && (
+                    <MikroPushButton
+                      compact
+                      method="UrunReceteKaydetV2"
+                      entityType="bom"
+                      entityId={bom.id}
+                      buildPayload={() => recetePayload({
+                        anaKod: bom.productSku,
+                        anaMiktar: 1,
+                        bilesenler: bom.components
+                          .filter(c => c.sku)
+                          .map(c => ({ sku: c.sku, miktar: c.quantity })),
+                      })}
+                    />
+                  )}
                   <button onClick={() => openEdit(bom)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>

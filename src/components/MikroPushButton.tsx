@@ -59,7 +59,7 @@ const MikroPushButton: React.FC<Props> = ({
           compact ? 'text-[10px] px-2 py-0.5' : 'text-xs px-3 py-1.5'
         } ${state === 'ok' ? 'bg-emerald-100 text-emerald-700' : 'bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c]/20'}`}
       >
-        {state === 'busy' ? '⏳' : state === 'ok' ? '✓' : '⇪'} {compact ? 'Mikro' : label}
+        {state === 'busy' ? '⏳' : state === 'ok' ? '✓' : '⇪'} {compact ? (label !== "Mikro'ya Gönder" ? label : 'Mikro') : label}
       </button>
       {msg && (
         <span className={`text-[10px] ${state === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>{msg}</span>

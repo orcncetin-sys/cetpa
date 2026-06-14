@@ -11,7 +11,7 @@ import ConfirmModal from './ConfirmModal';
 import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
-import { uretimIsEmriPayload } from '../services/mikroEvrak';
+import { uretimIsEmriPayload, uretimTalepPayload } from '../services/mikroEvrak';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, runTransaction, getDocs,
@@ -873,6 +873,24 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                             {order.orderNo}
                             <MikroPushButton
                               compact
+                              label="Talep"
+                              method="UretimTalepKaydetV2"
+                              entityType="productionOrder"
+                              entityId={order.id}
+                              buildPayload={() => {
+                                const sku = (order as unknown as { sku?: string }).sku;
+                                if (!sku) return null; // ürün SKU'suz üretim talebi Mikro'ya gidemez
+                                return uretimTalepPayload({
+                                  sku,
+                                  quantity: order.quantity,
+                                  deliveryDate: order.endDate,
+                                  belgeNo: order.orderNo,
+                                });
+                              }}
+                            />
+                            <MikroPushButton
+                              compact
+                              label="İş Emri"
                               method="UretimIsEmriOlusturV2"
                               entityType="productionOrder"
                               entityId={order.id}

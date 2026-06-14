@@ -3528,6 +3528,27 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                       </td>
                       <td className="py-2.5 px-3 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {(c.balance || 0) !== 0 && (
+                            <MikroPushButton
+                              compact
+                              method="DekontKaydetV2"
+                              entityType="cariDekont"
+                              entityId={c.id}
+                              buildPayload={() => {
+                                const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+                                  ?? (c as unknown as { code?: string }).code
+                                  ?? c.taxNo;
+                                if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
+                                const bal = c.balance || 0;
+                                return dekontPayload({
+                                  cariKod,
+                                  tutar: Math.abs(bal),
+                                  tip: bal > 0 ? 'borc' : 'alacak',
+                                  aciklama: `${c.name} bakiye dekontu`,
+                                });
+                              }}
+                            />
+                          )}
                           <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
                           <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                           <button onClick={() => deleteCustomer(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>

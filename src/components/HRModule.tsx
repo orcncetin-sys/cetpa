@@ -25,6 +25,13 @@ import {
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
 import { cn } from '../lib/utils';
+import MikroPushButton from './MikroPushButton';
+import { izinTalepPayload } from '../services/mikroEvrak';
+
+// İzin türü → Mikro pit_izin_tipi kodu eşlemesi
+const MIKRO_IZIN_TIPI: Record<string, number> = {
+  'Yıllık İzin': 0, 'Hastalık': 1, 'Mazeret': 2, 'Diğer': 3,
+};
 
 // Employee, PerformanceReview, Training, TravelRequest, LeaveRequest, Payroll are imported from ../types
 
@@ -788,7 +795,27 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                          </td>
                          <td className="py-3 px-5 text-right">
                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                             <button 
+                             {req.status === 'Onaylandı' && (
+                               <MikroPushButton
+                                 compact
+                                 method="PersonelIzinTalepKaydetV2"
+                                 entityType="leaveRequest"
+                                 entityId={req.id as string}
+                                 buildPayload={() => {
+                                   const emp = employees.find(e => e.id === req.employeeId);
+                                   const persKod = emp?.employeeId ?? '';
+                                   if (!persKod) return null;
+                                   return izinTalepPayload({
+                                     persKod,
+                                     startDate: req.startDate,
+                                     days: req.days,
+                                     type: MIKRO_IZIN_TIPI[req.type] ?? 0,
+                                     reason: `${req.type}${req.notes ? ' — ' + req.notes : ''}`,
+                                   });
+                                 }}
+                               />
+                             )}
+                             <button
                                onClick={() => updateDoc(doc(db, 'leaveRequests', req.id as string), { status: 'Onaylandı', approvalStatus: 'Onaylandı' })}
                                className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
                                title={currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
