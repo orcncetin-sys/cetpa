@@ -27,6 +27,7 @@ import { SUPPORTED_ERPS, type ErpId, type ErpInfo, type ErpStatusResult } from '
 // (only the active ERP's bundle is fetched)
 
 const MikroSyncPanel    = React.lazy(() => import('./MikroSyncPanel'));
+const ParasutSyncPanel  = React.lazy(() => import('./erp/ParasutSyncPanel'));
 const LucaSyncPanel     = React.lazy(() => import('./LucaSyncPanel'));
 const LogoSyncPanel     = React.lazy(() => import('./erp/LogoSyncPanel'));
 const DynamicsSyncPanel = React.lazy(() => import('./erp/DynamicsSyncPanel'));
@@ -34,6 +35,7 @@ const SAPSyncPanel      = React.lazy(() => import('./erp/SAPSyncPanel'));
 
 const PANEL_MAP: Record<ErpId, React.ComponentType<{ lang?: string; currentLanguage?: string }>> = {
   mikro:        MikroSyncPanel,
+  parasut:      ParasutSyncPanel,
   luca:         LucaSyncPanel,
   logo:         LogoSyncPanel,
   dynamics365:  DynamicsSyncPanel,
@@ -245,9 +247,10 @@ export default function ERPHubPanel({ currentLanguage = 'tr' }: { currentLanguag
       // Write to erpHub (new architecture)
       await setDoc(doc(db, 'settings', 'erpHub'), { activeErp: erpId }, { merge: true });
 
-      // Backward compat: mirror to settings/mikro and settings/luca
-      await setDoc(doc(db, 'settings', 'mikro'), { enabled: erpId === 'mikro' }, { merge: true });
-      await setDoc(doc(db, 'settings', 'luca'),  { enabled: erpId === 'luca'  }, { merge: true });
+      // Karşılıklı dışlama: aktif ERP dışındakiler kapanır (Mikro ↔ Paraşüt dahil)
+      await setDoc(doc(db, 'settings', 'mikro'),   { enabled: erpId === 'mikro'   }, { merge: true });
+      await setDoc(doc(db, 'settings', 'parasut'), { enabled: erpId === 'parasut' }, { merge: true });
+      await setDoc(doc(db, 'settings', 'luca'),    { enabled: erpId === 'luca'    }, { merge: true });
 
       setActiveErpState(erpId);
       setExpanded(erpId);
@@ -261,8 +264,9 @@ export default function ERPHubPanel({ currentLanguage = 'tr' }: { currentLanguag
     setSaving(true);
     try {
       await setDoc(doc(db, 'settings', 'erpHub'), { activeErp: null }, { merge: true });
-      await setDoc(doc(db, 'settings', 'mikro'), { enabled: false }, { merge: true });
-      await setDoc(doc(db, 'settings', 'luca'),  { enabled: false }, { merge: true });
+      await setDoc(doc(db, 'settings', 'mikro'),   { enabled: false }, { merge: true });
+      await setDoc(doc(db, 'settings', 'parasut'), { enabled: false }, { merge: true });
+      await setDoc(doc(db, 'settings', 'luca'),    { enabled: false }, { merge: true });
       setActiveErpState(null);
       setExpanded(null);
     } finally {

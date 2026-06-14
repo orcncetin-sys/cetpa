@@ -3924,6 +3924,7 @@ async function startServer() {
     res.json({
       integrations: [
         { id: 'mikro',       name: 'Mikro ERP (JumpBulut)', configured: has('MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'), requiredKeys: ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'], affects: 'Stok/cari/sipariş senkronizasyonu' },
+        { id: 'parasut',     name: 'Paraşüt', configured: has('PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'), requiredKeys: ['PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'], affects: 'Cari/ürün (fiyat dahil)/fatura senkronizasyonu' },
         { id: 'shopify',     name: 'Shopify',               configured: has('SHOPIFY_ACCESS_TOKEN'),                 requiredKeys: ['SHOPIFY_ACCESS_TOKEN'],                 affects: 'Ürün/sipariş sync + SKU otomatik eşleştirme' },
         { id: 'resend',      name: 'E-posta (Resend)',      configured: has('RESEND_API_KEY'),                       requiredKeys: ['RESEND_API_KEY'],                       affects: 'Sipariş onayı, davet ve bildirim e-postaları' },
         { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
@@ -4516,6 +4517,200 @@ async function startServer() {
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ══ Paraşüt entegrasyonu (Mikro alternatifi, OAuth2 v4 API) ════════════════
+  // ERPHubPanel'de activeErp tekil olduğu için Mikro ile karşılıklı dışlamalı.
+  // Mikro V16'nın aksine ürün fiyatını + cari bakiyeyi API'den verir.
+  interface ParasutCreds { clientId: string; clientSecret: string; username: string; password: string; companyId: string; }
+  async function getParasutCreds(): Promise<ParasutCreds | null> {
+    if (process.env.PARASUT_CLIENT_ID && process.env.PARASUT_CLIENT_SECRET
+        && process.env.PARASUT_USERNAME && process.env.PARASUT_PASSWORD && process.env.PARASUT_COMPANY_ID) {
+      return {
+        clientId: process.env.PARASUT_CLIENT_ID, clientSecret: process.env.PARASUT_CLIENT_SECRET,
+        username: process.env.PARASUT_USERNAME, password: process.env.PARASUT_PASSWORD,
+        companyId: process.env.PARASUT_COMPANY_ID,
+      };
+    }
+    if (!adminDb) return null;
+    try {
+      const snap = await adminDb.collection('settings').doc('parasut').get();
+      if (!snap.exists) return null;
+      const d = snap.data() as Record<string, unknown>;
+      const c = {
+        clientId: d.clientId as string, clientSecret: d.clientSecret as string,
+        username: d.username as string, password: d.password as string, companyId: d.companyId as string,
+      };
+      return c.clientId && c.clientSecret && c.username && c.password && c.companyId ? c : null;
+    } catch { return null; }
+  }
+
+  let parasutToken: { access: string; refresh: string; exp: number } | null = null;
+  const PARASUT_BASE = 'https://api.parasut.com';
+  async function getParasutToken(creds: ParasutCreds): Promise<string> {
+    if (parasutToken && parasutToken.exp > Date.now() + 60_000) return parasutToken.access;
+    const body = parasutToken?.refresh
+      ? { grant_type: 'refresh_token', client_id: creds.clientId, client_secret: creds.clientSecret, refresh_token: parasutToken.refresh }
+      : { grant_type: 'password', client_id: creds.clientId, client_secret: creds.clientSecret, username: creds.username, password: creds.password, redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' };
+    let res = await fetch(`${PARASUT_BASE}/oauth/token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok && parasutToken?.refresh) {
+      parasutToken = null;
+      res = await fetch(`${PARASUT_BASE}/oauth/token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_type: 'password', client_id: creds.clientId, client_secret: creds.clientSecret, username: creds.username, password: creds.password, redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' }),
+      });
+    }
+    if (!res.ok) throw new Error(`Paraşüt token alınamadı: HTTP ${res.status}`);
+    const j = await res.json() as { access_token: string; refresh_token: string; expires_in: number };
+    parasutToken = { access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in * 1000) };
+    return parasutToken.access;
+  }
+
+  async function parasutGetAll(creds: ParasutCreds, resource: string, params = ''): Promise<Record<string, unknown>[]> {
+    const token = await getParasutToken(creds);
+    const out: Record<string, unknown>[] = [];
+    for (let page = 1; page <= 200; page++) {
+      const url = `${PARASUT_BASE}/v4/${creds.companyId}/${resource}?page[number]=${page}&page[size]=25${params}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      if (!res.ok) break;
+      const j = await res.json() as { data?: Record<string, unknown>[] };
+      const rows = j.data ?? [];
+      if (!rows.length) break;
+      out.push(...rows);
+      if (rows.length < 25) break;
+    }
+    return out;
+  }
+
+  app.get('/api/parasut/status', requireAuth, async (_req: Request, res: Response) => {
+    const creds = await getParasutCreds();
+    if (!creds) return res.json({ configured: false, connected: false, message: 'Paraşüt yapılandırılmamış.' });
+    try {
+      await getParasutToken(creds);
+      res.json({ configured: true, connected: true, message: 'Paraşüt bağlantısı başarılı.' });
+    } catch (e) {
+      res.json({ configured: true, connected: false, error: (e as Error).message });
+    }
+  });
+
+  app.post('/api/parasut/import/cari', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    const creds = await getParasutCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
+    const companyId = (req as Request & { uid: string }).uid;
+    const t0 = Date.now();
+    try {
+      const contacts = await parasutGetAll(creds, 'contacts');
+      const leadSnap = await adminDb.collection('leads').get();
+      const byParasutId = new Map<string, PgDocRef>();
+      for (const d of leadSnap.docs) {
+        const pid = (d.data().parasutId as string) || '';
+        if (pid) byParasutId.set(pid, d.ref);
+      }
+      let created = 0, updated = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (const c of contacts) {
+        const a = (c.attributes as Record<string, unknown>) || {};
+        const pid = String(c.id);
+        const fields = {
+          name: (a.name as string) || pid,
+          company: (a.name as string) || '',
+          email: (a.email as string) || '',
+          phone: (a.phone as string) || '',
+          taxId: (a.tax_number as string) || '',
+          taxOffice: (a.tax_office as string) || '',
+          address: (a.address as string) || '',
+          city: (a.city as string) || '',
+          balance: Number(a.balance ?? 0),
+          type: a.account_type === 'supplier' ? 'Supplier' : 'Customer',
+          parasutId: pid, source: 'parasut', mikroSynced: false,
+          updatedAt: pgServerTimestamp(),
+        };
+        const ref = byParasutId.get(pid);
+        if (ref) { batch.update(ref, fields); updated++; }
+        else { batch.set(adminDb.collection('leads').doc(), { ...fields, companyId, status: 'Active', createdAt: pgServerTimestamp() }); created++; }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
+      await writeAuditLog(reqActor(req), 'Paraşüt Cari İçe Aktarma', `${created} yeni / ${updated} güncel`);
+      res.json({ success: true, created, updated, total: contacts.length, duration: Date.now() - t0 });
+    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
+  });
+
+  app.post('/api/parasut/import/stok', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    const creds = await getParasutCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
+    const companyId = (req as Request & { uid: string }).uid;
+    const t0 = Date.now();
+    try {
+      const products = await parasutGetAll(creds, 'products');
+      const invSnap = await adminDb.collection('inventory').get();
+      const bySku = new Map<string, PgDocRef>();
+      for (const d of invSnap.docs) {
+        const sku = ((d.data().sku as string) || '').trim();
+        if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
+      }
+      let created = 0, updated = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (const p of products) {
+        const a = (p.attributes as Record<string, unknown>) || {};
+        const sku = ((a.code as string) || String(p.id)).trim();
+        const listPrice = Number(a.list_price ?? 0);
+        const fields = {
+          name: (a.name as string) || sku,
+          unit: (a.unit as string) || 'ADET',
+          vatRate: Number(a.vat_rate ?? 20),
+          stockLevel: Number(a.stock_count ?? a.inventory_level ?? 0),
+          price: listPrice,
+          prices: { 'Retail': listPrice, 'B2B Standard': listPrice, 'B2B Premium': listPrice, 'Dealer': listPrice },
+          parasutId: String(p.id), source: 'parasut',
+          updatedAt: pgServerTimestamp(),
+        };
+        const ref = bySku.get(sku);
+        if (ref) { batch.update(ref, fields); updated++; }
+        else { batch.set(adminDb.collection('inventory').doc(), { ...fields, companyId, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() }); created++; }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
+      await writeAuditLog(reqActor(req), 'Paraşüt Stok İçe Aktarma', `${created} yeni / ${updated} güncel (fiyat dahil)`);
+      res.json({ success: true, created, updated, total: products.length, duration: Date.now() - t0 });
+    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
+  });
+
+  app.post('/api/parasut/fatura', requireAuth, async (req: Request, res: Response) => {
+    const creds = await getParasutCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
+    const { order } = req.body as { order: Record<string, unknown> };
+    if (!order) return res.status(400).json({ success: false, error: 'order zorunlu.' });
+    const t0 = Date.now();
+    try {
+      const token = await getParasutToken(creds);
+      const payload = {
+        data: {
+          type: 'sales_invoices',
+          attributes: {
+            item_type: 'invoice',
+            description: (order.customerName as string) || '',
+            issue_date: new Date().toISOString().slice(0, 10),
+            currency: 'TRL',
+          },
+          ...(order.parasutContactId ? { relationships: { contact: { data: { id: String(order.parasutContactId), type: 'contacts' } } } } : {}),
+        },
+      };
+      const r = await fetch(`${PARASUT_BASE}/v4/${creds.companyId}/sales_invoices`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      const success = r.ok;
+      await writeSyncLog('ParasutFatura', 'order', String(order.id ?? 'unknown'), success, null, success ? null : `HTTP ${r.status}`, Date.now() - t0, reqActor(req));
+      res.json({ success, data, duration: Date.now() - t0 });
+    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
   });
 
   // ── Trendyol Seller API ─────────────────────────────────────────────────────

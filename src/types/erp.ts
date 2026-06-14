@@ -13,6 +13,7 @@
 
 export type ErpId =
   | 'mikro'
+  | 'parasut'
   | 'luca'
   | 'logo'
   | 'dynamics365'
@@ -76,6 +77,25 @@ export const SUPPORTED_ERPS: ErpInfo[] = [
       'MIKRO_ALIAS', 'MIKRO_FIRMA_KODU', 'MIKRO_CALISMA_YILI',
       'MIKRO_API_KEY', 'MIKRO_KULLANICI_KODU', 'MIKRO_SIFRE',
       'MIKRO_FIRMA_NO', 'MIKRO_SUBE_NO',
+    ],
+  },
+  {
+    id:            'parasut',
+    displayName:   'Paraşüt',
+    shortName:     'Paraşüt',
+    vendor:        'Paraşüt (Logo)',
+    website:       'https://www.parasut.com',
+    logoEmoji:     '🪂',
+    brandColor:    '#0099ff',
+    descTr:        'Bulut ön muhasebe. API üzerinden cari, ürün (fiyat dahil) ve fatura senkronizasyonu. Mikro alternatifi.',
+    descEn:        'Cloud pre-accounting. Sync contacts, products (incl. prices) and invoices via API. Alternative to Mikro.',
+    apiType:       'rest',
+    features:      ['import_stok', 'import_cari', 'export_cari', 'export_fatura', 'pull_bakiye'],
+    statusPath:    '/api/parasut/status',
+    docsUrl:       'https://apidocs.parasut.com',
+    requiredEnvVars: [
+      'PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET',
+      'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID',
     ],
   },
   {
