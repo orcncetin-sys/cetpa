@@ -1735,17 +1735,18 @@ async function startServer() {
     contentSecurityPolicy: isProd ? {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", 'https://apis.google.com', 'https://www.gstatic.com'],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'https://apis.google.com', 'https://www.gstatic.com', 'https://accounts.google.com'],
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
         connectSrc: ["'self'", 'https://*.googleapis.com', 'https://*.firebaseio.com',
           'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com',
-          'wss://*.firebaseio.com', 'https://api.tcmb.gov.tr'],
-        frameSrc: ["'self'", 'https://*.firebaseapp.com'],
+          'wss://*.firebaseio.com', 'https://api.tcmb.gov.tr', 'https://accounts.google.com'],
+        // Google Sign-In (popup/iframe): firebaseapp.com auth handler + Google OAuth
+        frameSrc: ["'self'", 'https://*.firebaseapp.com', 'https://accounts.google.com', 'https://apis.google.com'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
-        formAction: ["'self'"],
+        formAction: ["'self'", 'https://accounts.google.com', 'https://*.firebaseapp.com'],
       },
     } : false, // dev'de CSP kapalı (Vite HMR/eval)
     crossOriginEmbedderPolicy: false, // harici görseller/Firebase için
