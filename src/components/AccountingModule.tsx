@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { authFetch } from '../services/authFetch';
 import MikroPushButton from './MikroPushButton';
 import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
@@ -452,6 +452,12 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
+  // İşletme sermayesi — editlenebilir kalemler (settings/workingCapital'da saklanır)
+  type WCField = 'kasaBanka' | 'ticariAlacaklar' | 'stoklar' | 'ticariBorclar' | 'vergiSgk' | 'krediler';
+  const [workingCapital, setWorkingCapital] = useState<Record<WCField, number>>({
+    kasaBanka: 0, ticariAlacaklar: 0, stoklar: 0, ticariBorclar: 0, vergiSgk: 0, krediler: 0,
+  });
+  const [wcSaved, setWcSaved] = useState(false);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [checks, setChecks] = useState<Check[]>([]);
@@ -792,7 +798,10 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       onSnapshot(collection(db, 'transfers'), s => setTransfers(s.docs.map(d => ({ id: d.id, ...d.data() } as Transfer))), (error) => logFirestoreError(error, OperationType.LIST, 'transfers')),
       onSnapshot(collection(db, 'checks'), s => setChecks(s.docs.map(d => ({ id: d.id, ...d.data() } as Check))), (error) => logFirestoreError(error, OperationType.LIST, 'checks')),
       onSnapshot(collection(db, 'budgets'), s => setBudgets(s.docs.map(d => ({ id: d.id, ...d.data() } as Budget))), (error) => logFirestoreError(error, OperationType.LIST, 'budgets')),
-      onSnapshot(collection(db, 'waybills'), s => setWaybills(s.docs.map(d => ({ id: d.id, ...d.data() } as Waybill))), (error) => logFirestoreError(error, OperationType.LIST, 'waybills'))
+      onSnapshot(collection(db, 'waybills'), s => setWaybills(s.docs.map(d => ({ id: d.id, ...d.data() } as Waybill))), (error) => logFirestoreError(error, OperationType.LIST, 'waybills')),
+      onSnapshot(doc(db, 'settings', 'workingCapital'), s => {
+        if (s.exists()) setWorkingCapital(prev => ({ ...prev, ...(s.data() as Partial<Record<WCField, number>>) }));
+      }, () => { /* yoksa varsayılan 0 */ })
     ];
     return () => unsubs.forEach(u => u());
   }, [isAuthenticated, userRole]);
@@ -851,6 +860,31 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       logFirestoreError(err, OperationType.UPDATE, 'settings/luca', auth.currentUser?.uid);
       showToast(t.errorOccurred, 'error');
     }
+  };
+
+  // İşletme sermayesi: kalemi güncelle + settings'e kaydet (debounce'lu)
+  const wcSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const updateWC = (field: WCField, value: number) => {
+    setWorkingCapital(prev => {
+      const next = { ...prev, [field]: value };
+      if (wcSaveTimer.current) clearTimeout(wcSaveTimer.current);
+      wcSaveTimer.current = setTimeout(() => {
+        void setDoc(doc(db, 'settings', 'workingCapital'), { ...next, updatedAt: serverTimestamp() }, { merge: true })
+          .then(() => { setWcSaved(true); setTimeout(() => setWcSaved(false), 1500); })
+          .catch(() => { /* non-critical */ });
+      }, 600);
+      return next;
+    });
+  };
+  // Gerçek veriden ön-doldur: alacaklar = ödenmemiş siparişler, stok = depo değeri
+  const prefillWC = () => {
+    const ar = orders
+      .filter(o => !(o as unknown as { paid?: boolean }).paid && o.status !== 'Cancelled')
+      .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
+    const stok = warehouseItems.reduce((s, w) => s + (Number(w.quantity) || 0) * (Number((w as unknown as { costPrice?: number }).costPrice) || 0), 0);
+    const next = { ...workingCapital, ticariAlacaklar: Math.round(ar), stoklar: Math.round(stok) };
+    setWorkingCapital(next);
+    void setDoc(doc(db, 'settings', 'workingCapital'), { ...next, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
   };
 
   const handleSyncMikroBank = async () => {
@@ -2846,77 +2880,83 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
       )}
 
       {/* İŞLETME SERMAYESİ */}
-      {accountingTab === 'isletme_sermayesi' && (
+      {accountingTab === 'isletme_sermayesi' && (() => {
+        const tr = currentLanguage === 'tr';
+        const wc = workingCapital;
+        const donenVarliklar = wc.kasaBanka + wc.ticariAlacaklar + wc.stoklar;
+        const kvYukumluluk = wc.ticariBorclar + wc.vergiSgk + wc.krediler;
+        const netSermaye = donenVarliklar - kvYukumluluk;
+        const cariOran = kvYukumluluk > 0 ? donenVarliklar / kvYukumluluk : 0;
+        const fmt = (n: number) => `₺${Math.round(n).toLocaleString('tr-TR')}`;
+        const oranDurum = cariOran >= 1.5 ? { txt: tr ? 'İdeal' : 'Ideal', cls: 'text-emerald-600' }
+          : cariOran >= 1 ? { txt: tr ? 'Yeterli' : 'Adequate', cls: 'text-amber-600' }
+          : { txt: tr ? 'Riskli' : 'At risk', cls: 'text-red-600' };
+        const WCInput = ({ field, label }: { field: WCField; label: string }) => (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-gray-500">{label}</span>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
+              <input type="number" value={wc[field] || ''} onChange={e => updateWC(field, Number(e.target.value) || 0)}
+                placeholder="0"
+                className="w-32 pl-5 pr-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums" />
+            </div>
+          </div>
+        );
+        return (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button 
-              onClick={() => setDrillDown({ 
-                title: currentLanguage === 'tr' ? 'Dönen Varlıklar Detayı' : 'Current Assets Detail',
-                rows: [
-                  { label: 'Kasa/Banka', value: '₺1.200.000' },
-                  { label: 'Ticari Alacaklar', value: '₺2.450.000' },
-                  { label: 'Stoklar', value: '₺1.200.000' }
-                ],
-                total: '₺4.850.000'
-              })}
-              className="apple-card p-6 text-left cursor-pointer group"
-            >
-              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{currentLanguage === 'tr' ? 'Dönen Varlıklar' : 'Current Assets'}</h4>
-              <p className="text-2xl font-black text-gray-800">₺4.850.000</p>
-              <div className="mt-4 space-y-2">
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Kasa/Banka</span><span>₺1.200.000</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Ticari Alacaklar</span><span>₺2.450.000</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Stoklar</span><span>₺1.200.000</span></div>
-              </div>
-              <div className="text-[10px] text-gray-300 mt-4 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-            </button>
-            <button 
-              onClick={() => setDrillDown({ 
-                title: currentLanguage === 'tr' ? 'Kısa Vadeli Yükümlülükler Detayı' : 'Current Liabilities Detail',
-                rows: [
-                  { label: 'Ticari Borçlar', value: '₺1.450.000' },
-                  { label: 'Vergi/SGK', value: '₺420.000' },
-                  { label: 'Kısa Vadeli Krediler', value: '₺250.000' }
-                ],
-                total: '₺2.120.000'
-              })}
-              className="apple-card p-6 text-left cursor-pointer group"
-            >
-              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{currentLanguage === 'tr' ? 'Kısa Vadeli Yükümlülükler' : 'Current Liabilities'}</h4>
-              <p className="text-2xl font-black text-red-600">₺2.120.000</p>
-              <div className="mt-4 space-y-2">
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Ticari Borçlar</span><span>₺1.450.000</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Vergi/SGK</span><span>₺420.000</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-500">Kısa Vadeli Krediler</span><span>₺250.000</span></div>
-              </div>
-              <div className="text-[10px] text-gray-300 mt-4 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-            </button>
-            <button 
-              onClick={() => setDrillDown({ 
-                title: currentLanguage === 'tr' ? 'Net İşletme Sermayesi Analizi' : 'Net Working Capital Analysis',
-                rows: [
-                  { label: 'Dönen Varlıklar', value: '₺4.850.000' },
-                  { label: 'KV Yükümlülükler', value: '₺2.120.000' },
-                  { label: 'Cari Oran', value: '2.29', badge: 'İdeal', badgeColor: 'bg-green-100 text-green-600' }
-                ],
-                total: '₺2.730.000'
-              })}
-              className="apple-card bg-brand p-6 text-white text-left cursor-pointer group"
-            >
-              <h4 className="text-xs font-bold opacity-70 uppercase mb-2">{currentLanguage === 'tr' ? 'Net İşletme Sermayesi' : 'Net Working Capital'}</h4>
-              <p className="text-3xl font-black">₺2.730.000</p>
-              <div className="mt-6 p-3 bg-white/10 rounded-xl">
-                <p className="text-[10px] font-medium leading-relaxed">
-                  {currentLanguage === 'tr' 
-                    ? 'İşletme sermayesi rasyosu 2.29 ile ideal seviyededir. Likidite riski bulunmamaktadır.' 
-                    : 'Working capital ratio is at ideal level with 2.29. No liquidity risk.'}
-                </p>
-              </div>
-              <div className="text-[10px] text-white/40 mt-4 group-hover:text-white/60 transition-colors">{currentLanguage === 'tr' ? 'Analiz için tıkla' : 'Click for analysis'}</div>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-gray-400">
+              {tr ? 'Kalemleri elle düzenleyin — otomatik kaydedilir.' : 'Edit items manually — auto-saved.'}
+              {wcSaved && <span className="ml-2 text-emerald-600 font-bold">✓ {tr ? 'Kaydedildi' : 'Saved'}</span>}
+            </p>
+            <button onClick={prefillWC} className="apple-button-secondary text-xs">
+              <RefreshCw className="w-3.5 h-3.5" /> {tr ? 'Verilerden Doldur (Alacak + Stok)' : 'Fill from Data (AR + Stock)'}
             </button>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Dönen Varlıklar — editlenebilir */}
+            <div className="apple-card p-6">
+              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Dönen Varlıklar' : 'Current Assets'}</h4>
+              <p className="text-2xl font-black text-gray-800 mb-4">{fmt(donenVarliklar)}</p>
+              <div className="space-y-3">
+                <WCInput field="kasaBanka" label={tr ? 'Kasa/Banka' : 'Cash/Bank'} />
+                <WCInput field="ticariAlacaklar" label={tr ? 'Ticari Alacaklar' : 'Trade Receivables'} />
+                <WCInput field="stoklar" label={tr ? 'Stoklar' : 'Inventory'} />
+              </div>
+            </div>
+            {/* Kısa Vadeli Yükümlülükler — editlenebilir */}
+            <div className="apple-card p-6">
+              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Kısa Vadeli Yükümlülükler' : 'Current Liabilities'}</h4>
+              <p className="text-2xl font-black text-red-600 mb-4">{fmt(kvYukumluluk)}</p>
+              <div className="space-y-3">
+                <WCInput field="ticariBorclar" label={tr ? 'Ticari Borçlar' : 'Trade Payables'} />
+                <WCInput field="vergiSgk" label={tr ? 'Vergi/SGK' : 'Tax/Social Sec.'} />
+                <WCInput field="krediler" label={tr ? 'Kısa Vadeli Krediler' : 'Short-term Loans'} />
+              </div>
+            </div>
+            {/* Net İşletme Sermayesi — hesaplanır */}
+            <div className="apple-card bg-brand p-6 text-white">
+              <h4 className="text-xs font-bold opacity-70 uppercase mb-2">{tr ? 'Net İşletme Sermayesi' : 'Net Working Capital'}</h4>
+              <p className="text-3xl font-black">{fmt(netSermaye)}</p>
+              <div className="mt-4 flex items-center gap-2">
+                <span className="text-xs opacity-70">{tr ? 'Cari Oran' : 'Current Ratio'}:</span>
+                <span className="text-lg font-black">{cariOran.toFixed(2)}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white ${oranDurum.cls}`}>{oranDurum.txt}</span>
+              </div>
+              <div className="mt-4 p-3 bg-white/10 rounded-xl">
+                <p className="text-[10px] font-medium leading-relaxed">
+                  {kvYukumluluk === 0 && donenVarliklar === 0
+                    ? (tr ? 'Kalemleri girerek işletme sermayenizi hesaplayın.' : 'Enter items to compute your working capital.')
+                    : cariOran >= 1.5
+                      ? (tr ? `İşletme sermayesi rasyosu ${cariOran.toFixed(2)} ile ideal seviyededir. Likidite riski düşüktür.` : `Working capital ratio is ideal at ${cariOran.toFixed(2)}. Low liquidity risk.`)
+                      : (tr ? `Cari oran ${cariOran.toFixed(2)} — likiditeyi yakından izleyin.` : `Current ratio ${cariOran.toFixed(2)} — monitor liquidity closely.`)}
+                </p>
+              </div>
+            </div>
+          </div>
         </motion.div>
-      )}
+        );
+      })()}
 
       {/* KDV */}
       {accountingTab === 'kdv' && (
