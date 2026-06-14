@@ -1750,6 +1750,11 @@ async function startServer() {
       },
     } : false, // dev'de CSP kapalı (Vite HMR/eval)
     crossOriginEmbedderPolicy: false, // harici görseller/Firebase için
+    // Google ile giriş (signInWithPopup): popup, accounts.google.com → firebaseapp.com
+    // auth handler üzerinden ana pencereye window.opener.postMessage ile döner.
+    // Varsayılan COOP "same-origin" bu opener referansını koparır → login takılır.
+    // "same-origin-allow-popups" güvenliği korur ama popup'ın haberleşmesine izin verir.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     hsts: isProd ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
   }));
 
