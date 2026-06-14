@@ -4416,6 +4416,58 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
         )}
       </AnimatePresence>
 
+      {/* STOK / DEPO MODAL */}
+      <AnimatePresence>
+        {showStockModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowStockModal(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{t.depo} — {editingStock ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <button onClick={() => setShowStockModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.product}</label>
+                  <input type="text" value={stockForm.productName} onChange={e => setStockForm(prev => ({ ...prev, productName: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">SKU</label>
+                    <input type="text" value={stockForm.sku} onChange={e => setStockForm(prev => ({ ...prev, sku: e.target.value }))} placeholder="CTP-000.00.00" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.quantity}</label>
+                    <input type="number" value={stockForm.quantity} onChange={e => setStockForm(prev => ({ ...prev, quantity: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.location}</label>
+                  <select value={stockForm.warehouseId} onChange={e => setStockForm(prev => ({ ...prev, warehouseId: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                    <option value="">{currentLanguage === 'tr' ? '— Depo seçin —' : '— Select warehouse —'}</option>
+                    {warehouses.map(wh => (
+                      <option key={wh.id} value={wh.id}>{wh.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
+                  <input type="text" value={stockForm.category} onChange={e => setStockForm(prev => ({ ...prev, category: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Genel' : 'General'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Not' : 'Notes'}</label>
+                  <input type="text" value={stockForm.notes} onChange={e => setStockForm(prev => ({ ...prev, notes: e.target.value }))} placeholder="..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setShowStockModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
+                <button onClick={saveStock} className="apple-button-primary"><Save size={14} /> {t.save}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* SUPPLIER MODAL */}
       <AnimatePresence>
         {showSupplierModal && (
