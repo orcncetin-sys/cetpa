@@ -1749,8 +1749,37 @@ function AppContent() {
   // ── Phase 634: Bütçe-Fiili Varyans Analizi ────────────────────────────────
   const [p634Period, setP634Period] = useState<'this_month'|'last_month'|'ytd'>('this_month');
   // ── Phase 635: Kur Değerleme (FX Revaluation) ─────────────────────────────
-  const [p635Rates, setP635Rates] = useState({USD:32.5,EUR:35.2});
-  const [p635RateEdit, setP635RateEdit] = useState(false);
+  // Kur Değerleme: açık döviz pozisyonu (foreign tutar) + defterdeki kur — editlenebilir,
+  // settings/fxRevaluation'da saklanır. Güncel kur canlı TCMB'den (exchangeRates).
+  const [fxPos, setFxPos] = useState({ usdBalance: 0, usdBookRate: 0, eurBalance: 0, eurBookRate: 0 });
+  const [fxRefreshing, setFxRefreshing] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, 'settings', 'fxRevaluation'), s => {
+      if (s.exists()) setFxPos(prev => ({ ...prev, ...(s.data() as typeof fxPos) }));
+    }, () => { /* yoksa 0 */ });
+    return () => unsub();
+  }, [user]);
+  const fxSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const updateFx = (field: keyof typeof fxPos, value: number) => {
+    setFxPos(prev => {
+      const next = { ...prev, [field]: value };
+      if (fxSaveTimer.current) clearTimeout(fxSaveTimer.current);
+      fxSaveTimer.current = setTimeout(() => {
+        void setDoc(doc(db, 'settings', 'fxRevaluation'), { ...next, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+      }, 600);
+      return next;
+    });
+  };
+  const refreshFxRates = async () => {
+    setFxRefreshing(true);
+    try {
+      const res = await fetch('/api/settings/exchange-rates');
+      const data = await res.json();
+      if (data?.rates?.USD) { setExchangeRates(data.rates); storeSetRates(data.rates); }
+    } catch { /* başarısızsa mevcut kalır */ }
+    setFxRefreshing(false);
+  };
   // ── Phase 636: SGK/Net Bordro Hesaplama Motoru ────────────────────────────
   const [p636Month, setP636Month] = useState(()=>new Date().toISOString().slice(0,7));
   const [p636Payrolls, setP636Payrolls] = useState<Array<{id:string;name:string;position:string;gross:number;sgkEmployee:number;sgkEmployer:number;incomeTax:number;stampTax:number;net:number}>>([]);
@@ -9737,50 +9766,44 @@ function AppContent() {
                   {/* ── Phase 635: Kur Değerleme (FX Revaluation) ───────────────── */}
                   {muhasebeTab === 'kur-degerleme' && (() => {
                     const tr635 = currentLanguage === 'tr';
-                    const usdBalances = orders.filter(o=>!['Cancelled','Delivered'].includes(o.status)&&(o.lineItems||[]).some(li=>li.price>0));
-                    const totalUsdExposure = usdBalances.reduce((s,o)=>s+(o.totalPrice||0)*0.15,0); // assume 15% USD exposure
-                    const totalEurExposure = usdBalances.reduce((s,o)=>s+(o.totalPrice||0)*0.10,0); // assume 10% EUR exposure
-                    const bookRateUSD = 30.0; const bookRateEUR = 32.5;
-                    const gainUSD = totalUsdExposure*(p635Rates.USD-bookRateUSD)/bookRateUSD;
-                    const gainEUR = totalEurExposure*(p635Rates.EUR-bookRateEUR)/bookRateEUR;
+                    // Güncel kur CANLI TCMB'den (exchangeRates); açık bakiye + defterdeki kur editlenebilir.
+                    const curUSD = exchangeRates?.USD ?? 0;
+                    const curEUR = exchangeRates?.EUR ?? 0;
+                    // Kur farkı = döviz bakiyesi × (güncel kur − defterdeki kur)  [TL cinsinden]
+                    const gainUSD = fxPos.usdBalance * (curUSD - fxPos.usdBookRate);
+                    const gainEUR = fxPos.eurBalance * (curEUR - fxPos.eurBookRate);
+                    const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v: number) => void; w?: string }) => (
+                      <input type="number" step="0.01" value={value || ''} onChange={e => onChange(Number(e.target.value) || 0)}
+                        placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
+                    );
+                    const positions = [
+                      { cur: 'USD', bal: fxPos.usdBalance, balField: 'usdBalance' as const, book: fxPos.usdBookRate, bookField: 'usdBookRate' as const, curRate: curUSD, gain: gainUSD },
+                      { cur: 'EUR', bal: fxPos.eurBalance, balField: 'eurBalance' as const, book: fxPos.eurBookRate, bookField: 'eurBookRate' as const, curRate: curEUR, gain: gainEUR },
+                    ];
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr635?'Kur Değerleme (FX Revaluation)':'FX Revaluation'} subtitle={tr635?'Açık döviz pozisyonlarının dönem sonu kur farkı hesabı':'Period-end FX revaluation of open foreign currency balances'} icon={TrendingUp}/>
                         <div className="flex items-center gap-4 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-600">USD:</span>
-                            {p635RateEdit?(
-                              <input type="number" step="0.1" value={p635Rates.USD} onChange={e=>setP635Rates(r=>({...r,USD:Number(e.target.value)}))} className="apple-input px-2 py-1 text-xs w-24"/>
-                            ):(
-                              <span className="text-sm font-bold text-gray-900">₺{p635Rates.USD.toFixed(2)}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-600">EUR:</span>
-                            {p635RateEdit?(
-                              <input type="number" step="0.1" value={p635Rates.EUR} onChange={e=>setP635Rates(r=>({...r,EUR:Number(e.target.value)}))} className="apple-input px-2 py-1 text-xs w-24"/>
-                            ):(
-                              <span className="text-sm font-bold text-gray-900">₺{p635Rates.EUR.toFixed(2)}</span>
-                            )}
-                          </div>
-                          <button onClick={()=>setP635RateEdit(v=>!v)} className="apple-button-secondary px-3 py-1.5 text-xs">
-                            {p635RateEdit?(tr635?'Kaydet':'Save'):(tr635?'Kur Güncelle':'Update Rates')}
+                          <span className="text-xs text-gray-500">{tr635?'Güncel Kur (TCMB):':'Current Rate (TCMB):'}</span>
+                          <span className="text-sm font-bold text-gray-900">USD ₺{curUSD.toFixed(4)}</span>
+                          <span className="text-sm font-bold text-gray-900">EUR ₺{curEUR.toFixed(4)}</span>
+                          <button onClick={() => void refreshFxRates()} disabled={fxRefreshing} className="apple-button-secondary px-3 py-1.5 text-xs">
+                            <RefreshCw className={`w-3.5 h-3.5 ${fxRefreshing?'animate-spin':''}`} /> {tr635?'Kur Güncelle':'Update Rates'}
                           </button>
+                          {(curUSD === 0) && <span className="text-[11px] text-amber-600">{tr635?'Kur çekilemedi — Kur Güncelle\'ye basın':'Rates unavailable — click Update'}</span>}
                         </div>
+                        <p className="text-[11px] text-gray-400">{tr635?'Açık bakiye (döviz cinsinden) ve defterdeki kuru girin — otomatik kaydedilir. Güncel kur TCMB\'den canlı çekilir.':'Enter open balance (in FX) and book rate — auto-saved. Current rate is live from the central bank.'}</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {[
-                            {cur:'USD',exposure:totalUsdExposure,bookRate:bookRateUSD,curRate:p635Rates.USD,gain:gainUSD},
-                            {cur:'EUR',exposure:totalEurExposure,bookRate:bookRateEUR,curRate:p635Rates.EUR,gain:gainEUR},
-                          ].map(fx=>(
+                          {positions.map(fx=>(
                             <div key={fx.cur} className={`apple-card p-5 border-l-4 ${fx.gain>=0?'border-l-emerald-400':'border-l-red-400'}`}>
                               <p className="text-xs font-bold text-gray-500 mb-3">{fx.cur} {tr635?'Pozisyonu':'Position'}</p>
-                              <div className="space-y-1.5 text-sm">
-                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Açık Bakiye':'Open Balance'}</span><span className="font-bold">₺{Math.round(fx.exposure).toLocaleString('tr-TR')}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Defterdeki Kur':'Book Rate'}</span><span className="font-semibold">₺{fx.bookRate.toFixed(2)}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">₺{fx.curRate.toFixed(2)}</span></div>
-                                <div className={`flex justify-between pt-1 border-t border-gray-100 font-black ${fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between items-center"><span className="text-gray-500">{tr635?'Açık Bakiye':'Open Balance'} ({fx.cur})</span><FxInput value={fx.bal} onChange={v=>updateFx(fx.balField, v)} /></div>
+                                <div className="flex justify-between items-center"><span className="text-gray-500">{tr635?'Defterdeki Kur':'Book Rate'}</span><FxInput value={fx.book} onChange={v=>updateFx(fx.bookField, v)} w="w-24" /></div>
+                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">₺{fx.curRate.toFixed(4)}</span></div>
+                                <div className={`flex justify-between pt-2 border-t border-gray-100 font-black ${fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
                                   <span>{tr635?'Kur Farkı':'FX Gain/Loss'}</span>
-                                  <span>{fx.gain>=0?'+':''}₺{Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}</span>
+                                  <span>{fx.gain>=0?'+':'-'}₺{Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}</span>
                                 </div>
                               </div>
                             </div>
@@ -9790,7 +9813,7 @@ function AppContent() {
                           <TrendingUp className={`w-5 h-5 ${(gainUSD+gainEUR)>=0?'text-emerald-600':'text-red-600'}`}/>
                           <div>
                             <p className="text-xs text-gray-500">{tr635?'Net Kur Farkı (Değerleme Sonucu)':'Net FX Position (Revaluation Result)'}</p>
-                            <p className={`text-lg font-black ${(gainUSD+gainEUR)>=0?'text-emerald-700':'text-red-700'}`}>{(gainUSD+gainEUR)>=0?'+':''}₺{Math.round(Math.abs(gainUSD+gainEUR)).toLocaleString('tr-TR')}</p>
+                            <p className={`text-lg font-black ${(gainUSD+gainEUR)>=0?'text-emerald-700':'text-red-700'}`}>{(gainUSD+gainEUR)>=0?'+':'-'}₺{Math.round(Math.abs(gainUSD+gainEUR)).toLocaleString('tr-TR')}</p>
                           </div>
                         </div>
                       </motion.div>
