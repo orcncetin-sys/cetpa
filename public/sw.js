@@ -1,6 +1,6 @@
 // ── CETPA Service Worker — Offline-first with stale-while-revalidate ─────────
 // Version bump triggers cache refresh on deploy
-const CACHE_VERSION = 'cetpa-v4';
+const CACHE_VERSION = 'cetpa-v5';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 

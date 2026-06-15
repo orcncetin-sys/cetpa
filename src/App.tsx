@@ -345,9 +345,29 @@ class TabErrorBoundary extends React.Component<
     this.state = { hasError: false, errorMsg: '' };
   }
   static getDerivedStateFromError(error: Error) { return { hasError: true, errorMsg: error.message }; }
+  componentDidCatch(error: Error) {
+    console.error(`[TabErrorBoundary:${this.props.tabName}]`, error);
+    // Stale chunk / deploy cache hatası → sayfayı bir kez otomatik yenile (döngü koruması).
+    const msg = error?.message || '';
+    const isChunkError = /dynamically imported module|Loading chunk|Importing a module script failed|Failed to fetch/i.test(msg);
+    if (isChunkError) {
+      const key = 'cetpa_chunk_reload';
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        // SW cache'ini temizleyip tam yeniden yükle
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+          if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+        }
+        setTimeout(() => window.location.reload(), 300);
+      }
+    }
+  }
   render() {
     if (this.state.hasError) {
       const isTR = this.props.lang !== 'en';
+      const msg = this.state.errorMsg || '';
+      const isChunkError = /dynamically imported module|Loading chunk|Importing a module script failed|Failed to fetch/i.test(msg);
       return (
         <div className="apple-card p-10 flex flex-col items-center justify-center text-center gap-4 min-h-[280px]">
           <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
@@ -358,16 +378,21 @@ class TabErrorBoundary extends React.Component<
               {isTR ? `${this.props.tabName} modülünde bir hata oluştu` : `Error in ${this.props.tabName} module`}
             </h3>
             <p className="text-sm text-gray-500 max-w-xs mx-auto">
-              {isTR ? 'Diğer modüller etkilenmedi. Modülü yeniden yüklemek için butona tıklayın.' : 'Other modules are unaffected. Click below to reload this module.'}
+              {isChunkError
+                ? (isTR ? 'Yeni sürüm yüklendi. Sayfayı yenileyin (önbellek temizlenecek).' : 'A new version was deployed. Reload the page (cache will be cleared).')
+                : (isTR ? 'Diğer modüller etkilenmedi. Yeniden yüklemek için butona tıklayın.' : 'Other modules are unaffected. Click below to reload.')}
             </p>
           </div>
           <button
-            onClick={() => this.setState({ hasError: false, errorMsg: '' })}
+            onClick={() => {
+              if (isChunkError) { sessionStorage.removeItem('cetpa_chunk_reload'); window.location.reload(); }
+              else this.setState({ hasError: false, errorMsg: '' });
+            }}
             className="apple-button-secondary px-6 py-2 text-sm font-semibold"
           >
-            {isTR ? '↺ Modülü Yenile' : '↺ Reload Module'}
+            {isChunkError ? (isTR ? '↺ Sayfayı Yenile' : '↺ Reload Page') : (isTR ? '↺ Modülü Yenile' : '↺ Reload Module')}
           </button>
-          {process.env.NODE_ENV === 'development' && <p className="text-[10px] text-gray-300 font-mono max-w-sm break-all">{this.state.errorMsg}</p>}
+          {msg && <p className="text-[10px] text-gray-400 font-mono max-w-md break-all bg-gray-50 rounded-lg px-3 py-2">{msg}</p>}
         </div>
       );
     }
@@ -3330,6 +3355,29 @@ function AppContent() {
     );
   }
 
+  // Tüm sekme/alt-modül id'leri için tek kaynak etiket lookup'ı (header + hata sınırı)
+  const tabLabelOf = (id: string): string => (({
+    dashboard: currentT.dashboard, crm: currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales',
+    inventory: currentT.inventory, lojistik: currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics',
+    muhasebe: currentLanguage === 'tr' ? 'Muhasebe' : 'Accounting', 'satin-alma': currentLanguage === 'tr' ? 'Satın Alma' : 'Purchasing',
+    ik: currentLanguage === 'tr' ? 'İK' : 'HR', hukuk: currentLanguage === 'tr' ? 'Hukuk' : 'Legal',
+    proje: currentLanguage === 'tr' ? 'Projeler' : 'Projects', production: currentLanguage === 'tr' ? 'Üretim' : 'Production',
+    kalite: currentLanguage === 'tr' ? 'Kalite' : 'Quality', kurumsal: currentLanguage === 'tr' ? 'Kurumsal' : 'Governance',
+    b2b: 'B2B Portal', risk: 'Risk', reports: currentT.reports, onaylar: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals',
+    admin: currentT.admin, settings: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings',
+    ebelge: currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub', vergi: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar',
+    ihracat: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', lotseri: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial',
+    bakim: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance', sube: currentLanguage === 'tr' ? 'Şubeler' : 'Branches',
+    servis: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service', iade: currentLanguage === 'tr' ? 'İade & Değişim' : 'Returns (RMA)',
+    orders: currentLanguage === 'tr' ? 'Siparişler' : 'Orders', mesai: currentLanguage === 'tr' ? 'Mesai & Devam' : 'Time & Attendance',
+    selfservis: currentLanguage === 'tr' ? 'Self-Servis Portalı' : 'Self-Service Portal',
+    cpq: currentLanguage === 'tr' ? 'CPQ Teklif' : 'CPQ Quote', dunning: currentLanguage === 'tr' ? 'Tahsilat Takip' : 'Dunning',
+    finance: currentLanguage === 'tr' ? 'Finans Paneli' : 'Finance Panel', gelirtanima: currentLanguage === 'tr' ? 'IFRS 15 Gelir Tanıma' : 'IFRS 15 Rev. Rec.',
+    holding: currentLanguage === 'tr' ? 'Holding Yönetimi' : 'Holding', mobilewms: currentLanguage === 'tr' ? 'Mobil WMS' : 'Mobile WMS',
+    mrp: 'MRP II', muhtasar: currentLanguage === 'tr' ? 'Muhtasar' : 'Withholding', performans: currentLanguage === 'tr' ? 'Performans' : 'Performance',
+    territory: currentLanguage === 'tr' ? 'Satış Bölgeleri' : 'Territories',
+  } as Record<string, string>)[id] || id);
+
   return (
     <div className="min-h-screen font-avenir overflow-x-hidden" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       {/* Navigation */}
@@ -3364,37 +3412,7 @@ function AppContent() {
 
             {/* Active tab label */}
             <span className={cn("font-semibold text-sm truncate hidden sm:block", darkMode ? "text-white/90" : "text-gray-900")}>
-              {([
-                { id: 'dashboard', label: currentT.dashboard },
-                { id: 'crm', label: currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales' },
-                { id: 'inventory', label: currentT.inventory },
-                { id: 'lojistik', label: currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics' },
-                { id: 'muhasebe', label: currentLanguage === 'tr' ? 'Muhasebe' : 'Accounting' },
-                { id: 'satin-alma', label: currentLanguage === 'tr' ? 'Satın Alma' : 'Purchasing' },
-                { id: 'ik', label: currentLanguage === 'tr' ? 'İK' : 'HR' },
-                { id: 'hukuk', label: currentLanguage === 'tr' ? 'Hukuk' : 'Legal' },
-                { id: 'proje', label: currentLanguage === 'tr' ? 'Projeler' : 'Projects' },
-                { id: 'production', label: currentLanguage === 'tr' ? 'Üretim' : 'Production' },
-                { id: 'kalite', label: currentLanguage === 'tr' ? 'Kalite' : 'Quality' },
-                { id: 'kurumsal', label: currentLanguage === 'tr' ? 'Kurumsal' : 'Governance' },
-                { id: 'b2b', label: currentLanguage === 'tr' ? 'B2B Portal' : 'B2B Portal' },
-                { id: 'risk', label: currentLanguage === 'tr' ? 'Risk' : 'Risk' },
-                { id: 'reports', label: currentT.reports },
-                { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals' },
-                { id: 'admin', label: currentT.admin },
-                { id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings' },
-                { id: 'ebelge', label: currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub' },
-                { id: 'vergi', label: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar' },
-                { id: 'ihracat', label: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export' },
-                { id: 'lotseri', label: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial' },
-                { id: 'bakim', label: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance' },
-                { id: 'sube', label: currentLanguage === 'tr' ? 'Şubeler' : 'Branches' },
-                { id: 'servis', label: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service' },
-                { id: 'iade', label: currentLanguage === 'tr' ? 'İade & Değişim' : 'Returns (RMA)' }, // Phase 549
-                { id: 'orders', label: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
-                { id: 'mesai', label: currentLanguage === 'tr' ? 'Mesai & Devam' : 'Time & Attendance' }, // Phase 552
-                { id: 'selfservis', label: currentLanguage === 'tr' ? 'Self-Servis Portalı' : 'Self-Service Portal' }, // Phase 553
-              ].find(t => t.id === activeTab)?.label || activeTab)}
+              {tabLabelOf(activeTab)}
             </span>
           </div>
 
@@ -4076,7 +4094,7 @@ function AppContent() {
             </div>
           )}
 
-        <TabErrorBoundary tabName={currentLanguage === 'tr' ? activeTab : activeTab} lang={currentLanguage}>
+        <TabErrorBoundary tabName={tabLabelOf(activeTab)} lang={currentLanguage}>
         <React.Suspense fallback={
           <div className="flex flex-col items-center justify-center min-h-[320px] gap-4">
             <div className="w-8 h-8 rounded-full border-2 border-brand border-t-transparent animate-spin" />
