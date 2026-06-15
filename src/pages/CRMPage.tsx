@@ -3620,6 +3620,28 @@ export default function CRMPage({
             );
           })()}
 
+      {/* ── CARİ EKSTRE MODAL (Phase 502) ── */}
+      <AnimatePresence>
+        {showStmtModal && (() => {
+          const stmtLead = leads.find(l => l.id === showStmtModal);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowStmtModal(null)} />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden">
+                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                  <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}{stmtLead ? ` — ${stmtLead.name}` : ''}</h3>
+                  <button onClick={() => setShowStmtModal(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                </div>
+                <div className="p-5 max-h-[75vh] overflow-y-auto">
+                  <React.Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin w-7 h-7 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+                    <CariEkstrePanel currentLanguage={currentLanguage} leadId={showStmtModal} customerName={stmtLead?.name} />
+                  </React.Suspense>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
     </>
   );
 }

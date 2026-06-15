@@ -651,6 +651,58 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         )}
       </div>
 
+      {/* ── Muhasebe Verisi Çek (Bakiye / Mizan / KDV) ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <h4 className="font-bold text-sm text-gray-800 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-[#1a3a5c]" />
+            {t ? 'Muhasebe Verisi Çek' : 'Pull Accounting Data'}
+          </h4>
+          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+            {t ? 'Dönem (Mizan/KDV):' : 'Period (Trial/VAT):'}
+            <input type="month" value={pullPeriod} onChange={e => setPullPeriod(e.target.value)}
+              className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#1a3a5c]" />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <PullCard
+            icon={<Users className="w-4 h-4 text-[#1a3a5c]" />}
+            title={t ? 'Cari Bakiyeler' : 'Account Balances'}
+            description={t ? 'Mikro cari bakiyelerini CRM müşterilerine işler.' : 'Sync Mikro account balances into CRM customers.'}
+            state={bakiyePull} disabled={!status?.configured} onPull={handlePullBakiye} lang={t}
+          />
+          <PullCard
+            icon={<Activity className="w-4 h-4 text-[#1a3a5c]" />}
+            title={t ? 'Mizan' : 'Trial Balance'}
+            description={t ? 'Seçili dönem mizanını çeker (hesap bazlı borç/alacak).' : 'Pull the trial balance for the selected period.'}
+            state={mizanPull} disabled={!status?.configured} onPull={handlePullMizan} lang={t}
+          />
+          <PullCard
+            icon={<Download className="w-4 h-4 text-[#1a3a5c]" />}
+            title={t ? 'KDV Özeti' : 'VAT Summary'}
+            description={t ? 'Seçili dönem KDV matrahı ve hesaplanan KDV.' : 'VAT base and calculated VAT for the period.'}
+            state={kdvPull} disabled={!status?.configured} onPull={handlePullKdv} lang={t}
+          />
+        </div>
+
+        {/* Diğer Mikro listeleri (genel import endpoint'leri) */}
+        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mt-5 mb-3">{t ? 'Diğer Mikro Listeleri' : 'Other Mikro Lists'}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {extraPullDefs.map(def => (
+            <PullCard
+              key={def.key}
+              icon={<Package className="w-4 h-4 text-[#1a3a5c]" />}
+              title={def.title}
+              description={def.desc}
+              state={extraPulls[def.key] ?? { running: false, result: null, error: null }}
+              disabled={!status?.configured}
+              onPull={() => handleExtraPull(def.key, def.route)}
+              lang={t}
+            />
+          ))}
+        </div>
+      </div>
+
       {/* ── Sync Log ── */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <button
