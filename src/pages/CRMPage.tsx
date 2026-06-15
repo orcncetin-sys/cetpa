@@ -113,7 +113,7 @@ export default function CRMPage({
   const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null);
   const [p515Dismissed, setP515Dismissed] = useState(false);
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null);
-  const [p549Iadeler, setP549Iadeler] = useState<Array<{ id: string; orderId: string; customerName: string; items: string; reason: string; condition: string; notes?: string; status: string; decision?: string; createdAt?: unknown }>>([]);
+  const [p549Iadeler] = useState<Array<{ id: string; orderId: string; customerName: string; items: string; reason: string; condition: string; notes?: string; status: string; decision?: string; createdAt?: unknown }>>([]);
   const [p549Form, setP549Form] = useState(false);
   const [p549Draft, setP549Draft] = useState({ orderId: '', customerName: '', items: '', reason: 'Hasarlı Ürün', condition: 'Hasarlı' as const, notes: '' });
   const [monthlyTarget, setMonthlyTarget] = useState<number>(0);
@@ -138,10 +138,10 @@ export default function CRMPage({
   const [campaignForm, setCampaignForm] = useState({ subject: '', body: '', segment: 'all' });
   const [campaignSending, setCampaignSending] = useState(false);
   const [campaignSent, setCampaignSent] = useState<{ count: number; ts: number } | null>(null);
-  const [contracts, setContracts] = useState<Array<{ id: string; customerName: string; title: string; value: number; startDate: string; endDate: string; status: string; autoRenew: boolean; createdAt?: unknown }>>([]);
+  const [contracts] = useState<Array<{ id: string; customerName: string; title: string; value: number; startDate: string; endDate: string; status: string; autoRenew: boolean; createdAt?: unknown }>>([]);
   const [contractForm, setContractForm] = useState({ customerName: '', title: '', value: 0, startDate: '', endDate: '', status: 'active', autoRenew: false });
   const [showContractForm, setShowContractForm] = useState(false);
-  const [priceOverrides, setPriceOverrides] = useState<Array<{ id: string; requestedBy: string; customerName: string; productName: string; standardPrice: number; requestedPrice: number; reason: string; status: 'pending' | 'approved' | 'rejected'; createdAt?: unknown }>>([]);
+  const [priceOverrides] = useState<Array<{ id: string; requestedBy: string; customerName: string; productName: string; standardPrice: number; requestedPrice: number; reason: string; status: 'pending' | 'approved' | 'rejected'; createdAt?: unknown }>>([]);
   const [showPriceOverrideForm, setShowPriceOverrideForm] = useState(false);
   const [priceOverrideForm, setPriceOverrideForm] = useState({ customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: '' });
   const [showStmtModal, setShowStmtModal] = useState<string|null>(null);

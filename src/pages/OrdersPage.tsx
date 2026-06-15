@@ -181,9 +181,9 @@ export default function OrdersPage({
   const [orderNoteText, setOrderNoteText] = useState('');
   const [orderNoteSaved, setOrderNoteSaved] = useState(false);
   const [orderNoteSaving, setOrderNoteSaving] = useState(false);
-  const [orderTimeline, setOrderTimeline] = useState<TimelineEntry[]>([]);
-  const [faturaLoading, setFaturaLoading] = useState<Record<string, boolean>>({});
-  const [iyzicoLinkLoading, setIyzicoLinkLoading] = useState<Record<string, boolean>>({});
+  const [orderTimeline] = useState<TimelineEntry[]>([]);
+  const [faturaLoading] = useState<Record<string, boolean>>({});
+  const [iyzicoLinkLoading] = useState<Record<string, boolean>>({});
   const [returnModal, setReturnModal] = useState<{ open: boolean; order: Order | null }>({ open: false, order: null });
   const [returnReason, setReturnReason] = useState('');
   const [returnItems, setReturnItems] = useState<string>('');
@@ -193,7 +193,7 @@ export default function OrdersPage({
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [dragIndex, setDragIndex] = useState<number|null>(null);
   const [p513Selected, setP513Selected] = useState<string|null>(null);
-  const [p554Bins, setP554Bins] = useState<Array<{ id: string; warehouseId: string; warehouseName?: string; binCode: string; productSku: string; productName: string; quantity: number; minQty: number; lastCounted?: string; notes?: string }>>([]);
+  const [p554Bins] = useState<Array<{ id: string; warehouseId: string; warehouseName?: string; binCode: string; productSku: string; productName: string; quantity: number; minQty: number; lastCounted?: string; notes?: string }>>([]);
   const [p554AddForm, setP554AddForm] = useState(false);
   const [p554Draft, setP554Draft] = useState({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
   const [p554Search, setP554Search] = useState('');
@@ -210,13 +210,13 @@ export default function OrdersPage({
   const [p609Tickets, setP609Tickets] = useState<Array<{id:string;customer:string;subject:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';status:'Açık'|'İşlemde'|'Çözüldü'|'Kapatıldı';createdAt:string;resolvedAt?:string;slaHours:number;satisfaction?:1|2|3|4|5}>>([]);
   const [p609ShowForm, setP609ShowForm] = useState(false);
   const [p609Draft, setP609Draft] = useState({customer:'',subject:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',slaHours:'24'});
-  const [p621Demands, setP621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
+  const [p621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
   const [p621ShowForm, setP621ShowForm] = useState(false);
   const [p621Draft, setP621Draft] = useState({productName:'',sku:'',requestedQty:'',requestedBy:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek',notes:''});
   const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
   const [p622ShowForm, setP622ShowForm] = useState(false);
   const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
-  const [p639Returns, setP639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
+  const [p639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
   const [p639ShowForm, setP639ShowForm] = useState(false);
   const [p639Draft, setP639Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
 
