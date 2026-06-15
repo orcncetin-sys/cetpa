@@ -216,9 +216,6 @@ export default function OrdersPage({
   const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
   const [p622ShowForm, setP622ShowForm] = useState(false);
   const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
-  const [p639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
-  const [p639ShowForm, setP639ShowForm] = useState(false);
-  const [p639Draft, setP639Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
 
   const sortData = <T,>(arr: T[], key: string, dir: 'asc' | 'desc'): T[] =>
     [...arr].sort((a: T, b: T) => {
@@ -1492,65 +1489,6 @@ export default function OrdersPage({
             );
           })()}
 
-          {/* ── Phase 639: İade & Kredi Notu ────────────────────────────────── */}
-          {activeTab === 'orders' && !selectedOrder && (() => {
-            const tr639 = currentLanguage === 'tr';
-            const statusCls:{[k:string]:string}={Bekliyor:'bg-amber-100 text-amber-700',Onaylandı:'bg-emerald-100 text-emerald-700',Reddedildi:'bg-red-100 text-red-700'};
-            const pendingReturns = p639Returns.filter(r=>r.status==='Bekliyor').length;
-            const approvedTotal = p639Returns.filter(r=>r.status==='Onaylandı').reduce((s,r)=>s+r.amount,0);
-            return (
-              <div className="apple-card p-5 space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div><h3 className="font-bold text-gray-900 text-sm">↩️ {tr639?'İade & Kredi Notu':'Returns & Credit Notes'}</h3>
-                  <p className="text-xs text-gray-400">{tr639?'Müşteri iadelerini ve kredi notlarını yönetin':'Manage customer returns and credit notes'}</p></div>
-                  <button onClick={()=>setActiveTab('iade')} className="apple-button-secondary text-xs flex items-center gap-1.5" title={tr639?'İade & Değişim sayfasında yönet':'Manage on Returns page'}><Plus className="w-3.5 h-3.5"/>{tr639?'İade Talebi':'New Return'}</button>
-                </div>
-                {pendingReturns>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">⚠️ {pendingReturns} {tr639?'bekleyen iade talebi':'pending return request(s)'}</div>}
-                {p639ShowForm && (
-                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="apple-input" placeholder={tr639?'Sipariş ID':'Order ID'} value={p639Draft.orderId} onChange={e=>setP639Draft(d=>({...d,orderId:e.target.value}))}/>
-                      <input className="apple-input" placeholder={tr639?'Müşteri Adı':'Customer Name'} value={p639Draft.customerName} onChange={e=>setP639Draft(d=>({...d,customerName:e.target.value}))}/>
-                      <input className="apple-input col-span-2" placeholder={tr639?'İade Sebebi':'Return Reason'} value={p639Draft.reason} onChange={e=>setP639Draft(d=>({...d,reason:e.target.value}))}/>
-                      <input type="number" className="apple-input" placeholder={tr639?'Tutar (₺)':'Amount (₺)'} value={p639Draft.amount} onChange={e=>setP639Draft(d=>({...d,amount:e.target.value}))}/>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={async ()=>{
-                        if(!p639Draft.customerName||!p639Draft.amount) return;
-                        try { await addDoc(collection(db,'returns'),{orderId:p639Draft.orderId,customerName:p639Draft.customerName,reason:p639Draft.reason,amount:Number(p639Draft.amount),status:'Bekliyor',createdAt:new Date().toISOString()}); toast(currentLanguage === 'tr' ? 'İade kaydedildi ✓' : 'Return saved ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'İade kaydedilemedi.' : 'Failed to save return.', 'error');}
-                        setP639Draft({orderId:'',customerName:'',reason:'',amount:''});
-                        setP639ShowForm(false);
-                        toast(tr639?'İade talebi oluşturuldu.':'Return request created.','success');
-                      }} className="apple-button-primary text-xs px-6">{tr639?'Oluştur':'Create'}</button>
-                      <button onClick={()=>setP639ShowForm(false)} className="apple-button-secondary text-xs px-4">{tr639?'İptal':'Cancel'}</button>
-                    </div>
-                  </div>
-                )}
-                {p639Returns.length > 0 ? (
-                  <>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Bekleyen':'Pending'}</p><p className="text-xl font-black text-amber-600">{pendingReturns}</p></div>
-                      <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Onaylanan':'Approved'}</p><p className="text-lg font-black text-emerald-600">₺{approvedTotal.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p></div>
-                      <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr639?'Reddedilen':'Rejected'}</p><p className="text-xl font-black text-red-600">{p639Returns.filter(r=>r.status==='Reddedildi').length}</p></div>
-                    </div>
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {[...p639Returns].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(r=>(
-                        <div key={r.id} className="flex items-start gap-3 border border-gray-100 rounded-xl px-4 py-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-gray-800">{r.customerName} <span className="font-normal text-gray-400">#{r.orderId}</span></p>
-                            <p className="text-[10px] text-gray-400">{r.reason} · ₺{r.amount.toLocaleString('tr-TR',{maximumFractionDigits:0})} · {new Date(r.createdAt).toLocaleDateString('tr-TR')}</p>
-                          </div>
-                          <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'returns',r.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[r.status]}`}>
-                            {['Bekliyor','Onaylandı','Reddedildi'].map(s=><option key={s}>{s}</option>)}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : <p className="text-center text-gray-400 text-xs py-4">{tr639?'Henüz iade talebi yok.':'No return requests yet.'}</p>}
-              </div>
-            );
-          })()}
 
         </motion.div>
       )}
