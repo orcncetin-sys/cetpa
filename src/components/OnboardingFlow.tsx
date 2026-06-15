@@ -80,6 +80,108 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
     a.click();
   };
 
+  // Tek-komut self-hosted kurulum script'i (firma kendi VPS'inde `sudo bash install.sh` çalıştırır).
+  // Bizim sunucu SSH ile bağlanmaz / VPS şifresi saklamaz → güvenli.
+  const downloadInstallScript = () => {
+    const dbPass = vps.dbPassword || ('cetpa_' + Math.random().toString(36).slice(2, 12));
+    const domain = vps.domain || 'cetpa.example.com';
+    const sessionSecret = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const mfaSecret = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const env = [
+      `NODE_ENV=production`,
+      `PORT=5173`,
+      `DATABASE_URL=postgresql://cetpa:${dbPass}@/cetpa_db?host=/var/run/postgresql`,
+      `FIREBASE_CLIENT_EMAIL=`,
+      `FIREBASE_PRIVATE_KEY=`,
+      `SESSION_TOKEN_SECRET=${sessionSecret}`,
+      `MFA_COOKIE_SECRET=${mfaSecret}`,
+      erpChoice === 'mikro' ? `MIKRO_IDM_EMAIL=\nMIKRO_IDM_PASSWORD=\nMIKRO_ALIAS=\nMIKRO_API_KEY=` : '',
+      erpChoice === 'parasut' ? `PARASUT_CLIENT_ID=\nPARASUT_CLIENT_SECRET=\nPARASUT_USERNAME=\nPARASUT_PASSWORD=\nPARASUT_COMPANY_ID=` : '',
+      `# Ödeme (opsiyonel): STRIPE_SECRET_KEY= / STRIPE_WEBHOOK_SECRET= / IYZICO_API_KEY= / IYZICO_SECRET_KEY=`,
+    ].filter(Boolean).join('\n');
+    const compose = [
+      'services:',
+      '  app:',
+      '    build: .',
+      '    container_name: cetpa-app',
+      '    ports: ["127.0.0.1:5173:5173"]',
+      '    env_file: [.env.production]',
+      '    extra_hosts: ["host.docker.internal:host-gateway"]',
+      '    volumes:',
+      '      - /var/run/postgresql:/var/run/postgresql',
+      '      - ./backups:/app/backups',
+      '    restart: unless-stopped',
+    ].join('\n');
+    const L: string[] = [];
+    const p = (s: string) => L.push(s);
+    p('#!/usr/bin/env bash');
+    p('set -euo pipefail');
+    p(`# CETPA self-hosted installer — ${companyName || 'firma'} — ${new Date().toISOString().slice(0, 10)}`);
+    p(`DOMAIN="${domain}"`);
+    p(`DB_PASS="${dbPass}"`);
+    p('REPO="https://github.com/orcncetin-sys/cetpa.git"');
+    p('APP_DIR="/opt/cetpa"');
+    p('[ "$(id -u)" -eq 0 ] || { echo "Lütfen root ile: sudo bash install.sh"; exit 1; }');
+    p('echo "▶ CETPA kurulumu başlıyor → $DOMAIN"');
+    p('# 1) Paket yöneticisi');
+    p('if command -v dnf >/dev/null 2>&1; then PM=dnf; elif command -v apt-get >/dev/null 2>&1; then PM=apt; else echo "Desteklenmeyen OS"; exit 1; fi');
+    p('# 2) Docker (cross-distro)');
+    p('if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi');
+    p('systemctl enable --now docker');
+    p('# 3) PostgreSQL 15 + nginx + certbot + git');
+    p('if [ "$PM" = "dnf" ]; then');
+    p('  dnf install -y git nginx certbot python3-certbot-nginx || true');
+    p('  dnf module reset -y postgresql || true; dnf module enable -y postgresql:15 || true');
+    p('  dnf install -y postgresql-server postgresql || true');
+    p('  [ -d /var/lib/pgsql/data/base ] || postgresql-setup --initdb || true');
+    p('  systemctl enable --now postgresql || true');
+    p('else');
+    p('  apt-get update -y && apt-get install -y git nginx certbot python3-certbot-nginx postgresql postgresql-contrib');
+    p('  systemctl enable --now postgresql || true');
+    p('fi');
+    p('# 4) Veritabanı + kullanıcı (idempotent)');
+    p('sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname=\'cetpa\'" | grep -q 1 || sudo -u postgres psql -c "CREATE ROLE cetpa LOGIN PASSWORD \'$DB_PASS\';"');
+    p('sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname=\'cetpa_db\'" | grep -q 1 || sudo -u postgres createdb -O cetpa cetpa_db');
+    p('# 5) Kod (private repo ise: REPO\'yu token\'lı URL ile değiştirin veya kodu elle koyun)');
+    p('mkdir -p "$APP_DIR" && cd "$APP_DIR"');
+    p('[ -d .git ] || git clone "$REPO" . || { echo "⚠ Repo çekilemedi (private?). Kodu $APP_DIR içine koyup tekrar çalıştırın."; exit 1; }');
+    p('git pull --ff-only || true');
+    p('# 6) Yapılandırma dosyaları');
+    p("cat > .env.production <<'ENVEOF'");
+    p(env);
+    p('ENVEOF');
+    p("cat > docker-compose.yml <<'COMPOSEEOF'");
+    p(compose);
+    p('COMPOSEEOF');
+    p('# 7) Uygulamayı başlat');
+    p('docker compose up -d --build');
+    p('# 8) Nginx reverse proxy');
+    p('NGINX_DIR=/etc/nginx/conf.d; [ -d "$NGINX_DIR" ] || NGINX_DIR=/etc/nginx/sites-enabled');
+    p('cat > "$NGINX_DIR/cetpa.conf" <<NGINXEOF');
+    p('server {');
+    p('  listen 80;');
+    p('  server_name $DOMAIN;');
+    p('  client_max_body_size 25m;');
+    p('  location / {');
+    p('    proxy_pass http://127.0.0.1:5173;');
+    p('    proxy_set_header Host $host;');
+    p('    proxy_set_header X-Real-IP $remote_addr;');
+    p('    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;');
+    p('    proxy_set_header X-Forwarded-Proto $scheme;');
+    p('  }');
+    p('}');
+    p('NGINXEOF');
+    p('systemctl enable --now nginx; nginx -t && systemctl reload nginx');
+    p('# 9) SSL (DNS A kaydı $DOMAIN → bu sunucuya bakmalı)');
+    p('certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --redirect || echo "ℹ DNS hazır olunca: certbot --nginx -d $DOMAIN"');
+    p('echo "✅ CETPA kuruldu → https://$DOMAIN  (Firebase + ERP creds için: $APP_DIR/.env.production doldurup: docker compose up -d --build)"');
+    const blob = new Blob([L.join('\n') + '\n'], { type: 'text/x-shellscript' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'install.sh';
+    a.click();
+  };
+
   const handleComplete = () => {
     // Entegrasyon + dağıtım seçimini kaydet (settings — App'i değiştirmeden)
     void (async () => {
@@ -372,11 +474,15 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                   <input value={vps.domain} onChange={e => setVps(v => ({ ...v, domain: e.target.value }))}
                     placeholder={lang === 'tr' ? 'Alan adı (örn. erp.firmaniz.com)' : 'Domain'}
                     className="w-full px-3 py-2 text-sm bg-white/10 border border-white/10 rounded-lg text-white placeholder-white/30 outline-none" />
-                  <button onClick={downloadDeployBundle}
-                    className="w-full apple-button-secondary justify-center py-2.5 text-sm bg-white/10 text-white border-white/20 hover:bg-white/20">
-                    <Download className="w-4 h-4" /> {lang === 'tr' ? 'Deploy Paketini İndir (.env + docker-compose)' : 'Download Deploy Bundle'}
+                  <button onClick={downloadInstallScript}
+                    className="w-full apple-button-primary justify-center py-2.5 text-sm">
+                    <Download className="w-4 h-4" /> {lang === 'tr' ? 'Tek-Komut Kurulum Script\'i (install.sh)' : 'One-Command Installer (install.sh)'}
                   </button>
-                  <p className="text-[10px] text-white/40">{lang === 'tr' ? 'Paketi VPS\'inize kopyalayıp docker compose up ile başlatın. SSH otomasyonu yakında.' : 'Copy to your VPS and run docker compose up. SSH automation coming soon.'}</p>
+                  <p className="text-[10px] text-white/50">{lang === 'tr' ? 'VPS\'inizde: sudo bash install.sh → Docker, PostgreSQL, Nginx, SSL otomatik kurulur. (Private repo ise script içindeki REPO\'yu token\'lı URL ile değiştirin.)' : 'On your VPS: sudo bash install.sh → Docker, PostgreSQL, Nginx, SSL set up automatically.'}</p>
+                  <button onClick={downloadDeployBundle}
+                    className="w-full apple-button-secondary justify-center py-2 text-xs bg-white/10 text-white border-white/20 hover:bg-white/20">
+                    <Download className="w-3.5 h-3.5" /> {lang === 'tr' ? 'Alternatif: Manuel Deploy Paketi (.env + compose)' : 'Alt: Manual Bundle'}
+                  </button>
                 </div>
               )}
 
