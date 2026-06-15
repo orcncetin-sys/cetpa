@@ -4468,6 +4468,89 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
         )}
       </AnimatePresence>
 
+      {/* BANKA HESABI MODAL */}
+      <AnimatePresence>
+        {showBankModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankModal(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hesabı' : 'Bank Account'} — {editingBank ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <button onClick={() => setShowBankModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                {[
+                  { label: currentLanguage === 'tr' ? 'Banka Adı' : 'Bank Name', key: 'bankName', placeholder: 'Ziraat Bankası' },
+                  { label: currentLanguage === 'tr' ? 'Şube' : 'Branch', key: 'branch', placeholder: 'Merkez' },
+                  { label: currentLanguage === 'tr' ? 'Hesap Sahibi' : 'Account Holder', key: 'accountHolder', placeholder: 'Cetpa Ltd. Şti.' },
+                  { label: currentLanguage === 'tr' ? 'Hesap No' : 'Account No', key: 'accountNumber', placeholder: '1234-5678' },
+                  { label: 'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
+                    <input type="text" value={bankForm[f.key as keyof typeof bankForm] as string} onChange={e => setBankForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Döviz' : 'Currency'}</label>
+                    <select value={bankForm.currency} onChange={e => setBankForm(prev => ({ ...prev, currency: e.target.value as 'TRY' | 'USD' | 'EUR' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                      {(['TRY', 'USD', 'EUR'] as const).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}</label>
+                    <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Hesap Tipi' : 'Account Type'}</label>
+                  <select value={bankForm.accountType} onChange={e => setBankForm(prev => ({ ...prev, accountType: e.target.value as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                    {(['Vadesiz', 'Vadeli', 'Kredi', 'Kasa'] as const).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setShowBankModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
+                <button onClick={saveBank} className="apple-button-primary"><Save size={14} /> {t.save}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DEPO TANIMI MODAL */}
+      <AnimatePresence>
+        {showWarehouseModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowWarehouseModal(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımı' : 'Warehouse'} — {editingWarehouse ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <button onClick={() => setShowWarehouseModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                {[
+                  { label: currentLanguage === 'tr' ? 'Depo Adı' : 'Warehouse Name', key: 'name', placeholder: 'Ana Depo' },
+                  { label: t.location, key: 'location', placeholder: 'İstanbul' },
+                  { label: currentLanguage === 'tr' ? 'Sorumlu' : 'Manager', key: 'manager', placeholder: 'Ahmet Yılmaz' },
+                  { label: currentLanguage === 'tr' ? 'Not' : 'Notes', key: 'notes', placeholder: '...' },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
+                    <input type="text" value={warehouseForm[f.key as keyof typeof warehouseForm] as string} onChange={e => setWarehouseForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setShowWarehouseModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
+                <button onClick={saveWarehouse} className="apple-button-primary"><Save size={14} /> {t.save}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* SUPPLIER MODAL */}
       <AnimatePresence>
         {showSupplierModal && (
