@@ -399,12 +399,12 @@ export default function CRMPage({
               </div>
 
               {/* CRM sub-tab: Müşteriler */}
-              {crmTab === 'musteriler' && (
+              {activeTab === 'crm' && crmTab === 'musteriler' && (
                 <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* CRM sub-tab: Siparişler */}
-              {crmTab === 'siparisler' && (
+              {activeTab === 'crm' && crmTab === 'siparisler' && (
                 <div className="space-y-6">
                   <ModuleHeader
                     title={currentT.all_orders}
@@ -528,11 +528,11 @@ export default function CRMPage({
               )}
 
               {/* CRM sub-tab: B2B Portal */}
-              {crmTab === 'b2b' && (
+              {activeTab === 'crm' && crmTab === 'b2b' && (
                 <B2BPortal user={user as unknown as import('firebase/auth').User} userRole={userRole as unknown as import('../types').UserRole} leads={leads} inventory={inventory} orders={orders} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
               )}
 
-              {crmTab === 'komisyon' && (
+              {activeTab === 'crm' && crmTab === 'komisyon' && (
                 <DealerCommissionPanel
                   currentLanguage={currentLanguage as 'tr' | 'en'}
                   isAuthenticated={!!user}
@@ -544,7 +544,7 @@ export default function CRMPage({
               )}
 
               {/* ── Phase 111: Support Tickets ── */}
-              {crmTab === 'tickets' && (
+              {activeTab === 'crm' && crmTab === 'tickets' && (
                 <div className="space-y-4">
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Destek Talepleri' : 'Support Tickets'}
@@ -713,7 +713,7 @@ export default function CRMPage({
               )}
 
               {/* ── Phase 115: Email Campaign Manager ── */}
-              {crmTab === 'kampanya' && (
+              {activeTab === 'crm' && crmTab === 'kampanya' && (
                 <div className="space-y-4">
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'E-posta Kampanyaları' : 'Email Campaigns'}
@@ -863,7 +863,7 @@ export default function CRMPage({
               )}
 
               {/* ── Phase 606: E-posta Kampanya Analitik ─────────────────────────────── */}
-              {crmTab === 'kampanya' && (() => {
+              {activeTab === 'crm' && crmTab === 'kampanya' && (() => {
                 const tr606 = currentLanguage === 'tr';
                 const totalRecip = p606Campaigns.reduce((s,c)=>s+c.recipients,0);
                 const totalOpens = p606Campaigns.reduce((s,c)=>s+c.opens,0);
@@ -948,7 +948,7 @@ export default function CRMPage({
               })()}
 
               {/* ── Phase 116: Contract Management ── */}
-              {crmTab === 'sozlesmeler' && (
+              {activeTab === 'crm' && crmTab === 'sozlesmeler' && (
                 <div className="space-y-4">
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Sözleşme Yönetimi' : 'Contract Management'}
@@ -1085,7 +1085,7 @@ export default function CRMPage({
               )}
 
               {/* ── Phase 122: Price Override Approval ── */}
-              {crmTab === 'fiyat-onay' && (
+              {activeTab === 'crm' && crmTab === 'fiyat-onay' && (
                 <div className="space-y-4">
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Fiyat Onay Sistemi' : 'Price Override Approvals'}
@@ -1246,7 +1246,7 @@ export default function CRMPage({
               )}
 
               {/* ── Phase 141: Sales Pipeline Kanban Board ── */}
-              {crmTab === 'pipeline' && (() => {
+              {activeTab === 'crm' && crmTab === 'pipeline' && (() => {
                 const stages: { key: Lead['status']; label: string; color: string; bg: string; border: string }[] = [
                   { key: 'New',       label: currentLanguage === 'tr' ? 'Yeni'         : 'New',       color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200' },
                   { key: 'Contacted', label: currentLanguage === 'tr' ? 'İletişim'     : 'Contacted', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
@@ -1326,7 +1326,7 @@ export default function CRMPage({
               })()}
 
               {/* ── Phase 142: Sales Target Tracker ── */}
-              {crmTab === 'hedefler' && (() => {
+              {activeTab === 'crm' && crmTab === 'hedefler' && (() => {
                 const now = new Date();
                 const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -1604,7 +1604,7 @@ export default function CRMPage({
               })()}
 
               {/* CRM sub-tab: Leads (default) */}
-              {crmTab === 'leads' && <>
+              {activeTab === 'crm' && crmTab === 'leads' && <>
               {/* Row 1: Title + primary action */}
               <ModuleHeader
                 title={currentT.sales_pipeline}
