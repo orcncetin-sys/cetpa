@@ -3005,6 +3005,242 @@ export default function OrdersPage({
               </>}
         </motion.div>
       )}
+
+      {/* ── İADE MODAL ── */}
+      <AnimatePresence>
+        {returnModal.open && returnModal.order && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReturnModal({ open: false, order: null })} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İade Oluştur' : 'Create Return'} — #{returnModal.order.id.slice(0, 6)}</h3>
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Tutarı (₺)' : 'Return Amount (₺)'}</label>
+                  <input type="number" className="apple-input w-full text-sm" value={returnAmount || ''} onChange={e => setReturnAmount(Number(e.target.value))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Edilen Ürünler' : 'Returned Items'}</label>
+                  <input type="text" className="apple-input w-full text-sm" placeholder={currentLanguage === 'tr' ? 'Ürün adları / adet' : 'Item names / qty'} value={returnItems} onChange={e => setReturnItems(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Sebebi' : 'Reason'}</label>
+                  <textarea className="apple-input w-full text-sm resize-none" rows={3} value={returnReason} onChange={e => setReturnReason(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button
+                  disabled={!returnReason.trim()}
+                  onClick={async () => {
+                    const o = returnModal.order!;
+                    try {
+                      await addDoc(collection(db, 'orderReturns'), {
+                        orderId: o.id, customerName: o.customerName ?? '', amount: returnAmount,
+                        items: returnItems, reason: returnReason, status: 'Pending',
+                        companyId: (o as unknown as { companyId?: string }).companyId ?? null,
+                        createdAt: serverTimestamp(),
+                      });
+                      createNotification(currentLanguage === 'tr' ? 'İade Oluşturuldu' : 'Return Created', `#${o.id.slice(0, 6)} — ₺${returnAmount.toLocaleString('tr-TR')}`, 'info');
+                      toast(currentLanguage === 'tr' ? 'İade kaydı oluşturuldu.' : 'Return created.', 'success');
+                      setReturnModal({ open: false, order: null });
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                  }}
+                  className="apple-button-primary text-sm disabled:opacity-50"
+                >{currentLanguage === 'tr' ? 'İade Oluştur' : 'Create Return'}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── SEVKİYAT EKLE/DÜZENLE MODAL ── */}
+      <AnimatePresence>
+        {isAddingShipment && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{editingShipmentId ? (currentLanguage === 'tr' ? 'Sevkiyat Düzenle' : 'Edit Shipment') : (currentLanguage === 'tr' ? 'Yeni Sevkiyat' : 'New Shipment')}</h3>
+                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                {[
+                  { k: 'customerName', label: currentLanguage === 'tr' ? 'Müşteri' : 'Customer' },
+                  { k: 'destination', label: currentLanguage === 'tr' ? 'Varış Noktası' : 'Destination' },
+                  { k: 'driver', label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver' },
+                  { k: 'cargoFirm', label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Firm' },
+                  { k: 'trackingNo', label: currentLanguage === 'tr' ? 'Takip No' : 'Tracking No' },
+                ].map(f => (
+                  <div key={f.k}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
+                    <input type="text" className="apple-input w-full text-sm" value={(newShipment[f.k as keyof Shipment] as string) ?? ''} onChange={e => setNewShipment(s => ({ ...s, [f.k]: e.target.value }))} />
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                    <input type="date" className="apple-input w-full text-sm" value={newShipment.date ?? ''} onChange={e => setNewShipment(s => ({ ...s, date: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                    <select className="apple-input w-full text-sm" value={newShipment.status ?? 'Pending'} onChange={e => setNewShipment(s => ({ ...s, status: e.target.value as Shipment['status'] }))}>
+                      {(['Pending', 'In Transit', 'Delivered', 'Cancelled'] as const).map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button
+                  disabled={!newShipment.customerName}
+                  onClick={async () => {
+                    try {
+                      if (editingShipmentId) {
+                        await updateDoc(doc(db, 'shipments', editingShipmentId), { ...newShipment, updatedAt: serverTimestamp() });
+                        toast(currentLanguage === 'tr' ? 'Sevkiyat güncellendi.' : 'Shipment updated.', 'success');
+                      } else {
+                        await addDoc(collection(db, 'shipments'), { status: 'Pending', ...newShipment, createdAt: serverTimestamp() });
+                        toast(currentLanguage === 'tr' ? 'Sevkiyat eklendi.' : 'Shipment added.', 'success');
+                      }
+                      setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' });
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                  }}
+                  className="apple-button-primary text-sm disabled:opacity-50"
+                >{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── İRSALİYE (DELIVERY NOTE) MODAL ── */}
+      <AnimatePresence>
+        {deliveryNoteOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeliveryNoteOrder(null)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İrsaliye / Teslimat Notu' : 'Delivery Note'} — #{deliveryNoteOrder.id.slice(0, 6)}</h3>
+                <button onClick={() => setDeliveryNoteOrder(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <p className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Sipariş teslim edildi olarak işaretlenecek. Teslimat notu ekleyebilirsiniz.' : 'Order will be marked Delivered. You may add a delivery note.'}</p>
+                <textarea className="apple-input w-full text-sm resize-none" rows={4} placeholder={currentLanguage === 'tr' ? 'Teslim alan, tarih, not...' : 'Received by, date, note...'} value={deliveryNoteText} onChange={e => setDeliveryNoteText(e.target.value)} />
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setDeliveryNoteOrder(null)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button
+                  onClick={async () => {
+                    const o = deliveryNoteOrder;
+                    try {
+                      await updateDoc(doc(db, 'orders', o.id), { status: 'Delivered', deliveryNote: deliveryNoteText, deliveredAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                      createNotification(currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered', `#${o.id.slice(0, 6)}`, 'info');
+                      toast(currentLanguage === 'tr' ? 'Teslimat kaydedildi.' : 'Delivery saved.', 'success');
+                      setDeliveryNoteOrder(null);
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                  }}
+                  className="apple-button-primary text-sm"
+                >{currentLanguage === 'tr' ? 'Teslim Et' : 'Mark Delivered'}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── SİPARİŞ DÜZENLE MODAL ── */}
+      <AnimatePresence>
+        {isEditingOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsEditingOrder(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Siparişi Düzenle' : 'Edit Order'}</h3>
+                <button onClick={() => setIsEditingOrder(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
+                  <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Teslimat Adresi' : 'Shipping Address'}</label>
+                  <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Tutar (₺)' : 'Total (₺)'}</label>
+                    <input type="number" className="apple-input w-full text-sm" value={(editingOrderData.totalPrice as number) ?? 0} onChange={e => setEditingOrderData(d => ({ ...d, totalPrice: Number(e.target.value) }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                    <select className="apple-input w-full text-sm" value={(editingOrderData.status as string) ?? 'Pending'} onChange={e => setEditingOrderData(d => ({ ...d, status: e.target.value as Order['status'] }))}>
+                      {(['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const).map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setIsEditingOrder(false)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button
+                  onClick={async () => {
+                    if (!selectedOrder) return;
+                    try {
+                      await updateDoc(doc(db, 'orders', selectedOrder.id), { ...editingOrderData, updatedAt: serverTimestamp() });
+                      setSelectedOrder({ ...selectedOrder, ...editingOrderData } as Order);
+                      toast(currentLanguage === 'tr' ? 'Sipariş güncellendi.' : 'Order updated.', 'success');
+                      setIsEditingOrder(false);
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                  }}
+                  className="apple-button-primary text-sm"
+                >{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── HIZLI SEVKİYAT MODAL ── */}
+      <AnimatePresence>
+        {showQuickShipment && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuickShipment(null)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
+                <button onClick={() => setShowQuickShipment(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+              </div>
+              <div className="p-5 space-y-2 text-sm text-gray-600">
+                <p>{currentLanguage === 'tr' ? 'Bu siparişten sevkiyat oluşturulsun mu?' : 'Create a shipment from this order?'}</p>
+                <p className="font-semibold text-gray-800">{showQuickShipment.customerName} — #{showQuickShipment.id.slice(0, 6)}</p>
+                <p className="text-xs text-gray-400">{showQuickShipment.shippingAddress}</p>
+              </div>
+              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
+                <button onClick={() => setShowQuickShipment(null)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button
+                  onClick={async () => {
+                    const o = showQuickShipment;
+                    try {
+                      await addDoc(collection(db, 'shipments'), {
+                        customerName: o.customerName ?? '', destination: o.shippingAddress ?? '',
+                        driver: '', cargoFirm: '', trackingNo: '', status: 'Pending',
+                        date: new Date().toISOString().slice(0, 10), orderId: o.id,
+                        companyId: (o as unknown as { companyId?: string }).companyId ?? null,
+                        createdAt: serverTimestamp(),
+                      });
+                      toast(currentLanguage === 'tr' ? 'Sevkiyat oluşturuldu.' : 'Shipment created.', 'success');
+                      setShowQuickShipment(null);
+                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                  }}
+                  className="apple-button-primary text-sm"
+                >{currentLanguage === 'tr' ? 'Oluştur' : 'Create'}</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
