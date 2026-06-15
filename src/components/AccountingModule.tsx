@@ -8,7 +8,7 @@ import {
   X, Save, RefreshCw, Link, Eye, Calculator, BarChart3, FileText, Briefcase,
   AlertCircle, CheckCircle, Info, ArrowUpDown, ShoppingCart, Users, Truck, Package,
   ArrowRightLeft, CreditCard, FileUp, FileDown, Search, Home, MapPin, User, PieChart,
-  Wallet, Layers, Landmark, Palette
+  Wallet, Layers, Landmark, Palette, Settings
 } from 'lucide-react';
 import TahsilatModule from './TahsilatModule';
 import KasaModule from './KasaModule';
@@ -480,6 +480,8 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   const [mikroBankMovements, setMikroBankMovements] = useState<any[]>([]);
   const [mikroBankLoading, setMikroBankLoading] = useState(false);
   const [mikroBankLastSync, setMikroBankLastSync] = useState<string | null>(null);
+  const [showErpConfig, setShowErpConfig] = useState(false); // ERP bağlantı ayarları formu (Mikro/Luca kimlik)
+  const [erpConfigSaving, setErpConfigSaving] = useState<'mikro' | 'luca' | null>(null);
 
   useEffect(() => {
     if (accountingTab === 'e-fatura') {
@@ -5132,6 +5134,14 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                   </span>
                 )}
                 <button
+                  onClick={() => setShowErpConfig(v => !v)}
+                  className="apple-button-secondary"
+                  title={currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Connection Settings'}
+                >
+                  <Settings className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Settings'}
+                </button>
+                <button
                   onClick={handleSyncMikroBank}
                   disabled={mikroBankLoading}
                   className="apple-button-primary"
@@ -5141,6 +5151,62 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
                 </button>
               </div>
             </div>
+
+            {/* ── ERP Bağlantı Ayarları (Mikro / Luca kimlik bilgileri) ── */}
+            {showErpConfig && (
+              <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Mikro */}
+                <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><Landmark className="w-4 h-4 text-brand" /> Mikro ERP</h4>
+                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                      <input type="checkbox" checked={mikroEnabled} onChange={e => setMikroEnabled(e.target.checked)} className="accent-[#ff4000]" />
+                      {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Access Token</label>
+                    <input type="password" value={mikroAccessToken} onChange={e => setMikroAccessToken(e.target.value)} placeholder="••••••••" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Endpoint</label>
+                    <input type="text" value={mikroEndpoint} onChange={e => setMikroEndpoint(e.target.value)} placeholder="https://jumpbulutapigw.mikro.com.tr/..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
+                  </div>
+                  <button onClick={async () => { setErpConfigSaving('mikro'); try { await saveMikroConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
+                    <Save size={14} /> {erpConfigSaving === 'mikro' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Mikro Ayarlarını Kaydet' : 'Save Mikro Settings')}
+                  </button>
+                  {mikroEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Mikro aktif edilince Luca otomatik kapanır (karşılıklı dışlama).' : 'Enabling Mikro disables Luca (mutual exclusion).'}</p>}
+                </div>
+                {/* Luca */}
+                <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><BookOpen className="w-4 h-4 text-indigo-500" /> Luca</h4>
+                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                      <input type="checkbox" checked={lucaEnabled} onChange={e => setLucaEnabled(e.target.checked)} className="accent-[#ff4000]" />
+                      {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">API Key</label>
+                    <input type="password" value={lucaApiKey} onChange={e => setLucaApiKey(e.target.value)} placeholder="••••••••" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Company ID</label>
+                      <input type="text" value={lucaCompanyId} onChange={e => setLucaCompanyId(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Base URL</label>
+                      <input type="text" value={lucaBaseUrl} onChange={e => setLucaBaseUrl(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
+                    </div>
+                  </div>
+                  <button onClick={async () => { setErpConfigSaving('luca'); try { await saveLucaConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
+                    <Save size={14} /> {erpConfigSaving === 'luca' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Luca Ayarlarını Kaydet' : 'Save Luca Settings')}
+                  </button>
+                  {lucaEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Luca aktif edilince Mikro otomatik kapanır.' : 'Enabling Luca disables Mikro.'}</p>}
+                </div>
+              </div>
+            )}
 
             <div className="overflow-x-auto -mx-4 sm:mx-0">
               <table className="apple-table mt-4">
