@@ -360,36 +360,6 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     }
   };
 
-  const handleSavePerformance = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
-    if (!performanceForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
-    const emp = employees.find(e => e.id === performanceForm.employeeId);
-    try {
-      if (editingPerformanceId) {
-        await updateDoc(doc(db, 'performanceReviews', editingPerformanceId), {
-          ...performanceForm,
-          employeeName: emp?.name || 'Unknown',
-        });
-        showToast(currentLanguage === 'tr' ? 'Değerlendirme güncellendi.' : 'Review updated.');
-      } else {
-        await addDoc(collection(db, 'performanceReviews'), {
-          ...performanceForm,
-          employeeName: emp?.name || 'Unknown',
-          createdAt: serverTimestamp()
-        });
-        showToast(currentLanguage === 'tr' ? 'Değerlendirme eklendi.' : 'Review added.');
-      }
-      setShowPerformanceModal(false);
-      setEditingPerformanceId(null);
-      setPerformanceForm({
-        employeeId: '', reviewer: '', date: format(new Date(), 'yyyy-MM-dd'), score: 5, comments: '', status: 'Bekliyor'
-      });
-    } catch (error) {
-      console.error("Error saving performance:", error);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'An error occurred.', 'error');
-    }
-  };
-
   const handleSaveTraining = async () => {
     if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
     if (!trainingForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');

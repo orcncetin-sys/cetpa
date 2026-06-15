@@ -8,6 +8,7 @@
  */
 
 import { authFetch } from './authFetch';
+import { enqueueSyncJob, processPendingSyncJobs, type SyncJob } from './syncRetryService';
 
 export interface MikroPushResult {
   success: boolean;
@@ -16,13 +17,21 @@ export interface MikroPushResult {
   data?: unknown;
 }
 
+/** Retry kuyruğunda saklanan Mikro işinin payload yapısı. */
+interface MikroJobPayload {
+  method: string;
+  payload: Record<string, unknown>;
+  meta?: { entityType?: string; entityId?: string };
+}
+
 const trDate = (iso?: string): string => {
   const s = (iso || new Date().toISOString()).slice(0, 10);
   const [y, m, d] = s.split('-');
   return `${d}.${m}.${y}`;
 };
 
-export async function pushMikroEvrak(
+/** Sunucu kapısına ham push — retry kuyruğuna dokunmaz (executor bunu kullanır). */
+async function rawMikroPush(
   method: string,
   payload: Record<string, unknown>,
   meta?: { entityType?: string; entityId?: string }
@@ -33,6 +42,36 @@ export async function pushMikroEvrak(
     body: JSON.stringify({ method, payload, ...meta }),
   });
   return r.json() as Promise<MikroPushResult>;
+}
+
+export async function pushMikroEvrak(
+  method: string,
+  payload: Record<string, unknown>,
+  meta?: { entityType?: string; entityId?: string }
+): Promise<MikroPushResult> {
+  try {
+    return await rawMikroPush(method, payload, meta);
+  } catch (err) {
+    // Ağ/timeout hatası = geçici → retry kuyruğuna ekle (exponential backoff).
+    // Mantıksal hatalar (success:false) kuyruğa girmez; onlar tekrar denense de geçmez.
+    const id = `mikro_${method}_${meta?.entityId ?? Date.now()}`;
+    const jobPayload: MikroJobPayload = { method, payload, meta };
+    void enqueueSyncJob({ id, type: 'mikro', payload: jobPayload, maxAttempts: 5 }).catch(() => {});
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Kuyruktaki bekleyen Mikro işlerini yeniden çalıştırır (app açılışı + periyodik). */
+export async function processMikroRetries(): Promise<void> {
+  await processPendingSyncJobs(async (job: SyncJob) => {
+    if (job.type !== 'mikro') return; // bu işleyici yalnız Mikro işlerini çalıştırır
+    const { method, payload, meta } = job.payload as MikroJobPayload;
+    const result = await rawMikroPush(method, payload, meta);
+    if (!result.success) {
+      // notConfigured kalıcı bir durumdur — tekrar denemenin anlamı yok, ölü işaretle
+      throw new Error(result.notConfigured ? 'Mikro yapılandırılmamış' : (result.error || 'Mikro push başarısız'));
+    }
+  });
 }
 
 // ── 1. Verilen Teklif (QuotationForm/Detail) ─────────────────────────────────

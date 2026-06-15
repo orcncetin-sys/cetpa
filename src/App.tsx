@@ -118,7 +118,7 @@ const LogisticsMapLazy = React.lazy(() => import('./components/LogisticsMap'));
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
 import { syncOrderWithCari } from './services/mikroService';
-import { pushMikroEvrak, izinTalepPayload, ziyaretPayload } from './services/mikroEvrak';
+import { pushMikroEvrak, processMikroRetries, izinTalepPayload, ziyaretPayload } from './services/mikroEvrak';
 import { 
   type Shipment, 
   UserRole, 
@@ -826,6 +826,17 @@ function AppContent() {
     );
 
     return () => { unsub(); unsubPayments(); };
+  }, [user]);
+
+  // ── Mikro retry kuyruğu: başarısız push'lar geçici hatada kuyruğa girer;
+  //    burada açılışta + 90 sn'de bir bekleyenler yeniden denenir (exponential backoff) ──
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const tick = () => { if (!cancelled) void processMikroRetries().catch(() => {}); };
+    tick(); // açılışta bir kez
+    const timer = setInterval(tick, 90_000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [user]);
 
   // Check if module is accessible by subscription

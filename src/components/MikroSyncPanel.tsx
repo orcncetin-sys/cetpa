@@ -14,6 +14,8 @@ import {
   MikroStatus,
   MikroImportResult,
 } from '../services/mikroService';
+import { getSyncQueueStats, clearDeadJobs } from '../services/syncRetryService';
+import { processMikroRetries } from '../services/mikroEvrak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,6 +85,15 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   // Status
   const [status, setStatus] = useState<MikroStatus | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
+
+  // Retry kuyruğu durumu (başarısız push'lar)
+  const [queueStats, setQueueStats] = useState<{ queued: number; dead: number; lastSuccess: number | null } | null>(null);
+  const [queueBusy, setQueueBusy] = useState(false);
+  const refreshQueue = useCallback(async () => {
+    try { const s = await getSyncQueueStats(); setQueueStats({ queued: s.queued, dead: s.dead, lastSuccess: s.lastSuccess }); }
+    catch { /* sessiz */ }
+  }, []);
+  useEffect(() => { void refreshQueue(); }, [refreshQueue]);
 
   // Import states
   const [stokImport, setStokImport] = useState<ImportState>({ running: false, result: null, error: null });
@@ -373,6 +384,40 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
           </div>
         )}
       </div>
+
+      {/* ── Retry Kuyruğu (başarısız push'lar otomatik yeniden denenir) ── */}
+      {queueStats && (queueStats.queued > 0 || queueStats.dead > 0) && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <RefreshCw className="w-4 h-4 text-amber-500" />
+            <div className="text-sm">
+              <span className="font-semibold text-gray-800">{t ? 'Retry Kuyruğu' : 'Retry Queue'}</span>
+              <span className="text-gray-500 ml-2">
+                {queueStats.queued} {t ? 'bekliyor' : 'queued'}
+                {queueStats.dead > 0 && <span className="text-red-500"> · {queueStats.dead} {t ? 'ölü' : 'dead'}</span>}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => { setQueueBusy(true); try { await processMikroRetries(); } finally { await refreshQueue(); setQueueBusy(false); } }}
+              disabled={queueBusy}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c]/20 transition-colors disabled:opacity-50"
+            >
+              {queueBusy ? (t ? 'Deneniyor…' : 'Retrying…') : (t ? 'Şimdi Dene' : 'Retry Now')}
+            </button>
+            {queueStats.dead > 0 && (
+              <button
+                onClick={async () => { setQueueBusy(true); try { await clearDeadJobs(); } finally { await refreshQueue(); setQueueBusy(false); } }}
+                disabled={queueBusy}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
+              >
+                {t ? 'Ölüleri Temizle' : 'Clear Dead'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Import Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
