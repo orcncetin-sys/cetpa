@@ -40,8 +40,7 @@ import {
   getDoc,
   getDocs,
   limit,
-  orderBy,
-  Timestamp
+  orderBy
 } from './lib/dbClient';
 import { sortByCreatedAt } from './utils/fsSort';
 import {
@@ -114,17 +113,14 @@ import {
   TrendingDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-const LogisticsMapLazy = React.lazy(() => import('./components/LogisticsMap'));
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
 import { syncOrderWithCari } from './services/mikroService';
-import { pushMikroEvrak, processMikroRetries, izinTalepPayload, ziyaretPayload } from './services/mikroEvrak';
+import { pushMikroEvrak, processMikroRetries, izinTalepPayload } from './services/mikroEvrak';
 import { 
   type Shipment, 
   UserRole, 
   type Lead, 
-  type LeadActivity, 
-  type VoiceNote, 
   type Order, 
   type OrderLineItem, 
   type InventoryItem, 
@@ -142,7 +138,6 @@ import { scoreLead } from './services/geminiService';
 import { createShopifyDraftOrder } from './services/shopifyService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import Papa from 'papaparse';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
@@ -159,11 +154,10 @@ import DateRangePicker from './components/DateRangePicker';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { translations, type Language } from './translations';
-import { haversineDistance, optimizeRoute } from './utils/logistics';
+import { optimizeRoute } from './utils/logistics';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
 const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
-import SortHeaderComponent from './components/SortHeader';
 // static: already bundled via InventoryView
 const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
 const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
@@ -2504,27 +2498,6 @@ function AppContent() {
   const computedTotal = orderLineItems.reduce((sum, l) => sum + l.price * l.quantity, 0);
 
   // ── Generic sort helper ──────────────────────────────────────────────────
-  const sortData = <T,>(arr: T[], key: string, dir: 'asc' | 'desc'): T[] => {
-    return [...arr].sort((a: T, b: T) => {
-      let av = (a as Record<string, unknown>)[key]; let bv = (b as Record<string, unknown>)[key];
-      // Handle Firestore Timestamps
-      if (av && typeof (av as Record<string, unknown>).toDate === 'function') av = (av as { toDate: () => Date }).toDate().getTime();
-      if (bv && typeof (bv as Record<string, unknown>).toDate === 'function') bv = (bv as { toDate: () => Date }).toDate().getTime();
-      // Handle strings case-insensitively
-      if (typeof av === 'string') av = av.toLowerCase();
-      if (typeof bv === 'string') bv = bv.toLowerCase();
-      if (av === undefined || av === null) av = '';
-      if (bv === undefined || bv === null) bv = '';
-      if (av < bv) return dir === 'asc' ? -1 : 1;
-      if (av > bv) return dir === 'asc' ? 1 : -1;
-      return 0;
-    });
-  };
-  const toggleSort = (
-    current: { key: string; dir: 'asc' | 'desc' },
-    key: string,
-    setter: (v: { key: string; dir: 'asc' | 'desc' }) => void
-  ) => setter({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' });
 
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -7878,10 +7878,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 293: Inventory Shrinkage & Loss Tracker (envanter) ── */}
       {reportsTab === 'envanter' && inventoryMovements.length >= 3 && (() => {
-        const adjustments = inventoryMovements.filter(m => {
-          const q = m.quantity || 0;
-          return m.type === 'out' && q < 0;
-        });
         const inbound = inventoryMovements.filter(m => m.type === 'in').reduce((s,m)=>s+(m.quantity||0),0);
         const outbound = inventoryMovements.filter(m => m.type === 'out' && (m.quantity||0) > 0).reduce((s,m)=>s+(m.quantity||0),0);
         const totalItems = inventory.length;
@@ -15430,7 +15426,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           );
         }
         const avg=ratings.reduce((a,b)=>a+b,0)/ratings.length;
-        const max5=5; // assume 5-star scale
         const bins=[1,2,3,4,5].map(s=>({star:s,count:ratings.filter(r=>Math.round(r)===s).length}));
         const maxBin=Math.max(...bins.map(b=>b.count),1);
         return (

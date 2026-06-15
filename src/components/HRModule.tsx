@@ -165,11 +165,6 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     baseSalary: 0, bonus: 0, deduction: 0, status: 'Taslak', currency: 'TRY'
   });
 
-  const [showPerformanceModal, setShowPerformanceModal] = useState(false);
-  const [editingPerformanceId, setEditingPerformanceId] = useState<string | null>(null);
-  const [performanceForm, setPerformanceForm] = useState<Partial<PerformanceReview>>({
-    employeeId: '', reviewer: '', date: format(new Date(), 'yyyy-MM-dd'), score: 5, comments: '', status: 'Bekliyor'
-  });
 
   const [showTrainingModal, setShowTrainingModal] = useState(false);
   const [editingTrainingId, setEditingTrainingId] = useState<string | null>(null);

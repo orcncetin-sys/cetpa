@@ -105,9 +105,6 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
     }
   };
 
-  const handleReset = () => {
-    setDraft(defaultTemplate(activeType));
-  };
 
   const tr = currentLanguage === 'tr';
 

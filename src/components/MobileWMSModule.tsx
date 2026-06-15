@@ -234,11 +234,6 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length;
   const todayCompleted = tasks.filter(t => t.status === 'completed' && t.completedAt).length;
 
-  const tasksByType = useMemo(() => {
-    const m: Record<string, number> = {};
-    tasks.forEach(t => { m[t.type] = (m[t.type] || 0) + 1; });
-    return m;
-  }, [tasks]);
 
   const tabs = [
     { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: BarChart3 },

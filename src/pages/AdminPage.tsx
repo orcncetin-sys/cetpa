@@ -138,16 +138,6 @@ export default function AdminPage({
     return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
   };
 
-  const KpiCurrencyToggle = () => (
-    <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-      {(['TRY', 'USD', 'EUR'] as const).map(c => (
-        <button key={c} onClick={() => setKpiCurrency(c)}
-          className={`text-[11px] font-bold px-2 py-1 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-        </button>
-      ))}
-    </div>
-  );
 
   const defaultAccessMatrix = DEFAULT_ACCESS_MATRIX;
   const ref = storageRef;
