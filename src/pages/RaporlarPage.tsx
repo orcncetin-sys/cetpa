@@ -43,9 +43,9 @@ interface Props {
 }
 
 export default function RaporlarPage({
-  canAccess, hasFullAccess, currentLanguage, currentT,
-  orders, leads, inventory, userRole, employees,
-  appQuotations, inventoryMovements, recurringOrders, exchangeRates,
+  canAccess = () => true, hasFullAccess = () => false, currentLanguage, currentT,
+  orders = [], leads = [], inventory = [], userRole, employees = [],
+  appQuotations = [], inventoryMovements = [], recurringOrders = [], exchangeRates,
   appReportsTab, setAppReportsTab, onNavigate,
   p570Targets, setP570Targets, fmtKpi,
 }: Props) {

@@ -72,14 +72,14 @@ export interface InventoryViewProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const InventoryView: React.FC<InventoryViewProps> = ({
-  inventory,
-  categories,
+  inventory = [],
+  categories = [],
   selectedCategory,
   setSelectedCategory,
   currentT,
   currentLanguage,
-  inventoryMovements,
-  warehouses,
+  inventoryMovements = [],
+  warehouses = [],
   onPrintLabels,
   onQuickPO,
   exchangeRates,

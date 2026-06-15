@@ -28,7 +28,7 @@ const toDate = (val: Order['syncedAt']): Date => {
   return new Date(val as string | number);
 };
 
-const FinancePanel: React.FC<FinancePanelProps> = ({ orders, currentLanguage, exchangeRates, displayCurrency: externalCurrency }) => {
+const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguage, exchangeRates, displayCurrency: externalCurrency }) => {
   const [sort, setSort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'date', dir: 'desc'});
   const [localCurrency, setLocalCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   const toggleSort = (key: string) => setSort(s => ({key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc'}));

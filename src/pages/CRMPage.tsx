@@ -88,10 +88,10 @@ interface Props {
 
 export default function CRMPage({
   crmTab, setCrmTab, selectedLead, setSelectedLead,
-  hasFullAccess, currentLanguage, currentT,
-  orders, leads, inventory, exchangeRates, employees,
+  hasFullAccess = () => true, currentLanguage, currentT,
+  orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
-  appQuotations, activeTab, darkMode, warehouses, supportTickets, commissionRules,
+  appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [],
   trackView, setEditingLeadData, setIsEditingLead, setEmailCompose,
   setNewOrder, setOrderCustomerSearch, handleToggleOrderPaid, openConfirm,
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,

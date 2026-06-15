@@ -64,7 +64,7 @@ interface PurchasingModuleProps {
   onPrefillConsumed?: () => void;
 }
 
-export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory, onNavigate, exchangeRates, prefillProduct, onPrefillConsumed }: PurchasingModuleProps) {
+export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory = [], onNavigate, exchangeRates, prefillProduct, onPrefillConsumed }: PurchasingModuleProps) {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);

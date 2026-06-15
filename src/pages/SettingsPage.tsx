@@ -55,11 +55,11 @@ interface Props {
 export default function SettingsPage({
   currentLanguage, userRole, user, isOwnerAdmin,
   exchangeRates, setExchangeRates,
-  userSubscription, paymentHistory,
-  companySettings, setCompanySettings,
+  userSubscription, paymentHistory = [],
+  companySettings = {}, setCompanySettings,
   geminiApiKeySetting, setGeminiApiKeySetting,
-  notifPrefs, toggleNotifPref,
-  auditLogs, webhookConfigs,
+  notifPrefs = {}, toggleNotifPref,
+  auditLogs = [], webhookConfigs = [],
   toast, logAuditAction,
   handleSelectPlan, handleCancelSubscription, setShowPricingPage,
 }: Props) {

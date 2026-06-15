@@ -275,7 +275,7 @@ const AT = {
   },
 } as const;
 
-export default function AccountingModule({ orders, currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp }: AccountingModuleProps) {
+export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp }: AccountingModuleProps) {
   const t = AT[currentLanguage];
   const MONTHS = currentLanguage === 'en' ? MONTHS_EN : MONTHS_TR;
   const resolvedInitialTab = (() => {

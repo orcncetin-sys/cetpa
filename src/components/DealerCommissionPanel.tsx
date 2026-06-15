@@ -71,7 +71,7 @@ const toDate = (val: unknown): Date => {
 };
 
 export default function DealerCommissionPanel({
-  currentLanguage, isAuthenticated, userRole, leads, orders, exchangeRates
+  currentLanguage, isAuthenticated, userRole, leads = [], orders = [], exchangeRates
 }: DealerCommissionPanelProps) {
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
   const [dealerSort, setDealerSort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'actualSales', dir: 'desc'});

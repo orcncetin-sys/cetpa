@@ -7578,7 +7578,8 @@ function AppContent() {
 
                   {/* ── Kasa Yönetimi ── */}
                   {muhasebeTab === 'kasa' && (
-                    <motion.div key="muhasebe-kasa" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                    <motion.div key="muhasebe-kasa" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      <ModuleHeader title={currentLanguage === 'tr' ? 'Kasa' : 'Cash Register'} subtitle={currentLanguage === 'tr' ? 'Nakit giriş/çıkış hareketleri ve kasa bakiyeleri' : 'Cash in/out movements and register balances'} icon={Wallet} />
                       <KasaModule currentLanguage={currentLanguage as 'tr' | 'en'} isAuthenticated={!!user && hasFullAccess('muhasebe')} />
                     </motion.div>
                   )}

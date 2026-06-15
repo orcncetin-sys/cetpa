@@ -79,7 +79,7 @@ function SortTh({ k, label, sort, onSort, align = 'left' }: {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const RiskPanel: React.FC<RiskPanelProps> = ({ orders, leads, currentLanguage, userRole, setActiveTab, exchangeRates }) => {
+const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentLanguage, userRole, setActiveTab, exchangeRates }) => {
   const [risks, setRisks] = useState<CustomerRisk[]>([]);
   const [activeFilter, setActiveFilter] = useState<'all' | 'highRisk' | 'exposure' | 'overdue'>('all');
   const [activeCurrency, setActiveCurrency] = useState<Currency>('TRY');
