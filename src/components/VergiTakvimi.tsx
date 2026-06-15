@@ -63,7 +63,6 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
   }, []);
 
   const today = new Date().toISOString().slice(0, 10);
-  const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
   const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
   const upcoming = deadlines.filter(d => d.durum === 'Yapılacak' && d.sonTarih >= today && d.sonTarih <= in30Days);

@@ -484,7 +484,6 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
 }
 
 function DocumentPreview({ template }: { template: DocTemplate }) {
-  const docType = DOC_TYPES.find(d => d.id === template.docType);
   const isQuote = template.docType === 'teklif';
   const isDelivery = template.docType === 'irsaliye';
   const isReceipt = template.docType === 'makbuz';

@@ -11343,7 +11343,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           { label: 'Silver',   color: '#6b7280', min: vals[0] * 0.05 },
           { label: 'Bronze',   color: '#b45309', min: 0 },
         ];
-        const counts = tiers.map(t => ({ ...t, count: vals.filter(v => v >= t.min).length - tiers.filter(t2 => t2.min > t.min).reduce((s, t2) => s + vals.filter(v => v >= t2.min).length, 0) }));
         const tierBuckets = tiers.map((t, i) => ({
           ...t,
           count: vals.filter(v => v >= t.min && (i === 0 || v < tiers[i - 1].min)).length,
@@ -11777,7 +11776,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         if (thisMRev === 0 && lastMRev === 0) return null;
         const pct = lastMRev > 0 ? ((thisMRev - lastMRev) / lastMRev) * 100 : 0;
         const gaugeVal = lastMRev > 0 ? Math.min(thisMRev / lastMRev, 2) : 1;
-        const angle = gaugeVal * 180;
         const r = 40; const cx = 60; const cy = 55;
         const rad = (a: number) => (a - 90) * Math.PI / 180;
         const arc = (pct2: number, color: string) => {
@@ -12508,7 +12506,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 410: Weekly Orders Trend (genel) ── */}
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
-        const now = new Date();
         const weeks: Record<string, number> = {};
         orders.forEach(o => {
           const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
@@ -14081,7 +14078,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const months = Object.keys(byMonth).sort().slice(-6);
         if (months.length < 2) return null;
         const maxVal = Math.max(...months.map(m=>byMonth[m].value),1);
-        const maxCount = Math.max(...months.map(m=>byMonth[m].count),1);
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3">Quotation Volume & Value by Month</h3>
@@ -14305,7 +14301,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           .map(e => {
             const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.()??new Date(e.startDate as string)) : null;
             if (!d || isNaN(d.getTime())) return null;
-            const yearsOld = now.getFullYear()-d.getFullYear();
             const nextAnniv = new Date(now.getFullYear(),d.getMonth(),d.getDate());
             if (nextAnniv < now) nextAnniv.setFullYear(now.getFullYear()+1);
             if (nextAnniv > in60) return null;
@@ -14631,7 +14626,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 464: Order Processing Pipeline (lojistik) ── */}
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
-        const now = new Date();
         const pipeline = [
           {status:'Pending',   count:orders.filter(o=>o.status==='Pending').length,   color:'#f59e0b', icon:'⏳'},
           {status:'Processing',count:orders.filter(o=>o.status==='Processing').length, color:'#3b82f6', icon:'⚙️'},
@@ -14808,7 +14802,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 469: Order Notes & Special Requests (lojistik) ── */}
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
-        const now = new Date();
         const withNotes = orders.filter(o=>{ const oR=o as unknown as Record<string,unknown>; return !!(oR.notes||oR.specialInstructions||oR.comments||oR.note); });
         const priorityOrders = orders.filter(o=>{ const oR=o as unknown as Record<string,unknown>; return (oR.priority as string|undefined)==='high'||(oR.urgent as boolean|undefined)===true||(oR.rush as boolean|undefined)===true; });
         const avgLineItems = orders.length>0 ? (orders.reduce((s,o)=>s+(o.lineItems??[]).length,0)/orders.length).toFixed(1) : '0';
@@ -15096,7 +15089,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
 
       {/* ── Phase 477: Inventory Batch Status (envanter) ── */}
       {reportsTab === 'envanter' && inventory.length >= 3 && (() => {
-        const itemR = inventory as unknown as Record<string,unknown>[];
         const withExpiry = inventory.filter(item=>{ const ir=item as unknown as Record<string,unknown>; return !!(ir.expiryDate||ir.expiry||ir.bestBefore); });
         const withBarcode = inventory.filter(item=>{ const ir=item as unknown as Record<string,unknown>; return !!(ir.barcode||ir.ean||ir.upc||item.sku); });
         const withCost = inventory.filter(item=>{ return !!(item as unknown as Record<string,unknown>).costPrice; });
@@ -15298,7 +15290,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           else{weekdayCount++;weekdayRev+=total;}
         });
         const totalOrders=weekdayCount+weekendCount;
-        const totalRev=weekdayRev+weekendRev;
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3">Weekday vs Weekend Orders</h3>
@@ -15468,7 +15459,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const now=new Date();
         let expiredValue=0,nearExpiryValue=0,healthyValue=0;
         const in30=new Date(now.getTime()+30*86400000);
-        const in90=new Date(now.getTime()+90*86400000);
         inventory.forEach(item=>{
           const itemR=item as unknown as Record<string,unknown>;
           const expStr=(itemR.expiryDate as string|undefined)??(itemR.expiry as string|undefined)??(itemR.bestBefore as string|undefined);
@@ -15537,7 +15527,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const now=new Date();
         const d30=new Date(now.getTime()-30*86400000);
         const orders30=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=d30; }).length;
-        const totalStock=inventory.reduce((s,i)=>s+((i.stock as number|undefined)??0),0);
         const lowStockCount=inventory.filter(i=>{ const stk=(i.stock as number|undefined)??0; const threshold=(i.reorderPoint as number|undefined)??(i.lowStockThreshold as number|undefined)??5; return stk<=threshold&&stk>0; }).length;
         const activeOrders=orders.filter(o=>o.status==='Processing'||o.status==='Pending'||o.status==='Shipped').length;
         const stats=[
@@ -15641,7 +15630,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         quotations.forEach(q=>{ (q as unknown as Record<string,unknown>); const items=((q as unknown as Record<string,unknown>).items as {productName?:string;name?:string}[]|undefined)??[]; items.forEach(i=>{ const n=i.productName??i.name; if(n) quotedProductNames.add(n); }); });
         const neverQuoted=inventory.filter(item=>!quotedProductNames.has(item.name)&&((item.stock as number|undefined)??0)>0).slice(0,6);
         if(neverQuoted.length===0) return null;
-        const totalWithStock=inventory.filter(i=>((i.stock as number|undefined)??0)>0).length;
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
@@ -15945,7 +15933,6 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const totalOut=recentOut.reduce((s,m)=>s+(m.quantity??0),0);
         const totalIn=recentIn.reduce((s,m)=>s+(m.quantity??0),0);
         const fillRate=totalOut>0?Math.min(Math.round((totalIn/totalOut)*100),200):100;
-        const outProducts=new Set(recentOut.map(m=>m.productId as string)).size;
         const inProducts=new Set(recentIn.map(m=>m.productId as string)).size;
         return (
           <div className="apple-card p-4 mb-4">

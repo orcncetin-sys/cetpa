@@ -86,7 +86,6 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [schedules, setSchedules] = useState<RevenueSchedule[]>([]);
   const [milestones, setMilestones] = useState<MilestoneProgress[]>([]);
-  const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [showContractForm, setShowContractForm] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState<Contract | null>(null);
   const [expandedContractId, setExpandedContractId] = useState<string | null>(null);

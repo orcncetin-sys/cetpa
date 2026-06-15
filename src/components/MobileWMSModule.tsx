@@ -69,7 +69,6 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const [loading, setLoading] = useState(true);
   const [showLocForm, setShowLocForm] = useState(false);
   const [cycleItems, setCycleItems] = useState<CycleCountEntry[]>([]);
-  const [cycleCount, setCycleCount] = useState<Record<string,number>>({});
   const [isMobileView] = useState(() => window.innerWidth < 768);
   const scanRef = useRef<HTMLInputElement>(null);
 

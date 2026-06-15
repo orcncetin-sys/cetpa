@@ -66,7 +66,6 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
   const [kvkkReqDone, setKvkkReqDone] = useState(false);
   const [docsFilter, setDocsFilter] = useState<string>('Tümü');
   const [docUploadCategory, setDocUploadCategory] = useState<string>('Diğer');
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const docUploadRef = useRef<HTMLInputElement>(null);
   const approvalUploadRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

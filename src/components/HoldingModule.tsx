@@ -72,7 +72,6 @@ export default function HoldingModule({ currentLanguage, isAuthenticated }: Hold
   const [showEntityForm, setShowEntityForm] = useState(false);
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [showICForm, setShowICForm] = useState(false);
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['asset','revenue']));
   const [loading, setLoading] = useState(true);
 
   // Entity form state

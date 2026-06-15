@@ -191,7 +191,6 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [showEmpForm, setShowEmpForm] = useState(false);
-  const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 

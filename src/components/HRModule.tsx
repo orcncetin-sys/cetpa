@@ -118,8 +118,6 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollSort, setPayrollSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'month', dir: 'desc' });
 
-  const [performanceSearch, setPerformanceSearch] = useState('');
-  const [performanceSort, setPerformanceSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
 
   const [trainingSearch, setTrainingSearch] = useState('');
   const [trainingSort, setTrainingSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });

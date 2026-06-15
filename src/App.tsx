@@ -164,7 +164,6 @@ import { haversineDistance, optimizeRoute } from './utils/logistics';
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
 const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
 import SortHeaderComponent from './components/SortHeader';
-const ProductForm             = React.lazy(() => import('./components/ProductForm'));
 // static: already bundled via InventoryView
 const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
 const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
@@ -177,9 +176,6 @@ const CorporateGovernanceModule = React.lazy(() => import('./components/Corporat
 const FinancePanel            = React.lazy(() => import('./components/FinancePanel'));
 const RiskPanel               = React.lazy(() => import('./components/RiskPanel'));
 const AnalyticsPanel          = React.lazy(() => import('./components/AnalyticsPanel'));
-const SubscriptionPanel       = React.lazy(() => import('./components/SubscriptionPanel'));
-const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncPanel'));
-const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
 const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
 const BOMPanel                = React.lazy(() => import('./components/BOMPanel'));
 const OrderTrackingView       = React.lazy(() => import('./components/OrderTrackingView'));
@@ -190,7 +186,6 @@ const IhracatModule           = React.lazy(() => import('./components/IhracatMod
 const SubeModule              = React.lazy(() => import('./components/SubeModule'));
 const VergiTakvimi            = React.lazy(() => import('./components/VergiTakvimi'));
 const LotSeriModule           = React.lazy(() => import('./components/LotSeriModule'));
-const DealerCommissionPanel   = React.lazy(() => import('./components/DealerCommissionPanel'));
 const TerritoryModule         = React.lazy(() => import('./components/TerritoryModule'));
 const PerformansModule        = React.lazy(() => import('./components/PerformansModule'));
 const CPQPanel                = React.lazy(() => import('./components/CPQPanel'));
@@ -257,7 +252,6 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
 
 // B2BPortal + SortHeader extracted to separate files
 const B2BPortal = B2BPortalComponent;
-const SortHeader = SortHeaderComponent;
 
 // --- Error Handling ---
 
@@ -435,7 +429,6 @@ const BackToTopButton: React.FC = () => {
   );
 };
 
-const LogisticsMap = LogisticsMapLazy;
 
 export default function App() {
   return (
@@ -784,7 +777,6 @@ function AppContent() {
   const [demoSubmitted, setDemoSubmitted] = useState(false);
   const [enteredApp, setEnteredApp] = useState(false);
   const [showPricingPage, setShowPricingPage] = useState(false);
-  const [upgradeModal, setUpgradeModal] = useState<{ isOpen: boolean; blockedModule: string }>({ isOpen: false, blockedModule: '' });
   const [subscriptionLoaded, setSubscriptionLoaded] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<{ id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' }[]>([]);
 
@@ -922,11 +914,6 @@ function AppContent() {
       console.error('[handleCancelSubscription]', e);
       toast(currentLanguage === 'tr' ? 'İptal işlemi başarısız.' : 'Could not cancel subscription.', 'error');
     }
-  };
-
-  const handleUpgrade = (planId: SubscriptionPlan) => {
-    setUpgradeModal({ isOpen: false, blockedModule: '' });
-    handleSelectPlan(planId, userSubscription?.cycle || 'monthly');
   };
 
   // Lock body scroll when menu is open
@@ -1189,7 +1176,6 @@ function AppContent() {
 
   // Lead quick-note — saved to leads/{id}.quickNote in Firestore
   const [leadNoteText, setLeadNoteText] = useState('');
-  const leadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const stored = selectedLead
       ? ((selectedLead as unknown as Record<string, unknown>)['quickNote'] as string ?? '')
@@ -1198,8 +1184,6 @@ function AppContent() {
   }, [selectedLead?.id]);
   // Order quick-note — top-level to avoid hooks-in-conditional violation
   const [orderNoteText, setOrderNoteText] = useState('');
-  const [orderNoteSaving, setOrderNoteSaving] = useState(false);
-  const [orderNoteSaved, setOrderNoteSaved] = useState(false);
   useEffect(() => {
     setOrderNoteText(selectedOrder?.notes ?? '');
     // Phase 101: load timeline from order doc
@@ -1232,27 +1216,14 @@ function AppContent() {
   const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
   const [orderCustomerOpen, setOrderCustomerOpen] = useState(false);
   const leadFromOrderRef = useRef(false); // Phase 82: track lead-modal opened from order form
-  const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
   const [isEditingLead, setIsEditingLead] = useState(false);
   const [editingLeadData, setEditingLeadData] = useState<Partial<Lead>>({});
-  const [isAddingActivity, setIsAddingActivity] = useState(false);
-  const [newActivity, setNewActivity] = useState<Partial<LeadActivity>>({ type: 'Note', description: '' });
 
   // --- Filters ---
-  const [crmSearch, setCrmSearch] = useState('');
-  const [crmSort, setCrmSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
-  const [orderStatusFilter,  setOrderStatusFilter]  = useState<string>('All'); // Phase 55
-  const [leadStatusFilter,   setLeadStatusFilter]   = useState<string>('All'); // Phase 72
   // ── Phase 501-515 ────────────────────────────────────────────────────────────
-  const [orderDateRange, setOrderDateRange] = useState<'all'|'today'|'week'|'month'|'quarter'>('all'); // Phase 501
   const [showStmtModal, setShowStmtModal] = useState<string|null>(null); // Phase 502 — customerId
-  const [showSmartReorder, setShowSmartReorder] = useState(false); // Phase 503
-  const [smartReorderSelected, setSmartReorderSelected] = useState<Set<string>>(new Set()); // Phase 503
-  const [smartReorderCreating, setSmartReorderCreating] = useState(false); // Phase 503
   const [deliveryNoteOrder, setDeliveryNoteOrder] = useState<Order|null>(null); // Phase 506
   const [deliveryNoteText, setDeliveryNoteText] = useState(''); // Phase 506
-  const [invPayPending, setInvPayPending] = useState(false); // Phase 511
-  const [p513Selected, setP513Selected] = useState<string|null>(null); // Phase 513 — orderId profit popup
   // ── Phase 504-520 ────────────────────────────────────────────────────────────
   const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set()); // Phase 504 — synced from userPrefs/{uid}
   const [showStockCount, setShowStockCount] = useState(false); // Phase 507
@@ -1262,26 +1233,13 @@ function AppContent() {
   const [dashClock, setDashClock] = useState(new Date()); // Phase 514
   const [showQuickShipment, setShowQuickShipment] = useState<Order|null>(null); // Phase 512
   // ── Phase 515-534 ────────────────────────────────────────────────────────────
-  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set()); // Phase 519
-  const [bulkLeadLoading, setBulkLeadLoading] = useState(false); // Phase 519
-  const [p515Dismissed, setP515Dismissed] = useState(false); // Phase 515 (follow-up alerts)
-  const [orderCustomerFilter, setOrderCustomerFilter] = useState<string|null>(null); // Phase 523
-  const [showInvoiceAging, setShowInvoiceAging] = useState(false); // Phase 521
-  const [p524CLV, setP524CLV] = useState<string|null>(null); // Phase 524 — leadId for CLV popup
-  const [expandedOrderId, setExpandedOrderId] = useState<string|null>(null); // Phase 525 — inline line items
   const [p528Dismissed, setP528Dismissed] = useState<Set<string>>(new Set()); // Phase 528 — smart alerts
-  const [showLeadFunnel, setShowLeadFunnel] = useState(false); // Phase 529 — pipeline funnel
-  const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null); // Phase 530 — copy ID feedback
   const [p532PayOrder, setP532PayOrder] = useState<Order|null>(null); // Phase 532 — payment method picker
   const [p532Method, setP532Method] = useState<Order['paymentMethod']>('bank_transfer'); // Phase 532
   const [showOverduePanel, setShowOverduePanel] = useState(false); // Phase 538 — overdue payments panel
   const [shipmentsExpanded, setShipmentsExpanded] = useState(false); // Phase 539 — shipments KPI
-  const [reorderExpanded, setReorderExpanded] = useState(false); // Phase 541 — inventory reorder list
-  const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null); // Phase 542 — AI rescore
-  const [crmLeadSort, setCrmLeadSort] = useState<'default'|'score'|'activity'|'name'>('default'); // Phase 537
   // ── Phase 543–545 ────────────────────────────────────────────────────────────
   const [dashVergiDeadlines, setDashVergiDeadlines] = useState<{ id: string; vergiTuru: string; sonTarih: string; durum: string }[]>([]); // Phase 543
-  const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null); // Phase 544 — leadId with open status dropdown
   // ── Phase 547: Bilanço — bank accounts fetched on demand ──────────────────
   const [p547BankAccounts, setP547BankAccounts] = useState<Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>>([]);
   const [p547FixedAssets, setP547FixedAssets]   = useState<Array<{ id: string; name: string; cost: number; depreciation: number }>>([]);
@@ -1299,26 +1257,16 @@ function AppContent() {
     condition: 'Hasarlı' | 'Sağlam' | 'Kısmen Hasarlı'; decision: 'İade' | 'Değişim' | 'Kredi Notu' | 'Bekliyor';
     status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'Tamamlandı'; createdAt?: unknown; notes?: string;
   }>>([]);
-  const [p549Form, setP549Form] = useState(false);
-  const [p549Draft, setP549Draft] = useState({ orderId: '', customerName: '', items: '', reason: 'Hasarlı Ürün', condition: 'Hasarlı' as const, notes: '' });
-  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
-  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false); // Phase 28
   // ── User invite state ─────────────────────────────────────────────
-  const [inviteEmail, setInviteEmail]   = useState('');
-  const [inviteRole,  setInviteRole]    = useState('Sales');
-  const [inviteLoading, setInviteLoading] = useState(false);
 
-  const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   // ── Phase 99: Monthly Sales Target ───────────────────────────────────────
   const [monthlyTarget, setMonthlyTarget] = useState<number>(0);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState('');
   // Per-month target history: { "2026-05": 100000, ... } — synced from settings/targets
   const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
-  const [editingMonthKey, setEditingMonthKey] = useState<string | null>(null);
-  const [editingMonthDraft, setEditingMonthDraft] = useState('');
   const saveMonthlyTarget = (monthKey: string, value: number) => {
     const isCurrentMonth = monthKey === (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
     if (isCurrentMonth) setMonthlyTarget(value);
@@ -1349,9 +1297,6 @@ function AppContent() {
     productSku: string; productName: string; quantity: number; minQty?: number;
     lastCounted?: string; notes?: string; createdAt?: unknown;
   }>>([]);
-  const [p554AddForm, setP554AddForm] = useState(false);
-  const [p554Draft, setP554Draft] = useState({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
-  const [p554Search, setP554Search] = useState('');
   // ── Phase 556: SGK e-Bildirge ─────────────────────────────────────────────
   const [p556Period, setP556Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   // ── Phase 558: KDV Analiz Raporu ─────────────────────────────────────────
@@ -1360,7 +1305,6 @@ function AppContent() {
   const [p559Customer, setP559Customer] = useState('');
   // ── Phase 560: Sipariş Onay Akışı ────────────────────────────────────────
   const [p560ApprovalThreshold, setP560ApprovalThreshold] = useState(50000);
-  const [p560PendingOrders, setP560PendingOrders] = useState<string[]>([]);
   // ── Phase 561: MRP Reorder Suggestions ────────────────────────────────────
   const [p561ShowAll, setP561ShowAll] = useState(false);
   // ── Phase 562: Stock Reservation View ─────────────────────────────────────
@@ -1377,8 +1321,6 @@ function AppContent() {
   // ── Phase 570: KPI Hedef Takibi ───────────────────────────────────────────
   const [p570Targets, setP570Targets] = useState({ revenue: 500000, orders: 100, avgOrderVal: 5000, leadConv: 30 });
   // ── Phase 571: Audit Trail Filter ────────────────────────────────────────
-  const [p571AuditFilter, setP571AuditFilter] = useState('');
-  const [p571AuditAction, setP571AuditAction] = useState<string>('all');
   // ── Phase 572: Employee Performance Scorecard ─────────────────────────────
   const [p572SelEmpId, setP572SelEmpId] = useState<string>('');
   // ── Phase 573: Dynamic Pricing Rules Engine ───────────────────────────────
@@ -1388,11 +1330,7 @@ function AppContent() {
   // ── Phase 574: Inventory Valuation Report ─────────────────────────────────
   const [p574ValMethod, setP574ValMethod] = useState<'cost'|'retail'|'weighted'>('cost');
   // ── Phase 575: Customer Returns & Complaints ──────────────────────────────
-  const [p575Returns, setP575Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Tamamlandı';amount:number;createdAt?:unknown}>>([]);
-  const [p575ShowForm, setP575ShowForm] = useState(false);
-  const [p575Draft, setP575Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
   // ── Phase 576: Supply Chain KPI Dashboard ─────────────────────────────────
-  const [p576Period, setP576Period] = useState<'7d'|'30d'|'90d'>('30d');
   // ── Phase 578: PO Approval Workflow ──────────────────────────────────────
   const [p578Threshold, setP578Threshold] = useState(25000);
   // ── Phase 579: Batch/Serial Number Tracking ───────────────────────────────
@@ -1403,22 +1341,16 @@ function AppContent() {
   // ── Phase 580: Budget vs Actual ───────────────────────────────────────────
   const [p580Year, setP580Year] = useState(() => String(new Date().getFullYear()));
   // ── Phase 581: Sales Rep Performance ──────────────────────────────────────
-  const [p581RepPeriod, setP581RepPeriod] = useState<'30d'|'90d'|'ytd'>('30d');
   // ── Phase 582: Project Cost Tracking ──────────────────────────────────────
   const [p582Projects, setP582Projects] = useState<Array<{id:string;name:string;budget:number;spent:number;status:'Aktif'|'Tamamlandı'|'Beklemede'}>>([]);
   const [p582ShowForm, setP582ShowForm] = useState(false);
   const [p582Draft, setP582Draft] = useState({name:'',budget:'',spent:'',status:'Aktif' as 'Aktif'|'Tamamlandı'|'Beklemede'});
   // ── Phase 583: Warranty & Service Requests ────────────────────────────────
-  const [p583Requests, setP583Requests] = useState<Array<{id:string;customerName:string;productName:string;serialNo?:string;issueDate:string;warrantyEnd?:string;description:string;status:'Açık'|'İşlemde'|'Kapatıldı';priority:'Düşük'|'Orta'|'Yüksek'}>>([]);
-  const [p583ShowForm, setP583ShowForm] = useState(false);
-  const [p583Draft, setP583Draft] = useState({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'});
   // ── Phase 584: Physical Inventory / Cycle Count ───────────────────────────
   const [p584CountItems, setP584CountItems] = useState<Array<{id:string;sku:string;name:string;systemQty:number;countedQty?:number;variance?:number}>>([]);
   const [p584Active, setP584Active] = useState(false);
   // ── Phase 585: Customer Loyalty Score ─────────────────────────────────────
-  const [p585TopN, setP585TopN] = useState(10);
   // ── Phase 586: Sales Target by Rep ────────────────────────────────────────
-  const [p586Targets, setP586Targets] = useState<Record<string,number>>({});
   // ── Phase 587: Quality Inspection Checklist ───────────────────────────────
   const [p587Checks, setP587Checks] = useState<Array<{id:string;item:string;checked:boolean;severity:'Kritik'|'Uyarı'|'Bilgi'}>>([]);
   const [p587NewItem, setP587NewItem] = useState('');
@@ -1427,22 +1359,16 @@ function AppContent() {
   const [p588ShowForm, setP588ShowForm] = useState(false);
   const [p588Draft, setP588Draft] = useState({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
   // ── Phase 590: Notification Inbox ─────────────────────────────────────────
-  const [p590Notifs, setP590Notifs] = useState<Array<{id:string;type:'info'|'warning'|'success'|'error';message:string;module:string;read:boolean;createdAt:string}>>([]);
-  const [p590ShowInbox, setP590ShowInbox] = useState(false);
   // ── Phase 591: Auto-Invoice Scheduler ─────────────────────────────────────
   const [p591Schedules, setP591Schedules] = useState<Array<{id:string;customerName:string;amount:number;frequency:'monthly'|'quarterly'|'yearly';nextDate:string;description:string;active:boolean}>>([]);
   const [p591ShowForm, setP591ShowForm] = useState(false);
   const [p591Draft, setP591Draft] = useState({customerName:'',amount:'',frequency:'monthly' as 'monthly'|'quarterly'|'yearly',nextDate:'',description:''});
   // ── Phase 593: Vehicle Fleet Tracking ─────────────────────────────────────
-  const [p593Vehicles, setP593Vehicles] = useState<Array<{id:string;plate:string;driver:string;model:string;status:'Müsait'|'Yolda'|'Bakımda'|'Arızalı';lastService?:string;nextService?:string;km?:number;fuel?:'Benzin'|'Dizel'|'LPG'|'Elektrik'}>>([]);
-  const [p593ShowForm, setP593ShowForm] = useState(false);
-  const [p593Draft, setP593Draft] = useState({plate:'',driver:'',model:'',status:'Müsait' as 'Müsait'|'Yolda'|'Bakımda'|'Arızalı',lastService:'',nextService:'',km:'',fuel:'Dizel' as 'Benzin'|'Dizel'|'LPG'|'Elektrik'});
   // ── Phase 595: Task & Reminder Board ──────────────────────────────────────
   const [p595Tasks, setP595Tasks] = useState<Array<{id:string;title:string;dueDate:string;assignedTo:string;module:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';done:boolean}>>([]);
   const [p595ShowForm, setP595ShowForm] = useState(false);
   const [p595Draft, setP595Draft] = useState({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik'});
   // ── Phase 596: Smart Replenishment Advisor ────────────────────────────────
-  const [p596MinLeadDays, setP596MinLeadDays] = useState(7);
   // ── Phase 597: Revenue Recognition Schedule ───────────────────────────────
   const [p597Contracts, setP597Contracts] = useState<Array<{id:string;customerName:string;totalValue:number;startDate:string;endDate:string;recognized:number}>>([]);
   const [p597ShowForm, setP597ShowForm] = useState(false);
@@ -1456,19 +1382,13 @@ function AppContent() {
   // ── Phase 600: Integration Health Dashboard ────────────────────────────────
   // (state derived from existing config — no new useState needed)
   // ── Phase 601: Müşteri Segmentasyon Analizi ───────────────────────────────
-  const [p601Segment, setP601Segment] = useState<'rfm'|'revenue'|'type'>('rfm');
   // ── Phase 602: Çoklu Döviz Sipariş Yönetimi ──────────────────────────────
-  const [p602OrderCurrency, setP602OrderCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   // ── Phase 604: Satıcı Komisyon Takibi ─────────────────────────────────────
-  const [p604CommRate, setP604CommRate] = useState(5); // default 5%
   // ── Phase 605: Üretim Kapasitesi Planlama ─────────────────────────────────
   const [p605Capacity, setP605Capacity] = useState<Array<{line:string;maxCap:number;planned:number;actual:number}>>([]);
   const [p605ShowForm, setP605ShowForm] = useState(false);
   const [p605Draft, setP605Draft] = useState({line:'',maxCap:'',planned:'',actual:''});
   // ── Phase 606: E-posta Kampanya Takibi ────────────────────────────────────
-  const [p606Campaigns, setP606Campaigns] = useState<Array<{id:string;name:string;sentDate:string;recipients:number;opens:number;clicks:number;conversions:number}>>([]);
-  const [p606ShowForm, setP606ShowForm] = useState(false);
-  const [p606Draft, setP606Draft] = useState({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
   // ── Phase 607: Tahsilat Hatırlatma Otomasyonu ─────────────────────────────
   const [p607ReminderDays, setP607ReminderDays] = useState([7, 14, 30]);
   // ── Phase 608: Tedarikçi Fiyat Karşılaştırması ───────────────────────────
@@ -1477,9 +1397,6 @@ function AppContent() {
   const [p608ShowForm, setP608ShowForm] = useState(false);
   const [p608Draft, setP608Draft] = useState({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
   // ── Phase 609: SLA & Müşteri Memnuniyeti Takibi ───────────────────────────
-  const [p609Tickets, setP609Tickets] = useState<Array<{id:string;customer:string;subject:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';status:'Açık'|'İşlemde'|'Çözüldü'|'Kapatıldı';createdAt:string;resolvedAt?:string;slaHours:number;satisfaction?:1|2|3|4|5}>>([]);
-  const [p609ShowForm, setP609ShowForm] = useState(false);
-  const [p609Draft, setP609Draft] = useState({customer:'',subject:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',slaHours:'24'});
   // ── Phase 610: Kâr Merkezi Analizi ───────────────────────────────────────
   const [p610Period, setP610Period] = useState<'this_month'|'last_month'|'ytd'>('this_month');
   // ── Phase 611: Stok Devir Hızı ────────────────────────────────────────────
@@ -1489,9 +1406,7 @@ function AppContent() {
   const [p612ShowForm, setP612ShowForm] = useState(false);
   const [p612Draft, setP612Draft] = useState({category:'',allocated:'',spent:'',period:new Date().toISOString().slice(0,7)});
   // ── Phase 613: Müşteri Portföy Analizi ────────────────────────────────────
-  const [p613Metric, setP613Metric] = useState<'revenue'|'orders'|'risk'>('revenue');
   // ── Phase 614: Nakit Pozisyon Özeti ──────────────────────────────────────
-  const [p614Currency, setP614Currency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   // ── Phase 615: Üretim Kalite Metrikleri ──────────────────────────────────
   const [p615Metrics, setP615Metrics] = useState<Array<{id:string;date:string;line:string;total:number;defects:number;rework:number}>>([]);
   const [p615ShowForm, setP615ShowForm] = useState(false);
@@ -1506,12 +1421,7 @@ function AppContent() {
   const [p618Draft, setP618Draft] = useState({name:'',start:'',end:'',progress:'0',status:'Aktif' as 'Aktif'|'Tamamlandı'|'Gecikmiş'|'Beklemede',owner:''});
   // ── Phase 621: Talep Yönetimi (Demand Management) ─────────────────────────
   const [p621Demands, setP621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
-  const [p621ShowForm, setP621ShowForm] = useState(false);
-  const [p621Draft, setP621Draft] = useState({productName:'',sku:'',requestedQty:'',requestedBy:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek',notes:''});
   // ── Phase 622: İhracat & Gümrük Takibi ───────────────────────────────────
-  const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
-  const [p622ShowForm, setP622ShowForm] = useState(false);
-  const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
   // ── Phase 623: Akreditif & Ödeme Belgesi Takibi ──────────────────────────
   const [p623LCs, setP623LCs] = useState<Array<{id:string;bank:string;beneficiary:string;amount:number;currency:'USD'|'EUR';expiryDate:string;status:'Açık'|'Kullanıldı'|'Sona Erdi'|'İptal';ref:string}>>([]);
   const [p623ShowForm, setP623ShowForm] = useState(false);
@@ -1525,13 +1435,11 @@ function AppContent() {
   const [p625BudgetData, setP625BudgetData] = useState<Array<{month:number;budgetRevenue:number;budgetExpense:number}>>([]);
   const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
   // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
-  const [p626Period, setP626Period] = useState<'30d'|'90d'|'ytd'>('90d');
   // ── Phase 627: Tedarik Zinciri Riski ─────────────────────────────────────
   const [p627Risks, setP627Risks] = useState<Array<{id:string;supplier:string;riskType:'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer';severity:'Düşük'|'Orta'|'Yüksek'|'Kritik';probability:number;mitigationPlan?:string;status:'Aktif'|'Azaltıldı'|'Kabul Edildi'}>>([]);
   const [p627ShowForm, setP627ShowForm] = useState(false);
   const [p627Draft, setP627Draft] = useState({supplier:'',riskType:'Tedarik Kesintisi' as 'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer',severity:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',probability:'50',mitigationPlan:''});
   // ── Phase 628: Stok Optimizasyon Analizi ─────────────────────────────────
-  const [p628ABCCategory, setP628ABCCategory] = useState<'all'|'A'|'B'|'C'>('all');
   // ── Phase 629: Çalışan Performans KPI ────────────────────────────────────
   const [p629KpiPeriod, setP629KpiPeriod] = useState<'this_month'|'last_month'|'ytd'>('this_month');
   // ── Phase 630: Fatura Takip & Yaşlandırma ─────────────────────────────────
@@ -1610,7 +1518,6 @@ function AppContent() {
   // ── Red-team Fix D: Data Import Wizard ────────────────────────────────────
   const [showDataImport, setShowDataImport] = useState(false);
   // ── Phase 633: RFM Müşteri Segmentasyonu ──────────────────────────────────
-  const [p633Segment, setP633Segment] = useState<'all'|'champions'|'loyal'|'at-risk'|'lost'>('all');
   // ── Phase 634: Bütçe-Fiili Varyans Analizi ────────────────────────────────
   const [p634Period, setP634Period] = useState<'this_month'|'last_month'|'ytd'>('this_month');
   // ── Phase 635: Kur Değerleme (FX Revaluation) ─────────────────────────────
@@ -1656,15 +1563,12 @@ function AppContent() {
   const [p638Running, setP638Running] = useState(false);
   // ── Phase 639: İade & Kredi Notu ──────────────────────────────────────────
   const [p639Returns, setP639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
-  const [p639ShowForm, setP639ShowForm] = useState(false);
-  const [p639Draft, setP639Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
   // ── Phase 640: Tekrarlayan Fatura / Abonelik ───────────────────────────────
   const [p640Subs, setP640Subs] = useState<Array<{id:string;customerName:string;amount:number;frequency:'Aylık'|'3 Aylık'|'Yıllık';nextDate:string;status:'Aktif'|'Pasif'|'İptal'}>>([]);
   const [p640ShowForm, setP640ShowForm] = useState(false);
   const [p640Draft, setP640Draft] = useState({customerName:'',amount:'',frequency:'Aylık' as 'Aylık'|'3 Aylık'|'Yıllık',nextDate:new Date().toISOString().slice(0,10)});
   // ── Phase 641: Denetim İzi (Audit Trail) ──────────────────────────────────
 
-  const [p641Logs, setP641Logs] = useState<Array<{id:string;user:string;action:string;entity:string;entityId:string;ts:string;details?:string}>>([]);
   // ── Phase 642: Garanti Takip ───────────────────────────────────────────────
   const [p642Warranties, setP642Warranties] = useState<Array<{id:string;productName:string;sku:string;serialNo:string;customerName:string;purchaseDate:string;warrantyMonths:number;status:'Aktif'|'Sona Erdi'|'Talep Açık'}>>([]);
   const [p642ShowForm, setP642ShowForm] = useState(false);
@@ -1796,8 +1700,6 @@ function AppContent() {
     priority: 'low' | 'medium' | 'high'; status: 'open' | 'in_progress' | 'resolved';
     createdAt?: unknown; assignedTo?: string; description?: string;
   }>>([]);
-  const [showTicketForm, setShowTicketForm] = useState(false);
-  const [ticketForm, setTicketForm] = useState({ title: '', customerName: '', description: '', priority: 'medium' as 'low' | 'medium' | 'high', orderId: '' });
   // ── Phase 112: RMA / Returns ──────────────────────────────────────────────
   const [returnModal, setReturnModal] = useState<{ open: boolean; order: Order | null }>({ open: false, order: null });
   const [returnReason, setReturnReason] = useState('');
@@ -1805,18 +1707,11 @@ function AppContent() {
   const [returnAmount, setReturnAmount] = useState<number>(0);
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   // ── Phase 115: Email Campaign Manager ────────────────────────────────────
-  const [campaignForm, setCampaignForm] = useState({
-    subject: '', body: '', segment: 'all' as 'all' | 'new' | 'active' | 'highScore',
-  });
-  const [campaignSending, setCampaignSending] = useState(false);
-  const [campaignSent, setCampaignSent] = useState<{ count: number; ts: number } | null>(null);
   // ── Phase 116: Contract Management ────────────────────────────────────────
   const [contracts, setContracts] = useState<Array<{
     id: string; customerName: string; title: string; value: number;
     startDate: string; endDate: string; status: string; autoRenew: boolean;
   }>>([]);
-  const [contractForm, setContractForm] = useState({ customerName: '', title: '', value: 0, startDate: '', endDate: '', status: 'active', autoRenew: false });
-  const [showContractForm, setShowContractForm] = useState(false);
   // ── Phase 121: Leave Management ──────────────────────────────────────────
   const [leaveRequests, setLeaveRequests] = useState<Array<{
     id: string; employeeId: string; employeeName: string;
@@ -1843,11 +1738,6 @@ function AppContent() {
     id: string; templateName: string; customerName: string; totalPrice: number;
     frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean;
   }>>([]);
-  const [showRecurringForm, setShowRecurringForm] = useState(false);
-  const [recurringForm, setRecurringForm] = useState({
-    templateName: '', customerName: '', totalPrice: 0,
-    frequency: 'monthly' as 'weekly' | 'monthly' | 'quarterly', nextDue: ''
-  });
   // ── Phase 122: Price Override Approval ──────────────────────────────────
   const [priceOverrides, setPriceOverrides] = useState<Array<{
     id: string; requestedBy: string; customerName: string;
@@ -1855,10 +1745,6 @@ function AppContent() {
     reason: string; status: 'pending' | 'approved' | 'rejected';
     createdAt: unknown;
   }>>([]);
-  const [showPriceOverrideForm, setShowPriceOverrideForm] = useState(false);
-  const [priceOverrideForm, setPriceOverrideForm] = useState({
-    customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: ''
-  });
   // ── Phase 113: Budget vs Actuals ─────────────────────────────────────────
   type BudgetEntry = { dept: string; budgetTRY: number };
   const [budgets, setBudgets] = useState<BudgetEntry[]>([]);
@@ -1914,7 +1800,6 @@ function AppContent() {
   // --- Route Optimizer State ---
   const [routeStops, setRouteStops] = useState<RouteStop[]>([]);
   const [isRouteOptimized, setIsRouteOptimized] = useState(false);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   // --- Auth & User Profile ---
   useEffect(() => {
@@ -4684,7 +4569,6 @@ function AppContent() {
 
               {/* ── Phase 543: Upcoming Tax Deadlines Widget ── */}
               {dashVergiDeadlines.length > 0 && (() => {
-                const today543 = new Date().toISOString().slice(0, 10);
                 const getDays = (sonTarih: string) => Math.ceil((new Date(sonTarih).getTime() - Date.now()) / 86400000);
                 return (
                   <div className={cn('rounded-2xl border p-4', darkMode ? 'bg-white/5 border-white/10' : 'bg-amber-50/60 border-amber-200/60')}>
@@ -5251,8 +5135,6 @@ function AppContent() {
 
               {/* ── New ERP Module Quick-Status Strip ── */}
               {(() => {
-                const today = new Date().toISOString().slice(0, 10);
-                const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {/* E-Belge status */}
@@ -9179,7 +9061,6 @@ function AppContent() {
                   {/* ── Phase 597: Gelir Tanıma Takvimi ────────────────────────────── */}
                   {muhasebeTab === 'gelir-tanima' && (() => {
                     const tr597 = currentLanguage === 'tr';
-                    const today597 = new Date();
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr597?'📅 Gelir Tanıma Takvimi':'📅 Revenue Recognition Schedule'} subtitle={tr597?'Sözleşme gelirini dönemler arası otomatik olarak dağıtın.':'Spread contract revenue across periods automatically.'} icon={BarChart3}
@@ -13869,7 +13750,6 @@ function AppContent() {
               {/* ── Phase 644: MRP / Malzeme İhtiyaç Planlaması ─────────────── */}
               {inventory.length > 0 && (() => {
                 const tr644 = currentLanguage === 'tr';
-                const horizon644 = new Date(Date.now()+p644Horizon*86400000).toISOString().slice(0,10);
                 // Determine demand from open orders
                 const demandMap:{[sku:string]:{name:string;demand:number}} = {};
                 orders.filter(o=>o.status==='Pending'||o.status==='Processing').forEach(o=>{

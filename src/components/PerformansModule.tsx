@@ -152,7 +152,6 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
     : 0;
 
   const filtered = filterStatus === 'all' ? reviews : reviews.filter(r => r.status === filterStatus);
-  const selected = reviews.find(r => r.id === selectedId) ?? null;
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const saveReview = async () => {

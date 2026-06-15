@@ -428,23 +428,15 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
   const [lucaApiKey, setLucaApiKey] = useState('');
   const [lucaCompanyId, setLucaCompanyId] = useState('');
   const [lucaBaseUrl, setLucaBaseUrl] = useState('https://api.luca.com.tr');
-  const [lucaSyncing, setLucaSyncing] = useState(false);
   const [lucaLastSync, setLucaLastSync] = useState<string | null>(null);
   const [lucaConnected, setLucaConnected] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [lucaTesting, setLucaTesting] = useState(false);
 
   // Mikro
   const [mikroEnabled, setMikroEnabled] = useState(true);
   const [mikroAccessToken, setMikroAccessToken] = useState('');
-  const [mikroTokenFetching, setMikroTokenFetching] = useState(false);
-  const [mikroTokenInfo, setMikroTokenInfo] = useState<string | null>(null);
   const [mikroEndpoint, setMikroEndpoint] = useState('https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods');
   const [mikroConnected, setMikroConnected] = useState(false);
-  const [mikroTesting, setMikroTesting] = useState(false);
-  const [mikroSyncing, setMikroSyncing] = useState(false);
   const [mikroLastSync, setMikroLastSync] = useState<string | null>(null);
-  const [showMikroToken, setShowMikroToken] = useState(false);
 
   // New tab states
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -5209,7 +5201,6 @@ export default function AccountingModule({ orders, currentLanguage, isAuthentica
 
       {/* ── Gelir Tablosu (Income Statement) ── */}
       {accountingTab === 'gelir_tablosu' && (() => {
-        const now = new Date();
         const [gtYear, setGtYear] = [gelirYear, setGelirYear];
         const [gtMonth, setGtMonth] = [gelirMonth, setGelirMonth];
         const monthNames = currentLanguage === 'tr'
