@@ -54,25 +54,10 @@ interface RevenueSchedule {
   createdAt: any;
 }
 
-interface MilestoneProgress {
-  contractId: string;
-  obligationId: string;
-  milestoneNo: number;
-  description: string;
-  targetDate: string;
-  completionPercent: number;
-  approved: boolean;
-  approvedDate?: string;
-  value: number;
-}
-
 function fmt(n: number, currency = 'TRY') {
   return new Intl.NumberFormat('tr-TR', { style: 'currency', currency, minimumFractionDigits: 0 }).format(n);
 }
 
-function pocAmountForPeriod(contract: Contract, obligation: PerformanceObligation, pocPercent: number): number {
-  return (obligation.allocatedValue * pocPercent) / 100;
-}
 
 function straightLineMonths(start: string, end: string): number {
   const s = new Date(start);
@@ -85,7 +70,6 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
   const [view, setView] = useState<'contracts' | 'schedule' | 'deferred' | 'recognition'>('contracts');
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [schedules, setSchedules] = useState<RevenueSchedule[]>([]);
-  const [milestones, setMilestones] = useState<MilestoneProgress[]>([]);
   const [showContractForm, setShowContractForm] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState<Contract | null>(null);
   const [expandedContractId, setExpandedContractId] = useState<string | null>(null);
@@ -104,9 +88,6 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
     }));
     unsubs.push(onSnapshot(collection(db, 'revenueSchedules'), snap => {
       setSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueSchedule)));
-    }));
-    unsubs.push(onSnapshot(collection(db, 'revenueMilestones'), snap => {
-      setMilestones(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as MilestoneProgress)));
     }));
     return () => unsubs.forEach(u => u());
   }, []);

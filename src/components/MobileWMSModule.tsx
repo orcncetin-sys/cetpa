@@ -244,6 +244,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   ] as const;
 
   if (!isAuthenticated) return <div className="p-8 text-center text-gray-500">{tr ? 'Lütfen giriş yapın.' : 'Please sign in.'}</div>;
+  if (loading) return <div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
