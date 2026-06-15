@@ -1240,7 +1240,7 @@ export default function OrdersPage({
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-gray-900 text-sm">{tr575?'↩️ İade & Şikayet Yönetimi':'↩️ Returns & Complaints'}</h3>
                   {hasFullAccess('orders') && (
-                    <button onClick={()=>setP575ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
+                    <button onClick={()=>setActiveTab('iade')} className="apple-button-primary flex items-center gap-2 text-sm" title={tr575?'İade & Değişim sayfasında yönet':'Manage on Returns page'}>
                       <Plus className="w-4 h-4"/>{tr575?'İade Talebi':'New Return'}
                     </button>
                   )}
@@ -1503,7 +1503,7 @@ export default function OrdersPage({
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div><h3 className="font-bold text-gray-900 text-sm">↩️ {tr639?'İade & Kredi Notu':'Returns & Credit Notes'}</h3>
                   <p className="text-xs text-gray-400">{tr639?'Müşteri iadelerini ve kredi notlarını yönetin':'Manage customer returns and credit notes'}</p></div>
-                  <button onClick={()=>setP639ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr639?'İade Talebi':'New Return'}</button>
+                  <button onClick={()=>setActiveTab('iade')} className="apple-button-secondary text-xs flex items-center gap-1.5" title={tr639?'İade & Değişim sayfasında yönet':'Manage on Returns page'}><Plus className="w-3.5 h-3.5"/>{tr639?'İade Talebi':'New Return'}</button>
                 </div>
                 {pendingReturns>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">⚠️ {pendingReturns} {tr639?'bekleyen iade talebi':'pending return request(s)'}</div>}
                 {p639ShowForm && (

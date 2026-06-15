@@ -449,6 +449,13 @@ const BackToTopButton: React.FC = () => {
 };
 
 
+// Kur Değerleme sayısal girişi — modül seviyesinde (render içinde tanımlanırsa
+// her tuşta yeniden mount olur ve focus kaybolur).
+const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v: number) => void; w?: string }) => (
+  <input type="number" step="0.01" value={value || ''} onChange={e => onChange(Number(e.target.value) || 0)}
+    placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
+);
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -3402,7 +3409,7 @@ function AppContent() {
                   </div>
                 )}
                 {userRole === 'Admin' && (
-                  <label className="absolute -bottom-1 -right-1 bg-white/20 backdrop-blur-sm rounded-full p-1 shadow-md cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
+                  <label className="absolute -bottom-1.5 -right-1.5 bg-brand rounded-full p-1 shadow-md ring-2 ring-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
                     <Upload className="w-3 h-3 text-white" />
                     <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/avif,image/webp" className="hidden" onChange={handleLogoUpload} />
                   </label>
@@ -3580,13 +3587,17 @@ function AppContent() {
                   'bg-white/10 text-white/50'
                 )}>{userRole}</span>
               </div>
-              {user?.photoURL ? (
-                <img src={user.photoURL} className={cn("w-8 h-8 rounded-full border-2 shadow-sm flex-shrink-0", darkMode ? "border-white/20" : "border-black/10")} alt="User" />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xs font-bold text-brand">{(user?.displayName || 'M')[0].toUpperCase()}</span>
+              <div className="relative w-8 h-8 flex-shrink-0">
+                {/* Taban: baş harf — foto yüklenmezse/hatalıysa bu görünür */}
+                <div className={cn("absolute inset-0 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center", darkMode && "border-brand/40")}>
+                  <span className="text-xs font-bold text-brand">{(user?.displayName || user?.email || 'M')[0].toUpperCase()}</span>
                 </div>
-              )}
+                {user?.photoURL && (
+                  <img src={user.photoURL} referrerPolicy="no-referrer" loading="lazy"
+                    onError={e => { e.currentTarget.style.display = 'none'; }}
+                    className={cn("absolute inset-0 w-8 h-8 rounded-full border-2 shadow-sm object-cover", darkMode ? "border-white/20" : "border-black/10")} alt="User" />
+                )}
+              </div>
               {user && (
                 <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
                   className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
@@ -3928,6 +3939,7 @@ function AppContent() {
                       <button
                         onClick={() => {
                           if (isGroupActive && !hasChildren) return;
+                          setSelectedLead(null); setSelectedOrder(null); // detay görünümünü kapat
                           setActiveTab(group.id);
                           if (group.id === 'crm') setCrmTab('leads');
                           if (group.id === 'muhasebe') setMuhasebeTab('genel');
@@ -3959,7 +3971,7 @@ function AppContent() {
                             return (
                               <button
                                 key={child.subId}
-                                onClick={() => { child.action(); setIsMobileMenuOpen(false); }}
+                                onClick={() => { setSelectedLead(null); setSelectedOrder(null); child.action(); setIsMobileMenuOpen(false); }}
                                 className={cn(
                                   'w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all',
                                   active
@@ -8869,10 +8881,13 @@ function AppContent() {
                     });
                     const totalActual580 = actuals580.reduce((s,v)=>s+v,0);
                     // Monthly budget targets (equal split for now)
-                    const annualBudget = p570Targets.revenue * 12;
-                    const monthlyBudget = annualBudget / 12;
-                    const budgets580 = months580.map(() => monthlyBudget);
+                    // Gerçek aylık bütçe: App "Bütçe & Senaryo" (settings/budgets → allBudgetsFirestore[yyyy-MM]).
+                    const budgets580 = months580.map(m => {
+                      const mm = String(m + 1).padStart(2, '0');
+                      return (allBudgetsFirestore[`${year580}-${mm}`] ?? []).reduce((s, b) => s + (b.budgetTRY || 0), 0);
+                    });
                     const totalBudget580 = budgets580.reduce((s,v)=>s+v,0);
+                    const hasBudget580 = totalBudget580 > 0;
                     const overallPct = totalBudget580 > 0 ? (totalActual580/totalBudget580)*100 : 0;
                     const now580 = new Date();
                     const currentMonth = year580 === now580.getFullYear() ? now580.getMonth() : 11;
@@ -8884,6 +8899,12 @@ function AppContent() {
                             {[String(now580.getFullYear()-1), String(now580.getFullYear()), String(now580.getFullYear()+1)].map(y=><option key={y}>{y}</option>)}
                           </select>
                         </div>
+                        {!hasBudget580 && (
+                          <div className="apple-card p-3 bg-amber-50 border border-amber-200 text-[12px] text-amber-700 flex items-center gap-2">
+                            <span>ℹ</span>
+                            <span>{tr580 ? `${year580} için bütçe tanımlanmamış. Muhasebe → Bütçe & Senaryo'dan aylık bütçe girince burada karşılaştırılır.` : `No budget defined for ${year580}. Add monthly budgets under Accounting → Budget & Scenario.`}</span>
+                          </div>
+                        )}
                         {/* Summary KPIs */}
                         <div className="grid grid-cols-3 gap-4">
                           {[
@@ -9312,10 +9333,6 @@ function AppContent() {
                     // Kur farkı = döviz bakiyesi × (güncel kur − defterdeki kur)  [TL cinsinden]
                     const gainUSD = fxPos.usdBalance * (curUSD - fxPos.usdBookRate);
                     const gainEUR = fxPos.eurBalance * (curEUR - fxPos.eurBookRate);
-                    const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v: number) => void; w?: string }) => (
-                      <input type="number" step="0.01" value={value || ''} onChange={e => onChange(Number(e.target.value) || 0)}
-                        placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
-                    );
                     const positions = [
                       { cur: 'USD', bal: fxPos.usdBalance, balField: 'usdBalance' as const, book: fxPos.usdBookRate, bookField: 'usdBookRate' as const, curRate: curUSD, gain: gainUSD },
                       { cur: 'EUR', bal: fxPos.eurBalance, balField: 'eurBalance' as const, book: fxPos.eurBookRate, bookField: 'eurBookRate' as const, curRate: curEUR, gain: gainEUR },

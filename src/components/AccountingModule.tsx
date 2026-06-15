@@ -372,7 +372,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [bankForm, setBankForm] = useState({
     bankName: '', branch: '', accountHolder: '', accountNumber: '',
     iban: '', currency: 'TRY' as 'TRY' | 'USD' | 'EUR', balance: 0,
-    accountType: 'Vadesiz' as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa',
+    accountType: 'Vadesiz' as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu',
   });
 
   // Bank Transactions (auto-pull)
@@ -4499,8 +4499,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Hesap Tipi' : 'Account Type'}</label>
-                  <select value={bankForm.accountType} onChange={e => setBankForm(prev => ({ ...prev, accountType: e.target.value as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    {(['Vadesiz', 'Vadeli', 'Kredi', 'Kasa'] as const).map(c => <option key={c} value={c}>{c}</option>)}
+                  <select value={bankForm.accountType} onChange={e => setBankForm(prev => ({ ...prev, accountType: e.target.value as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                    {(['Vadesiz', 'Vadeli', 'Kredi', 'Kasa', 'Akreditif (L/C)', 'Teminat Mektubu'] as const).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
