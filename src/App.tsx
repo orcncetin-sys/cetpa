@@ -554,23 +554,11 @@ function AppContent() {
     firebase: boolean; resend: boolean; whatsapp: boolean; iyzico: boolean;
     timestamp: string;
   } | null>(null);
-  const [statsData, setStatsData] = useState<Record<string, number> | null>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
-
   const fetchSystemHealth = useCallback(async () => {
-    setHealthLoading(true);
     try {
-      const [hr, sr] = await Promise.all([
-        fetch('/api/health'),
-        fetch('/api/admin/stats'),
-      ]);
+      const hr = await fetch('/api/health');
       if (hr.ok) setHealthData(await hr.json() as typeof healthData);
-      if (sr.ok) {
-        const sd = await sr.json() as { counts: Record<string, number> };
-        setStatsData(sd.counts);
-      }
     } catch { /* ignore — offline */ }
-    setHealthLoading(false);
   }, []);
 
   useEffect(() => {
@@ -621,7 +609,6 @@ function AppContent() {
   const [appQuotations, setAppQuotations] = useState<Quotation[]>([]);
   // eBA approval queue pending count (badge on nav tab)
   const pendingApprovalsCount = usePendingApprovalCount(userRole, user?.email);
-  const [firestoreCategories, setFirestoreCategories] = useState<string[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -763,7 +750,6 @@ function AppContent() {
 
   // ─── Subscription State ─────────────────────────────────────────────────
   const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showLoginPage, setShowLoginPage] = useState(false);
   const [showDemoForm, setShowDemoForm] = useState(false);
   const [demoForm, setDemoForm] = useState({ name: '', company: '', email: '', phone: '', message: '' });
@@ -899,7 +885,6 @@ function AppContent() {
     try {
       await setDoc(doc(db, 'subscriptions', user.uid), subscription);
       await setDoc(doc(db, 'companies', user.uid), { ...companyInfo, createdAt: serverTimestamp() }, { merge: true });
-      setShowOnboarding(false);
     } catch (e) {
       console.error('[handleOnboardingComplete]', e);
       toast(currentLanguage === 'tr' ? 'Kurulum kaydedilemedi.' : 'Could not save onboarding data.', 'error');
@@ -1170,8 +1155,6 @@ function AppContent() {
       handleFirestoreError(error, OperationType.CREATE, 'auditLog');
     }
   }, [user]);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   const [isAddingLead, setIsAddingLead] = useState(false);
   const [isScoring, setIsScoring] = useState(false);
@@ -1180,23 +1163,6 @@ function AppContent() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   // Lead quick-note — saved to leads/{id}.quickNote in Firestore
-  const [leadNoteText, setLeadNoteText] = useState('');
-  useEffect(() => {
-    const stored = selectedLead
-      ? ((selectedLead as unknown as Record<string, unknown>)['quickNote'] as string ?? '')
-      : '';
-    setLeadNoteText(stored);
-  }, [selectedLead?.id]);
-  // Order quick-note — top-level to avoid hooks-in-conditional violation
-  const [orderNoteText, setOrderNoteText] = useState('');
-  useEffect(() => {
-    setOrderNoteText(selectedOrder?.notes ?? '');
-    // Phase 101: load timeline from order doc
-    const ord101 = selectedOrder as unknown as Record<string, unknown>;
-    setOrderTimeline(Array.isArray(ord101?.timeline) ? ord101.timeline as TimelineEntry[] : []);
-  }, [selectedOrder?.id]);
-  const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
-  const [iyzicoLinkLoading,  setIyzicoLinkLoading]  = useState<Record<string, boolean>>({});
   const [labelItems,         setLabelItems]         = useState<LabelItem[] | null>(null);
   // Public order tracking — read from URL on mount
   const trackOrderId = new URLSearchParams(window.location.search).get('track') ?? null;
@@ -1230,7 +1196,6 @@ function AppContent() {
   const [deliveryNoteOrder, setDeliveryNoteOrder] = useState<Order|null>(null); // Phase 506
   const [deliveryNoteText, setDeliveryNoteText] = useState(''); // Phase 506
   // ── Phase 504-520 ────────────────────────────────────────────────────────────
-  const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set()); // Phase 504 — synced from userPrefs/{uid}
   const [showStockCount, setShowStockCount] = useState(false); // Phase 507
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, number>>({}); // Phase 507
   const [stockCountSaving, setStockCountSaving] = useState(false); // Phase 507
@@ -1690,7 +1655,6 @@ function AppContent() {
   const [emailSending, setEmailSending] = useState(false);
   // ── Phase 101: Order Activity Timeline ───────────────────────────────────
   type TimelineEntry = { action: string; actor: string; ts: number; note?: string };
-  const [orderTimeline, setOrderTimeline] = useState<TimelineEntry[]>([]);
   // ── Phase 102: Quick PO prefill ──────────────────────────────────────────
   const [quickPOProduct, setQuickPOProduct] = useState<{ name: string; sku: string } | null>(null);
   // ── Phase 110: AP Tracker — purchase orders for accounting ───────────────
@@ -1875,7 +1839,6 @@ function AppContent() {
     const unsubSettings = onSnapshot(doc(db, 'settings', 'app'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setLogoUrl(data.logoUrl || null);
         setCompanySettings(data.companySettings || {});
       }
     }, (error) => importedLogFirestoreError(error, OperationType.GET, 'settings/app', user.uid));
@@ -1926,21 +1889,17 @@ function AppContent() {
       return;
     }
 
-    setIsUploadingLogo(true);
     try {
       const logoRef = ref(storage, `settings/logo`);
       await uploadBytes(logoRef, file);
       const url = await getDownloadURL(logoRef);
 
       await setDoc(doc(db, 'settings', 'app'), { logoUrl: url }, { merge: true });
-      setLogoUrl(url);
       logAuditAction(currentT.logo_update, currentT.logo_updated);
       alert(currentT.logo_update_success);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/app');
       alert(currentT.logo_upload_failed);
-    } finally {
-      setIsUploadingLogo(false);
     }
   };
 
@@ -2146,9 +2105,6 @@ function AppContent() {
       }
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventory', auth.currentUser?.uid));
 
-    const unsubCategories = onSnapshot(query(collection(db, 'categories')), (snapshot) => {
-      setFirestoreCategories(snapshot.docs.map(d => d.data().name as string).filter(Boolean));
-    }, () => { /* silently ignore — categories may not exist yet */ });
 
     const unsubWarehouses = onSnapshot(collection(db, 'warehouses'), (snapshot) => {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
@@ -2218,7 +2174,6 @@ function AppContent() {
       const d = snap.data();
       if (d.darkMode !== undefined) setDarkMode(d.darkMode as boolean);
       if (d.notifPrefs) setNotifPrefs(d.notifPrefs as Record<string, boolean>);
-      if (Array.isArray(d.starredOrders)) setStarredOrders(new Set(d.starredOrders as string[]));
       if (typeof d.quickNote === 'string') setQuickNote(d.quickNote);
       if (Array.isArray(d.recentlyViewed)) setRecentlyViewed(d.recentlyViewed);
     }, () => { /* non-critical */ });
@@ -2242,7 +2197,6 @@ function AppContent() {
       unsubLeads();
       unsubOrders();
       unsubInventory();
-      unsubCategories();
       unsubWarehouses();
       unsubMovements();
       unsubEmployees();
@@ -2655,7 +2609,6 @@ function AppContent() {
       const newEntry = { action: `Durum: ${status}`, actor: user?.displayName || user?.email || 'Sistem', ts: Date.now() };
       const updatedTimeline = [...prevTimeline, newEntry];
       await updateDoc(doc(db, 'orders', orderId), { status, timeline: updatedTimeline });
-      if (selectedOrder?.id === orderId) setOrderTimeline(updatedTimeline);
       logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
 
       // ── Notification trigger on key status changes ─────────────────────────
@@ -2765,7 +2718,6 @@ function AppContent() {
 
   // ── e-Fatura: push order to Mikro ────────────────────────────────────────────
   const handleMikroFatura = async (order: Order) => {
-    setFaturaLoading(prev => ({ ...prev, [order.id]: true }));
     try {
       const lead = leads.find(l => l.id === order.leadId);
       const r = await authFetch('/api/mikro/fatura/kaydet', {
@@ -2800,14 +2752,11 @@ function AppContent() {
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'error');
-    } finally {
-      setFaturaLoading(prev => ({ ...prev, [order.id]: false }));
     }
   };
 
   // ── iyzico: generate payment link ─────────────────────────────────────────
   const handleIyzicoPaymentLink = async (order: Order) => {
-    setIyzicoLinkLoading(prev => ({ ...prev, [order.id]: true }));
     try {
       const lead = leads.find(l => l.id === order.leadId);
       const r = await authFetch('/api/iyzico/payment-link', {
@@ -2843,8 +2792,6 @@ function AppContent() {
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'error');
-    } finally {
-      setIyzicoLinkLoading(prev => ({ ...prev, [order.id]: false }));
     }
   };
 
@@ -3368,7 +3315,6 @@ function AppContent() {
             else {
               setShowPricingPage(false);
               setEnteredApp(false);
-              if (!userSubscription) setShowOnboarding(true);
             }
           }}
         />
