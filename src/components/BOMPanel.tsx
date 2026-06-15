@@ -10,7 +10,7 @@
  *   capacity load calculations, and auto-generate purchase orders.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Factory, Plus, Trash2, Edit2, ChevronDown, ChevronUp,
   Package, RefreshCw, Search, X, ArrowRight,

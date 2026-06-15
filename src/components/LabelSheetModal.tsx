@@ -9,7 +9,7 @@
  * A <style> tag injects @media print rules so ONLY the label sheet prints.
  */
 
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import MikroPushButton from './MikroPushButton';
 import { etiketPayload } from '../services/mikroEvrak';
 import { QRCodeSVG } from 'qrcode.react';

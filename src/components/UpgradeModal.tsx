@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'motion/react';
 import { Lock, ArrowRight, Check, Zap } from 'lucide-react';
 import { PLANS, getPlanConfig, type SubscriptionPlan, type UserSubscription } from '../types/subscription';

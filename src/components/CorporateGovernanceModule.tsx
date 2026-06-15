@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Gavel, Users, FileText, Calendar, Plus, Search, Edit2, Trash2, Download, AlertCircle,
   Shield, Scale, Briefcase, UserPlus, CheckCircle2, X, Eye, TrendingUp

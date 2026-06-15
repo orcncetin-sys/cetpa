@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Brain, Sparkles, X, Loader2, TrendingUp, AlertCircle } from 'lucide-react';
 import Markdown from 'react-markdown';

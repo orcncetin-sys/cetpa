@@ -8,7 +8,7 @@
  * Usage: <MutabakatPanel leadId={lead.id} currentLanguage="tr" />
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';

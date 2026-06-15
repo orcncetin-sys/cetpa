@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, ArrowRight, Building2, Rocket, Sparkles, Plug, Server, Cloud, Download } from 'lucide-react';
 import { PLANS, type SubscriptionPlan, createTrialSubscription, type UserSubscription } from '../types/subscription';

@@ -6,7 +6,7 @@
  * Firebase MFA değil — Spark planında ücretsiz çalışan kendi /api/mfa/*
  * altyapımızı kullanır.
  */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { ShieldCheck, ShieldOff, Loader2, X, KeyRound } from 'lucide-react';
 import { getMfaStatus, startEnrollment, finishEnrollment, disableMfa, verifyLogin } from '../lib/mfa';

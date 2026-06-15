@@ -10,7 +10,7 @@
  *  - Saved configurations reuse
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, Plus, X, ChevronDown, FileText,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';

@@ -10,7 +10,7 @@
  *   <CariEkstrePanel currentLanguage="tr" leadId={lead.id} />  ← one customer
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   collection, query, where, onSnapshot, Timestamp,
 } from '../lib/dbClient';

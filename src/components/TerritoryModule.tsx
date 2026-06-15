@@ -10,7 +10,7 @@
  *  - Overlap & coverage map (text-based heat)
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MapPin, Plus, X, Target, Users, Edit2, Trash2, BarChart2, Award

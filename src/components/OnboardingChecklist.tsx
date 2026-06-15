@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, ChevronRight, X } from 'lucide-react';
 import { doc, onSnapshot, setDoc, updateDoc } from '../lib/dbClient';

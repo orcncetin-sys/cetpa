@@ -6,7 +6,7 @@
  * and shows a branded status timeline to the customer.
  */
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Package, Truck, CheckCircle2, Clock, AlertCircle,
   MapPin, RefreshCw, ExternalLink,

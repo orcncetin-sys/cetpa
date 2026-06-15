@@ -7,7 +7,7 @@
  * actionable recommendations.
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   TrendingUp, RefreshCw, AlertCircle, Package,
   DollarSign, ChevronDown, ChevronUp,

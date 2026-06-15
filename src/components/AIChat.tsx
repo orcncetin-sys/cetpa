@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, Send, X, Bot, RefreshCw, Zap, Brain } from 'lucide-react';
 import { auth } from '../firebase';

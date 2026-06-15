@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Edit2, Package, Tag, Layers, DollarSign, History, TrendingUp, AlertCircle } from 'lucide-react';

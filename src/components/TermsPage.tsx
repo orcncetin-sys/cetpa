@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
 interface Props {
