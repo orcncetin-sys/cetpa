@@ -361,6 +361,10 @@ const TENANT_COLLECTIONS = new Set([
   'wmsLocations', 'dataRequests',
 ]);
 const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding']);
+// Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
+// ERP/email/iyzico gibi deployment-seviyesi creds GLOBAL kalır (server cron/API okur).
+// docs tablosu PK (coll,id) olduğu için id companyId ile namespace'lenir: `${cid}__{key}`.
+const PER_COMPANY_SETTINGS = new Set(['app', 'erpHub', 'workingCapital', 'companyProfile']);
 
 // Kullanıcının firma kimliği: users/{uid}.companyId, yoksa uid (sahip = kendi firması).
 const companyIdCache = new Map<string, { cid: string; exp: number }>();
@@ -1926,6 +1930,7 @@ async function startServer() {
         if (!data) return true;
         if (TENANT_COLLECTIONS.has(coll)) { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; }
         if (USER_SCOPED_COLLECTIONS.has(coll)) { const du = data.userId as string | undefined; return !du || du === streamUid; }
+        if (coll === 'settings') { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; } // firma-bazlı ayar init izolasyonu
         return true;
       };
       try {
@@ -1942,6 +1947,7 @@ async function startServer() {
         // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
+        if (ev.coll === 'settings' && ev.cid && ev.cid !== streamCid) return; // firma-bazlı ayar yayını izolasyonu
         res.write(`event: change\ndata: ${JSON.stringify(ev)}\n\n`);
       };
       dbEvents.on('change', onChange);
@@ -2010,6 +2016,20 @@ async function startServer() {
       }
       return true;
     };
+    // settings/{key} → firma-bazlı gerçek id. perCompany ise GET'te legacy global'e fallback edilir.
+    const settingsRealId = async (req: Request, coll: string, id: string): Promise<{ realId: string; perCompany: boolean; cid: string }> => {
+      if (coll === 'settings' && PER_COMPANY_SETTINGS.has(id)) {
+        const uid = (req as Request & { uid?: string }).uid || '';
+        const cid = await getUserCompanyId(uid);
+        return { realId: `${cid}__${id}`, perCompany: true, cid };
+      }
+      return { realId: id, perCompany: false, cid: '' };
+    };
+    // Doğrudan namespaced ayar erişimini engelle (client yalnız 'app','mikro' gibi düz anahtar ister).
+    const rejectNamespacedSettings = (coll: string, id: string, res: Response): boolean => {
+      if (coll === 'settings' && id.includes('__')) { res.status(400).json({ error: 'Geçersiz ayar anahtarı.' }); return true; }
+      return false;
+    };
 
     app.get('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
@@ -2025,9 +2045,15 @@ async function startServer() {
     app.get('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (rejectNamespacedSettings(coll, id, res)) return;
       if (await denied(req, res, coll, 'read', id)) return;
       try {
-        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        const { realId, perCompany } = await settingsRealId(req, coll, id);
+        let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
+        // Firma-bazlı ayar henüz oluşmamışsa legacy global ayara düş (mevcut firma kaybetmesin).
+        if (!rows.length && perCompany) {
+          ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]));
+        }
         if (!rows.length || !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(404).json({ error: 'Not found.' }); return; }
         res.json({ data: rows[0].data });
       } catch (e) { dbErr(e, res, 'GET', coll); }
@@ -2055,9 +2081,11 @@ async function startServer() {
       if (!validColl(coll, res)) return;
       // Append-only koleksiyonlarda mevcut kaydın üzerine yazma yok
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      if (rejectNamespacedSettings(coll, id, res)) return;
       if (await denied(req, res, coll, 'write', id)) return;
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
+        const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
         const incoming = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
         let data = incoming;
         let before: Record<string, unknown> = {};
@@ -2065,18 +2093,20 @@ async function startServer() {
         const scoped = TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll);
         // Sahiplik: kapsamlı/audit/merge için mevcut kaydı çek
         if (req.query.merge === '1' || audited || scoped) {
-          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+          let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
+          if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
           before = (rows[0]?.data as Record<string, unknown>) ?? {};
           if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
           if (req.query.merge === '1') data = mergeDocData(before, incoming);
         }
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
+        if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-          [coll, id, JSON.stringify(data)],
+          [coll, realId, JSON.stringify(data)],
         );
-        broadcastDocChange(coll, 'set', id, data);
+        broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla (client settings/{id} dinler)
         if (audited) {
           const fd = computeFieldDiff(before, data);
           if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} kaydedildi`, `${coll}/${id}`, fd);
@@ -2090,21 +2120,25 @@ async function startServer() {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      if (rejectNamespacedSettings(coll, id, res)) return;
       if (await denied(req, res, coll, 'write', id)) return;
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
+        const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
         const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
-        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
+        if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
         if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         let data = mergeDocData(before, patch);
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
+        if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-          [coll, id, JSON.stringify(data)],
+          [coll, realId, JSON.stringify(data)],
         );
-        broadcastDocChange(coll, 'set', id, data);
+        broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla
         // Hassas koleksiyonlarda 'kim neyi değiştirdi' diff'i kaydet (bloklamadan)
         if (AUDITED_COLLECTIONS.has(coll)) {
           const fd = computeFieldDiff(before, data);
@@ -2118,14 +2152,16 @@ async function startServer() {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon silinemez (append-only).' }); return; }
+      if (rejectNamespacedSettings(coll, id, res)) return;
       if (await denied(req, res, coll, 'delete')) return;
       try {
+        const { realId } = await settingsRealId(req, coll, id);
         // Sahiplik: başka firmanın kaydı silinemez
         if (TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) {
-          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
           if (rows.length && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
-        await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         broadcastDocChange(coll, 'delete', id);
         res.json({ ok: true });
       } catch (e) { dbErr(e, res, 'DELETE', coll); }
