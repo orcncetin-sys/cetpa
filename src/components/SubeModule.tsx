@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc,
-  doc, serverTimestamp, query, where, limit
+  doc, serverTimestamp, query, limit
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
-  MapPin, Phone, Mail, User, CheckCircle, Clock, Package
+  MapPin, Phone, Mail, User, CheckCircle, Package
 } from 'lucide-react';
 
 interface Sube {

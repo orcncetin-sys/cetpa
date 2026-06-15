@@ -15,8 +15,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Cpu, Plus, X, ChevronDown, Settings, Clock, AlertTriangle,
-  CheckCircle2, BarChart2, Calendar, Zap, ArrowRight, Package,
+  Cpu, Plus, X, Settings, AlertTriangle, BarChart2, ArrowRight, Package,
   RefreshCw, Edit2, Trash2
 } from 'lucide-react';
 import {

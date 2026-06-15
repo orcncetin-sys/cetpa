@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
-  collection, onSnapshot, addDoc, updateDoc,
-  doc, serverTimestamp, query
+  collection, onSnapshot, addDoc, serverTimestamp, query
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
-import {
-  Globe, Package, CreditCard, FileText, Plus, X,
-  TrendingUp, Clock, CheckCircle, AlertCircle, Ship
+import { Package, CreditCard, FileText, Plus, X, Ship
 } from 'lucide-react';
 
 interface Ihracat {

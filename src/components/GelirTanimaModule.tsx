@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
-import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, AlertCircle, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
+import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
 
 interface GelirTanimaModuleProps {
   currentLanguage: string;
@@ -155,7 +155,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
       if (obl.recognitionMethod === 'straight_line') {
         const months = straightLineMonths(contract.startDate, contract.endDate);
         const monthlyAmount = obl.allocatedValue / months;
-        let current = new Date(start);
+        const current = new Date(start);
         while (current <= end) {
           const period = `${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,'0')}`;
           scheduleItems.push({

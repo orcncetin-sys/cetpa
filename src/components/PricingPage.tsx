@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, X, Zap, ChevronDown, Shield, CreditCard, Globe } from 'lucide-react';
+import { Check, X, ChevronDown, Shield, CreditCard, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   PLANS,

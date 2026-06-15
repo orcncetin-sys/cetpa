@@ -21,7 +21,6 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
-  signInAnonymously,
   GoogleAuthProvider,
   signOut,
   getRedirectResult,
@@ -44,7 +43,7 @@ import {
   orderBy,
   Timestamp
 } from './lib/dbClient';
-import { sortByCreatedAt, byField } from './utils/fsSort';
+import { sortByCreatedAt } from './utils/fsSort';
 import {
   ref,
   uploadBytes,
@@ -63,59 +62,44 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  MapPin,
   TrendingUp,
   BarChart3,
   Scan,
   RefreshCw,
   FileText,
   Calendar,
-  ArrowLeft,
   Trash2,
   Edit2,
-  Kanban,
   List,
-  MessageSquare,
   Phone,
   Mail,
   Upload,
-  Route,
-  GripVertical,
-  Navigation,
   Shield,
   Bell,
   Settings,
   ChevronRight,
   Download,
-  FilePlus,
   CreditCard,
   DollarSign,
   Lock,
   History,
   Globe,
   X,
-  ImageIcon,
   Menu,
   FileDown,
-  FileUp,
   Target as TargetIcon,
-  Eye,
   UserCheck,
   ShieldCheck,
   Scale,
   Activity,
-  ArrowRightLeft,
   Building2,
   BookOpen,
   ShoppingBag,
   ShoppingCart,
   Factory,
-  Link,
-  Flame,
   Award,
   Moon,
   Sun,
-  Copy,
   Check,
   Tag,
   ChevronDown,
@@ -144,9 +128,7 @@ import {
   type Order, 
   type OrderLineItem, 
   type InventoryItem, 
-  type Quotation, 
-  type QuotationItem, 
-  type PriceList,
+  type Quotation,
   type Employee,
   type Payroll,
   type InventoryMovement,
@@ -157,20 +139,17 @@ import {
   type Supplier
 } from './types';
 import { scoreLead } from './services/geminiService';
-import { syncShopify, createShopifyDraftOrder } from './services/shopifyService';
+import { createShopifyDraftOrder } from './services/shopifyService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
-import { tr, enUS } from 'date-fns/locale';
 // ── Lazy auth/marketing pages (not needed on initial render) ─────────────────
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
-import UpgradeModal from './components/UpgradeModal';
 import ConfirmModal from './components/ConfirmModal';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import DataImportWizard from './components/DataImportWizard';
@@ -180,18 +159,13 @@ import DateRangePicker from './components/DateRangePicker';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { translations, type Language } from './translations';
-import { exportOrdersCSV, exportLeadsCSV, exportInventoryCSV, exportMonthlySummaryCSV, exportStockMovementsCSV, downloadInventoryImportTemplate, type MonthlySummaryRow, type StockMovementRow } from './utils/export';
-import { formatCurrency, formatInCurrency } from './utils/currency';
 import { haversineDistance, optimizeRoute } from './utils/logistics';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
 const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
 import SortHeaderComponent from './components/SortHeader';
-const QuotationForm           = React.lazy(() => import('./components/QuotationForm'));
-const QuotationDetail         = React.lazy(() => import('./components/QuotationDetail'));
-const PriceListForm           = React.lazy(() => import('./components/PriceListForm'));
 const ProductForm             = React.lazy(() => import('./components/ProductForm'));
-import ProductDetail from './components/ProductDetail'; // static: already bundled via InventoryView
+// static: already bundled via InventoryView
 const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
 const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
 const HRModule                = React.lazy(() => import('./components/HRModule'));
@@ -206,12 +180,7 @@ const AnalyticsPanel          = React.lazy(() => import('./components/AnalyticsP
 const SubscriptionPanel       = React.lazy(() => import('./components/SubscriptionPanel'));
 const MikroSyncPanel          = React.lazy(() => import('./components/MikroSyncPanel'));
 const LucaSyncPanel           = React.lazy(() => import('./components/LucaSyncPanel'));
-const ERPHubPanel             = React.lazy(() => import('./components/ERPHubPanel'));
-const SkuMappingPanel         = React.lazy(() => import('./components/SkuMappingPanel'));
-const IntegrationHealthPanel  = React.lazy(() => import('./components/IntegrationHealthPanel'));
-const MarketplacePanel        = React.lazy(() => import('./components/MarketplacePanel'));
 const CariEkstrePanel         = React.lazy(() => import('./components/CariEkstrePanel'));
-const MutabakatPanel          = React.lazy(() => import('./components/MutabakatPanel'));
 const BOMPanel                = React.lazy(() => import('./components/BOMPanel'));
 const OrderTrackingView       = React.lazy(() => import('./components/OrderTrackingView'));
 const EBelgeMerkezi           = React.lazy(() => import('./components/EBelgeMerkezi'));
@@ -235,9 +204,7 @@ const SabitKiymetModule       = React.lazy(() => import('./components/SabitKiyme
 const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMerkeziModule'));
 const KasaModule              = React.lazy(() => import('./components/KasaModule'));
 const TahsilatModule          = React.lazy(() => import('./components/TahsilatModule'));
-const CargoTrackingTab        = React.lazy(() => import('./components/CargoTrackingTab'));
 import NewLeadModal, { type NewLeadData } from './components/NewLeadModal';
-const DocumentDesigner        = React.lazy(() => import('./components/DocumentDesigner'));
 import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
   type UserSubscription,
@@ -245,9 +212,6 @@ import {
   type BillingCycle,
   canAccessModule,
   createTrialSubscription,
-  isTrialActive,
-  daysRemaining,
-  getPlanConfig,
 } from './types/subscription';
 import { useAppStore } from './store/appStore';
 import { useRouteSync } from './hooks/useRouteSync';
@@ -440,14 +404,6 @@ function itemCostTRY(item: InventoryItem, rates: Record<string, number> | null |
  * Returns a specific price tier of an item expressed in TRY.
  * Items may store prices in USD/EUR (priceCurrency). Falls back to TRY if unset.
  */
-function itemPriceTRY(item: InventoryItem, tier: string, rates: Record<string, number> | null | undefined): number {
-  const raw = (item.prices?.[tier] as number | undefined) ?? item.price ?? 0;
-  const cur = item.priceCurrency;
-  if (!cur || cur === 'TRY' || !rates) return raw;
-  return raw * (rates[cur] ?? 1);
-}
-
-
 // haversineDistance and optimizeRoute are imported from ./utils/logistics
 
 const InventoryView = InventoryViewComponent;
@@ -481,66 +437,6 @@ const BackToTopButton: React.FC = () => {
 
 const LogisticsMap = LogisticsMapLazy;
 
-// ── Order Status Timeline ────────────────────────────────────────────────────
-
-const ORDER_STATUS_STEPS = [
-  { key: 'Pending',    labelTR: 'Sipariş Alındı',  labelEN: 'Received',   icon: Clock        },
-  { key: 'Processing', labelTR: 'Hazırlanıyor',     labelEN: 'Processing', icon: Package      },
-  { key: 'Shipped',    labelTR: 'Kargoya Verildi',  labelEN: 'Shipped',    icon: Truck        },
-  { key: 'Delivered',  labelTR: 'Teslim Edildi',    labelEN: 'Delivered',  icon: CheckCircle2 },
-] as const;
-
-function OrderStatusTimeline({ status, lang = 'tr' }: { status: string; lang?: string }) {
-  const isTR = lang === 'tr';
-  const isCancelled = status === 'Cancelled';
-  const activeIdx = Math.max(ORDER_STATUS_STEPS.findIndex(s => s.key === status), 0);
-
-  return (
-    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-4">
-        {isTR ? 'Sipariş Durumu' : 'Order Status'}
-      </p>
-      {isCancelled ? (
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-            <X className="w-5 h-5 text-red-500" />
-          </div>
-          <div>
-            <p className="font-bold text-red-600 text-sm">{isTR ? 'Sipariş İptal Edildi' : 'Order Cancelled'}</p>
-            <p className="text-[11px] text-red-400">{isTR ? 'Bu sipariş iptal edilmiştir.' : 'This order has been cancelled.'}</p>
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-end">
-          {ORDER_STATUS_STEPS.map((step, idx) => {
-            const done   = activeIdx >= idx;
-            const active = activeIdx === idx;
-            const Icon   = step.icon;
-            return (
-              <React.Fragment key={step.key}>
-                <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300
-                    ${done ? 'bg-brand text-white' : 'bg-gray-100 text-gray-300'}
-                    ${active ? 'ring-4 ring-brand/20 scale-110' : ''}`}>
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <span className={`text-[9px] text-center font-bold leading-tight max-w-[60px] ${done ? 'text-brand' : 'text-gray-300'}`}>
-                    {isTR ? step.labelTR : step.labelEN}
-                  </span>
-                </div>
-                {idx < ORDER_STATUS_STEPS.length - 1 && (
-                  <div className={`flex-1 h-[3px] mb-[22px] mx-1.5 rounded-full transition-all duration-500
-                    ${activeIdx > idx ? 'bg-brand' : 'bg-gray-100'}`} />
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <ErrorBoundary>
@@ -551,20 +447,12 @@ export default function App() {
   );
 }
 
-const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'asc' | 'desc' } }) => (
-  <TrendingUp className={cn(
-    "w-3 h-3 ml-1 transition-all opacity-0 group-hover:opacity-100",
-    config.key === col ? "opacity-100 text-brand" : "text-gray-300",
-    config.key === col && config.dir === 'desc' ? "rotate-180" : ""
-  )} />
-);
-
 function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
   const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
 
   // ── Zustand store sync ────────────────────────────────────────────────────
-  const { setLanguage: storeSetLanguage, setExchangeRates: storeSetRates,
+  const { setExchangeRates: storeSetRates,
           setUser: storeSetUser, setUserRole: storeSetRole, setCompanyId: storeSetCompanyId } = useAppStore();
 
   // ── Phase 25: Online / offline indicator ──────────────────────────────────
@@ -584,7 +472,7 @@ function AppContent() {
   useEffect(() => {
     const t = setInterval(() => setDashClock(new Date()), 1000);
     return () => clearInterval(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   React.useEffect(() => {
     const html = document.documentElement;
@@ -788,7 +676,7 @@ function AppContent() {
       setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp))));
     });
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [user, activeTab]);
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
@@ -805,7 +693,7 @@ function AppContent() {
       setSuppliers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))));
     }, err => console.error('suppliers:', err));
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [user, activeTab]);
 
   const [vknLookupLoading, setVknLookupLoading] = useState(false);
@@ -1088,7 +976,7 @@ function AppContent() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab]);  
 
   const filteredOrders = orders.filter(o => {
     if (!o.createdAt) return true;
@@ -1308,15 +1196,6 @@ function AppContent() {
       : '';
     setLeadNoteText(stored);
   }, [selectedLead?.id]);
-  const handleLeadNoteChange = (val: string) => {
-    setLeadNoteText(val);
-    if (leadNoteTimer.current) clearTimeout(leadNoteTimer.current);
-    if (selectedLead) {
-      leadNoteTimer.current = setTimeout(() => {
-        updateDoc(doc(db, 'leads', selectedLead.id), { quickNote: val }).catch(() => {});
-      }, 600);
-    }
-  };
   // Order quick-note — top-level to avoid hooks-in-conditional violation
   const [orderNoteText, setOrderNoteText] = useState('');
   const [orderNoteSaving, setOrderNoteSaving] = useState(false);
@@ -1327,20 +1206,6 @@ function AppContent() {
     const ord101 = selectedOrder as unknown as Record<string, unknown>;
     setOrderTimeline(Array.isArray(ord101?.timeline) ? ord101.timeline as TimelineEntry[] : []);
   }, [selectedOrder?.id]);
-  const handleSaveOrderNote = async () => {
-    if (!selectedOrder || orderNoteText === (selectedOrder.notes ?? '')) return;
-    setOrderNoteSaving(true);
-    try {
-      await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: orderNoteText, updatedAt: serverTimestamp() });
-      setSelectedOrder({ ...selectedOrder, notes: orderNoteText });
-      setOrderNoteSaved(true);
-      setTimeout(() => setOrderNoteSaved(false), 2000);
-    } catch (e) {
-      console.error('[handleSaveOrderNote]', e);
-      toast(currentLanguage === 'tr' ? 'Not kaydedilemedi.' : 'Could not save note.', 'error');
-    } finally { setOrderNoteSaving(false); }
-  };
-
   const [faturaLoading,      setFaturaLoading]      = useState<Record<string, boolean>>({});
   const [iyzicoLinkLoading,  setIyzicoLinkLoading]  = useState<Record<string, boolean>>({});
   const [labelItems,         setLabelItems]         = useState<LabelItem[] | null>(null);
@@ -1847,7 +1712,7 @@ function AppContent() {
       }))));
     }, () => setP547FixedAssets([]));
     return () => { unsubBank(); unsubFA(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab, muhasebeTab]);
 
   // ── Phase 548: Fetch expense claims (masraf) ───────────────────────────
@@ -1857,7 +1722,7 @@ function AppContent() {
       setP548Masraflar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p548Masraflar[number]))));
     }, () => {});
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab, muhasebeTab]);
 
   // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
@@ -1867,7 +1732,7 @@ function AppContent() {
       setP552Records(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number]))));
     }, () => {});
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab]);
 
   // ── Phase 554: Fetch WMS bins when on lojistik/wms tab ──────────────────
@@ -1877,7 +1742,7 @@ function AppContent() {
       setP554Bins(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p554Bins[number]))));
     }, () => {});
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab, lojistikTab]);
 
   // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
@@ -1887,7 +1752,7 @@ function AppContent() {
       setP549Iadeler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p549Iadeler[number]))));
     }, () => {});
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab]);
 
   // ── Phase 543: Subscribe to vergiTakvimi when on dashboard ───────────────
@@ -1906,7 +1771,7 @@ function AppContent() {
       () => setDashVergiDeadlines([])
     );
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activeTab]);
 
   // ── Phase 100: In-App Email Compose ──────────────────────────────────────
@@ -2516,7 +2381,7 @@ function AppContent() {
       (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid)
     );
     return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [user, activeTab]);
 
   // ── Phase extended collections — Firestore subscriptions ─────────────────
@@ -2639,76 +2504,6 @@ function AppContent() {
     setIsRouteOptimized(false);
   };
 
-  const handleDragStart = (index: number) => setDragIndex(index);
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (dragIndex === null || dragIndex === index) return;
-    const updated = [...routeStops];
-    const [moved] = updated.splice(dragIndex, 1);
-    updated.splice(index, 0, moved);
-    // Recalculate sequences and estimated times
-    const depot = DEPOTS[selectedDepot];
-    let elapsed = 0;
-    let prev = { lat: depot.lat, lng: depot.lng };
-    const recalculated = updated.map((stop, i) => {
-      const dist = haversineDistance(prev, stop.location);
-      elapsed += Math.round((dist / 60) * 60) + 15;
-      prev = stop.location;
-      return { ...stop, sequence: i + 1, estimatedMinutes: elapsed };
-    });
-    setRouteStops(recalculated);
-    setDragIndex(index);
-  };
-  const handleDragEnd = () => setDragIndex(null);
-
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          let importedCount = 0;
-          for (const row of results.data as Record<string, string>[]) {
-            const firstName = row['First Name'] || '';
-            const lastName = row['Last Name'] || '';
-            const name = `${firstName} ${lastName}`.trim();
-            const company = row['Default Address Company'] || name || 'Unknown Company';
-            const email = row['Email'] || '';
-            const phone = row['Phone'] || row['Default Address Phone'] || '';
-            const notes = row['Note'] || '';
-            if (name) {
-              try {
-                await addDoc(collection(db, 'leads'), {
-                  name, company, email, phone, status: 'New', score: 50, notes,
-                  companyId: user?.uid ?? 'guest',
-                  assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-                });
-                importedCount++;
-              } catch (error) {
-                handleFirestoreError(error, OperationType.CREATE, 'leads');
-              }
-            }
-          }
-          logAuditAction(currentT.csv_lead_import, currentT.csv_lead_imported.replace('{0}', importedCount.toString()));
-          alert(currentT.csv_import_success.replace('{0}', importedCount.toString()));
-        } catch (error) {
-          console.error("Error importing CSV:", error);
-          alert(currentT.csv_import_failed);
-        }
-      }
-    });
-  };
-
-  const handleDeleteShipment = async (shipmentId: string) => {
-    try {
-      await deleteDoc(doc(db, 'shipments', shipmentId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `shipments/${shipmentId}`);
-    }
-  };
-
   const handleAddShipment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -2734,13 +2529,6 @@ function AppContent() {
     } catch (error) {
       handleFirestoreError(error, editingShipmentId ? OperationType.UPDATE : OperationType.CREATE, 'shipments');
     }
-  };
-
-  const handleEditShipment = (shipment: Shipment) => {
-    setEditingShipmentId(shipment.id);
-    setNewShipment({ ...shipment });
-    setShipmentCustomerSearch(shipment.customerName || '');
-    setIsAddingShipment(true);
   };
 
   const handleAddLead = async (data: NewLeadData) => {
@@ -2772,41 +2560,6 @@ function AppContent() {
       handleFirestoreError(error, OperationType.CREATE, 'leads');
     } finally {
       setIsScoring(false);
-    }
-  };
-
-  const handleUpdateLeadStatus = async (leadId: string, status: Lead['status']) => {
-    try {
-      await updateDoc(doc(db, 'leads', leadId), { status, updatedAt: serverTimestamp() });
-      if (selectedLead && selectedLead.id === leadId) setSelectedLead({ ...selectedLead, status });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `leads/${leadId}`);
-    }
-  };
-
-  const handleUploadVoiceNote = async (file: File) => {
-    if (!selectedLead) return;
-    try {
-      const storageRef = ref(storage, `leads/${selectedLead.id}/voiceNotes/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      const newNote: VoiceNote = { id: Date.now().toString(), url, createdAt: serverTimestamp() };
-      const updatedNotes = [...(selectedLead.voiceNotes || []), newNote];
-      await updateDoc(doc(db, 'leads', selectedLead.id), { voiceNotes: updatedNotes });
-      setSelectedLead({ ...selectedLead, voiceNotes: updatedNotes });
-    } catch (error) {
-      console.error("Error uploading voice note:", error);
-    }
-  };
-
-  const handleUpdateFollowUpDate = async (date: string) => {
-    if (!selectedLead) return;
-    try {
-      const nextFollowUpDate = Timestamp.fromDate(new Date(date));
-      await updateDoc(doc(db, 'leads', selectedLead.id), { nextFollowUpDate });
-      setSelectedLead({ ...selectedLead, nextFollowUpDate });
-    } catch (error) {
-      console.error("Error updating follow-up date:", error);
     }
   };
 
@@ -3250,17 +3003,6 @@ function AppContent() {
     }
   };
 
-  const handleDeleteLead = async (leadId: string) => {
-    try {
-      const targetLead = leads.find(l => l.id === leadId);
-      await deleteDoc(doc(db, 'leads', leadId));
-      if (selectedLead?.id === leadId) setSelectedLead(null);
-      logAuditAction(currentT.lead_deletion, `${targetLead?.name || leadId} ${currentT.lead_deleted}`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `leads/${leadId}`);
-    }
-  };
-
   // ── Phase 89 + Phase 532: Toggle order payment status (with method picker) ──
   const handleToggleOrderPaid = (order: Order) => {
     if (!order.paid) {
@@ -3286,46 +3028,6 @@ function AppContent() {
       setP532PayOrder(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${p532PayOrder.id}`);
-    }
-  };
-
-  const handleDeleteOrder = async (orderId: string) => {
-    try {
-      await deleteDoc(doc(db, 'orders', orderId));
-      logAuditAction(currentT.order_deletion, `${currentT.order} #${orderId} ${currentT.order_deleted}`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `orders/${orderId}`);
-    }
-  };
-
-  const handleAddActivity = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedLead) return;
-    try {
-      const activity: LeadActivity = {
-        id: crypto.randomUUID(),
-        type: newActivity.type as 'Call' | 'Email' | 'Meeting' | 'Note' | 'Visit',
-        description: newActivity.description || '',
-        date: Timestamp.now()
-      };
-      const updatedActivities = [...(selectedLead.activities || []), activity];
-      await updateDoc(doc(db, 'leads', selectedLead.id), { activities: updatedActivities, updatedAt: serverTimestamp() });
-      setSelectedLead({ ...selectedLead, activities: updatedActivities });
-      // Saha ziyareti → Mikro'ya ZiyaretKaydetV2 (cari kodu varsa; hata lokali engellemez)
-      if (activity.type === 'Visit') {
-        const cariKod = (selectedLead as unknown as { mikroCariKod?: string }).mikroCariKod;
-        if (cariKod) {
-          pushMikroEvrak('ZiyaretKaydetV2', ziyaretPayload({
-            cariKod,
-            basZamani: new Date().toISOString(),
-            personelKod: (user?.email ?? '').split('@')[0].slice(0, 15),
-          }), { entityType: 'leadVisit', entityId: selectedLead.id }).catch(() => {});
-        }
-      }
-      setIsAddingActivity(false);
-      setNewActivity({ type: 'Note', description: '' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `leads/${selectedLead.id}`);
     }
   };
 
@@ -3538,11 +3240,6 @@ function AppContent() {
   }
 
   // Handle Login Page Exit
-  const exitLoginToHome = () => {
-    setShowLoginPage(false);
-    setEnteredApp(false);
-  };
-
   if (!user && !isGuestMode) {
     return (
       <div className={cn("min-h-screen relative flex items-center justify-center overflow-hidden font-avenir transition-colors duration-500", darkMode ? "bg-[#0a0a0a]" : "bg-white")}>

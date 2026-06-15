@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Factory, Play, Pause, CheckCircle2, AlertTriangle, Clock,
-  Plus, Search, Trash2, Edit2, Settings, BarChart3,
-  TrendingUp, Package, Users, Activity, X, Eye, Wrench, Zap, Target,
-  ChevronUp, ChevronDown
+  Factory, Play, Pause, CheckCircle2,
+  Plus, Search, Trash2, Edit2, Settings, BarChart3, Package, Activity, X, Wrench, Zap, Target
 } from 'lucide-react';
 import ModuleHeader from './ModuleHeader';
 import ConfirmModal from './ConfirmModal';
@@ -14,7 +12,7 @@ import MikroPushButton from './MikroPushButton';
 import { uretimIsEmriPayload, uretimTalepPayload } from '../services/mikroEvrak';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, runTransaction, getDocs,
+  doc, serverTimestamp, runTransaction,
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';

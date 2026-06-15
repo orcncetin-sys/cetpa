@@ -2,13 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, Monitor, Building2, Car, Wrench, HelpCircle,
-  Plus, Search, X, Edit2, Trash2, FileText,
-  ChevronUp, ChevronDown, User, MapPin, Calendar,
-  TrendingDown, BarChart3, CheckCircle, AlertTriangle,
-  Archive, ShieldCheck, Sofa, Calculator, RefreshCw,
+  Plus, Search, X, Edit2, Trash2,
+  ChevronUp, ChevronDown, MapPin,
+  TrendingDown, BarChart3, CheckCircle, AlertTriangle, ShieldCheck, Sofa, Calculator, RefreshCw,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp,

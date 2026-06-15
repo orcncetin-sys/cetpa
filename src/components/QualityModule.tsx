@@ -21,7 +21,6 @@ import {
   doc, serverTimestamp, query 
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import { byField } from '../utils/fsSort';
 
 interface QCRecord {
   id: string;

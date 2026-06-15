@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Package, Users, ShoppingCart, X, ArrowRight, Hash, Building2 } from 'lucide-react';
+import { Search, Package, Users, ShoppingCart, X, ArrowRight, Hash } from 'lucide-react';
 import type { Order, Lead, InventoryItem } from '../types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────

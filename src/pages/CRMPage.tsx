@@ -1,14 +1,11 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Plus, Search, Filter, X, ChevronDown, ChevronUp, ChevronRight,
-  ArrowLeft, BarChart3, BarChart2, Users, TrendingUp, TrendingDown,
-  Star, Clock, CheckCircle, CheckCircle2, XCircle, AlertTriangle, AlertCircle,
-  Mail, Phone, MapPin, Calendar, MessageSquare, FileText, Download,
-  Edit, Edit2, Trash2, MoreHorizontal, Copy, ExternalLink, RefreshCw,
-  DollarSign, Package, Tag, Eye, Lock, Activity, Globe, Zap,
-  Target as TargetIcon, Award, Layers, GripVertical, Info, HelpCircle,
-  Upload, Archive, UserCheck, UserX, UserPlus, Building2, List,
+  Plus, Search, X, ChevronDown,
+  ArrowLeft, BarChart3, BarChart2, Users, TrendingUp, CheckCircle2, AlertTriangle,
+  Mail, Phone, MessageSquare, FileText, Download, Edit2, Trash2, RefreshCw, Package, Tag, Globe,
+  Target as TargetIcon,
+  Upload, UserCheck, List,
   Bell, Check, FileDown, Flame, GitBranch, Headphones, Kanban,
 } from 'lucide-react';
 import { db, auth, storage } from '../firebase';

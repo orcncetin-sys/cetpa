@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Activity, Target, Star, Calendar, Download, CheckCircle2, ChevronRight,
+  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
   CreditCard,
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -31,22 +31,11 @@ import { formatInCurrency } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 import {
   type Order,
-  type Lead,
   type Employee,
   type Quotation,
   type InventoryItem,
   type InventoryMovement,
 } from '../types';
-
-type RecurringOrder = {
-  id: string;
-  templateName: string;
-  customerName: string;
-  totalPrice: number;
-  frequency: 'weekly' | 'monthly' | 'quarterly';
-  nextDue: string;
-  active: boolean;
-};
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
@@ -102,7 +91,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       acc[e.department] = (acc[e.department] || 0) + 1;
       return acc;
     }, {});
-    // eslint-disable-next-line
+     
     setHrStats(prev => ({
       ...prev,
       activeEmployees: active,

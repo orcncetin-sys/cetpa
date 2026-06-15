@@ -5,7 +5,6 @@ import {
   CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown
 } from 'lucide-react';
 import { db } from '../firebase';
-import { byField } from '../utils/fsSort';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp

@@ -13,9 +13,8 @@
  */
 
 import React, { useState, useEffect, Suspense, useCallback } from 'react';
-import {
-  Plug, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp,
-  ExternalLink, Settings, KeyRound, Eye, EyeOff, Save,
+import { RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp,
+  ExternalLink, KeyRound, Eye, EyeOff, Save,
 } from 'lucide-react';
 import {
   doc, onSnapshot, setDoc, getDoc,

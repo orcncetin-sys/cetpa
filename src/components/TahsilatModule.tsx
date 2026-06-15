@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   DollarSign, AlertTriangle, Clock, CheckCircle, Plus, Search, Download,
-  X, Edit2, Trash2, CreditCard, TrendingUp, TrendingDown, Calendar,
-  Filter, FileText, ChevronRight, ChevronUp, ChevronDown
+  X, Edit2, Trash2, CreditCard, TrendingDown, Calendar,
+  Filter, FileText, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
@@ -12,7 +12,6 @@ import {
   query, serverTimestamp
 } from '../lib/dbClient';
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
-import { byField } from '../utils/fsSort';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -451,8 +450,8 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
       return true;
     })
     .sort((a, b) => {
-      let va: string | number = (a as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
-      let vb: string | number = (b as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
+      const va: string | number = (a as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
+      const vb: string | number = (b as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
       if (typeof va === 'string' && typeof vb === 'string') {
         return sort.dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
       }

@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Save, Eye, Settings2, Check, FileText,
-  Receipt, ClipboardList, Truck, ShoppingCart, CheckCircle, Loader2,
-  Trash2, Edit2, RotateCcw
+  Receipt, ClipboardList, Truck, ShoppingCart, CheckCircle, Loader2, Edit2
 } from 'lucide-react';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from '../lib/dbClient';
 import { db } from '../firebase';

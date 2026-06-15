@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2, XCircle, Clock, Filter, Search,
   ShoppingCart, Package, Users, FileText, ChevronRight,
-  AlertCircle, RefreshCw, Eye, MessageSquare, Building2
+  AlertCircle, MessageSquare, Building2
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, updateDoc, doc,

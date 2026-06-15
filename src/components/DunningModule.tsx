@@ -16,16 +16,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Bell, Plus, X, AlertTriangle, CheckCircle2, Clock,
-  MessageSquare, Mail, Phone, Gavel, ChevronDown,
-  TrendingDown, Calendar, Send
+  Bell, Plus, X, AlertTriangle, CheckCircle2,
+  MessageSquare, Mail, Phone, Gavel, ChevronDown
 } from 'lucide-react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
-  onSnapshot, serverTimestamp, query
+  onSnapshot, serverTimestamp
 } from '../lib/dbClient';
 import { db } from '../firebase';
-import { sortByCreatedAt, byField } from '../utils/fsSort';
+import { sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 
 // ─── Types ─────────────────────────────────────────────────────────────────

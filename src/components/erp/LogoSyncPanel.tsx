@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle,
-  Package, Users, ShoppingCart, Activity, Clock,
+  Package, Users, ShoppingCart, Clock,
   ChevronDown, ChevronUp, Download, ArrowUpRight,
 } from 'lucide-react';
 import { collection, query, limit, onSnapshot, orderBy } from '../../lib/dbClient';

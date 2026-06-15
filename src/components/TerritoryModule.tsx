@@ -13,8 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  MapPin, Plus, X, Target, TrendingUp, Users, ChevronDown,
-  CheckCircle2, Edit2, Trash2, BarChart2, AlertCircle, Award
+  MapPin, Plus, X, Target, Users, Edit2, Trash2, BarChart2, Award
 } from 'lucide-react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
@@ -38,14 +37,6 @@ interface Territory {
   color: string;             // hex badge colour
   active: boolean;
   createdAt?: unknown;
-}
-
-interface TerritoryLead {
-  id: string;
-  name: string;
-  city: string;
-  totalRevenue?: number;
-  status?: string;
 }
 
 interface Props {

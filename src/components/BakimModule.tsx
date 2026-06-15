@@ -7,9 +7,8 @@ import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { bakimTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
-import {
-  Wrench, ClipboardList, CalendarDays, AlertTriangle,
-  Plus, X, CheckCircle, Clock, Settings, Zap, Car, Monitor, Package,
+import { CalendarDays,
+  Plus, X, Settings, Zap, Car, Monitor, Package,
   Edit2, Trash2
 } from 'lucide-react';
 

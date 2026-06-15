@@ -10,7 +10,6 @@ import {
   limit,
 } from '../lib/dbClient';
 import { db } from '../firebase';
-import { byField } from '../utils/fsSort';
 
 // ---------------------------------------------------------------------------
 // Types

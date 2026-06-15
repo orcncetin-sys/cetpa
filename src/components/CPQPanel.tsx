@@ -13,15 +13,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Settings, Plus, X, ChevronDown, ChevronRight, FileText,
-  Layers, Tag, Check, DollarSign, Package, Copy, Trash2, Edit2
+  Settings, Plus, X, ChevronDown, FileText,
+  Layers, Check, Trash2, Edit2
 } from 'lucide-react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, serverTimestamp
 } from '../lib/dbClient';
 import { db } from '../firebase';
-import { byField, sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 
 // ─── Types ─────────────────────────────────────────────────────────────────

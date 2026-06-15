@@ -1,19 +1,17 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  CreditCard, Calendar, Users, Zap, AlertTriangle, ChevronRight,
-  Download, Check, X, Clock, Shield, Crown
+  CreditCard, Calendar, Users, Zap, AlertTriangle,
+  Download, Clock, Shield, Crown
 } from 'lucide-react';
 import {
   type UserSubscription,
   type SubscriptionPlan,
   type BillingCycle,
   getPlanConfig,
-  PLANS,
   formatPrice,
   daysRemaining,
   isTrialActive,
-  yearlySavingsPercent,
 } from '../types/subscription';
 
 interface SubscriptionPanelProps {

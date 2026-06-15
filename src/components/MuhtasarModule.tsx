@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
-import { FileText, Download, Send, CheckCircle2, AlertCircle, Clock, Plus, X, ChevronDown, ChevronRight, Users, Calculator } from 'lucide-react';
+import { FileText, Download, Plus, X, Users, Calculator } from 'lucide-react';
 
 interface MuhtasarModuleProps {
   currentLanguage: string;

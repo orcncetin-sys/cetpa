@@ -45,7 +45,7 @@ import {
 } from '../types';
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
-import { sortByCreatedAt, byField } from '../utils/fsSort';
+import { sortByCreatedAt } from '../utils/fsSort';
 
 // --- SortHeader Component ---
 const SortHeader = ({ 

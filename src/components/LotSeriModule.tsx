@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc } from '../lib/dbClient';
 import { db } from '../firebase';
-import { Plus, Search, X, Save, AlertTriangle, Package, Hash, Calendar, CheckCircle2 } from 'lucide-react';
-import { sortByCreatedAt, byField } from '../utils/fsSort';
+import { Plus, Search, X, Save, AlertTriangle, Hash, CheckCircle2 } from 'lucide-react';
 
 interface LotKaydi {
   id: string;

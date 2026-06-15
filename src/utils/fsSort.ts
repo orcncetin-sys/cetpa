@@ -22,7 +22,7 @@ function toMs(v: unknown): number {
  * Sort an array of docs by their `createdAt` field (Firestore Timestamp, ISO string, or ms number).
  * Works on any array type — docs without createdAt are sorted to the end.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function sortByCreatedAt<T>(docs: T[], dir: 'asc' | 'desc' = 'desc'): T[] {
   return [...docs].sort((a, b) => {
     const diff = toMs((b as Record<string, unknown>).createdAt) -

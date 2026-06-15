@@ -1,33 +1,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   BarChart3, Users, Shield, Activity, FileText, Building2,
-  List, Package, AlertTriangle, AlertCircle, Archive, Eye, Lock,
-  RefreshCw, CheckCircle, XCircle, Clock, Trash2, Edit, Plus,
-  Download, Upload, Mail, Bell, Globe, Image as ImageIcon,
-  ChevronDown, ChevronUp, ChevronRight, Search, Filter, X,
-  TrendingUp, TrendingDown, DollarSign, Star, GripVertical,
-  MapPin, Phone, MessageSquare, Calendar, MoreHorizontal,
-  Copy, ExternalLink, Layers, Tag, Info, HelpCircle, Zap,
-  Settings, Database, Server, Cpu, HardDrive,
-  Key, UserCheck, UserX, UserPlus, LogOut, BookOpen,
+  List, Package,
+  RefreshCw, Upload, Mail, Image as ImageIcon, Search,
 } from 'lucide-react';
-import { db, auth, storage } from '../firebase';
+import { db, storage } from '../firebase';
 import {
-  doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp, onSnapshot,
+  doc, setDoc, updateDoc, deleteDoc,
+  collection, onSnapshot,
 } from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip } from 'recharts';
-import AIInlineNudge from '../components/AIInlineNudge';
-import ModuleHeader from '../components/ModuleHeader';
-import UnauthorizedView from '../components/UnauthorizedView';
-import ReadOnlyBanner from '../components/ReadOnlyBanner';
-import InventoryView from '../components/InventoryView';
-import B2BPortal from '../components/B2BPortal';
 import DocumentDesigner from '../components/DocumentDesigner';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
@@ -124,7 +110,7 @@ export default function AdminPage({
       setClientErrors(rows.slice(0, 50));
     }, () => { /* RBAC reddi / offline — sessiz */ });
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [adminTab]);
 
   const fetchSystemHealth = useCallback(async () => {

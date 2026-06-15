@@ -10,7 +10,6 @@ import { format } from 'date-fns';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 
 import { InventoryItem } from '../types';
-import { byField } from '../utils/fsSort';
 
 interface InventoryMovement {
   id: string;

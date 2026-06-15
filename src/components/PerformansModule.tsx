@@ -15,16 +15,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Star, Plus, X, ClipboardList, TrendingUp, Users,
-  CheckCircle2, Clock, ChevronDown, Edit2, Award, Target,
-  BarChart2, Zap
+  Star, Plus, X,
+  CheckCircle2, ChevronDown
 } from 'lucide-react';
 import {
   collection, addDoc, updateDoc, doc,
   onSnapshot, serverTimestamp
 } from '../lib/dbClient';
 import { db } from '../firebase';
-import { byField, sortByCreatedAt } from '../utils/fsSort';
+import { sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 
 // ─── Types ─────────────────────────────────────────────────────────────────

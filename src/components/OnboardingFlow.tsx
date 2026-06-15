@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, ArrowRight, Building2, Users, Rocket, Sparkles, Plug, Server, Cloud, Download } from 'lucide-react';
-import { PLANS, type SubscriptionPlan, type BillingCycle, createTrialSubscription, type UserSubscription } from '../types/subscription';
+import { Check, ArrowRight, Building2, Rocket, Sparkles, Plug, Server, Cloud, Download } from 'lucide-react';
+import { PLANS, type SubscriptionPlan, createTrialSubscription, type UserSubscription } from '../types/subscription';
 import { doc, setDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 

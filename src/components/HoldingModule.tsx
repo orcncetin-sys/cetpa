@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, query, orderBy as fsOrderBy,
+  collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp,
 } from '../lib/dbClient';
 import { db } from '../firebase';
-import { Building2, Plus, ChevronDown, ChevronRight, BarChart3, FileText, ArrowLeftRight, Settings, TrendingUp, TrendingDown, Minus, AlertCircle, CheckCircle2, X } from 'lucide-react';
+import { Building2, Plus, BarChart3, FileText, ArrowLeftRight, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
 
 interface HoldingModuleProps {
   currentLanguage: string;

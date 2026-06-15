@@ -21,7 +21,6 @@ import { collection, query, limit, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
-import { byField } from '../utils/fsSort';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

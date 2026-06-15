@@ -1,19 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle, Download,
-  Package, Users, ShoppingCart, Activity, Clock, ChevronDown, ChevronUp,
+  Package, Users, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { collection, doc, query, limit, onSnapshot } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { byField } from '../utils/fsSort';
 import {
   getMikroStatus,
   importStokFromMikro,
   importCariFromMikro,
-  syncInventoryItemToMikro,
-  syncLeadToMikro,
   MikroStatus,
   MikroImportResult,
 } from '../services/mikroService';

@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Trash2, Edit2, Download, X, Save, CheckCircle,
-  AlertCircle, Building2, TrendingUp, TrendingDown, BarChart3,
-  PieChart, FileText, ArrowUpDown, Search, Filter, ChevronDown,
-  DollarSign, Target, Activity, Check, RefreshCw
+  AlertCircle, Building2, TrendingUp, BarChart3,
+  PieChart, FileText, ArrowUpDown, Search, Target, Check, RefreshCw
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
@@ -16,7 +15,6 @@ import {
   PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
 import ConfirmModal from './ConfirmModal';
-import { byField } from '../utils/fsSort';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

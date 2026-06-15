@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, FileText, Search, Trash2, Tag, Plus, ChevronDown, ChevronUp, Check, PackageSearch } from 'lucide-react';
+import { X, Save, FileText, Search, Trash2, Tag, Plus, ChevronUp, Check, PackageSearch } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { type InventoryItem } from '../types';

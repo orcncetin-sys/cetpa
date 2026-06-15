@@ -14,7 +14,6 @@ import { logFirestoreError, OperationType } from '../utils/firebase';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
-import { sortByCreatedAt } from '../utils/fsSort';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 

@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Scale, FileText, ShieldCheck, Plus, Search, Trash2, Edit2,
-  AlertTriangle, CheckCircle2, Clock, Calendar, ChevronRight, Download, Folder, X, Eye, TrendingUp,
+  AlertTriangle, CheckCircle2, Clock, Calendar, ChevronRight, Folder, X, Eye, TrendingUp,
   Upload, ThumbsUp, ThumbsDown, Send, Paperclip, CheckSquare
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { db, auth, storage } from '../firebase';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, where
+  doc, serverTimestamp, query
 } from '../lib/dbClient';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError, OperationType } from '../utils/firebase';

@@ -20,7 +20,6 @@ import {
   doc, serverTimestamp, query 
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import { byField } from '../utils/fsSort';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; dir: 'asc' | 'desc' }; onSort: (key: string) => void; align?: 'left' | 'right' | 'center' }> = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isActive = currentSort.key === sortKey;

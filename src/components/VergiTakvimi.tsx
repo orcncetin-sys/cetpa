@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc, getDocs } from '../lib/dbClient';
 import { db } from '../firebase';
-import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, Plus } from 'lucide-react';
+import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 import { byField } from '../utils/fsSort';
 
 interface VergiDeadline {
