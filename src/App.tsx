@@ -583,6 +583,9 @@ function AppContent() {
   const [firestoreUsers, setFirestoreUsers] = useState<Record<string, unknown>[]>([]);
   const [auditLogs, setAuditLogs] = useState<Record<string, unknown>[]>([]);
   const [companySettings, setCompanySettings] = useState<Record<string, unknown>>({});
+  // Firma logosu özelleştirmesi — settings/app.logoUrl'den yüklenir, header'da gösterilir
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [geminiApiKeySetting, setGeminiApiKeySetting] = useState('');
 
   const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
@@ -1839,6 +1842,7 @@ function AppContent() {
     const unsubSettings = onSnapshot(doc(db, 'settings', 'app'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        setLogoUrl(data.logoUrl || null);
         setCompanySettings(data.companySettings || {});
       }
     }, (error) => importedLogFirestoreError(error, OperationType.GET, 'settings/app', user.uid));
@@ -1889,17 +1893,21 @@ function AppContent() {
       return;
     }
 
+    setIsUploadingLogo(true);
     try {
       const logoRef = ref(storage, `settings/logo`);
       await uploadBytes(logoRef, file);
       const url = await getDownloadURL(logoRef);
 
       await setDoc(doc(db, 'settings', 'app'), { logoUrl: url }, { merge: true });
+      setLogoUrl(url);
       logAuditAction(currentT.logo_update, currentT.logo_updated);
       alert(currentT.logo_update_success);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/app');
       alert(currentT.logo_upload_failed);
+    } finally {
+      setIsUploadingLogo(false);
     }
   };
 
@@ -3339,9 +3347,14 @@ function AppContent() {
             {/* Logo */}
             <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
               <div className="relative group">
-                <img src="/cetpalogo.avif" alt="CETPA" className="h-8 w-auto object-contain" />
+                <img src={logoUrl || '/cetpalogo.avif'} alt="Logo" className="h-8 w-auto max-w-[160px] object-contain" />
+                {isUploadingLogo && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded">
+                    <Clock className="w-4 h-4 animate-spin text-brand" />
+                  </div>
+                )}
                 {userRole === 'Admin' && (
-                  <label className="absolute -bottom-1 -right-1 bg-white/20 backdrop-blur-sm rounded-full p-1 shadow-md cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+                  <label className="absolute -bottom-1 -right-1 bg-white/20 backdrop-blur-sm rounded-full p-1 shadow-md cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
                     <Upload className="w-3 h-3 text-white" />
                     <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/avif,image/webp" className="hidden" onChange={handleLogoUpload} />
                   </label>
