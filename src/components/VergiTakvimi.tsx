@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc, getDocs } from '../lib/dbClient';
 import { db } from '../firebase';
-import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
+import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, TrendingUp } from 'lucide-react';
 import { byField } from '../utils/fsSort';
 
 interface VergiDeadline {
@@ -45,11 +45,33 @@ function generateDeadlines(year: number): Omit<VergiDeadline, 'id' | 'createdAt'
   return result.sort((a, b) => a.sonTarih.localeCompare(b.sonTarih));
 }
 
-export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+type VTOrder = { totalPrice?: number; kdvOran?: number; faturali?: boolean; status?: string; createdAt?: unknown };
+export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders = [] }: { currentLanguage: string; isAuthenticated: boolean; orders?: VTOrder[] }) {
   const tr = currentLanguage === 'tr';
   const [deadlines, setDeadlines] = useState<VergiDeadline[]>([]);
   const [filter, setFilter] = useState<'all' | 'upcoming' | 'late' | 'done'>('upcoming');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [editTutarId, setEditTutarId] = useState<string | null>(null);
+  const [tutarDraft, setTutarDraft] = useState('');
+
+  // Tutar kaydet (manuel / mali müşavir / ERP). Düzenlenebilir.
+  const saveTutar = async (id: string, val: number) => {
+    await updateDoc(doc(db, 'vergiTakvimi', id), { tahminiTutar: val });
+    setEditTutarId(null);
+  };
+  // Yaklaşım 1 — KDV Beyannamesi için dönemin satış KDV'sini faturalardan türet (öneri).
+  const ayKdvOner = (donem: string): number => {
+    const m = donem.match(/(\d{4})[/-](\d{2})/); if (!m) return 0;
+    const ym = `${m[1]}-${m[2]}`;
+    return orders.reduce((s, o) => {
+      if (o.status === 'Cancelled' || o.faturali === false) return s;
+      let d: string;
+      try { d = (o.createdAt as { toDate?: () => Date })?.toDate?.()?.toISOString().slice(0, 7) ?? new Date(o.createdAt as string).toISOString().slice(0, 7); } catch { return s; }
+      if (d !== ym) return s;
+      const rate = (o.kdvOran ?? 20) / 100;
+      return s + (Number(o.totalPrice) || 0) * rate;
+    }, 0);
+  };
 
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, 'vergiTakvimi')), snap => {
@@ -120,11 +142,12 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
   return (
     <div className="space-y-4">
       {/* KPI Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
           { label: tr ? 'Bu Ay Yaklaşan' : 'Due This Month', val: upcoming.length, icon: Calendar, color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: tr ? 'Geciken' : 'Overdue', val: late.length, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
           { label: tr ? 'Tamamlanan' : 'Completed', val: done.length, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: tr ? 'Toplam Tutar' : 'Total Amount', val: `₺${Math.round(deadlines.reduce((s, d) => s + (d.tahminiTutar || 0), 0)).toLocaleString('tr-TR')}`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
           { label: tr ? 'Toplam Kayıt' : 'Total Records', val: deadlines.length, icon: Clock, color: 'text-gray-600', bg: 'bg-gray-50' },
         ].map(k => (
           <div key={k.label} className={`apple-card flex items-center gap-3 p-4 ${k.bg}`}>
@@ -188,6 +211,29 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
                     {tr ? 'Son Tarih:' : 'Deadline:'} {new Date(d.sonTarih).toLocaleDateString('tr-TR')} &nbsp;•&nbsp;
                     {d.sorumlu}
                   </p>
+                </div>
+                {/* Tutar (düzenlenebilir — manuel/müşavir/ERP; KDV'de faturadan öneri) */}
+                <div className="flex items-center mx-2 flex-shrink-0">
+                  {editTutarId === d.id ? (
+                    <div className="flex items-center gap-1">
+                      <input type="number" autoFocus value={tutarDraft} onChange={e => setTutarDraft(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveTutar(d.id, Number(tutarDraft) || 0); if (e.key === 'Escape') setEditTutarId(null); }}
+                        placeholder="0" className="w-28 px-2 py-1 text-xs text-right bg-white border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums" />
+                      <button onClick={() => saveTutar(d.id, Number(tutarDraft) || 0)} className="text-green-600 hover:text-green-700 text-sm font-bold px-1">✓</button>
+                      <button onClick={() => setEditTutarId(null)} className="text-gray-400 hover:text-gray-600 text-sm px-1">✕</button>
+                    </div>
+                  ) : (
+                    <button disabled={!isAuthenticated}
+                      onClick={() => { setEditTutarId(d.id); setTutarDraft(String(d.tahminiTutar ?? (d.vergiTuru.includes('KDV') ? Math.round(ayKdvOner(d.donem)) || '' : ''))); }}
+                      className="text-xs text-right tabular-nums hover:bg-white rounded-lg px-2 py-1 transition-colors disabled:cursor-default"
+                      title={tr ? 'Tutarı düzenle (mali müşavir / e-Beyanname)' : 'Edit amount'}>
+                      {d.tahminiTutar
+                        ? <span className="font-bold text-gray-900">₺{d.tahminiTutar.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                        : (d.vergiTuru.includes('KDV') && ayKdvOner(d.donem) > 0)
+                          ? <span className="text-blue-500" title={tr ? 'Faturalardan türetilen satış KDV önerisi' : 'Suggested from invoices'}>≈₺{Math.round(ayKdvOner(d.donem)).toLocaleString('tr-TR')} <span className="text-[9px] opacity-70">öner</span></span>
+                          : isAuthenticated ? <span className="text-gray-300">{tr ? '+ tutar' : '+ amount'}</span> : null}
+                    </button>
+                  )}
                 </div>
                 {isAuthenticated && d.durum !== 'Tamamlandı' && (
                   <button onClick={() => toggleDone(d)}

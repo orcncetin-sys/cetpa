@@ -12652,7 +12652,7 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
                     icon={Receipt}
                   />
-                  <VergiTakvimi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('vergi')} />
+                  <VergiTakvimi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('vergi')} orders={orders} />
                 </>
               )}
             </motion.div>
