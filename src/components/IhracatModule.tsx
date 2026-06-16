@@ -52,6 +52,7 @@ interface Akreditif {
   doviz: 'USD' | 'EUR';
   vadesi: string;
   tur: 'İhracat' | 'İthalat';
+  lcTur?: string;        // Akreditif türü (Irrevocable / At Sight / Confirmed ...)
   durum: string;
   createdAt?: any;
 }
@@ -69,6 +70,12 @@ interface GumrukBeyanname {
 
 const INCOTERMLER = ['EXW', 'FOB', 'CIF', 'DDP', 'DAP', 'FCA', 'CPT', 'CIP'];
 const GUMRUK_DURUMLARI = ['Bekliyor', 'Gümrükte', 'Tamamlandı', 'İptal'];
+// Akreditif (L/C) türleri — güvence / ödeme / özel amaçlı gruplarıyla
+const LC_TURLERI: { grup: string; turler: string[] }[] = [
+  { grup: 'Güvence Şekline Göre', turler: ['Gayri Kabili Rücu (Irrevocable)', 'Kabili Rücu (Revocable)'] },
+  { grup: 'Ödeme Yöntemine Göre', turler: ['Görüldüğünde Ödemeli (At Sight)', 'Vadeli (Deferred Payment)', 'Kabul Kredili (Acceptance)', 'Karışık Ödemeli (Mixed Payment)'] },
+  { grup: 'Özel Amaçlı', turler: ['Teyitli (Confirmed)', 'Devredilebilir (Transferable)', 'Döner (Revolving)', 'Kırmızı Şartlı (Red Clause)'] },
+];
 const REJIMLER = ['İhracat', 'İthalat', 'Transit'];
 
 function statusBadge(durum: string) {
@@ -102,7 +109,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
   const [ithForm, setIthForm] = useState(emptyIth);
 
   // Akreditif form state
-  const emptyAkr = { banka: '', lehdarAmir: '', tutar: '', doviz: 'USD' as const, vadesi: '', tur: 'İhracat' as const, durum: 'Açıldı' };
+  const emptyAkr = { banka: '', lehdarAmir: '', tutar: '', doviz: 'USD' as const, vadesi: '', tur: 'İhracat' as const, lcTur: 'Gayri Kabili Rücu (Irrevocable)', durum: 'Açıldı' };
   const [akrForm, setAkrForm] = useState(emptyAkr);
 
   // Gumruk form state
@@ -328,7 +335,10 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
                   <td className="py-3 px-3 text-gray-600">{a.lehdarAmir}</td>
                   <td className="py-3 px-3 font-semibold">{a.doviz} {a.tutar?.toLocaleString()}</td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{a.vadesi}</td>
-                  <td className="py-3 px-3"><span className="bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded-full font-medium">{a.tur}</span></td>
+                  <td className="py-3 px-3">
+                    <span className="bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded-full font-medium">{a.tur}</span>
+                    {a.lcTur && <span className="block text-[10px] text-gray-400 mt-1">{a.lcTur}</span>}
+                  </td>
                   <td className="py-3 px-3"><span className={statusBadge(a.durum)}>{a.durum}</span></td>
                 </tr>
               ))}
@@ -499,6 +509,16 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
                         <option>Açıldı</option><option>Kullanıldı</option><option>Süresi Doldu</option>
                       </select>
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">L/C Türü</label>
+                    <select value={akrForm.lcTur} onChange={e => setAkrForm(p => ({ ...p, lcTur: e.target.value }))} className="apple-input">
+                      {LC_TURLERI.map(g => (
+                        <optgroup key={g.grup} label={g.grup}>
+                          {g.turler.map(t => <option key={t} value={t}>{t}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
                   </div>
                   <button onClick={saveAkreditif} disabled={saving} className="apple-button-primary w-full">{saving ? 'Kaydediliyor...' : 'Kaydet'}</button>
                 </>

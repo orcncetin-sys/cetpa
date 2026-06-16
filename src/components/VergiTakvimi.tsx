@@ -74,8 +74,12 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
     : filter === 'done' ? done
     : deadlines;
 
-  const markDone = async (id: string) => {
-    await updateDoc(doc(db, 'vergiTakvimi', id), { durum: 'Tamamlandı' });
+  // Tamamla / geri al — tamamlanmışsa tarihe göre Gecikmiş/Yapılacak'a döner.
+  const toggleDone = async (d: { id: string; durum: string; sonTarih: string }) => {
+    const next = d.durum === 'Tamamlandı'
+      ? (d.sonTarih < today ? 'Gecikmiş' : 'Yapılacak')
+      : 'Tamamlandı';
+    await updateDoc(doc(db, 'vergiTakvimi', d.id), { durum: next });
   };
 
   const generateCalendar = async () => {
@@ -186,16 +190,26 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated }: { cur
                   </p>
                 </div>
                 {isAuthenticated && d.durum !== 'Tamamlandı' && (
-                  <button onClick={() => markDone(d.id)}
+                  <button onClick={() => toggleDone(d)}
                     className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600 hover:text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-full transition-colors flex-shrink-0">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    {tr ? 'Tamamlandı' : 'Mark Done'}
+                    {tr ? 'Tamamla' : 'Mark Done'}
                   </button>
                 )}
                 {d.durum === 'Tamamlandı' && (
-                  <span className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> {tr ? 'Tamam' : 'Done'}
-                  </span>
+                  isAuthenticated ? (
+                    <button onClick={() => toggleDone(d)} title={tr ? 'Geri al (tamamlanmadı işaretle)' : 'Undo (mark not done)'}
+                      className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600 hover:text-amber-600 bg-green-50 hover:bg-amber-50 px-3 py-1.5 rounded-full transition-colors flex-shrink-0 group/done">
+                      <CheckCircle2 className="w-3.5 h-3.5 group-hover/done:hidden" />
+                      <span className="hidden group-hover/done:inline">↩</span>
+                      <span className="group-hover/done:hidden">{tr ? 'Tamam' : 'Done'}</span>
+                      <span className="hidden group-hover/done:inline">{tr ? 'Geri Al' : 'Undo'}</span>
+                    </button>
+                  ) : (
+                    <span className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {tr ? 'Tamam' : 'Done'}
+                    </span>
+                  )
                 )}
               </div>
             );
