@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Send, AlertTriangle, Clock, Plus, X, RefreshCw,
@@ -206,6 +207,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   };
 
   const handleDelete = async (id: string) => {
+    if (!await confirmDelete()) return;
     try {
       await deleteDoc(doc(db, 'eBelgeler', id));
       showToast('Belge silindi.');

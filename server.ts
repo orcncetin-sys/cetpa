@@ -1365,6 +1365,13 @@ async function writeSyncLog(
  */
 // Değişiklik denetimi yapılacak hassas koleksiyonlar (before/after diff).
 const AUDITED_COLLECTIONS = new Set(['orders', 'leads', 'inventory', 'users', 'settings', 'priceLists', 'quotations']);
+// Silme (DELETE) ve düzenleme her zaman loglanır; sadece gürültülü/efemeral
+// koleksiyonlar audit dışı tutulur (presence, bildirim, kuyruk vb.).
+const AUDIT_DENYLIST = new Set([
+  'auditLog', 'notifications', 'presence', 'workflowTasks', 'userOnboarding',
+  'mikroSyncQueue', 'syncRetry', 'chatMessages', 'sessions', 'exchangeRates',
+]);
+const shouldAudit = (coll: string) => !AUDIT_DENYLIST.has(coll);
 // Gürültü/PII azaltmak için diff dışı tutulan alanlar.
 const DIFF_IGNORE = new Set(['updatedAt', 'mikroSyncedAt', 'lastLogin', 'createdAt', 'timestamp', 'device', 'photoURL']);
 
@@ -2107,7 +2114,9 @@ async function startServer() {
           [coll, realId, JSON.stringify(data)],
         );
         broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla (client settings/{id} dinler)
-        if (audited) {
+        // before yalnızca audited/scoped/merge'de çekildiği için logu bununla sınırla
+        // (aksi halde diff tüm alanları "yeni" gösterir = gürültü).
+        if (shouldAudit(coll) && (audited || scoped || req.query.merge === '1')) {
           const fd = computeFieldDiff(before, data);
           if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} kaydedildi`, `${coll}/${id}`, fd);
         }
@@ -2139,8 +2148,8 @@ async function startServer() {
           [coll, realId, JSON.stringify(data)],
         );
         broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla
-        // Hassas koleksiyonlarda 'kim neyi değiştirdi' diff'i kaydet (bloklamadan)
-        if (AUDITED_COLLECTIONS.has(coll)) {
+        // 'kim neyi değiştirdi' diff'i kaydet (bloklamadan); before her zaman çekildi.
+        if (shouldAudit(coll)) {
           const fd = computeFieldDiff(before, data);
           if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} güncellendi`, `${coll}/${id}`, fd);
         }
@@ -2156,13 +2165,20 @@ async function startServer() {
       if (await denied(req, res, coll, 'delete')) return;
       try {
         const { realId } = await settingsRealId(req, coll, id);
+        // Silinecek kaydın bir kopyasını al (audit ve sahiplik kontrolü için).
+        const { rows: existing } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
+        const prevData = (existing[0]?.data as Record<string, unknown>) || {};
         // Sahiplik: başka firmanın kaydı silinemez
         if (TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) {
-          const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
-          if (rows.length && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+          if (existing.length && !(await ownsDoc(req, coll, prevData))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         broadcastDocChange(coll, 'delete', id);
+        // Silme işlemini her zaman logla (efemeral koleksiyonlar hariç).
+        if (shouldAudit(coll)) {
+          const label = (prevData.name || prevData.title || prevData.adi || prevData.musteriAdi || id) as string;
+          void writeAuditLog(reqActor(req), `${coll} silindi`, `${coll}/${id} (${label})`);
+        }
         res.json({ ok: true });
       } catch (e) { dbErr(e, res, 'DELETE', coll); }
     });

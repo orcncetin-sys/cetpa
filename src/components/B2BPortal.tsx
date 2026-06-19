@@ -3,6 +3,7 @@
  * Handles quotations, dealers, and price lists for B2B/dealer users.
  */
 import React, { useState, useEffect } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -406,7 +407,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <td>
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => { setEditingDealer(d); setDealerForm({ name: d.name as string || '', company: d.company as string || '', email: d.email as string || '', phone: d.phone as string || '', taxId: d.taxId as string || '', creditLimit: d.creditLimit as number || 500000, priceTier: d.priceTier as string || 'Dealer', paymentTerms: d.paymentTerms as string || '30', address: d.address as string || '' }); setIsDealerModalOpen(true); }} className="action-btn-edit"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={async () => { await deleteDoc(doc(db, 'leads', d.id as string)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; await deleteDoc(doc(db, 'leads', d.id as string)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -461,7 +462,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <td className="text-right text-brand font-bold">{(pl.prices?.['Dealer'] ?? 0).toLocaleString('tr-TR')}</td>
                       <td><div className="flex items-center justify-end gap-1">
                         <button onClick={() => { setSelectedPriceList(pl); setIsEditingPriceList(true); }} className="action-btn-edit"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={async () => { await deleteDoc(doc(db, 'priceLists', pl.id)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; await deleteDoc(doc(db, 'priceLists', pl.id)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div></td>
                     </tr>
                   ))}

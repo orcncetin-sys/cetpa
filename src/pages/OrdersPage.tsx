@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, X, ChevronDown,
@@ -283,6 +284,7 @@ export default function OrdersPage({
   };
 
   const handleDeleteShipment = async (shipmentId: string) => {
+    if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     try { await deleteDoc(doc(db, 'shipments', shipmentId)); }
     catch (error) { handleFirestoreError(error, OperationType.DELETE, `shipments/${shipmentId}`); }
   };

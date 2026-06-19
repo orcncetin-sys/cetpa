@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, X, ChevronDown,
@@ -237,6 +238,8 @@ export default function CRMPage({
   };
 
   const handleDeleteLead = async (leadId: string) => {
+    const tl = leads.find(l => l.id === leadId);
+    if (!await confirmDelete(tl?.name, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     try {
       const targetLead = leads.find(l => l.id === leadId);
       await deleteDoc(doc(db, 'leads', leadId));
@@ -330,6 +333,7 @@ export default function CRMPage({
   };
 
   const handleDeleteOrder = async (orderId: string) => {
+    if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     try {
       await deleteDoc(doc(db, 'orders', orderId));
       logAuditAction(currentT.order_deletion || 'Order Deleted', orderId);

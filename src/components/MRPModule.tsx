@@ -13,6 +13,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Cpu, Plus, X, Settings, AlertTriangle, BarChart2, ArrowRight, Package,
@@ -409,7 +410,7 @@ export default function MRPModule({
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                         <button onClick={() => { setWcDraft({ name: wc.name, code: wc.code, description: wc.description, capacityHoursPerDay: wc.capacityHoursPerDay, efficiency: wc.efficiency, costPerHour: wc.costPerHour, workerCount: wc.workerCount, active: wc.active, color: wc.color }); setEditingWCId(wc.id); setShowWCForm(true); }}
                           className="p-1 hover:bg-gray-100 rounded-lg"><Edit2 className="w-3.5 h-3.5 text-gray-400" /></button>
-                        <button onClick={() => deleteDoc(doc(db, 'workCenters', wc.id))}
+                        <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; deleteDoc(doc(db, 'workCenters', wc.id)); }}
                           className="p-1 hover:bg-red-50 rounded-lg"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
                       </div>
                     )}
@@ -554,7 +555,7 @@ export default function MRPModule({
                     <div className="flex gap-1">
                       <button onClick={() => { setRoutingDraft({ productName: r.productName, productSku: r.productSku, steps: r.steps, notes: r.notes }); setEditingRoutingId(r.id); setShowRoutingForm(true); }}
                         className="p-1 hover:bg-gray-100 rounded-lg"><Edit2 className="w-3.5 h-3.5 text-gray-400" /></button>
-                      <button onClick={() => deleteDoc(doc(db, 'routingTemplates', r.id))}
+                      <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; deleteDoc(doc(db, 'routingTemplates', r.id)); }}
                         className="p-1 hover:bg-red-50 rounded-lg"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
                     </div>
                   )}

@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, Plus, X, ChevronDown, FileText,
@@ -364,7 +365,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                     <>
                       <button onClick={() => { setTemplateDraft({ name: t.name, description: t.description, basePrice: t.basePrice, currency: t.currency, category: t.category, attributes: t.attributes, minQty: t.minQty }); setEditingTemplateId(t.id); setShowTemplateForm(true); }}
                         className="p-1.5 rounded-xl hover:bg-gray-100"><Edit2 className="w-3.5 h-3.5 text-gray-400" /></button>
-                      <button onClick={() => deleteDoc(doc(db, 'cpqTemplates', t.id))}
+                      <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; deleteDoc(doc(db, 'cpqTemplates', t.id)); }}
                         className="p-1.5 rounded-xl hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
                     </>
                   )}

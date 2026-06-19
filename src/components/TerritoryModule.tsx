@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MapPin, Plus, X, Target, Users, Edit2, Trash2, BarChart2, Award
@@ -132,6 +133,8 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
   };
 
   const deleteTerritry = async (id: string) => {
+    const t = territories.find(x => x.id === id);
+    if (!await confirmDelete(t?.name, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     await deleteDoc(doc(db, 'territories', id));
     if (selectedTerritoryId === id) setSelectedTerritoryId(null);
   };

@@ -146,6 +146,8 @@ const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
 import ConfirmModal from './components/ConfirmModal';
+import GlobalConfirm from './components/GlobalConfirm';
+import { confirmDelete } from './lib/confirm';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import DataImportWizard from './components/DataImportWizard';
 import GlobalSearch from './components/GlobalSearch';
@@ -461,6 +463,7 @@ export default function App() {
     <ErrorBoundary>
       <ToastProvider>
         <AppContent />
+        <GlobalConfirm />
       </ToastProvider>
     </ErrorBoundary>
   );
@@ -756,7 +759,8 @@ function AppContent() {
   };
 
   const handleDeleteSupplier = async (id: string) => {
-    if (!window.confirm(currentLanguage === 'tr' ? 'Tedarikçiyi silmek istiyor musunuz?' : 'Delete this supplier?')) return;
+    const s = suppliers.find(x => x.id === id);
+    if (!await confirmDelete(s?.name, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     await deleteDoc(doc(db, 'suppliers', id));
   };
 
@@ -3873,7 +3877,7 @@ function AppContent() {
                 { label: tr ? 'Self-Servis Portalı' : 'Self-Service',        subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
                 { label: tr ? 'SGK e-Bildirge' : 'SGK e-Declaration',        subId: 'sgk-bildirge', action: () => setActiveTab('ik') }, // Phase 556 (renders in IK tab)
                 { label: tr ? 'Muhtasar & SGK' : 'Muhtasar & SGK',          subId: 'muhtasar',   action: () => setActiveTab('muhtasar') },
-                { label: tr ? 'Masraf Yönetimi' : 'Expense Reports',         subId: 'masraf',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
+                // Masraf Yönetimi İK'dan kaldırıldı — tek kanonik yer Muhasebe grubu (Phase 548 merge)
               ],
             },
             { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
@@ -6236,12 +6240,12 @@ function AppContent() {
                           </p>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${prioBadge595[t.priority]}`}>{t.priority}</span>
-                        <button onClick={async ()=>{try{await deleteDoc(doc(db,'workflowTasks',t.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                        <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'workflowTasks',t.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                       </div>
                     ))}
                     {p595Tasks.filter(t=>t.done).length>0&&(
                       <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {tr595?'tamamlanan görev':'completed task(s)'} &nbsp;
-                        <button onClick={()=>{p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
+                        <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
                       </p>
                     )}
                   </div>
@@ -9086,7 +9090,7 @@ function AppContent() {
                                 <div key={c.id} className="apple-card p-4">
                                   <div className="flex items-center justify-between mb-2">
                                     <p className="font-semibold text-gray-800">{c.customerName}</p>
-                                    <button onClick={async ()=>{try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                                    <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
                                   </div>
                                   <div className="grid grid-cols-3 gap-3 text-xs mb-3">
                                     <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">₺{c.totalValue.toLocaleString()}</p></div>
@@ -9428,7 +9432,7 @@ function AppContent() {
                                       {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
                                     </span>
                                   </div>
-                                  <button onClick={async ()=>{try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                                  <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
                                 </div>
                               );
                             })}
@@ -11767,7 +11771,7 @@ function AppContent() {
                                     </div>
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
-                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
+                                      <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                                     </div>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">

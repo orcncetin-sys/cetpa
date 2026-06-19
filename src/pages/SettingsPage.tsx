@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
@@ -268,7 +269,7 @@ export default function SettingsPage({
                     >
                       {wh.enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive')}
                     </button>
-                    <button onClick={async () => { try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
+                    <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
                       <X size={14} />
                     </button>
                   </div>

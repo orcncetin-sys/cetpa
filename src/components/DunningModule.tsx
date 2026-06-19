@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Bell, Plus, X, AlertTriangle, CheckCircle2,
@@ -526,7 +527,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                 <p className="text-sm font-semibold text-gray-800">{p.name}</p>
                 <p className="text-xs text-gray-400">{p.levels.length} {tr ? 'eskalasyon seviyesi' : 'escalation levels'}</p>
               </div>
-              <button onClick={() => deleteDoc(doc(db, 'dunningPolicies', p.id))}
+              <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; deleteDoc(doc(db, 'dunningPolicies', p.id)); }}
                 className="p-1 hover:bg-red-50 rounded-lg"><X className="w-3.5 h-3.5 text-red-400" /></button>
             </div>
           ))}
