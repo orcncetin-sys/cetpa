@@ -14615,7 +14615,15 @@ function AppContent() {
         <OnboardingChecklist
           userId={user.uid}
           currentLanguage={currentLanguage}
-          onNavigate={tab => setActiveTab(tab as typeof activeTab)}
+          onNavigate={(tab, subTarget) => {
+            setSelectedLead(null); setSelectedOrder(null); // açık detay görünümünü kapat
+            setActiveTab(tab as typeof activeTab);
+            // Hedef sayfanın doğru alt-sekmesine/aksiyonuna indir
+            if (tab === 'crm') setCrmTab(subTarget === 'musteriler' ? 'musteriler' : 'leads');
+            else if (tab === 'muhasebe') setMuhasebeTab(subTarget === 'banka' ? 'banka' : 'genel');
+            else if (tab === 'orders' && subTarget === 'add') setIsAddingOrder(true);
+            else if (tab === 'admin') setAdminTab(subTarget === 'invite' ? 'users' : 'overview');
+          }}
           onOpenImport={() => setShowDataImport(true)}
         />
       )}

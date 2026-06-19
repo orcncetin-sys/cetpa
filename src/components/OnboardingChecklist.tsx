@@ -7,7 +7,7 @@ import { db } from '../firebase';
 interface OnboardingChecklistProps {
   userId: string;
   currentLanguage: string;
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: string, subTarget?: string) => void;
   onOpenImport?: () => void;
 }
 
@@ -17,16 +17,17 @@ interface OnboardingStep {
   labelEN: string;
   action: 'navigate' | 'import';
   target?: string;
+  subTarget?: string; // hedef sayfanın alt-sekmesi / aksiyonu (doğru görünüme indir)
 }
 
 const STEPS: OnboardingStep[] = [
-  { id: 'add-product',          labelTR: 'İlk ürününüzü ekleyin',                    labelEN: 'Add your first product',         action: 'navigate', target: 'inventory' },
-  { id: 'add-customer',         labelTR: 'İlk müşterinizi ekleyin',                  labelEN: 'Add your first customer',        action: 'navigate', target: 'crm' },
-  { id: 'create-order',         labelTR: 'İlk siparişi oluşturun',                   labelEN: 'Create your first order',        action: 'navigate', target: 'orders' },
-  { id: 'setup-bank',           labelTR: 'Banka hesabı ekleyin',                     labelEN: 'Add a bank account',             action: 'navigate', target: 'muhasebe' },
+  { id: 'add-product',          labelTR: 'İlk ürününüzü ekleyin',                    labelEN: 'Add your first product',         action: 'navigate', target: 'inventory', subTarget: 'add' },
+  { id: 'add-customer',         labelTR: 'İlk müşterinizi ekleyin',                  labelEN: 'Add your first customer',        action: 'navigate', target: 'crm',       subTarget: 'musteriler' },
+  { id: 'create-order',         labelTR: 'İlk siparişi oluşturun',                   labelEN: 'Create your first order',        action: 'navigate', target: 'orders',    subTarget: 'add' },
+  { id: 'setup-bank',           labelTR: 'Banka hesabı ekleyin',                     labelEN: 'Add a bank account',             action: 'navigate', target: 'muhasebe',  subTarget: 'banka' },
   { id: 'import-data',          labelTR: 'Toplu veri içe aktarın',                   labelEN: 'Bulk import your data',          action: 'import' },
   { id: 'connect-integration',  labelTR: 'Entegrasyon bağlayın (Mikro/Shopify)',     labelEN: 'Connect an integration',         action: 'navigate', target: 'settings' },
-  { id: 'invite-user',          labelTR: 'Takım üyesi davet edin',                   labelEN: 'Invite a team member',           action: 'navigate', target: 'settings' },
+  { id: 'invite-user',          labelTR: 'Takım üyesi davet edin',                   labelEN: 'Invite a team member',           action: 'navigate', target: 'admin',     subTarget: 'invite' },
   { id: 'setup-logo',           labelTR: 'Şirket logonuzu yükleyin',                 labelEN: 'Upload your company logo',       action: 'navigate', target: 'settings' },
 ];
 
@@ -81,7 +82,7 @@ export default function OnboardingChecklist({
 
   const handleStepAction = (step: OnboardingStep) => {
     if (step.action === 'navigate' && step.target) {
-      onNavigate(step.target);
+      onNavigate(step.target, step.subTarget);
     } else if (step.action === 'import' && onOpenImport) {
       onOpenImport();
     }
