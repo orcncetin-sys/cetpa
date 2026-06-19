@@ -15,12 +15,13 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import DocumentDesigner from '../components/DocumentDesigner';
+import SuperAdminPanel from '../components/SuperAdminPanel';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-type AdminTabId = 'overview' | 'users' | 'access' | 'auditlog' | 'system' | 'company' | 'evrak';
+type AdminTabId = 'overview' | 'users' | 'access' | 'auditlog' | 'system' | 'company' | 'evrak' | 'tenants';
 type AccessVal = '✅' | '👁' | '📊' | '❌';
 
 const ACCESS_VALUES = ['✅', '👁', '📊', '❌'] as const;
@@ -41,6 +42,7 @@ const DEFAULT_ACCESS_MATRIX: { section: string; access: AccessVal[] }[] = [
 interface Props {
   adminTab: AdminTabId;
   setAdminTab: (tab: AdminTabId) => void;
+  isSuperAdmin?: boolean;
   kpiCurrency: 'TRY' | 'USD' | 'EUR';
   setKpiCurrency: (c: 'TRY' | 'USD' | 'EUR') => void;
   canAccess: (tab: string) => boolean;
@@ -74,7 +76,7 @@ interface Props {
 }
 
 export default function AdminPage({
-  adminTab, setAdminTab, kpiCurrency, setKpiCurrency,
+  adminTab, setAdminTab, isSuperAdmin = false, kpiCurrency, setKpiCurrency,
   canAccess, hasFullAccess, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees, inventoryMovements,
   userRole, user, isOwnerAdmin,
@@ -155,6 +157,7 @@ export default function AdminPage({
           { id: 'system', label: currentLanguage==='tr'?'Sistem Durumu':'System Status', icon: Activity },
           { id: 'company', label: currentLanguage==='tr'?'Şirket Ayarları':'Company Settings', icon: Building2 },
           { id: 'evrak', label: currentLanguage==='tr'?'Evrak Tasarımı':'Document Design', icon: FileText },
+          ...(isSuperAdmin ? [{ id: 'tenants' as const, label: currentLanguage==='tr'?'Müşteri Yönetimi':'Customer Mgmt', icon: Building2 }] : []),
         ] as const).map(tab => {
           const Icon = tab.icon;
           return (
@@ -958,6 +961,12 @@ export default function AdminPage({
     {adminTab === 'evrak' && (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="py-2">
         <DocumentDesigner currentLanguage={currentLanguage} />
+      </motion.div>
+    )}
+
+    {adminTab === 'tenants' && isSuperAdmin && (
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="py-2">
+        <SuperAdminPanel currentLanguage={currentLanguage} toast={toast as (m: string, t?: 'success' | 'error' | 'info') => void} />
       </motion.div>
     )}
     </motion.div>

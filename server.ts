@@ -138,6 +138,14 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
     const decoded = await admin.auth().verifyIdToken(token);
     (req as Request & { uid: string; userEmail?: string }).uid = decoded.uid;
     (req as Request & { uid: string; userEmail?: string }).userEmail = decoded.email;
+    // Askıya alınmış kiracı firmanın kullanıcıları engellenir (süper-admin hariç).
+    if (!isSuperAdmin(req)) {
+      const cid = await getUserCompanyId(decoded.uid);
+      if (await getCompanyStatus(cid) === 'suspended') {
+        res.status(403).json({ error: 'Firma hesabınız askıya alınmıştır. Lütfen yönetici ile iletişime geçin.', code: 'COMPANY_SUSPENDED' });
+        return;
+      }
+    }
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token.' });
@@ -179,6 +187,36 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
 /** Koleksiyon+operasyon için kullanıcının yetkili olup olmadığını döner. */
 async function canAccessCollection(uid: string, coll: string, op: DbOp): Promise<boolean> {
   return isAllowed(await getUserRole(uid), coll, op);
+}
+
+// ── Süper-admin (SaaS operatörü) — tüm kiracı firmaları yönetir ──────────────
+// E-posta tabanlı, env ile yapılandırılır. Varsayılan: kurulum sahibi.
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS || 'orcncetin@gmail.com')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean),
+);
+function isSuperAdmin(req: Request): boolean {
+  return SUPER_ADMIN_EMAILS.has((reqActor(req).email || '').toLowerCase());
+}
+async function requireSuperAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (isSuperAdmin(req)) { next(); return; }
+  res.status(403).json({ error: 'Bu işlem için süper-admin yetkisi gerekir.' });
+}
+
+// Kiracı firma durumu (active/suspended) — 60 sn önbellekli.
+const companyStatusCache = new Map<string, { status: string; exp: number }>();
+async function getCompanyStatus(cid: string): Promise<string> {
+  const c = companyStatusCache.get(cid);
+  if (c && c.exp > Date.now()) return c.status;
+  let status = 'active';
+  if (adminDb) {
+    try {
+      const snap = await adminDb.collection('companyStatus').doc(cid).get();
+      if (snap.exists) status = (snap.data()?.status as string) || 'active';
+    } catch { /* varsayılan: active */ }
+  }
+  companyStatusCache.set(cid, { status, exp: Date.now() + 60_000 });
+  return status;
 }
 
 // ── PostgreSQL document store (Firestore replacement) ───────────────────────
@@ -6487,6 +6525,85 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
         })
       );
       return res.json({ counts, timestamp: new Date().toISOString() });
+    } catch (err) {
+      return res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SÜPER-ADMIN (SaaS operatörü) — kiracı firma yönetimi
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** İstek sahibinin süper-admin olup olmadığını döner (panel görünürlüğü için). */
+  app.get('/api/superadmin/me', requireAuth, (req: Request, res: Response) => {
+    res.json({ isSuperAdmin: isSuperAdmin(req), email: reqActor(req).email });
+  });
+
+  /** Tüm kiracı firmaları istatistikleriyle listeler. */
+  app.get('/api/superadmin/tenants', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    try {
+      const usersSnap = await adminDb.collection('users').get();
+      // companyId -> { userCount, owner, users[] }
+      const groups = new Map<string, { userCount: number; ownerEmail: string; ownerName: string; createdAt: unknown }>();
+      usersSnap.docs.forEach(d => {
+        const u = d.data() as Record<string, unknown>;
+        const cid = (u.companyId as string) || d.id;
+        const g = groups.get(cid) || { userCount: 0, ownerEmail: '', ownerName: '', createdAt: undefined };
+        g.userCount++;
+        // Sahip: uid === companyId olan ya da admin rolündeki ilk kullanıcı
+        if (d.id === cid || (!g.ownerEmail && (u.role === 'admin' || u.role === 'Admin'))) {
+          g.ownerEmail = (u.email as string) || g.ownerEmail;
+          g.ownerName = (u.displayName as string) || (u.name as string) || g.ownerName;
+        }
+        if (!g.ownerEmail) g.ownerEmail = (u.email as string) || g.ownerEmail;
+        if (!g.createdAt) g.createdAt = u.createdAt;
+        groups.set(cid, g);
+      });
+
+      const tenants = await Promise.all(Array.from(groups.entries()).map(async ([cid, g]) => {
+        let companyName = '';
+        let plan = 'free'; let subStatus = 'none';
+        try {
+          const profSnap = await adminDb!.collection('settings').doc(`${cid}__companyProfile`).get();
+          if (profSnap.exists) { const p = profSnap.data() as Record<string, unknown>; companyName = (p.companyName as string) || (p.name as string) || (p.unvan as string) || ''; }
+        } catch { /* ignore */ }
+        try {
+          const subSnap = await adminDb!.collection('subscriptions').doc(cid).get();
+          if (subSnap.exists) { const s = subSnap.data() as Record<string, unknown>; plan = (s.plan as string) || plan; subStatus = (s.status as string) || subStatus; }
+        } catch { /* ignore */ }
+        const status = await getCompanyStatus(cid);
+        return {
+          companyId: cid,
+          companyName: companyName || g.ownerName || g.ownerEmail || cid,
+          ownerEmail: g.ownerEmail,
+          userCount: g.userCount,
+          plan, subStatus, status,
+          createdAt: g.createdAt ?? null,
+        };
+      }));
+      tenants.sort((a, b) => b.userCount - a.userCount);
+      return res.json({ tenants, count: tenants.length, timestamp: new Date().toISOString() });
+    } catch (err) {
+      return res.status(500).json({ error: String(err) });
+    }
+  });
+
+  /** Bir kiracı firmanın durumunu değiştirir (active/suspended) + plan/not. */
+  app.post('/api/superadmin/tenants/:companyId/status', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId);
+    const { status, note } = (req.body ?? {}) as { status?: string; note?: string };
+    if (status !== 'active' && status !== 'suspended') {
+      return res.status(400).json({ error: 'status "active" veya "suspended" olmalı.' });
+    }
+    try {
+      await adminDb.collection('companyStatus').doc(cid).set({
+        status, note: note || '', updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email,
+      }, { merge: true });
+      companyStatusCache.set(cid, { status, exp: Date.now() + 60_000 });
+      void writeAuditLog(reqActor(req), `Kiracı firma ${status === 'suspended' ? 'askıya alındı' : 'aktifleştirildi'}`, `companyStatus/${cid}`);
+      return res.json({ ok: true, companyId: cid, status });
     } catch (err) {
       return res.status(500).json({ error: String(err) });
     }

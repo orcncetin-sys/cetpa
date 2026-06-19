@@ -40,7 +40,8 @@ import {
   getDoc,
   getDocs,
   limit,
-  orderBy
+  orderBy,
+  authedFetch
 } from './lib/dbClient';
 import { sortByCreatedAt } from './utils/fsSort';
 import {
@@ -562,7 +563,8 @@ function AppContent() {
 
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
-  const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'|'tenants'>('overview');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'>('genel');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
@@ -599,6 +601,19 @@ function AppContent() {
   useEffect(() => {
     if (adminTab === 'system') void fetchSystemHealth();
   }, [adminTab, fetchSystemHealth]);
+
+  // Süper-admin (SaaS operatörü) mü? — kiracı yönetimi sekmesinin görünürlüğü için
+  useEffect(() => {
+    if (!user) { setIsSuperAdmin(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authedFetch('/api/superadmin/me');
+        if (res.ok && !cancelled) { const d = await res.json() as { isSuperAdmin?: boolean }; setIsSuperAdmin(!!d.isSuperAdmin); }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
   const ACCESS_VALUES = ['✅','👁','📊','❌'] as const;
   type AccessVal = typeof ACCESS_VALUES[number];
   const defaultAccessMatrix: { section: string; access: AccessVal[] }[] = [
@@ -3908,6 +3923,7 @@ function AppContent() {
                 { label: tr ? 'Erişim Kontrolü' : 'Access',  subId: 'a-access',   action: () => { setActiveTab('admin'); setAdminTab('access'); } },
                 { label: 'Audit Log',                          subId: 'a-audit',    action: () => { setActiveTab('admin'); setAdminTab('auditlog'); } },
                 { label: tr ? 'Şirket Bilgileri' : 'Company', subId: 'a-company',  action: () => { setActiveTab('admin'); setAdminTab('company'); } },
+                ...(isSuperAdmin ? [{ label: tr ? 'Müşteri Yönetimi' : 'Customer Mgmt', subId: 'a-tenants', action: () => { setActiveTab('admin'); setAdminTab('tenants'); } }] : []),
               ],
             }] as SidebarGroup[] : []),
             ...((userRole === 'Admin' || userRole === 'Manager') ? [{ id: 'settings', label: tr ? 'Ayarlar' : 'Settings', icon: Settings }] as SidebarGroup[] : []),
@@ -12275,6 +12291,7 @@ function AppContent() {
               <AdminPage
                 adminTab={adminTab}
                 setAdminTab={setAdminTab}
+                isSuperAdmin={isSuperAdmin}
                 kpiCurrency={kpiCurrency}
                 setKpiCurrency={setKpiCurrency}
                 canAccess={canAccess}

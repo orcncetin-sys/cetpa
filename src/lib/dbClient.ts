@@ -220,6 +220,19 @@ async function getToken(): Promise<string> {
   return u.getIdToken();
 }
 
+/** Kimlik doğrulamalı genel fetch — /api/* uç noktaları için (Bearer token ekler). */
+export async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const token = await getToken();
+  return fetch(path, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers || {}),
+    },
+  });
+}
+
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const token = await getToken();
   const res = await fetch(`/api/db/${path}`, {
