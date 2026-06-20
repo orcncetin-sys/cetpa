@@ -6609,6 +6609,34 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
+  /** Bir kiracı firmayı düzenler — plan, durum ve not birlikte güncellenir. */
+  const SA_PLANS = new Set(['starter', 'professional', 'business', 'enterprise', 'free']);
+  app.post('/api/superadmin/tenants/:companyId/update', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId);
+    const { plan, status, note } = (req.body ?? {}) as { plan?: string; status?: string; note?: string };
+    if (plan !== undefined && !SA_PLANS.has(plan)) return res.status(400).json({ error: 'Geçersiz plan.' });
+    if (status !== undefined && status !== 'active' && status !== 'suspended') return res.status(400).json({ error: 'Geçersiz durum.' });
+    try {
+      const changes: string[] = [];
+      if (plan !== undefined) {
+        await adminDb.collection('subscriptions').doc(cid).set({ plan, updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email }, { merge: true });
+        changes.push(`plan=${plan}`);
+      }
+      if (status !== undefined || note !== undefined) {
+        const payload: Record<string, unknown> = { updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email };
+        if (status !== undefined) payload.status = status;
+        if (note !== undefined) payload.note = note;
+        await adminDb.collection('companyStatus').doc(cid).set(payload, { merge: true });
+        if (status !== undefined) { companyStatusCache.set(cid, { status, exp: Date.now() + 60_000 }); changes.push(`durum=${status}`); }
+      }
+      void writeAuditLog(reqActor(req), 'Kiracı firma düzenlendi', `tenant/${cid} (${changes.join(', ') || 'not'})`);
+      return res.json({ ok: true, companyId: cid, plan, status });
+    } catch (err) {
+      return res.status(500).json({ error: String(err) });
+    }
+  });
+
   // ─────────────────────────────────────────────────────────────────────────────
   // ERP PLUGIN ROUTES
   // Each ERP follows the same contract:
