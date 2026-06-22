@@ -136,8 +136,9 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
   }
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    (req as Request & { uid: string; userEmail?: string }).uid = decoded.uid;
-    (req as Request & { uid: string; userEmail?: string }).userEmail = decoded.email;
+    (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).uid = decoded.uid;
+    (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).userEmail = decoded.email;
+    (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).emailVerified = decoded.email_verified === true;
     // Askıya alınmış kiracı firmanın kullanıcıları engellenir (süper-admin hariç).
     if (!isSuperAdmin(req)) {
       const cid = await getUserCompanyId(decoded.uid);
@@ -156,6 +157,17 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
 function reqActor(req: Request): { uid: string; email: string } {
   const r = req as Request & { uid?: string; userEmail?: string };
   return { uid: r.uid || 'system', email: r.userEmail || '' };
+}
+
+/** Giden e-posta HTML'ine gömülen kiracı kaynaklı metni güvenli hale getirir. */
+function escapeHtml(v: unknown): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+/** Basit e-posta format kontrolü. */
+function isValidEmail(e: string): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 }
 
 // ── Sunucu tarafı RBAC (rol bazlı erişim kontrolü) ───────────────────────────
@@ -196,7 +208,11 @@ const SUPER_ADMIN_EMAILS = new Set(
     .split(',').map(e => e.trim().toLowerCase()).filter(Boolean),
 );
 function isSuperAdmin(req: Request): boolean {
-  return SUPER_ADMIN_EMAILS.has((reqActor(req).email || '').toLowerCase());
+  // Yalnız doğrulanmış e-posta güvenilir: e-posta/şifre ile doğrulanmamış bir hesap
+  // (örn. SUPER_ADMIN_EMAILS'teki bir adresi ön-kayıtla ele geçirme) yetki kazanamaz.
+  const r = req as Request & { userEmail?: string; emailVerified?: boolean };
+  if (r.emailVerified !== true) return false;
+  return SUPER_ADMIN_EMAILS.has((r.userEmail || '').toLowerCase());
 }
 async function requireSuperAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (isSuperAdmin(req)) { next(); return; }
@@ -6534,6 +6550,17 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   // SÜPER-ADMIN (SaaS operatörü) — kiracı firma yönetimi
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Plan fiyatları (TRY) — src/types/subscription.ts PLANS ile elle senkron.
+  const PLAN_PRICES_TRY: Record<string, { monthly: number; yearly: number }> = {
+    starter:      { monthly: 999,  yearly: 9990 },
+    professional: { monthly: 2499, yearly: 24990 },
+    business:     { monthly: 4999, yearly: 49990 },
+    enterprise:   { monthly: 0,    yearly: 0 },
+    free:         { monthly: 0,    yearly: 0 },
+  };
+  const planAmount = (plan: string, cycle: string): number =>
+    PLAN_PRICES_TRY[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'] ?? 0;
+
   /** İstek sahibinin süper-admin olup olmadığını döner (panel görünürlüğü için). */
   app.get('/api/superadmin/me', requireAuth, (req: Request, res: Response) => {
     res.json({ isSuperAdmin: isSuperAdmin(req), email: reqActor(req).email });
@@ -6563,22 +6590,34 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
       const tenants = await Promise.all(Array.from(groups.entries()).map(async ([cid, g]) => {
         let companyName = '';
-        let plan = 'free'; let subStatus = 'none';
+        let plan = 'free'; let subStatus = 'none'; let cycle = 'monthly';
+        let nextPaymentDate: unknown = null; let lastPaymentDate: unknown = null; let amount = 0;
         try {
           const profSnap = await adminDb!.collection('settings').doc(`${cid}__companyProfile`).get();
           if (profSnap.exists) { const p = profSnap.data() as Record<string, unknown>; companyName = (p.companyName as string) || (p.name as string) || (p.unvan as string) || ''; }
         } catch { /* ignore */ }
         try {
           const subSnap = await adminDb!.collection('subscriptions').doc(cid).get();
-          if (subSnap.exists) { const s = subSnap.data() as Record<string, unknown>; plan = (s.plan as string) || plan; subStatus = (s.status as string) || subStatus; }
+          if (subSnap.exists) {
+            const s = subSnap.data() as Record<string, unknown>;
+            plan = (s.plan as string) || plan;
+            subStatus = (s.status as string) || subStatus;
+            cycle = (s.cycle as string) || cycle;
+            nextPaymentDate = s.currentPeriodEnd ?? s.nextPaymentDate ?? s.endDate ?? null;
+            lastPaymentDate = s.lastPaymentDate ?? s.lastPaymentAt ?? s.lastPayment ?? null;
+            amount = (s.amount as number) ?? planAmount(plan, cycle);
+          }
         } catch { /* ignore */ }
+        if (!amount) amount = planAmount(plan, cycle);
         const status = await getCompanyStatus(cid);
         return {
           companyId: cid,
           companyName: companyName || g.ownerName || g.ownerEmail || cid,
           ownerEmail: g.ownerEmail,
           userCount: g.userCount,
-          plan, subStatus, status,
+          plan, subStatus, status, cycle, amount,
+          nextPaymentDate: nextPaymentDate ?? null,
+          lastPaymentDate: lastPaymentDate ?? null,
           createdAt: g.createdAt ?? null,
         };
       }));
@@ -6598,9 +6637,9 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       return res.status(400).json({ error: 'status "active" veya "suspended" olmalı.' });
     }
     try {
-      await adminDb.collection('companyStatus').doc(cid).set({
-        status, note: note || '', updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email,
-      }, { merge: true });
+      const csPayload: Record<string, unknown> = { status, updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email };
+      if (note !== undefined) csPayload.note = note; // not yalnız gönderildiğinde yazılır (mevcut notu silme)
+      await adminDb.collection('companyStatus').doc(cid).set(csPayload, { merge: true });
       companyStatusCache.set(cid, { status, exp: Date.now() + 60_000 });
       void writeAuditLog(reqActor(req), `Kiracı firma ${status === 'suspended' ? 'askıya alındı' : 'aktifleştirildi'}`, `companyStatus/${cid}`);
       return res.json({ ok: true, companyId: cid, status });
@@ -6614,14 +6653,24 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   app.post('/api/superadmin/tenants/:companyId/update', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const cid = String(req.params.companyId);
-    const { plan, status, note } = (req.body ?? {}) as { plan?: string; status?: string; note?: string };
+    const { plan, status, note, cycle, nextPaymentDate } = (req.body ?? {}) as
+      { plan?: string; status?: string; note?: string; cycle?: string; nextPaymentDate?: string | number | null };
     if (plan !== undefined && !SA_PLANS.has(plan)) return res.status(400).json({ error: 'Geçersiz plan.' });
     if (status !== undefined && status !== 'active' && status !== 'suspended') return res.status(400).json({ error: 'Geçersiz durum.' });
+    if (cycle !== undefined && cycle !== 'monthly' && cycle !== 'yearly') return res.status(400).json({ error: 'Geçersiz dönem.' });
     try {
       const changes: string[] = [];
+      // Abonelik alanları (plan / dönem / sonraki ödeme tarihi) tek yazımda
+      const subPatch: Record<string, unknown> = {};
       if (plan !== undefined) {
-        await adminDb.collection('subscriptions').doc(cid).set({ plan, updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email }, { merge: true });
-        changes.push(`plan=${plan}`);
+        subPatch.plan = plan; changes.push(`plan=${plan}`);
+        // Süper-admin manuel ücretli plan atadığında aboneliği aktif say (MRR'ye dahil).
+        subPatch.status = (plan === 'free' || plan === 'enterprise') ? 'none' : 'active';
+      }
+      if (cycle !== undefined) { subPatch.cycle = cycle; changes.push(`dönem=${cycle}`); }
+      if (nextPaymentDate !== undefined) { subPatch.currentPeriodEnd = nextPaymentDate; changes.push('sonraki ödeme'); }
+      if (Object.keys(subPatch).length) {
+        await adminDb.collection('subscriptions').doc(cid).set({ ...subPatch, updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email }, { merge: true });
       }
       if (status !== undefined || note !== undefined) {
         const payload: Record<string, unknown> = { updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email };
@@ -6634,6 +6683,174 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       return res.json({ ok: true, companyId: cid, plan, status });
     } catch (err) {
       return res.status(500).json({ error: String(err) });
+    }
+  });
+
+  /** Tek bir kiracı firmanın tam detayı — profil, kullanıcılar, faturalandırma, ödeme geçmişi. */
+  app.get('/api/superadmin/tenants/:companyId', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId);
+    try {
+      // Profil
+      let profile: Record<string, unknown> = {};
+      try {
+        const ps = await adminDb.collection('settings').doc(`${cid}__companyProfile`).get();
+        if (ps.exists) profile = ps.data() as Record<string, unknown>;
+        else { const legacy = await adminDb.collection('settings').doc('companyProfile').get(); if (legacy.exists) profile = legacy.data() as Record<string, unknown>; }
+      } catch { /* ignore */ }
+
+      // Kullanıcılar (companyId == cid veya uid == cid)
+      const usersSnap = await adminDb.collection('users').get();
+      const users = usersSnap.docs
+        .filter(d => ((d.data().companyId as string) || d.id) === cid)
+        .map(d => { const u = d.data() as Record<string, unknown>; return {
+          uid: d.id, email: (u.email as string) || '', name: (u.displayName as string) || (u.name as string) || '',
+          role: (u.role as string) || 'user', lastLogin: u.lastLogin ?? null, createdAt: u.createdAt ?? null,
+        }; });
+      const owner = users.find(u => u.uid === cid) || users.find(u => /admin/i.test(u.role)) || users[0] || null;
+
+      // Abonelik / faturalandırma
+      let billing: Record<string, unknown> = { plan: 'free', status: 'none', cycle: 'monthly' };
+      try {
+        const ss = await adminDb.collection('subscriptions').doc(cid).get();
+        if (ss.exists) billing = { ...billing, ...(ss.data() as Record<string, unknown>) };
+      } catch { /* ignore */ }
+      const plan = String(billing.plan || 'free');
+      const cycle = String(billing.cycle || 'monthly');
+      billing.amount = (billing.amount as number) ?? planAmount(plan, cycle);
+      billing.nextPaymentDate = billing.currentPeriodEnd ?? billing.nextPaymentDate ?? billing.endDate ?? null;
+      billing.lastPaymentDate = billing.lastPaymentDate ?? billing.lastPaymentAt ?? billing.lastPayment ?? null;
+
+      // Durum + not
+      const csSnap = await adminDb.collection('companyStatus').doc(cid).get();
+      const cs = csSnap.exists ? (csSnap.data() as Record<string, unknown>) : {};
+      const status = await getCompanyStatus(cid);
+
+      // Ödeme geçmişi (tenantInvoices)
+      let invoices: Record<string, unknown>[] = [];
+      try {
+        const invSnap = await adminDb.collection('tenantInvoices').where('companyId', '==', cid).get();
+        invoices = invSnap.docs.map(d => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
+          .sort((a, b) => Number((b as { createdMs?: number }).createdMs || 0) - Number((a as { createdMs?: number }).createdMs || 0));
+      } catch { /* ignore */ }
+
+      return res.json({
+        companyId: cid,
+        profile: {
+          companyName: profile.companyName || profile.name || '', taxNo: profile.taxNo || '', taxOffice: profile.taxOffice || '',
+          address: profile.address || '', email: profile.email || (owner?.email ?? ''), phone: profile.phone || '',
+          iban: profile.iban || '', website: profile.website || '',
+        },
+        owner, users, billing, status, note: cs.note || '',
+        invoices,
+      });
+    } catch (err) {
+      return res.status(500).json({ error: String(err) });
+    }
+  });
+
+  /** Kiracı firmaya abonelik ödeme linki oluşturur (iyzico) ve isteğe bağlı e-posta gönderir. */
+  app.post('/api/superadmin/tenants/:companyId/payment-link', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const creds = await getIyzicoCreds();
+    if (!creds) return res.status(503).json({ success: false, notConfigured: true, error: 'İyzico yapılandırılmamış (IYZICO_API_KEY).' });
+    const cid = String(req.params.companyId);
+    const body = (req.body ?? {}) as {
+      amount?: number; currency?: string; plan?: string; cycle?: string;
+      email?: string; sendEmail?: boolean; description?: string;
+    };
+    const currency = body.currency || 'TRY';
+    try {
+      // Plan / dönem / tutar çözümle
+      const ss = await adminDb.collection('subscriptions').doc(cid).get();
+      const sub = ss.exists ? (ss.data() as Record<string, unknown>) : {};
+      const plan = body.plan || String(sub.plan || 'starter');
+      const cycle = body.cycle || String(sub.cycle || 'monthly');
+      const amount = Number(body.amount ?? planAmount(plan, cycle));
+      if (!amount || amount <= 0) return res.status(400).json({ success: false, error: 'Geçerli bir tutar gerekli (plan ücretsiz/özel olabilir).' });
+
+      // Profil / e-posta / müşteri adı
+      let profile: Record<string, unknown> = {};
+      const ps = await adminDb.collection('settings').doc(`${cid}__companyProfile`).get();
+      if (ps.exists) profile = ps.data() as Record<string, unknown>;
+      let ownerEmail = body.email || (profile.email as string) || '';
+      let customerName = (profile.companyName as string) || '';
+      if (!ownerEmail || !customerName) {
+        const us = await adminDb.collection('users').get();
+        const mine = us.docs.filter(d => ((d.data().companyId as string) || d.id) === cid).map(d => d.data() as Record<string, unknown>);
+        const own = mine.find(u => /admin/i.test(String(u.role))) || mine[0];
+        ownerEmail = ownerEmail || (own?.email as string) || '';
+        customerName = customerName || (own?.displayName as string) || (own?.name as string) || ownerEmail || cid;
+      }
+      if (!ownerEmail) return res.status(400).json({ success: false, error: 'Müşteri e-postası bulunamadı; e-posta parametresi gönderin.' });
+      if (!isValidEmail(ownerEmail)) return res.status(400).json({ success: false, error: 'Geçersiz e-posta adresi.' });
+
+      const invoiceId = `inv_${cid}_${randStr().slice(0, 10)}`;
+      const amountStr = amount.toFixed(2);
+      const nameParts = customerName.trim().split(' ');
+      const callbackUrl = `${req.protocol}://${req.get('host')}/payment/result`;
+      const planLabel = `Cetpa ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${cycle === 'yearly' ? 'Yıllık' : 'Aylık'})`;
+
+      const iyzBody = {
+        locale: 'tr', conversationId: invoiceId, price: amountStr, paidPrice: amountStr, currency,
+        basketId: invoiceId, paymentGroup: 'SUBSCRIPTION', callbackUrl,
+        buyer: {
+          id: cid, name: nameParts[0] || 'Müşteri', surname: nameParts.slice(1).join(' ') || 'Firma',
+          email: ownerEmail, identityNumber: (profile.taxNo as string) || '11111111111',
+          registrationAddress: (profile.address as string) || 'Türkiye', city: 'İstanbul', country: 'Turkey',
+          ip: req.ip || '127.0.0.1', gsmNumber: (profile.phone as string) || '+905000000000',
+        },
+        shippingAddress: { contactName: customerName, city: 'İstanbul', country: 'Turkey', address: (profile.address as string) || 'Türkiye', zipCode: '34000' },
+        billingAddress: { contactName: customerName, city: 'İstanbul', country: 'Turkey', address: (profile.address as string) || 'Türkiye', zipCode: '34000' },
+        basketItems: [{ id: invoiceId, name: body.description || planLabel, category1: 'SaaS', itemType: 'VIRTUAL', price: amountStr }],
+      };
+
+      const rndStr = randStr();
+      const pkiStr = toPkiString(iyzBody);
+      const auth = iyzicoAuth(creds, rndStr, pkiStr);
+      const r = await fetch(`${creds.baseUrl}/payment/initialize/checkout`, {
+        method: 'POST',
+        headers: { Authorization: auth, 'x-iyzi-rnd': rndStr, 'Content-Type': 'application/json' },
+        body: JSON.stringify(iyzBody), signal: AbortSignal.timeout(15000),
+      });
+      const d = await r.json() as { status?: string; paymentPageUrl?: string; token?: string; errorMessage?: string };
+      const success = d.status === 'success' && !!d.paymentPageUrl;
+      if (!success) return res.status(502).json({ success: false, error: d.errorMessage || 'İyzico link oluşturulamadı.' });
+
+      // Faturayı kaydet
+      await adminDb.collection('tenantInvoices').doc(invoiceId).set({
+        companyId: cid, plan, cycle, amount, currency,
+        paymentPageUrl: d.paymentPageUrl, iyzicoToken: d.token,
+        status: 'pending', email: ownerEmail, description: body.description || planLabel,
+        sandbox: creds.baseUrl.includes('sandbox'),
+        createdAt: pgServerTimestamp(), createdMs: Date.now(), createdBy: reqActor(req).email,
+      });
+
+      // İsteğe bağlı e-posta gönder
+      let emailed = false; let emailError: string | undefined;
+      if (body.sendEmail) {
+        // Kiracı kaynaklı alanlar (customerName) HTML injection'a karşı escape edilir.
+        const safeName = escapeHtml(customerName);
+        const safePlan = escapeHtml(planLabel);
+        const safeUrl = encodeURI(d.paymentPageUrl || '');
+        const html = `
+          <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px">
+            <h2 style="color:#ff4000;margin:0 0 4px">Cetpa Ödeme Bağlantısı</h2>
+            <p style="color:#555;font-size:14px">Sayın ${safeName},</p>
+            <p style="color:#555;font-size:14px">${safePlan} aboneliğiniz için ödeme bağlantınız hazır:</p>
+            <p style="font-size:22px;font-weight:bold;color:#1d1d1f;margin:16px 0">${escapeHtml(amountStr)} ${escapeHtml(currency)}</p>
+            <a href="${safeUrl}" style="display:inline-block;background:#ff4000;color:#fff;text-decoration:none;padding:12px 28px;border-radius:999px;font-weight:bold">Ödemeyi Tamamla</a>
+            <p style="color:#999;font-size:12px;margin-top:20px">Bağlantı çalışmıyorsa: <br>${escapeHtml(safeUrl)}</p>
+          </div>`;
+        const er = await sendEmail(ownerEmail, `Cetpa Ödeme Bağlantısı — ${amountStr} ${currency}`, html);
+        emailed = !er.error;
+        if (er.error) emailError = er.error === 'notConfigured' ? 'E-posta servisi yapılandırılmamış (RESEND_API_KEY).' : er.error;
+      }
+
+      void writeAuditLog(reqActor(req), 'Kiracı ödeme linki oluşturuldu', `tenant/${cid} — ${amountStr} ${currency} (${plan}/${cycle})${emailed ? ' + e-posta' : ''}`);
+      return res.json({ success: true, paymentPageUrl: d.paymentPageUrl, invoiceId, amount, currency, email: ownerEmail, emailed, emailError });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: String(err) });
     }
   });
 

@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Building2, Users, RefreshCw, Search, ShieldOff, ShieldCheck, Crown, Pencil, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Building2, Users, RefreshCw, Search, ShieldOff, ShieldCheck, Crown, X,
+  CreditCard, Link2, Mail, Copy, Check, Calendar, Phone, MapPin, Receipt, FileText,
+} from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
 
@@ -11,7 +14,24 @@ interface Tenant {
   plan: string;
   subStatus: string;
   status: string; // 'active' | 'suspended'
+  cycle: string;
+  amount: number;
+  nextPaymentDate: unknown;
+  lastPaymentDate: unknown;
   createdAt: unknown;
+}
+
+interface TenantUser { uid: string; email: string; name: string; role: string; lastLogin: unknown; createdAt: unknown; }
+interface TenantInvoice { id: string; amount: number; currency: string; plan?: string; cycle?: string; status?: string; paymentPageUrl?: string; email?: string; createdAt?: unknown; createdMs?: number; }
+interface TenantDetail {
+  companyId: string;
+  profile: { companyName: string; taxNo: string; taxOffice: string; address: string; email: string; phone: string; iban: string; website: string };
+  owner: TenantUser | null;
+  users: TenantUser[];
+  billing: Record<string, unknown>;
+  status: string;
+  note: string;
+  invoices: TenantInvoice[];
 }
 
 interface Props {
@@ -27,11 +47,40 @@ const PLAN_LABEL: Record<string, { tr: string; en: string }> = {
   enterprise: { tr: 'Kurumsal', en: 'Enterprise' },
   free: { tr: 'Ücretsiz', en: 'Free' },
 };
+const PLAN_PRICES: Record<string, { monthly: number; yearly: number }> = {
+  starter: { monthly: 999, yearly: 9990 },
+  professional: { monthly: 2499, yearly: 24990 },
+  business: { monthly: 4999, yearly: 49990 },
+  enterprise: { monthly: 0, yearly: 0 },
+  free: { monthly: 0, yearly: 0 },
+};
+
+function toMs(v: unknown): number {
+  if (!v) return 0;
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
+  if (typeof v === 'string') { const t = Date.parse(v); return isNaN(t) ? 0 : t; }
+  if (typeof v === 'object') {
+    const o = v as { seconds?: number; _seconds?: number; toMillis?: () => number };
+    if (typeof o.toMillis === 'function') return o.toMillis();
+    if (o.seconds) return o.seconds * 1000;
+    if (o._seconds) return o._seconds * 1000;
+  }
+  return 0;
+}
+function fmtDate(v: unknown, lang: string): string {
+  const ms = toMs(v);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+function fmtMoney(v: number, currency = 'TRY'): string {
+  const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₺';
+  return `${sym}${Math.round(v).toLocaleString('tr-TR')}`;
+}
 
 /**
- * Süper-admin (SaaS operatörü) paneli — tüm kiracı firmaları listeler,
- * plan/durum düzenler, askıya alma/aktifleştirme yapılır.
- * Sadece SUPER_ADMIN_EMAILS için görünür.
+ * Süper-admin (SaaS operatörü) — tam kapsamlı kiracı yönetim paneli.
+ * Liste + detay çekmecesi (profil, faturalandırma, kullanıcılar, ödeme geçmişi)
+ * + ödeme linki oluşturma/e-posta gönderme. Yalnız SUPER_ADMIN_EMAILS için.
  */
 export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   const tr = currentLanguage === 'tr';
@@ -39,103 +88,132 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
-  const [editing, setEditing] = useState<Tenant | null>(null);
-  const [editPlan, setEditPlan] = useState<string>('starter');
-  const [editStatus, setEditStatus] = useState<string>('active');
-  const [editNote, setEditNote] = useState<string>('');
-  const [saving, setSaving] = useState(false);
 
-  // toast prop'u her render'da yeni referans olabilir → load'u ref ile sabitle
-  // (yoksa useEffect sonsuz döngüye girer).
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
-  const trRef = useRef(tr);
-  trRef.current = tr;
+  // Detay çekmecesi
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TenantDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [savingBilling, setSavingBilling] = useState(false);
+
+  // Düzenlenebilir faturalandırma alanları
+  const [fPlan, setFPlan] = useState('starter');
+  const [fCycle, setFCycle] = useState('monthly');
+  const [fStatus, setFStatus] = useState('active');
+  const [fNextDate, setFNextDate] = useState('');
+  const [fNote, setFNote] = useState('');
+
+  // Ödeme linki modalı
+  const [payOpen, setPayOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState('');
+  const [payCurrency, setPayCurrency] = useState('TRY');
+  const [payEmail, setPayEmail] = useState('');
+  const [paySendEmail, setPaySendEmail] = useState(true);
+  const [payBusy, setPayBusy] = useState(false);
+  const [payResult, setPayResult] = useState<{ url: string; emailed: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const toastRef = useRef(toast); toastRef.current = toast;
+  const trRef = useRef(tr); trRef.current = tr;
 
   async function load() {
     setLoading(true);
     try {
       const res = await authedFetch('/api/superadmin/tenants');
-      if (res.ok) {
-        const data = await res.json() as { tenants: Tenant[] };
-        setTenants(data.tenants || []);
-      } else if (res.status === 403) {
-        toastRef.current(trRef.current ? 'Süper-admin yetkiniz yok.' : 'Super-admin access required.', 'error');
-      }
-    } catch {
-      toastRef.current(trRef.current ? 'Kiracılar yüklenemedi.' : 'Failed to load tenants.', 'error');
-    }
+      if (res.ok) { const data = await res.json() as { tenants: Tenant[] }; setTenants(data.tenants || []); }
+      else if (res.status === 403) toastRef.current(trRef.current ? 'Süper-admin yetkiniz yok.' : 'Super-admin access required.', 'error');
+    } catch { toastRef.current(trRef.current ? 'Kiracılar yüklenemedi.' : 'Failed to load tenants.', 'error'); }
     setLoading(false);
   }
-
-  // Yalnızca mount'ta bir kez yükle; "Yenile" butonu manuel tetikler.
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  const setStatus = async (t: Tenant, status: 'active' | 'suspended') => {
-    const ok = await confirmAction(
-      status === 'suspended'
-        ? {
-            title: tr ? 'Firmayı Askıya Al' : 'Suspend Company',
-            message: tr
-              ? `"${t.companyName}" askıya alınacak. Bu firmanın tüm kullanıcıları sisteme erişemeyecek. Emin misiniz?`
-              : `"${t.companyName}" will be suspended. All its users will lose access. Are you sure?`,
-            confirmLabel: tr ? 'Askıya Al' : 'Suspend',
-            variant: 'danger',
-          }
-        : {
-            title: tr ? 'Firmayı Aktifleştir' : 'Activate Company',
-            message: tr
-              ? `"${t.companyName}" yeniden aktifleştirilecek. Devam edilsin mi?`
-              : `"${t.companyName}" will be re-activated. Continue?`,
-            confirmLabel: tr ? 'Aktifleştir' : 'Activate',
-            variant: 'warning',
-          },
-    );
+  const openDetail = async (t: Tenant) => {
+    setDetailId(t.companyId); setDetail(null); setDetailLoading(true); setPayOpen(false); setPayResult(null);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(t.companyId)}`);
+      if (res.ok) {
+        const d = await res.json() as TenantDetail;
+        setDetail(d);
+        const plan = String(d.billing.plan || t.plan || 'starter');
+        const cycle = String(d.billing.cycle || t.cycle || 'monthly');
+        setFPlan(PLAN_OPTIONS.includes(plan as typeof PLAN_OPTIONS[number]) ? plan : 'starter');
+        setFCycle(cycle === 'yearly' ? 'yearly' : 'monthly');
+        setFStatus(d.status === 'suspended' ? 'suspended' : 'active');
+        const ms = toMs(d.billing.nextPaymentDate ?? d.billing.currentPeriodEnd);
+        setFNextDate(ms ? new Date(ms).toISOString().slice(0, 10) : '');
+        setFNote(d.note || '');
+        setPayEmail(d.profile.email || d.owner?.email || t.ownerEmail || '');
+        setPayAmount(String((d.billing.amount as number) || PLAN_PRICES[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'] || ''));
+        setPayCurrency('TRY');
+      } else { toast(tr ? 'Detay yüklenemedi.' : 'Failed to load detail.', 'error'); }
+    } catch { toast(tr ? 'Detay yüklenemedi.' : 'Failed to load detail.', 'error'); }
+    setDetailLoading(false);
+  };
+  const closeDetail = () => { setDetailId(null); setDetail(null); setPayOpen(false); setPayResult(null); };
+
+  // Yalnız detay verisini (ör. ödeme geçmişi) tazeler; çekmece/modal/form durumuna dokunmaz.
+  const refreshDetail = async (cid: string) => {
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(cid)}`);
+      if (res.ok) setDetail(await res.json() as TenantDetail);
+    } catch { /* sessiz */ }
+  };
+
+  const saveBilling = async () => {
+    if (!detailId) return;
+    setSavingBilling(true);
+    try {
+      const nextMs = fNextDate ? Date.parse(fNextDate) : undefined;
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/update`, {
+        method: 'POST',
+        body: JSON.stringify({ plan: fPlan, cycle: fCycle, status: fStatus, note: fNote, nextPaymentDate: nextMs ?? null }),
+      });
+      if (res.ok) {
+        setTenants(prev => prev.map(x => x.companyId === detailId ? { ...x, plan: fPlan, cycle: fCycle, status: fStatus, nextPaymentDate: nextMs ?? x.nextPaymentDate } : x));
+        toast(tr ? 'Faturalandırma güncellendi.' : 'Billing updated.', 'success');
+      } else { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
+    } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
+    setSavingBilling(false);
+  };
+
+  const quickStatus = async (t: Tenant, status: 'active' | 'suspended') => {
+    const ok = await confirmAction(status === 'suspended'
+      ? { title: tr ? 'Firmayı Askıya Al' : 'Suspend Company', message: tr ? `"${t.companyName}" askıya alınacak. Tüm kullanıcıları erişemeyecek. Emin misiniz?` : `"${t.companyName}" will be suspended. Are you sure?`, confirmLabel: tr ? 'Askıya Al' : 'Suspend', variant: 'danger' }
+      : { title: tr ? 'Firmayı Aktifleştir' : 'Activate Company', message: tr ? `"${t.companyName}" aktifleştirilecek. Devam?` : `Activate "${t.companyName}"?`, confirmLabel: tr ? 'Aktifleştir' : 'Activate', variant: 'warning' });
     if (!ok) return;
     setBusy(t.companyId);
     try {
-      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(t.companyId)}/status`, {
-        method: 'POST',
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        setTenants(prev => prev.map(x => x.companyId === t.companyId ? { ...x, status } : x));
-        toast(tr ? (status === 'suspended' ? 'Firma askıya alındı.' : 'Firma aktifleştirildi.') : 'Updated.', 'success');
-      } else {
-        toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error');
-      }
-    } catch {
-      toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error');
-    }
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(t.companyId)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
+      if (res.ok) { setTenants(prev => prev.map(x => x.companyId === t.companyId ? { ...x, status } : x)); toast(tr ? (status === 'suspended' ? 'Askıya alındı.' : 'Aktifleştirildi.') : 'Updated.', 'success'); }
+      else toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error');
+    } catch { toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error'); }
     setBusy(null);
   };
 
-  const openEdit = (t: Tenant) => {
-    setEditing(t);
-    setEditPlan(PLAN_OPTIONS.includes(t.plan as typeof PLAN_OPTIONS[number]) ? t.plan : 'starter');
-    setEditStatus(t.status === 'suspended' ? 'suspended' : 'active');
-    setEditNote('');
+  const createLink = async () => {
+    if (!detailId) return;
+    const amt = Number(payAmount);
+    if (!amt || amt <= 0) { toast(tr ? 'Geçerli bir tutar girin.' : 'Enter a valid amount.', 'error'); return; }
+    setPayBusy(true); setPayResult(null);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/payment-link`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: amt, currency: payCurrency, email: payEmail, sendEmail: paySendEmail, plan: fPlan, cycle: fCycle }),
+      });
+      const d = await res.json() as { success?: boolean; paymentPageUrl?: string; emailed?: boolean; emailError?: string; notConfigured?: boolean; error?: string };
+      if (res.ok && d.success && d.paymentPageUrl) {
+        setPayResult({ url: d.paymentPageUrl, emailed: !!d.emailed });
+        toast(d.emailed ? (tr ? 'Ödeme linki oluşturuldu ve e-posta gönderildi.' : 'Link created & emailed.') : (tr ? 'Ödeme linki oluşturuldu.' : 'Link created.'), 'success');
+        if (d.emailError) toast(d.emailError, 'info');
+        void refreshDetail(detailId); // ödeme geçmişini tazele — modal/sonuç ekranını bozmadan
+      } else if (d.notConfigured) {
+        toast(tr ? 'İyzico yapılandırılmamış (IYZICO_API_KEY).' : 'iyzico not configured.', 'error');
+      } else { toast(d.error || (tr ? 'Link oluşturulamadı.' : 'Failed to create link.'), 'error'); }
+    } catch { toast(tr ? 'Link oluşturulamadı.' : 'Failed to create link.', 'error'); }
+    setPayBusy(false);
   };
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(editing.companyId)}/update`, {
-        method: 'POST',
-        body: JSON.stringify({ plan: editPlan, status: editStatus, note: editNote }),
-      });
-      if (res.ok) {
-        setTenants(prev => prev.map(x => x.companyId === editing.companyId ? { ...x, plan: editPlan, status: editStatus } : x));
-        toast(tr ? 'Firma güncellendi.' : 'Tenant updated.', 'success');
-        setEditing(null);
-      } else {
-        toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error');
-      }
-    } catch {
-      toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error');
-    }
-    setSaving(false);
+  const copyLink = async (url: string) => {
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
   };
 
   const filtered = tenants.filter(t => {
@@ -143,18 +221,14 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
     const s = q.toLowerCase();
     return t.companyName.toLowerCase().includes(s) || t.ownerEmail.toLowerCase().includes(s) || t.companyId.toLowerCase().includes(s);
   });
-
   const totalUsers = tenants.reduce((s, t) => s + t.userCount, 0);
+  const mrr = tenants.filter(t => t.status === 'active' && t.subStatus === 'active').reduce((s, t) => s + (t.cycle === 'yearly' ? (t.amount || 0) / 12 : (t.amount || 0)), 0);
   const suspended = tenants.filter(t => t.status === 'suspended').length;
 
-  const planBadge = (plan: string) => {
-    const map: Record<string, string> = {
-      free: 'bg-gray-100 text-gray-600', starter: 'bg-blue-100 text-blue-600',
-      professional: 'bg-purple-100 text-purple-600', business: 'bg-indigo-100 text-indigo-600',
-      enterprise: 'bg-amber-100 text-amber-700',
-    };
-    return map[plan?.toLowerCase()] || 'bg-gray-100 text-gray-600';
-  };
+  const planBadge = (plan: string) => ({
+    free: 'bg-gray-100 text-gray-600', starter: 'bg-blue-100 text-blue-600', professional: 'bg-purple-100 text-purple-600',
+    business: 'bg-indigo-100 text-indigo-600', enterprise: 'bg-amber-100 text-amber-700',
+  } as Record<string, string>)[plan?.toLowerCase()] || 'bg-gray-100 text-gray-600';
   const planText = (plan: string) => PLAN_LABEL[plan?.toLowerCase()]?.[tr ? 'tr' : 'en'] || plan;
 
   return (
@@ -171,30 +245,18 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="apple-card p-4">
-          <div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Building2 className="w-4 h-4" />{tr ? 'Toplam Firma' : 'Total Companies'}</div>
-          <p className="text-2xl font-bold text-[#1D1D1F]">{tenants.length}</p>
-        </div>
-        <div className="apple-card p-4">
-          <div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Users className="w-4 h-4" />{tr ? 'Toplam Kullanıcı' : 'Total Users'}</div>
-          <p className="text-2xl font-bold text-[#1D1D1F]">{totalUsers}</p>
-        </div>
-        <div className="apple-card p-4">
-          <div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldCheck className="w-4 h-4" />{tr ? 'Aktif' : 'Active'}</div>
-          <p className="text-2xl font-bold text-green-600">{tenants.length - suspended}</p>
-        </div>
-        <div className="apple-card p-4">
-          <div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{tr ? 'Askıda' : 'Suspended'}</div>
-          <p className="text-2xl font-bold text-red-500">{suspended}</p>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Building2 className="w-4 h-4" />{tr ? 'Toplam Firma' : 'Companies'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{tenants.length}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Users className="w-4 h-4" />{tr ? 'Kullanıcı' : 'Users'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{totalUsers}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldCheck className="w-4 h-4" />{tr ? 'Aktif' : 'Active'}</div><p className="text-2xl font-bold text-green-600">{tenants.length - suspended}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{tr ? 'Askıda' : 'Suspended'}</div><p className="text-2xl font-bold text-red-500">{suspended}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><CreditCard className="w-4 h-4" />{tr ? 'Aylık Gelir' : 'MRR'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{fmtMoney(mrr)}</p></div>
       </div>
 
       {/* Search */}
       <div className="relative">
         <Search className="w-4 h-4 text-[#86868B] absolute left-3 top-1/2 -translate-y-1/2" />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder={tr ? 'Firma, sahip e-posta veya ID ara...' : 'Search company, owner email or ID...'}
-          className="apple-input pl-9 w-full" />
+        <input value={q} onChange={e => setQ(e.target.value)} aria-label={tr ? 'Kiracı ara' : 'Search tenants'} placeholder={tr ? 'Firma, sahip e-posta veya ID ara...' : 'Search...'} className="apple-input pl-9 w-full" />
       </div>
 
       {/* Table */}
@@ -205,42 +267,37 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
               <tr className="text-left text-xs text-[#86868B] border-b border-[#f0f0f2]">
                 <th className="px-4 py-3 font-medium">{tr ? 'Firma' : 'Company'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Sahip' : 'Owner'}</th>
-                <th className="px-4 py-3 font-medium text-center">{tr ? 'Kullanıcı' : 'Users'}</th>
+                <th className="px-4 py-3 font-medium text-center">{tr ? 'Kull.' : 'Users'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Plan' : 'Plan'}</th>
+                <th className="px-4 py-3 font-medium">{tr ? 'Sonraki Ödeme' : 'Next Payment'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Durum' : 'Status'}</th>
                 <th className="px-4 py-3 font-medium text-right">{tr ? 'İşlem' : 'Action'}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</td></tr>}
-              {!loading && filtered.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Kayıt bulunamadı.' : 'No records.'}</td></tr>}
+              {loading && <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</td></tr>}
+              {!loading && filtered.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Kayıt bulunamadı.' : 'No records.'}</td></tr>}
               {!loading && filtered.map(t => (
-                <tr key={t.companyId} className="border-b border-[#f7f7f8] last:border-0 hover:bg-gray-50/60">
+                <tr key={t.companyId} className="border-b border-[#f7f7f8] last:border-0 hover:bg-gray-50/60 cursor-pointer" onClick={() => void openDetail(t)}>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-[#1D1D1F]">{t.companyName}</div>
                     <div className="text-[10px] text-gray-400 font-mono">{t.companyId.slice(0, 14)}</div>
                   </td>
                   <td className="px-4 py-3 text-[#1D1D1F]">{t.ownerEmail || '—'}</td>
                   <td className="px-4 py-3 text-center font-medium">{t.userCount}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planBadge(t.plan)}`}>{planText(t.plan)}</span>
-                  </td>
+                  <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planBadge(t.plan)}`}>{planText(t.plan)}</span></td>
+                  <td className="px-4 py-3 text-xs text-[#1D1D1F]">{fmtDate(t.nextPaymentDate, currentLanguage)}</td>
                   <td className="px-4 py-3">
                     {t.status === 'suspended'
                       ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">{tr ? 'Askıda' : 'Suspended'}</span>
                       : <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">{tr ? 'Aktif' : 'Active'}</span>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => openEdit(t)}
-                        className="text-xs font-semibold text-[#1D1D1F] hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1">
-                        <Pencil className="w-3.5 h-3.5" />{tr ? 'Düzenle' : 'Edit'}
-                      </button>
+                      <button onClick={() => void openDetail(t)} className="text-xs font-semibold text-brand hover:bg-brand/10 px-3 py-1.5 rounded-lg">{tr ? 'Detay' : 'Details'}</button>
                       {t.status === 'suspended'
-                        ? <button disabled={busy === t.companyId} onClick={() => setStatus(t, 'active')}
-                            className="text-xs font-semibold text-green-600 hover:bg-green-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Aktifleştir' : 'Activate'}</button>
-                        : <button disabled={busy === t.companyId} onClick={() => setStatus(t, 'suspended')}
-                            className="text-xs font-semibold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Askıya Al' : 'Suspend'}</button>}
+                        ? <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'active')} className="text-xs font-semibold text-green-600 hover:bg-green-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Aktifleştir' : 'Activate'}</button>
+                        : <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'suspended')} className="text-xs font-semibold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Askıya Al' : 'Suspend'}</button>}
                     </div>
                   </td>
                 </tr>
@@ -250,44 +307,173 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         </div>
       </div>
 
-      {/* Edit modal */}
-      {editing && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !saving && setEditing(null)}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-[#f0f0f2]">
+      {/* Detail drawer */}
+      {detailId && (
+        <div className="fixed inset-0 z-[110] flex justify-end bg-black/30 backdrop-blur-sm" onClick={closeDetail}>
+          <div className="bg-[#fafafa] w-full max-w-lg h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="sticky top-0 bg-white/90 backdrop-blur border-b border-[#f0f0f2] px-5 py-4 flex items-center justify-between z-10">
               <div>
-                <h3 className="font-bold text-[#1D1D1F]">{tr ? 'Firmayı Düzenle' : 'Edit Tenant'}</h3>
-                <p className="text-xs text-[#86868B] mt-0.5">{editing.companyName}</p>
+                <h3 className="font-bold text-[#1D1D1F]">{detail?.profile.companyName || (tr ? 'Firma Detayı' : 'Tenant Detail')}</h3>
+                <p className="text-[10px] text-gray-400 font-mono">{detailId}</p>
               </div>
-              <button onClick={() => setEditing(null)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>
+              <button onClick={closeDetail} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>
             </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#86868B] mb-1.5">{tr ? 'Plan' : 'Plan'}</label>
-                <select value={editPlan} onChange={e => setEditPlan(e.target.value)} className="apple-input w-full">
-                  {PLAN_OPTIONS.map(p => <option key={p} value={p}>{planText(p)}</option>)}
-                </select>
+
+            {detailLoading && <div className="p-10 text-center text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</div>}
+
+            {!detailLoading && detail && (
+              <div className="p-5 space-y-5">
+                {/* Genel / Profil */}
+                <section className="apple-card p-4">
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" />{tr ? 'Firma Bilgileri' : 'Company Info'}</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <Field label={tr ? 'Vergi No' : 'Tax No'} value={detail.profile.taxNo} />
+                    <Field label={tr ? 'Vergi Dairesi' : 'Tax Office'} value={detail.profile.taxOffice} />
+                    <Field label="E-posta" value={detail.profile.email} icon={<Mail className="w-3 h-3" />} />
+                    <Field label={tr ? 'Telefon' : 'Phone'} value={detail.profile.phone} icon={<Phone className="w-3 h-3" />} />
+                    <Field label="IBAN" value={detail.profile.iban} full />
+                    <Field label={tr ? 'Adres' : 'Address'} value={detail.profile.address} icon={<MapPin className="w-3 h-3" />} full />
+                  </div>
+                </section>
+
+                {/* Faturalandırma */}
+                <section className="apple-card p-4">
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" />{tr ? 'Faturalandırma' : 'Billing'}</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Plan' : 'Plan'}</label>
+                      <select value={fPlan} aria-label={tr ? 'Plan' : 'Plan'} onChange={e => { setFPlan(e.target.value); const pr = PLAN_PRICES[e.target.value]?.[fCycle === 'yearly' ? 'yearly' : 'monthly']; if (pr) setPayAmount(String(pr)); }} className="apple-input w-full text-sm">
+                        {PLAN_OPTIONS.map(p => <option key={p} value={p}>{planText(p)}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Dönem' : 'Cycle'}</label>
+                      <select value={fCycle} aria-label={tr ? 'Dönem' : 'Cycle'} onChange={e => { setFCycle(e.target.value); const pr = PLAN_PRICES[fPlan]?.[e.target.value === 'yearly' ? 'yearly' : 'monthly']; if (pr) setPayAmount(String(pr)); }} className="apple-input w-full text-sm">
+                        <option value="monthly">{tr ? 'Aylık' : 'Monthly'}</option>
+                        <option value="yearly">{tr ? 'Yıllık' : 'Yearly'}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Durum' : 'Status'}</label>
+                      <select value={fStatus} aria-label={tr ? 'Durum' : 'Status'} onChange={e => setFStatus(e.target.value)} className="apple-input w-full text-sm">
+                        <option value="active">{tr ? 'Aktif' : 'Active'}</option>
+                        <option value="suspended">{tr ? 'Askıda' : 'Suspended'}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" />{tr ? 'Sonraki Ödeme' : 'Next Payment'}</label>
+                      <input type="date" value={fNextDate} aria-label={tr ? 'Sonraki ödeme tarihi' : 'Next payment date'} onChange={e => setFNextDate(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Not' : 'Note'}</label>
+                      <input value={fNote} aria-label={tr ? 'Not' : 'Note'} onChange={e => setFNote(e.target.value)} placeholder={tr ? 'Örn. ödeme bekleniyor' : 'e.g. awaiting payment'} className="apple-input w-full text-sm" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => void saveBilling()} disabled={savingBilling} className="apple-button-primary text-sm px-4 py-2 disabled:opacity-50">{savingBilling ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
+                    <button onClick={() => { setPayOpen(true); setPayResult(null); }} className="apple-button-secondary text-sm px-4 py-2 flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" />{tr ? 'Ödeme Linki Gönder' : 'Send Payment Link'}</button>
+                  </div>
+                </section>
+
+                {/* Kullanıcılar */}
+                <section className="apple-card p-4">
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />{tr ? 'Kullanıcılar' : 'Users'} ({detail.users.length})</h4>
+                  <div className="space-y-1.5">
+                    {detail.users.map(u => (
+                      <div key={u.uid} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+                        <div><div className="text-[#1D1D1F]">{u.name || u.email}</div><div className="text-[11px] text-gray-400">{u.email}</div></div>
+                        <div className="text-right"><span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">{u.role}</span><div className="text-[10px] text-gray-400 mt-0.5">{tr ? 'Son giriş' : 'Last'}: {fmtDate(u.lastLogin, currentLanguage)}</div></div>
+                      </div>
+                    ))}
+                    {detail.users.length === 0 && <p className="text-xs text-gray-400">{tr ? 'Kullanıcı yok.' : 'No users.'}</p>}
+                  </div>
+                </section>
+
+                {/* Ödeme geçmişi */}
+                <section className="apple-card p-4">
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Receipt className="w-3.5 h-3.5" />{tr ? 'Ödeme Geçmişi' : 'Payment History'} ({detail.invoices.length})</h4>
+                  <div className="space-y-1.5">
+                    {detail.invoices.map(inv => (
+                      <div key={inv.id} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+                        <div>
+                          <div className="text-[#1D1D1F] font-medium">{fmtMoney(inv.amount, inv.currency)}</div>
+                          <div className="text-[11px] text-gray-400">{planText(inv.plan || '')} · {fmtDate(inv.createdMs || inv.createdAt, currentLanguage)}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${inv.status === 'paid' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>{inv.status === 'paid' ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Pending')}</span>
+                          {inv.paymentPageUrl && <button onClick={() => void copyLink(inv.paymentPageUrl!)} className="text-gray-400 hover:text-brand" title={tr ? 'Linki kopyala' : 'Copy link'}><Copy className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </div>
+                    ))}
+                    {detail.invoices.length === 0 && <p className="text-xs text-gray-400 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />{tr ? 'Henüz ödeme kaydı yok.' : 'No payments yet.'}</p>}
+                  </div>
+                </section>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#86868B] mb-1.5">{tr ? 'Durum' : 'Status'}</label>
-                <select value={editStatus} onChange={e => setEditStatus(e.target.value)} className="apple-input w-full">
-                  <option value="active">{tr ? 'Aktif' : 'Active'}</option>
-                  <option value="suspended">{tr ? 'Askıda' : 'Suspended'}</option>
-                </select>
-                {editStatus === 'suspended' && <p className="text-[11px] text-red-500 mt-1">{tr ? 'Askıya alınırsa firmanın tüm kullanıcıları erişemez.' : 'Suspending blocks all users of this company.'}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#86868B] mb-1.5">{tr ? 'Not (opsiyonel)' : 'Note (optional)'}</label>
-                <input value={editNote} onChange={e => setEditNote(e.target.value)} placeholder={tr ? 'Örn. ödeme bekleniyor' : 'e.g. awaiting payment'} className="apple-input w-full" />
-              </div>
-            </div>
-            <div className="flex gap-3 p-5 pt-0">
-              <button onClick={() => setEditing(null)} disabled={saving} className="apple-button-secondary flex-1">{tr ? 'Vazgeç' : 'Cancel'}</button>
-              <button onClick={() => void saveEdit()} disabled={saving} className="apple-button-primary flex-1 disabled:opacity-50">{saving ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
-            </div>
+            )}
           </div>
+
+          {/* Ödeme linki modalı (drawer üstünde) */}
+          {payOpen && (
+            <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/40" onClick={e => { e.stopPropagation(); if (!payBusy) setPayOpen(false); }}>
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-5 border-b border-[#f0f0f2]">
+                  <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Link2 className="w-4 h-4 text-brand" />{tr ? 'Ödeme Linki' : 'Payment Link'}</h3>
+                  <button onClick={() => setPayOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>
+                </div>
+                {!payResult ? (
+                  <>
+                    <div className="p-5 space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2">
+                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Tutar' : 'Amount'}</label>
+                          <input type="number" value={payAmount} aria-label={tr ? 'Tutar' : 'Amount'} onChange={e => setPayAmount(e.target.value)} className="apple-input w-full text-sm" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Para Birimi' : 'Currency'}</label>
+                          <select value={payCurrency} aria-label={tr ? 'Para birimi' : 'Currency'} onChange={e => setPayCurrency(e.target.value)} className="apple-input w-full text-sm"><option>TRY</option><option>USD</option><option>EUR</option></select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Müşteri E-postası' : 'Customer Email'}</label>
+                        <input value={payEmail} aria-label={tr ? 'Müşteri e-postası' : 'Customer email'} onChange={e => setPayEmail(e.target.value)} className="apple-input w-full text-sm" />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-[#1D1D1F] cursor-pointer">
+                        <input type="checkbox" checked={paySendEmail} onChange={e => setPaySendEmail(e.target.checked)} className="w-4 h-4 accent-[#ff4000]" />
+                        <Mail className="w-3.5 h-3.5 text-[#86868B]" />{tr ? 'Linki müşteriye e-posta ile gönder' : 'Email the link to customer'}
+                      </label>
+                      <p className="text-[11px] text-gray-400">{tr ? 'Link İyzico üzerinden güvenli ödeme sayfası oluşturur.' : 'Creates a secure iyzico payment page.'}</p>
+                    </div>
+                    <div className="flex gap-3 p-5 pt-0">
+                      <button onClick={() => setPayOpen(false)} disabled={payBusy} className="apple-button-secondary flex-1">{tr ? 'Vazgeç' : 'Cancel'}</button>
+                      <button onClick={() => void createLink()} disabled={payBusy} className="apple-button-primary flex-1 disabled:opacity-50">{payBusy ? (tr ? 'Oluşturuluyor...' : 'Creating...') : (tr ? 'Link Oluştur' : 'Create Link')}</button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-5 space-y-4">
+                    <div className="flex items-center gap-2 text-green-600 text-sm font-semibold"><Check className="w-4 h-4" />{payResult.emailed ? (tr ? 'Link oluşturuldu ve e-posta gönderildi.' : 'Link created & emailed.') : (tr ? 'Link oluşturuldu.' : 'Link created.')}</div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-xs text-[#1D1D1F] break-all font-mono">{payResult.url}</div>
+                    <div className="flex gap-3">
+                      <button onClick={() => void copyLink(payResult.url)} className="apple-button-secondary flex-1 flex items-center justify-center gap-1.5">{copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}{copied ? (tr ? 'Kopyalandı' : 'Copied') : (tr ? 'Kopyala' : 'Copy')}</button>
+                      <a href={payResult.url} target="_blank" rel="noreferrer" className="apple-button-primary flex-1 text-center">{tr ? 'Linki Aç' : 'Open Link'}</a>
+                    </div>
+                    <button onClick={() => { setPayResult(null); }} className="text-xs text-[#86868B] hover:text-[#1D1D1F] w-full text-center">{tr ? 'Yeni link oluştur' : 'Create another'}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function Field({ label, value, icon, full }: { label: string; value: string; icon?: ReactNode; full?: boolean }) {
+  return (
+    <div className={full ? 'col-span-2' : ''}>
+      <div className="text-[11px] text-[#86868B] mb-0.5 flex items-center gap-1">{icon}{label}</div>
+      <div className="text-sm text-[#1D1D1F] break-words">{value || '—'}</div>
     </div>
   );
 }
