@@ -170,6 +170,26 @@ function isValidEmail(e: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 }
 
+// users/{uid} self-write'ta sunucu-kontrollü kimlik alanlarını koru.
+// Cross-tenant escalation engeli: bir kullanıcı kendi users dokümanına
+// {companyId:'kurban'} yazıp o firmanın verisine erişemesin. Admin değilse
+// companyId/role/status client'tan gelse bile mevcut değere sabitlenir
+// (yoksa tamamen düşürülür). Login profil senkronu bu alanları göndermez,
+// dolayısıyla normal akış etkilenmez.
+const PROTECTED_USER_FIELDS = ['companyId', 'role', 'status'] as const;
+async function pinProtectedUserFields(
+  uid: string, data: Record<string, unknown>, before: Record<string, unknown> | undefined,
+): Promise<Record<string, unknown>> {
+  const role = await getUserRole(uid);
+  if (role === 'Admin') return data; // Admin kullanıcı yönetimi yapabilir
+  const out = { ...data };
+  for (const f of PROTECTED_USER_FIELDS) {
+    if (before && f in before) out[f] = before[f];
+    else delete out[f];
+  }
+  return out;
+}
+
 // ── Sunucu tarafı RBAC (rol bazlı erişim kontrolü) ───────────────────────────
 // PostgreSQL göçüyle Firestore güvenlik kuralları kalktı; yetki artık burada
 // uygulanır. Politika src/lib/rbac.ts'te (saf, test edilir); rol users/{uid}
@@ -403,6 +423,7 @@ function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, da
 // İş verisi koleksiyonları companyId ile, kullanıcı verisi userId ile izole
 // edilir. Diğerleri (settings global, users RBAC, append-only loglar) filtresiz.
 const TENANT_COLLECTIONS = new Set([
+  // ── Çekirdek satış/stok/lojistik ──
   'inventory', 'leads', 'orders', 'quotations', 'shipments', 'warehouseItems',
   'warehouses', 'employees', 'customerRisks', 'inventoryMovements', 'priceLists',
   'priceOverrides', 'suppliers', 'purchaseOrders', 'returns', 'recurringOrders',
@@ -413,6 +434,24 @@ const TENANT_COLLECTIONS = new Set([
   'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
   'wmsLocations', 'dataRequests',
+  // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
+  'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',
+  'bankAccounts', 'bankTransactions', 'boardMeetings', 'bom', 'campaigns', 'cargoTracking',
+  'complaints', 'complianceItems', 'cpqQuotes', 'cpqTemplates', 'ctpatRecords',
+  'documentTemplates', 'dunningInvoices', 'dunningPolicies', 'eBelgeler', 'eightDRecords',
+  'ekipmanlar', 'fiveSRecords', 'fmeaRecords', 'garantiler', 'gumrukBeyannameleri',
+  'holdingAccounts', 'holdingEntities', 'holdingIntercompany', 'ihracatlar', 'invoices',
+  'isEmirleri', 'ithalatlar', 'jobs', 'journalEntries', 'kaizenRecords', 'kasaHareketleri',
+  'kasaKapanislar', 'kasalar', 'legalCases', 'legalDocs', 'lotHareketleri', 'lotKayitlari',
+  'machines', 'maliyetKalemleri', 'maliyetMerkezleri', 'masraflar', 'orderReturns',
+  'payments', 'payrollEntries', 'performanceReviews', 'pfmeaRecords', 'projects',
+  'qcRecords', 'resources', 'revenueSchedules', 'rmaRequests', 'routingTemplates',
+  'sabitKiymetBakim', 'sabitKiymetSigorta', 'sabitKiymetler', 'seriNolar', 'servisTalepleri',
+  'shareholders', 'skuMappings', 'subeTransferler', 'tahsilatKayitlari', 'tahsilatOdemeleri',
+  'tasks', 'taxDeclarations', 'teknisyenler', 'territories', 'timeAttendance', 'trainings',
+  'travelRequests', 'warehouseBins', 'webhookConfigs', 'wmsCycleCounts', 'wmsTasks', 'workCenters',
+  // Entegrasyon senkron logları (firma-bazlı)
+  'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',
 ]);
 const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding']);
 // Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
@@ -2126,7 +2165,8 @@ async function startServer() {
       if (await denied(req, res, coll, 'write')) return;
       try {
         const id = genDocId();
-        const data = await injectTenant(req, coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
+        let data = await injectTenant(req, coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, undefined); // companyId/role/status escalation engeli
         await docsDb.query(
           'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)',
           [coll, id, JSON.stringify(data)],
@@ -2162,6 +2202,7 @@ async function startServer() {
         }
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
         if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -2196,6 +2237,7 @@ async function startServer() {
         let data = mergeDocData(before, patch);
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
         if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
