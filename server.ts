@@ -170,6 +170,20 @@ function isValidEmail(e: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 }
 
+/** SSRF guard — yalnız public http(s) host'lara izin verir (iç ağ/metadata engeli). */
+function isSafePublicUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  if (h === 'localhost' || h === '0.0.0.0' || h === '::1' || h === '169.254.169.254') return false;
+  if (h.endsWith('.internal') || h.endsWith('.local')) return false;
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+  if (h.startsWith('fd') || h.startsWith('fe80') || h.startsWith('fc')) return false;
+  return true;
+}
+
 // users/{uid} self-write'ta sunucu-kontrollü kimlik alanlarını koru.
 // Cross-tenant escalation engeli: bir kullanıcı kendi users dokümanına
 // {companyId:'kurban'} yazıp o firmanın verisine erişemesin. Admin değilse
@@ -1934,6 +1948,19 @@ async function startServer() {
     const totpCheck = (token: string, secret: string): boolean =>
       (totpVerifyRaw({ secret, token, window: 1 } as Parameters<typeof totpVerifyRaw>[0]).valid === true);
 
+    // MFA brute-force kilidi — uid başına ardışık başarısız deneme; 5 hatadan sonra
+    // 15 dk kilit (gevşek dbLimiter'a güvenmeyiz). Başarıda sayaç sıfırlanır.
+    const mfaFailures = new Map<string, { count: number; until: number }>();
+    const MFA_MAX_FAIL = 5, MFA_LOCK_MS = 15 * 60 * 1000;
+    const mfaLocked = (uid: string): boolean => { const f = mfaFailures.get(uid); return !!f && f.until > Date.now(); };
+    const mfaFail = (uid: string): void => {
+      const f = mfaFailures.get(uid) || { count: 0, until: 0 };
+      f.count++;
+      if (f.count >= MFA_MAX_FAIL) { f.until = Date.now() + MFA_LOCK_MS; f.count = 0; }
+      mfaFailures.set(uid, f);
+    };
+    const mfaLockMsg = { error: 'Çok fazla hatalı kod denemesi. 15 dakika sonra tekrar deneyin.' };
+
     // Durum: kullanıcının MFA'sı açık mı + bu oturum doğrulanmış mı?
     app.get('/api/mfa/status', dbLimiter, requireAuth, async (req: Request, res: Response) => {
       const uid = (req as Request & { uid: string }).uid;
@@ -1962,11 +1989,14 @@ async function startServer() {
     app.post('/api/mfa/enroll/verify', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const uid = (req as Request & { uid: string }).uid;
       const code = String(req.body?.code || '').trim();
+      if (mfaLocked(uid)) return res.status(429).json(mfaLockMsg);
       try {
         const { rows } = await pgPool!.query('SELECT secret FROM mfa_secrets WHERE uid = $1', [uid]);
         if (!rows[0]?.secret || !totpCheck(code, rows[0].secret)) {
+          mfaFail(uid);
           return res.status(400).json({ error: 'Kod hatalı veya süresi doldu.' });
         }
+        mfaFailures.delete(uid);
         await pgPool!.query('UPDATE mfa_secrets SET enabled = true, updated_at = now() WHERE uid = $1', [uid]);
         mfaStatusCache.delete(uid);
         res.cookie(MFA_COOKIE, signMfaToken(uid), { httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: MFA_COOKIE_MAX_AGE, path: '/' });
@@ -1978,11 +2008,14 @@ async function startServer() {
     app.post('/api/mfa/verify', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const uid = (req as Request & { uid: string }).uid;
       const code = String(req.body?.code || '').trim();
+      if (mfaLocked(uid)) return res.status(429).json(mfaLockMsg);
       try {
         const { rows } = await pgPool!.query('SELECT secret, enabled FROM mfa_secrets WHERE uid = $1', [uid]);
         if (!rows[0]?.enabled || !totpCheck(code, rows[0].secret)) {
+          mfaFail(uid);
           return res.status(400).json({ error: 'Kod hatalı veya süresi doldu.' });
         }
+        mfaFailures.delete(uid);
         res.cookie(MFA_COOKIE, signMfaToken(uid), { httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: MFA_COOKIE_MAX_AGE, path: '/' });
         res.json({ ok: true });
       } catch (e) { console.error('[mfa/verify]', (e as Error).message); res.status(500).json({ error: 'Doğrulama başarısız.' }); }
@@ -1992,11 +2025,14 @@ async function startServer() {
     app.post('/api/mfa/disable', dbLimiter, requireAuth, dbJson, async (req: Request, res: Response) => {
       const uid = (req as Request & { uid: string }).uid;
       const code = String(req.body?.code || '').trim();
+      if (mfaLocked(uid)) return res.status(429).json(mfaLockMsg);
       try {
         const { rows } = await pgPool!.query('SELECT secret, enabled FROM mfa_secrets WHERE uid = $1', [uid]);
         if (!rows[0]?.enabled || !totpCheck(code, rows[0].secret)) {
+          mfaFail(uid);
           return res.status(400).json({ error: 'Kod hatalı.' });
         }
+        mfaFailures.delete(uid);
         await pgPool!.query('DELETE FROM mfa_secrets WHERE uid = $1', [uid]);
         mfaStatusCache.delete(uid);
         res.clearCookie(MFA_COOKIE, { path: '/' });
@@ -2178,6 +2214,11 @@ async function startServer() {
         const id = genDocId();
         let data = await injectTenant(req, coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, undefined); // companyId/role/status escalation engeli
+        if (coll === 'auditLog') {
+          // Sahtecilik engeli: actor alanları sunucu-doğrulanmış kimlikle override (client "kim" diye yalan söyleyemez).
+          const actor = reqActor(req);
+          data = { ...data, userId: actor.uid, userEmail: actor.email, userName: data.userName || actor.email, source: 'client', timestamp: pgServerTimestamp() };
+        }
         await docsDb.query(
           'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)',
           [coll, id, JSON.stringify(data)],
@@ -2394,10 +2435,9 @@ async function startServer() {
     let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
 
     if (!accessToken) {
-      const shopifyKeys = Object.keys(process.env).filter(k => k.includes('SHOPIFY'));
-      return res.status(400).json({ 
-        error: `Shopify Access Token missing. Please set SHOPIFY_ACCESS_TOKEN in secrets. Found keys: ${shopifyKeys.join(', ')}` 
-      });
+      // Env anahtar adlarını client'a sızdırma (yalnız sunucu logunda).
+      console.warn('[shopify/sync] SHOPIFY_ACCESS_TOKEN tanımlı değil.');
+      return res.status(400).json({ error: 'Shopify Access Token eksik. Ayarlardan SHOPIFY_ACCESS_TOKEN girin.' });
     }
 
     // Clean up domain if it has https://
@@ -2413,6 +2453,12 @@ async function startServer() {
       storeDomain = 'cetpa.myshopify.com';
     } else if (!storeDomain.includes('myshopify.com')) {
       storeDomain = `${storeDomain}.myshopify.com`;
+    }
+
+    // SSRF / token sızıntısı engeli: accessToken yalnız geçerli <shop>.myshopify.com
+    // host'una gönderilebilir (önce `includes('myshopify.com')` bypass'lanabiliyordu).
+    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(storeDomain)) {
+      return res.status(400).json({ error: 'Geçersiz Shopify mağaza alan adı (yalnız *.myshopify.com).' });
     }
 
     try {
@@ -2533,17 +2579,16 @@ async function startServer() {
 
   // ── Shopify Webhook Handler ──────────────────────────────────────────────
   app.post("/api/shopify/webhook", async (req: Request & { rawBody?: Buffer }, res: Response) => {
-    // ── HMAC Verification ────────────────────────────────────────────────
+    // ── HMAC doğrulaması (fail-closed) ───────────────────────────────────
+    // Secret tanımsızsa webhook doğrulanamaz → işlenmez (önce atlanıp sahte
+    // sipariş enjekte edilebiliyordu).
     const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
     const shopifyHmac   = req.headers['x-shopify-hmac-sha256'] as string | undefined;
-    if (webhookSecret && shopifyHmac && req.rawBody) {
-      const computed = createHmac('sha256', webhookSecret)
-        .update(req.rawBody)
-        .digest('base64');
-      if (computed !== shopifyHmac) {
-        res.status(401).send('Invalid signature');
-        return;
-      }
+    if (!webhookSecret) { res.status(503).send('Webhook not configured'); return; }
+    if (!shopifyHmac || !req.rawBody) { res.status(401).send('Missing signature'); return; }
+    {
+      const computed = createHmac('sha256', webhookSecret).update(req.rawBody).digest('base64');
+      if (computed !== shopifyHmac) { res.status(401).send('Invalid signature'); return; }
     }
 
     const topic = req.headers['x-shopify-topic'] as string;
@@ -5362,8 +5407,10 @@ async function startServer() {
       req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
     if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });
 
-    const trackUrl = `${req.protocol}://${req.get('host')}/?track=${orderId}`;
+    const trackUrl = `${req.protocol}://${req.get('host')}/?track=${encodeURIComponent(orderId)}`;
     const tr = lang === 'tr';
+    const eName = escapeHtml(customerName); // HTML injection engeli
+    const eOrderNo = escapeHtml(orderNo ?? orderId.slice(0, 8).toUpperCase());
 
     const statusLabel: Record<string, { tr: string; en: string; color: string }> = {
       Pending:    { tr: 'Sipariş Alındı',   en: 'Order Received',  color: '#f59e0b' },
@@ -5388,7 +5435,7 @@ async function startServer() {
   </div>
   <!-- Body -->
   <div style="padding:32px;">
-    <p style="margin:0 0 8px;font-size:14px;color:#374151;">${tr ? `Sayın ${customerName},` : `Dear ${customerName},`}</p>
+    <p style="margin:0 0 8px;font-size:14px;color:#374151;">${tr ? `Sayın ${eName},` : `Dear ${eName},`}</p>
     <p style="margin:0 0 24px;font-size:14px;color:#6b7280;">${tr ? 'Siparişinizin durumu güncellendi.' : 'Your order status has been updated.'}</p>
     <!-- Status badge -->
     <div style="text-align:center;margin:0 0 24px;">
@@ -5399,7 +5446,7 @@ async function startServer() {
     <!-- Order no -->
     <div style="background:#f9fafb;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center;">
       <p style="margin:0;font-size:11px;color:#9ca3af;font-weight:700;letter-spacing:.08em;">${tr ? 'SİPARİŞ NO' : 'ORDER NO'}</p>
-      <p style="margin:4px 0 0;font-size:20px;font-weight:800;color:#1a3a5c;font-family:monospace;">#${orderNo ?? orderId.slice(0, 8).toUpperCase()}</p>
+      <p style="margin:4px 0 0;font-size:20px;font-weight:800;color:#1a3a5c;font-family:monospace;">#${eOrderNo}</p>
     </div>
     <!-- CTA -->
     <div style="text-align:center;margin-bottom:24px;">
@@ -5432,7 +5479,9 @@ async function startServer() {
   // Body: { email, role }
   app.post('/api/admin/invite', authLimiter, requireAuth, requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
-    if (!email) return res.status(400).json({ success: false, error: 'email gerekli.' });
+    if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
+    const ALLOWED_INVITE_ROLES = ['Admin', 'Manager', 'Sales', 'Accountant', 'Warehouse', 'Dealer', 'B2B', 'Viewer'];
+    if (!ALLOWED_INVITE_ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Geçersiz rol.' });
 
     // Generate a random token
     const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -5474,7 +5523,7 @@ async function startServer() {
     <div style="padding:28px 32px;">
       <p style="font-size:14px;color:#1d1d1f;margin:0 0 16px;">Merhaba,</p>
       <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">
-        CETPA B2B platformuna <strong>${role}</strong> rolüyle davet edildiniz.
+        CETPA B2B platformuna <strong>${escapeHtml(role)}</strong> rolüyle davet edildiniz.
         Aşağıdaki butona tıklayarak kaydınızı tamamlayabilirsiniz.
       </p>
       <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;letter-spacing:-.2px;">
@@ -5588,7 +5637,7 @@ async function startServer() {
    */
   app.post('/api/webhooks/test', requireAuth, async (req: Request, res: Response) => {
     const { url } = req.body as { url: string };
-    if (!url || !url.startsWith('http')) return res.status(400).json({ error: 'valid url required' });
+    if (!url || !isSafePublicUrl(url)) return res.status(400).json({ error: 'Geçerli bir public http(s) URL gerekli (iç ağ adresleri engellidir).' });
     try {
       const r = await fetch(url, {
         method: 'POST',

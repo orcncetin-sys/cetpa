@@ -2131,6 +2131,7 @@ function AppContent() {
   // --- Data Fetching ---
   useEffect(() => {
     if (!isAuthReady || !user || !userRole) return;
+    if (mfaChallenge) return; // 2FA doğrulanana kadar tenant verisi yüklenmez
 
     // Data is scoped by companyId (= uid of the account owner).
     // Documents without a companyId field are legacy/test data and are excluded.
@@ -2282,7 +2283,7 @@ function AppContent() {
       unsubTargets();
       unsubBudgets();
     };
-  }, [user, userRole, isAuthReady, storeCompanyId]);
+  }, [user, userRole, isAuthReady, storeCompanyId, mfaChallenge]);
 
   // ── auditLog: yalnızca Admin > Denetim Kaydı açıkken dinle ────────────────
   useEffect(() => {

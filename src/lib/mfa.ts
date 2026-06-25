@@ -25,11 +25,16 @@ async function authedFetch(path: string, body?: unknown): Promise<Response> {
 
 /** MFA durumu: açık mı + bu oturum doğrulanmış mı? */
 export async function getMfaStatus(): Promise<{ enabled: boolean; verified: boolean }> {
-  try {
-    const res = await authedFetch('/api/mfa/status');
-    if (!res.ok) return { enabled: false, verified: true };
-    return await res.json();
-  } catch { return { enabled: false, verified: true }; }
+  // Tek retry — geçici ağ hatası MFA challenge'ını atlamasın. Kalıcı hatada
+  // enabled:false döner (MFA'sız kullanıcıları blip'te kilitlememek için); asıl
+  // koruma veri-yükleme gate'i (mfaChallenge true iken yükleyici çalışmaz).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await authedFetch('/api/mfa/status');
+      if (res.ok) return await res.json();
+    } catch { /* retry */ }
+  }
+  return { enabled: false, verified: true };
 }
 
 /** Kayıt 1. adım: otpauth URL + manuel secret döner (QR için). */

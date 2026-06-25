@@ -104,7 +104,7 @@ interface QualityModuleProps {
   isAuthenticated: boolean;
 }
 
-const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage }) => {
+const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthenticated }) => {
   const [activeTab, setActiveTab] = useState<'qc' | 'complaints' | 'audit' | 'kpi' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d'>('qc');
   const [qcRecords, setQcRecords] = useState<QCRecord[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
@@ -402,6 +402,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage }) => {
   };
 
   const handleDelete = (id: string, type: 'qc' | 'complaint' | 'audit' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d') => {
+    if (!isAuthenticated) { showToast(currentLanguage === 'tr' ? 'Bu işlem için giriş gerekli.' : 'Login required.', 'error'); return; }
     setConfirmModal({
       isOpen: true,
       title: currentLanguage === 'tr' ? 'Silme Onayı' : 'Delete Confirmation',
@@ -429,6 +430,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage }) => {
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAuthenticated) { showToast(currentLanguage === 'tr' ? 'Bu işlem için giriş gerekli.' : 'Login required.', 'error'); return; }
     if (modalConfig.mode === 'view') {
       setModalConfig({ isOpen: false, type: null, mode: 'add', data: null });
       return;
