@@ -261,9 +261,37 @@ export default function OrdersPage({
     }
   };
 
+  // Sevkiyatta stok düş, iptalde geri yükle (idempotent — order.stockApplied flag).
+  const applyOrderStock = async (order: Order, direction: 'out' | 'in', reason: string) => {
+    for (const li of (order.lineItems || []) as unknown as Array<Record<string, unknown>>) {
+      const invId = (li.inventoryId as string) || '';
+      const qty = Number(li.quantity) || 0;
+      const inv = inventory.find(i => i.id === invId || i.sku === (li.sku as string));
+      if (!inv || qty <= 0) continue;
+      const cur = Number(inv.stockLevel) || 0;
+      const next = direction === 'out' ? Math.max(0, cur - qty) : cur + qty;
+      try {
+        await updateDoc(doc(db, 'inventory', inv.id), { stockLevel: next });
+        await addDoc(collection(db, 'inventoryMovements'), {
+          type: direction, productId: inv.id, productName: inv.name || (li.name as string) || inv.id,
+          quantity: qty, reason, orderId: order.id, timestamp: serverTimestamp(),
+        });
+      } catch (err) { console.error('[applyOrderStock]', err); }
+    }
+  };
+
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp() });
+      const ord = orders.find(o => o.id === orderId);
+      const applied = (ord as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
+      if (ord && !applied && (status === 'Shipped' || status === 'Delivered')) {
+        await applyOrderStock(ord, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+        await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
+      } else if (ord && applied && status === 'Cancelled') {
+        await applyOrderStock(ord, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+        await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
     }

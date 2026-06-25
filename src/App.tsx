@@ -2662,6 +2662,31 @@ function AppContent() {
     }
   };
 
+  // Sipariş kalemlerine göre stok hareketi uygular ve inventoryMovements'a loglar.
+  // direction 'out' = sevkiyatta düş, 'in' = iptal/iade'de geri yükle. Idempotent
+  // değil — çağıran stockApplied flag'iyle çift uygulamayı engeller.
+  const applyOrderStockMovement = async (order: Order, direction: 'out' | 'in', reason: string) => {
+    for (const li of (order.lineItems || []) as unknown as Array<Record<string, unknown>>) {
+      const invId = li.inventoryId as string | undefined;
+      const qty = Number(li.quantity) || 0;
+      if (!invId || qty <= 0) continue;
+      const inv = inventory.find(i => i.id === invId);
+      if (!inv) continue;
+      const cur = Number(inv.stockLevel) || 0;
+      const next = direction === 'out' ? Math.max(0, cur - qty) : cur + qty;
+      try {
+        await updateDoc(doc(db, 'inventory', invId), { stockLevel: next });
+        await addDoc(collection(db, 'inventoryMovements'), {
+          type: direction, productId: invId,
+          productName: inv.name || (li.name as string) || (li.title as string) || invId,
+          quantity: qty, reason, orderId: order.id,
+          companyId: storeCompanyId ?? user?.uid ?? null,
+          timestamp: serverTimestamp(),
+        });
+      } catch (err) { console.error('[applyOrderStockMovement]', err); }
+    }
+  };
+
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
       // Phase 101: append timeline entry
@@ -2673,6 +2698,19 @@ function AppContent() {
       const updatedTimeline = [...prevTimeline, newEntry];
       await updateDoc(doc(db, 'orders', orderId), { status, timeline: updatedTimeline });
       logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
+
+      // ── Stok hareketi: sevkiyatta düş, iptalde geri yükle (idempotent) ──────
+      {
+        const ordStk = orders.find(o => o.id === orderId);
+        const applied = (ordStk as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
+        if (ordStk && !applied && (status === 'Shipped' || status === 'Delivered')) {
+          await applyOrderStockMovement(ordStk, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+          await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
+        } else if (ordStk && applied && status === 'Cancelled') {
+          await applyOrderStockMovement(ordStk, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+          await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
+        }
+      }
 
       // ── Notification trigger on key status changes ─────────────────────────
       {
