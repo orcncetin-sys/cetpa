@@ -2289,6 +2289,39 @@ async function startServer() {
         res.json({ ok: true });
       } catch (e) { dbErr(e, res, 'DELETE', coll); }
     });
+
+    // Atomik sayısal artırma (stok hareketleri için yarış koşulu yok).
+    // Body: { field, delta, min? } → data[field] = max(min ?? -∞, (data[field] ?? 0) + delta)
+    // Tek SQL UPDATE; oku-değiştir-yaz yok.
+    app.patch('/api/db/:coll/:id/increment', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      const { field, delta, min } = (req.body ?? {}) as { field?: string; delta?: number; min?: number };
+      if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof delta !== 'number' || !Number.isFinite(delta)) {
+        return res.status(400).json({ error: 'field (alfasayısal) ve delta (sayı) gerekli.' });
+      }
+      if (await denied(req, res, coll, 'write', id)) return;
+      try {
+        // Sahiplik kontrolü
+        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+        if ((TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) {
+          return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
+        }
+        const floor = typeof min === 'number' && Number.isFinite(min) ? min : -1e18;
+        const upd = await docsDb.query(
+          `UPDATE docs SET data = jsonb_set(data, ARRAY[$3],
+             to_jsonb( GREATEST($5::numeric, COALESCE((data->>$3)::numeric, 0) + $4::numeric) )),
+             updated_at = now()
+           WHERE coll = $1 AND id = $2 RETURNING data`,
+          [coll, id, field, delta, floor],
+        );
+        const data = upd.rows[0]?.data;
+        broadcastDocChange(coll, 'set', id, data as Record<string, unknown>);
+        res.json({ id, data });
+      } catch (e) { dbErr(e, res, 'INCREMENT', coll); }
+    });
   }
 
   const apiLimiter = rateLimit({

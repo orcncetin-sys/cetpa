@@ -41,7 +41,8 @@ import {
   getDocs,
   limit,
   orderBy,
-  authedFetch
+  authedFetch,
+  incrementField
 } from './lib/dbClient';
 import { sortByCreatedAt } from './utils/fsSort';
 import {
@@ -2672,10 +2673,9 @@ function AppContent() {
       if (!invId || qty <= 0) continue;
       const inv = inventory.find(i => i.id === invId);
       if (!inv) continue;
-      const cur = Number(inv.stockLevel) || 0;
-      const next = direction === 'out' ? Math.max(0, cur - qty) : cur + qty;
       try {
-        await updateDoc(doc(db, 'inventory', invId), { stockLevel: next });
+        // Atomik artırma (yarış koşulu yok); 'out' min 0'a clamp'lenir.
+        await incrementField('inventory', invId, 'stockLevel', direction === 'out' ? -qty : qty, 0);
         await addDoc(collection(db, 'inventoryMovements'), {
           type: direction, productId: invId,
           productName: inv.name || (li.name as string) || (li.title as string) || invId,

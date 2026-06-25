@@ -233,6 +233,20 @@ export async function authedFetch(path: string, init?: RequestInit): Promise<Res
   });
 }
 
+/** Atomik sayısal artırma — stok hareketlerinde yarış koşulunu önler.
+ *  data[field] = max(min ?? -∞, (data[field] ?? 0) + delta), tek SQL UPDATE. */
+export async function incrementField(
+  coll: string, id: string, field: string, delta: number, min?: number,
+): Promise<void> {
+  const token = await getToken();
+  const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/increment`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field, delta, ...(min !== undefined ? { min } : {}) }),
+  });
+  if (!res.ok) throw new Error(`incrementField ${coll}/${id} → ${res.status}`);
+}
+
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const token = await getToken();
   const res = await fetch(`/api/db/${path}`, {

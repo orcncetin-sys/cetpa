@@ -14,7 +14,7 @@ import {
 import { db, auth } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp,
+  collection, serverTimestamp, incrementField,
 } from '../lib/dbClient';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { clsx, type ClassValue } from 'clsx';
@@ -268,10 +268,8 @@ export default function OrdersPage({
       const qty = Number(li.quantity) || 0;
       const inv = inventory.find(i => i.id === invId || i.sku === (li.sku as string));
       if (!inv || qty <= 0) continue;
-      const cur = Number(inv.stockLevel) || 0;
-      const next = direction === 'out' ? Math.max(0, cur - qty) : cur + qty;
       try {
-        await updateDoc(doc(db, 'inventory', inv.id), { stockLevel: next });
+        await incrementField('inventory', inv.id, 'stockLevel', direction === 'out' ? -qty : qty, 0);
         await addDoc(collection(db, 'inventoryMovements'), {
           type: direction, productId: inv.id, productName: inv.name || (li.name as string) || inv.id,
           quantity: qty, reason, orderId: order.id, timestamp: serverTimestamp(),

@@ -552,6 +552,9 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     try {
       const tutar = parseFloat(paymentForm.tutar) || 0;
       if (tutar <= 0) { showToast('Geçerli bir tutar girin.', 'error'); return; }
+      // Ödeme açık bakiyeyi aşamaz (tahsilEdilen > toplamTutar engeli).
+      const acikBakiye = (Number(paymentKaydi.toplamTutar) || 0) - (Number(paymentKaydi.tahsilEdilen) || 0);
+      if (tutar > acikBakiye + 0.01) { showToast(`Tutar açık bakiyeyi (${acikBakiye.toFixed(2)}) aşamaz.`, 'error'); return; }
 
       await addDoc(collection(db, 'tahsilatOdemeleri'), {
         kaydiId: paymentKaydi.id,

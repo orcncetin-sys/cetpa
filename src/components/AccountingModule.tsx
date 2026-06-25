@@ -341,8 +341,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const src = invoiceSource;
     const lineItems = src ? (src.lineItems as Record<string,unknown>[] || []) : [];
     const totalPrice = src ? (src.totalPrice as number || 0) : 0;
-    const kdvHaric = totalPrice / (1 + invoiceForm.kdvOran / 100);
-    const kdvTutari = totalPrice - kdvHaric;
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const kdvHaric = round2(totalPrice / (1 + invoiceForm.kdvOran / 100));
+    const kdvTutari = round2(totalPrice - kdvHaric);
     await addDoc(collection(db, 'invoices'), {
       ...invoiceForm,
       lineItems,
@@ -1038,6 +1039,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveJournal = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!journalForm.aciklama.trim()) return showToast(t.descRequired, 'error');
+    // Çift taraflı kayıt dengesi: borç == alacak (kuruş toleransı) ve pozitif.
+    const jBorc = Number(journalForm.borc) || 0;
+    const jAlacak = Number(journalForm.alacak) || 0;
+    if (jBorc <= 0 || jAlacak <= 0) return showToast(currentLanguage === 'tr' ? 'Borç ve alacak tutarları sıfırdan büyük olmalı.' : 'Debit and credit must be positive.', 'error');
+    if (Math.abs(jBorc - jAlacak) > 0.01) return showToast(currentLanguage === 'tr' ? `Fiş dengesiz: borç (${jBorc}) ≠ alacak (${jAlacak}).` : `Unbalanced entry: debit (${jBorc}) ≠ credit (${jAlacak}).`, 'error');
     try {
       if (editingJournal) {
         await updateDoc(doc(db, 'journalEntries', editingJournal.id), { ...journalForm, updatedAt: serverTimestamp() });
@@ -1735,8 +1741,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   });
   const gelirEntries = filteredEntries.filter(e => e.alacakHesap.startsWith('6'));
   const giderEntries = filteredEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8'));
-  const toplamGelir = gelirEntries.reduce((s, e) => s + e.borc, 0);
-  const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);
+  const toplamGelir = gelirEntries.reduce((s, e) => s + (e.alacak ?? e.borc), 0); // gelir = alacak (kredi)
+  const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);               // gider = borç (debit)
   const netKar = toplamGelir - toplamGider;
 
   // Monthly chart data
@@ -1747,7 +1753,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       const d = new Date(e.date);
       return d.getMonth() + 1 === month && d.getFullYear() === gelirYear;
     });
-    const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + e.borc, 0);
+    const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + (e.alacak ?? e.borc), 0);
     const gider = mEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8')).reduce((s, e) => s + e.borc, 0);
     return { month: m, gelir, gider };
   });
@@ -1755,25 +1761,28 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // Gelir breakdown by account
   const gelirBreakdown: Record<string, number> = {};
-  gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + e.borc; });
+  gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + (e.alacak ?? e.borc); });
   const giderBreakdown: Record<string, number> = {};
   giderEntries.forEach(e => { giderBreakdown[e.debitHesap] = (giderBreakdown[e.debitHesap] || 0) + e.borc; });
 
   // KDV computation
   const kdvFilteredEntries = journalEntries.filter(e => {
-    if (!e.date) return true;
+    if (!e.date) return false; // tarihsiz fiş hiçbir döneme dahil edilmez (aylık P&L ile tutarlı)
     const d = new Date(e.date);
     return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear;
   });
   const hesaplananKDV = kdvFilteredEntries.filter(e => e.alacakHesap === '391 - Hesaplanan KDV').reduce((s, e) => s + e.alacak, 0);
   const indirilecekKDV = kdvFilteredEntries.filter(e => e.debitHesap === '191 - İndirilecek KDV').reduce((s, e) => s + e.borc, 0);
   const odenecekKDV = hesaplananKDV - indirilecekKDV;
+  // Matrah yalnız gelir (alacakHesap 6xx) fişlerinden, oran bazında; KDV = matrah*oran.
+  // (Önceki sürüm her borç satırından matrah uyduruyordu.)
   const kdvOranBreakdown: Record<number, { matrah: number; kdv: number }> = {};
-  kdvFilteredEntries.forEach(e => {
+  kdvFilteredEntries.filter(e => e.alacakHesap.startsWith('6') && (e.kdvOran ?? 0) > 0).forEach(e => {
     const oran = e.kdvOran ?? 0;
+    const matrah = e.alacak ?? e.borc;
     if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
-    kdvOranBreakdown[oran].matrah += e.borc;
-    kdvOranBreakdown[oran].kdv += e.borc * (oran / 100);
+    kdvOranBreakdown[oran].matrah += matrah;
+    kdvOranBreakdown[oran].kdv += matrah * (oran / 100);
   });
 
   const tabs = [

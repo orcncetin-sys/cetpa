@@ -272,7 +272,8 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
                 required
                 type="number"
                 value={formData.stockLevel}
-                onChange={e => setFormData({ ...formData, stockLevel: Number(e.target.value) })}
+                min={0}
+                onChange={e => setFormData({ ...formData, stockLevel: Math.max(0, Number(e.target.value) || 0) })}
                 className="apple-input w-full"
               />
             </div>

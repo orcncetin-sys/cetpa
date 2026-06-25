@@ -122,22 +122,33 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
     return () => { u1(); u2(); u3(); };
   }, [isAuthenticated]);
 
-  // Derived balance
+  // Yalnız ₺ kasaların hareketleri ₺ toplamına dahil edilir (karışık para birimi
+  // toplamı yanlış olur; USD/EUR kasalar kendi para biriminde gösterilir).
+  const tryKasaIds = useMemo(
+    () => new Set(kasalar.filter(k => (k.doviz ?? 'TRY') === 'TRY').map(k => k.id)),
+    [kasalar]
+  );
+  const isTryHareket = (h: { kasaId: string }) => tryKasaIds.has(h.kasaId);
+
+  // Derived balance (₺)
   const toplamBakiye = useMemo(() => {
-    const giris = hareketler.filter(h => h.tur === 'Giriş').reduce((s, h) => s + h.tutar, 0);
-    const cikis = hareketler.filter(h => h.tur === 'Çıkış').reduce((s, h) => s + h.tutar, 0);
+    const giris = hareketler.filter(h => isTryHareket(h) && h.tur === 'Giriş').reduce((s, h) => s + h.tutar, 0);
+    const cikis = hareketler.filter(h => isTryHareket(h) && h.tur === 'Çıkış').reduce((s, h) => s + h.tutar, 0);
     return giris - cikis;
-  }, [hareketler]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hareketler, tryKasaIds]);
 
   // Today's movements
   const todayHareketler = useMemo(() => hareketler.filter(h => h.tarih === TODAY), [hareketler]);
   const bugunGiris = useMemo(
-    () => todayHareketler.filter(h => h.tur === 'Giriş').reduce((s, h) => s + h.tutar, 0),
-    [todayHareketler]
+    () => todayHareketler.filter(h => isTryHareket(h) && h.tur === 'Giriş').reduce((s, h) => s + h.tutar, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [todayHareketler, tryKasaIds]
   );
   const bugunCikis = useMemo(
-    () => todayHareketler.filter(h => h.tur === 'Çıkış').reduce((s, h) => s + h.tutar, 0),
-    [todayHareketler]
+    () => todayHareketler.filter(h => isTryHareket(h) && h.tur === 'Çıkış').reduce((s, h) => s + h.tutar, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [todayHareketler, tryKasaIds]
   );
 
   // Balance per kasa

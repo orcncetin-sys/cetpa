@@ -19,7 +19,7 @@ import {
   X, Edit2, Trash2, Package,
 } from 'lucide-react';
 import {
-  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs,
+  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs, incrementField,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
@@ -728,14 +728,14 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {/* Phase 54: Quick Stock Adjustment */}
                           <button
-                            onClick={async (e) => { e.stopPropagation(); const newStock = Math.max(0, (item.stockLevel ?? 0) - 1); await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); if (newStock !== (item.stockLevel ?? 0)) await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'out', quantity: 1, note: 'Hızlı düzeltme (-1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
+                            onClick={async (e) => { e.stopPropagation(); if ((item.stockLevel ?? 0) <= 0) return; await incrementField('inventory', item.id, 'stockLevel', -1, 0); await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'out', quantity: 1, note: 'Hızlı düzeltme (-1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
                             className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-all font-bold text-xs"
                             title={currentLanguage === 'tr' ? 'Stok azalt' : 'Decrease stock'}
                           >
                             −
                           </button>
                           <button
-                            onClick={async (e) => { e.stopPropagation(); const newStock = (item.stockLevel ?? 0) + 1; await updateDoc(doc(db, 'inventory', item.id), { stockLevel: newStock }); await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'in', quantity: 1, note: 'Hızlı düzeltme (+1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
+                            onClick={async (e) => { e.stopPropagation(); await incrementField('inventory', item.id, 'stockLevel', 1, 0); await addDoc(collection(db, 'inventoryMovements'), { productId: item.id, productName: item.name, sku: item.sku, type: 'in', quantity: 1, note: 'Hızlı düzeltme (+1)', companyId: (item as unknown as { companyId?: string }).companyId ?? null, timestamp: serverTimestamp() }); }}
                             className="p-1.5 rounded-lg hover:bg-emerald-50 text-gray-300 hover:text-emerald-600 transition-all font-bold text-xs"
                             title={currentLanguage === 'tr' ? 'Stok artır' : 'Increase stock'}
                           >
