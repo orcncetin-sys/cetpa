@@ -576,8 +576,10 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   )}
                 </div>
                 {(() => {
-                  const totalTRY = employees.reduce((s, e) => s + (e.salary || 0), 0);
-                  const rate = salaryCurrency === 'USD' ? (exchangeRates?.USD || 1) : salaryCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                  // Her çalışanın maaşı KENDİ para biriminden ₺'ye çevrilir (önce hepsi TRY sanılıyordu).
+                  const toTRYsal = (amt: number, cur?: string) => (amt || 0) * (cur === 'USD' ? (exchangeRates?.USD ?? 38) : cur === 'EUR' ? (exchangeRates?.EUR ?? 41) : 1);
+                  const totalTRY = employees.reduce((s, e) => s + toTRYsal(e.salary, (e as { salaryCurrency?: string }).salaryCurrency), 0);
+                  const rate = salaryCurrency === 'USD' ? (exchangeRates?.USD ?? 38) : salaryCurrency === 'EUR' ? (exchangeRates?.EUR ?? 41) : 1;
                   const sym = salaryCurrency === 'TRY' ? '₺' : salaryCurrency === 'USD' ? '$' : '€';
                   const converted = salaryCurrency === 'TRY' ? totalTRY : totalTRY / rate;
                   return (

@@ -460,6 +460,11 @@ const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v:
     placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
 );
 
+// Tek kaynak: canlı kur yokken kullanılan yedek oranlar (soğuk başlangıç).
+// Önceden modüller arası tutarsızdı (32/35 vs 38/41). KPI'larda `|| 1` ham TRY'yi
+// $/€ diye gösteriyordu → `?? FX_FALLBACK` ile gerçek oran kullanılır.
+const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -676,8 +681,8 @@ function AppContent() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 32;
-    const eur = exchangeRates?.EUR ?? 35;
+    const usd = exchangeRates?.USD ?? FX_FALLBACK.USD;
+    const eur = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
     const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
     const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
     const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
@@ -1047,7 +1052,7 @@ function AppContent() {
       fetch('https://api.frankfurter.app/latest?from=USD&to=TRY,EUR')
         .then(r => r.json())
         .then(data => {
-          const tryPerUsd: number = data.rates?.TRY ?? 38;
+          const tryPerUsd: number = data.rates?.TRY ?? FX_FALLBACK.USD;
           const eurPerUsd: number = data.rates?.EUR ?? 0.92;
           const tryPerEur = tryPerUsd / eurPerUsd;
           setExchangeRates({ USD: tryPerUsd, EUR: tryPerEur });
@@ -4329,7 +4334,7 @@ function AppContent() {
                 {/* Revenue KPI with currency toggle + delta */}
                 {(() => {
                   const totalTRY = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
-                  const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                  const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                   const converted = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                   const revDelta = summaryData?.revenue?.delta;
@@ -4411,7 +4416,7 @@ function AppContent() {
                   })
                   .reduce((s, o) => s + o.totalPrice, 0);
 
-                const insightRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const insightRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const insightSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvtWeek = kpiCurrency === 'TRY' ? weekRevenue : weekRevenue / insightRate;
                 return (
@@ -4670,7 +4675,7 @@ function AppContent() {
                 const dayProgress = Math.round((now.getDate() / daysInMonth) * 100);
                 // On-pace projection
                 const projectedRev   = dayProgress > 0 ? Math.round(mtdRev * (100 / dayProgress)) : mtdRev;
-                const mtdRate        = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const mtdRate        = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const mtdSymbol      = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvtMtd         = kpiCurrency === 'TRY' ? mtdRev      : mtdRev / mtdRate;
                 const cvtProjected   = kpiCurrency === 'TRY' ? projectedRev : projectedRev / mtdRate;
@@ -4740,7 +4745,7 @@ function AppContent() {
                 const mtdRev99 = orders.filter(o => getOD(o) >= thisMonthStart && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const pct99 = monthlyTarget > 0 ? Math.min(Math.round((mtdRev99 / monthlyTarget) * 100), 200) : 0;
                 const barColor99 = pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
-                const rate99 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const rate99 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const sym99 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvtRev99 = kpiCurrency === 'TRY' ? mtdRev99 : mtdRev99 / rate99;
                 const cvtTarget99 = kpiCurrency === 'TRY' ? monthlyTarget : monthlyTarget / rate99;
@@ -4860,7 +4865,7 @@ function AppContent() {
                   for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + 1; }
                   return Object.values(custMap).filter(c => c > 1).length;
                 })();
-                const kpiRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const kpiRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const kpiSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvtAov    = kpiCurrency === 'TRY' ? aov : aov / kpiRate;
                 return (
@@ -4990,7 +4995,7 @@ function AppContent() {
                 const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const r130 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const r130 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const s130 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvt130 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r130).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
                 return (
@@ -5052,7 +5057,7 @@ function AppContent() {
                   if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
                 }
                 const maxWeek = Math.max(...weeks, 1);
-                const r159 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const r159 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const s159 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const f159 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r159).toLocaleString(undefined, { maximumFractionDigits: 0 });
                 return (
@@ -5269,7 +5274,7 @@ function AppContent() {
                 }
                 const topPayers = Object.values(custPay).sort((a, b) => b.totalPaid - a.totalPaid).slice(0, 5);
                 const topDebtors = Object.entries(custUnpaid).sort(([,a],[,b]) => b - a).slice(0, 5);
-                const r160 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const r160 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const s160 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const f160 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r160).toLocaleString(undefined, { maximumFractionDigits: 0 });
                 return (
@@ -5319,7 +5324,7 @@ function AppContent() {
                   rev: orders.filter(o => { const d = getOD103(o); return d.getFullYear() === m.year && d.getMonth() === m.month && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
                 }));
                 const maxRev103 = Math.max(...data103.map(d => d.rev), 1);
-                const rate103 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const rate103 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const sym103 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -5410,7 +5415,7 @@ function AppContent() {
                 if (totalRev === 0) return null;
                 const b2bPct    = Math.round((b2bRev    / totalRev) * 100);
                 const retailPct = 100 - b2bPct;
-                const p79Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const p79Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const p79Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvtB2B    = kpiCurrency === 'TRY' ? b2bRev    : b2bRev    / p79Rate;
                 const cvtRetail = kpiCurrency === 'TRY' ? retailRev : retailRev / p79Rate;
@@ -5461,7 +5466,7 @@ function AppContent() {
                 ];
                 const total106 = segs.reduce((s, seg) => s + seg.rev, 0);
                 if (total106 === 0) return null;
-                const p106Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const p106Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const p106Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 const cvt106   = (v: number) => (kpiCurrency === 'TRY' ? v : v / p106Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
 
@@ -5807,7 +5812,7 @@ function AppContent() {
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {(() => {
-                        const ivRate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const ivRate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const ivSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                         const cvCost   = kpiCurrency === 'TRY' ? costValue   : costValue   / ivRate;
                         const cvRetail = kpiCurrency === 'TRY' ? retailValue : retailValue / ivRate;
@@ -6087,7 +6092,7 @@ function AppContent() {
                   .slice(0, 5);
                 if (top5.length === 0) return null;
                 const maxRev = top5[0].revenue;
-                const mtdTopRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                const mtdTopRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const mtdTopSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -6575,7 +6580,7 @@ function AppContent() {
                         });
                         const maxAmt110 = Math.max(...apBuckets.map(b => b.orders.reduce((s, po) => s + po.totalAmount, 0)), 1);
 
-                        const apRate = apCurrency === 'USD' ? (exchangeRates?.USD || 1) : apCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const apRate = apCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : apCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const apSym = apCurrency === 'TRY' ? '₺' : apCurrency === 'USD' ? '$' : '€';
                         const fmtAP = (n: number) => apCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${apSym}${(n / apRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                         return (
@@ -6730,7 +6735,7 @@ function AppContent() {
                           setDoc(doc(db, 'settings', 'budgets'), { [budgetMonth]: newBudgets }, { merge: true }).catch(() => {});
                         };
 
-                        const butceRate = butceCurrency === 'USD' ? (exchangeRates?.USD || 1) : butceCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const butceRate = butceCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : butceCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const butceSym = butceCurrency === 'TRY' ? '₺' : butceCurrency === 'USD' ? '$' : '€';
                         const fmtButce = (n: number) => butceCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${butceSym}${(n / butceRate).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
                         return (
@@ -7141,7 +7146,7 @@ function AppContent() {
                             <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tüm siparişler tahsil edildi.' : 'All orders collected.'}</p>
                           </div>
                         );
-                        const r131 = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+                        const r131 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const s131 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                         const f131 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r131).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
                         return (
@@ -7326,8 +7331,8 @@ function AppContent() {
                   {/* ── Phase 143: Profit & Loss Statement ── */}
                   {muhasebeTab === 'pnl' && (() => {
                     // ── Shared currency setup (used by entire PnL tab) ──────────
-                    const pnlUsd = exchangeRates?.USD ?? 38;
-                    const pnlEur = exchangeRates?.EUR ?? 41;
+                    const pnlUsd = exchangeRates?.USD ?? FX_FALLBACK.USD;
+                    const pnlEur = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
                     const pnlRate = p563PnlCurrency === 'USD' ? pnlUsd : p563PnlCurrency === 'EUR' ? pnlEur : 1;
                     const pnlSym  = p563PnlCurrency === 'USD' ? '$' : p563PnlCurrency === 'EUR' ? '€' : '₺';
                     const fmtPnl  = (v: number) => `${pnlSym}${(v / pnlRate).toLocaleString(
@@ -7661,7 +7666,7 @@ function AppContent() {
                   {/* ── Phase 547: Bilanço (Balance Sheet) ─────────────────────────────── */}
                   {muhasebeTab === 'bilanco' && (() => {
                     const tr547 = currentLanguage === 'tr';
-                    const usd547 = exchangeRates?.USD ?? 32; const eur547 = exchangeRates?.EUR ?? 35;
+                    const usd547 = exchangeRates?.USD ?? FX_FALLBACK.USD; const eur547 = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
                     const toTRY = (v: number, cur: string) => cur === 'USD' ? v * usd547 : cur === 'EUR' ? v * eur547 : v;
                     // — Aktif (Assets) —
                     const kasa547   = p547BankAccounts.filter(b => b.accountType === 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
@@ -7834,8 +7839,10 @@ function AppContent() {
                     const cats548 = [tr548?'Ulaşım':'Transportation', tr548?'Konaklama':'Accommodation', tr548?'Yemek':'Meals', tr548?'Temsil':'Entertainment', tr548?'Kırtasiye':'Office Supplies', tr548?'Diğer':'Other'];
                     const pending548 = p548Masraflar.filter(m=>m.status==='Bekliyor');
                     const approved548 = p548Masraflar.filter(m=>m.status==='Onaylandı');
-                    const totalPending = pending548.reduce((s,m)=>s+(m.amount||0),0);
-                    const totalApproved = approved548.reduce((s,m)=>s+(m.amount||0),0);
+                    // Karışık para birimlerini ₺'ye çevirerek topla (önce ham toplanıyordu).
+                    const toTRY548 = (amt:number, cur?:string) => (amt||0) * (cur==='USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : cur==='EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1);
+                    const totalPending = pending548.reduce((s,m)=>s+toTRY548(m.amount,(m as {currency?:string}).currency),0);
+                    const totalApproved = approved548.reduce((s,m)=>s+toTRY548(m.amount,(m as {currency?:string}).currency),0);
                     const fE = (v:number, c:string='TRY') => c==='USD'?`$${v.toFixed(2)}`:c==='EUR'?`€${v.toFixed(2)}`:`₺${Math.round(v).toLocaleString('tr-TR')}`;
                     return (
                       <motion.div key="masraf" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -8970,8 +8977,8 @@ function AppContent() {
                         {/* Summary KPIs */}
                         <div className="grid grid-cols-3 gap-4">
                           {[
-                            {label:tr580?'Bütçe':'Budget', val:fmtKpi(totalBudget580,'K',1)+' ₺', color:'text-blue-600', bg:'bg-blue-50'},
-                            {label:tr580?'Gerçekleşen':'Actual', val:fmtKpi(totalActual580,'K',1)+' ₺', color:'text-emerald-600', bg:'bg-emerald-50'},
+                            {label:tr580?'Bütçe':'Budget', val:fmtKpi(totalBudget580,'K',1), color:'text-blue-600', bg:'bg-blue-50'},
+                            {label:tr580?'Gerçekleşen':'Actual', val:fmtKpi(totalActual580,'K',1), color:'text-emerald-600', bg:'bg-emerald-50'},
                             {label:tr580?'Gerçekleşme %':'Achievement', val:overallPct.toFixed(1)+'%', color:overallPct>=90?'text-emerald-700':overallPct>=70?'text-amber-600':'text-red-600', bg:overallPct>=90?'bg-emerald-50':overallPct>=70?'bg-amber-50':'bg-red-50'},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card flex items-center gap-3 p-4 ${k.bg}`}>
@@ -8997,10 +9004,10 @@ function AppContent() {
                                   return (
                                     <tr key={m} className={`hover:bg-gray-50/50 ${isFuture?'opacity-40':''}`}>
                                       <td className="px-3 py-2.5 font-semibold text-gray-800">{monthLabels[m]}</td>
-                                      <td className="px-3 py-2.5 text-gray-500 font-mono">{fmtKpi(bud,'K',0)} ₺</td>
-                                      <td className="px-3 py-2.5 font-bold font-mono text-gray-800">{fmtKpi(act,'K',0)} ₺</td>
+                                      <td className="px-3 py-2.5 text-gray-500 font-mono">{fmtKpi(bud,'K',0)}</td>
+                                      <td className="px-3 py-2.5 font-bold font-mono text-gray-800">{fmtKpi(act,'K',0)}</td>
                                       <td className="px-3 py-2.5">
-                                        {!isFuture && <span className={`font-bold font-mono ${diff>=0?'text-emerald-600':'text-red-500'}`}>{diff>=0?'+':''}{fmtKpi(diff,'K',0)} ₺</span>}
+                                        {!isFuture && <span className={`font-bold font-mono ${diff>=0?'text-emerald-600':'text-red-500'}`}>{diff>=0?'+':''}{fmtKpi(diff,'K',0)}</span>}
                                       </td>
                                       <td className="px-3 py-2.5">
                                         {!isFuture && (
