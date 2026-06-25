@@ -6520,6 +6520,13 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
     if (!adminDb) return res.status(503).json({ error: 'Firestore not available.' });
 
+    // Idempotency: Stripe aynı event'i birden çok kez teslim edebilir → bir kez işle.
+    try {
+      const evRef = adminDb.collection('stripeEvents').doc(event.id);
+      if ((await evRef.get()).exists) return res.sendStatus(200);
+      await evRef.set({ type: event.type, processedAt: pgServerTimestamp() });
+    } catch (e) { console.warn('[Stripe webhook] idempotency check failed:', (e as Error).message); }
+
     try {
       if (event.type === 'checkout.session.completed') {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -7301,6 +7308,11 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     // Everything else (index.html, icons) — no cache so new deploys are picked up
     app.use(express.static(distPath, { maxAge: 0 }));
     app.use((req, res) => {
+      // Eşleşmeyen /api/* → SPA index.html DEĞİL, JSON 404 (HTML-as-JSON karışıklığı engeli).
+      if (req.path.startsWith('/api/')) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
       // Missing hashed assets MUST 404 — returning index.html here poisons
       // browsers/service workers with HTML-as-JS ("Unexpected token '<'")
       // after every deploy that changes chunk hashes.
@@ -7312,9 +7324,21 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     });
   }
 
+  // Global Express hata yakalayıcı — yakalanmamış route hataları + body-parser hataları
+  // generic JSON 500 döner (stack/secret sızdırmaz; ham hata sunucu logunda).
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    console.error('[express error]', err?.message || err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Sunucu hatası.' });
+  });
+
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  // Yakalanmamış hata/promise reddi process'i çökertmesin (cron fire-and-forget dahil).
+  process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', reason); });
+  process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err); });
 
   // Graceful shutdown — Docker/systemd sends SIGTERM before SIGKILL
   process.on('SIGTERM', () => {

@@ -386,9 +386,25 @@ class StreamManager {
   private notify(coll: string): void {
     this.listeners.get(coll)?.forEach(l => { try { l(); } catch (e) { console.error('[dbClient listener]', e); } });
   }
+
+  /** Logout/kullanıcı değişiminde belleği temizle — önceki kiracının verisi kalmasın. */
+  reset(): void {
+    try { this.es?.close(); } catch { /* ignore */ }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.es = null;
+    this.connectedColls = '';
+    this.sessionReady = false;
+    this.cache.clear();
+    this.ready.clear();
+    // Dinleyicileri uyandır ki boş cache'i yansıtsınlar.
+    for (const coll of this.listeners.keys()) this.notify(coll);
+  }
 }
 
 const stream = new StreamManager();
+
+/** Oturum kapanışında SSE bağlantısını kapatır ve önbelleği temizler. */
+export function resetStream(): void { stream.reset(); }
 
 // ── Public read/subscribe API ───────────────────────────────────────────────
 

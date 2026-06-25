@@ -2688,13 +2688,15 @@ export default function CRMPage({
               {activeTab === 'crm' && !selectedLead && crmTab === 'leads' && leads.length > 0 && (() => {
                 const tr613 = currentLanguage === 'tr';
                 // Revenue per customer from orders
-                const custRevMap:{[name:string]:{revenue:number;orderCount:number;customerType:string}} = {};
+                // Müşteri kimliğine (leadId) göre grupla — aynı isimli farklı müşteriler birleşmesin.
+                const custRevMap:{[key:string]:{name:string;revenue:number;orderCount:number;customerType:string}} = {};
                 orders.filter(o=>o.status!=='Cancelled').forEach(o=>{
-                  if(!custRevMap[o.customerName]) custRevMap[o.customerName]={revenue:0,orderCount:0,customerType:o.customerType||'Retail'};
-                  custRevMap[o.customerName].revenue += o.totalPrice||0;
-                  custRevMap[o.customerName].orderCount++;
+                  const key = (o.leadId as string) || o.customerName || 'unknown';
+                  if(!custRevMap[key]) custRevMap[key]={name:o.customerName||'—',revenue:0,orderCount:0,customerType:o.customerType||'Retail'};
+                  custRevMap[key].revenue += o.totalPrice||0;
+                  custRevMap[key].orderCount++;
                 });
-                const custRows = Object.entries(custRevMap).map(([name,d])=>({name,...d})).sort((a,b)=>b.revenue-a.revenue);
+                const custRows = Object.values(custRevMap).sort((a,b)=>b.revenue-a.revenue);
                 const totalRev613 = custRows.reduce((s,r)=>s+r.revenue,0);
                 // Top 20% (Pareto)
                 const top20pct = Math.ceil(custRows.length*0.2);

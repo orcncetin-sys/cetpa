@@ -42,7 +42,8 @@ import {
   limit,
   orderBy,
   authedFetch,
-  incrementField
+  incrementField,
+  resetStream
 } from './lib/dbClient';
 import { sortByCreatedAt } from './utils/fsSort';
 import {
@@ -479,6 +480,7 @@ export default function App() {
 function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
   const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
+  const darkModeFromServerRef = React.useRef(false); // listener'dan gelen değeri işaretler (echo-write engeli)
 
   // ── Zustand store sync ────────────────────────────────────────────────────
   const { setExchangeRates: storeSetRates,
@@ -507,6 +509,8 @@ function AppContent() {
   React.useEffect(() => {
     const html = document.documentElement;
     if (darkMode) { html.classList.add('dark'); } else { html.classList.remove('dark'); }
+    // Listener'dan gelen değer için Firestore'a echo-yazma yapma (yarış/loop engeli).
+    if (darkModeFromServerRef.current) { darkModeFromServerRef.current = false; return; }
     const uid = auth.currentUser?.uid;
     if (uid) setDoc(doc(db, 'userPrefs', uid), { darkMode }, { merge: true }).catch(() => {});
   }, [darkMode]);
@@ -1850,7 +1854,8 @@ function AppContent() {
 
         const fetchLocation = async () => {
           try {
-            const res = await fetch('https://ipapi.co/json/');
+            // 3sn timeout — 3. parti geolocation auth boot'unu süresiz bloke etmesin.
+            const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(3000) });
             const data = await res.json();
             return `${data.city}, ${data.country_name}`;
           } catch {
@@ -2118,14 +2123,22 @@ function AppContent() {
     });
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (isGuestMode) {
       setIsGuestMode(false);
       setUser(null);
       storeSetUser(null);
-    } else {
-      signOut(auth);
+      return;
     }
+    try {
+      await signOut(auth); // await: oturum kapanışı tamamlanmadan state temizlenmesin
+    } catch (e) { console.error('[handleLogout]', e); }
+    // Yerel durum + SSE oturum cookie'sini temizle (bayat veri kalmasın).
+    setUser(null);
+    storeSetUser(null);
+    storeSetCompanyId(null);
+    resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
+    try { await authedFetch('/api/db/session/logout', { method: 'POST' }); } catch { /* ignore */ }
   };
 
   // --- Data Fetching ---
@@ -2242,7 +2255,7 @@ function AppContent() {
     const unsubUserPrefs = onSnapshot(doc(db, 'userPrefs', user.uid), (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
-      if (d.darkMode !== undefined) setDarkMode(d.darkMode as boolean);
+      if (d.darkMode !== undefined && d.darkMode !== darkMode) { darkModeFromServerRef.current = true; setDarkMode(d.darkMode as boolean); }
       if (d.notifPrefs) setNotifPrefs(d.notifPrefs as Record<string, boolean>);
       if (typeof d.quickNote === 'string') setQuickNote(d.quickNote);
       if (Array.isArray(d.recentlyViewed)) setRecentlyViewed(d.recentlyViewed);
@@ -7891,9 +7904,11 @@ function AppContent() {
                             </div>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
-                                if(!p548Draft.employeeName||!p548Draft.amount) return;
-                                await addDoc(collection(db,'masraflar'),{...p548Draft,amount:parseFloat(p548Draft.amount),status:'Bekliyor',createdAt:serverTimestamp()});
-                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:new Date().toISOString().slice(0,10),description:''});
+                                const amt=parseFloat(p548Draft.amount);
+                                if(!p548Draft.employeeName||!Number.isFinite(amt)||amt<=0){ toast(tr548?'Geçerli bir tutar girin.':'Enter a valid amount.','error'); return; }
+                                try{ await addDoc(collection(db,'masraflar'),{...p548Draft,amount:amt,status:'Bekliyor',createdAt:serverTimestamp()});
+                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:new Date().toISOString().slice(0,10),description:''}); }
+                                catch(e){ console.error('[masraf save]',e); toast(tr548?'Kaydedilemedi.':'Could not save.','error'); }
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr548?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP548Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr548?'İptal':'Cancel'}</button>
                             </div>
@@ -7928,8 +7943,8 @@ function AppContent() {
                                       <td className="px-4 py-2.5 text-center">
                                         {m.status==='Bekliyor' && (
                                           <div className="flex justify-center gap-1">
-                                            <button onClick={()=>updateDoc(doc(db,'masraflar',m.id),{status:'Onaylandı',approvedBy:user?.displayName||user?.email||''})} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200 transition-colors">{tr548?'Onayla':'Approve'}</button>
-                                            <button onClick={()=>updateDoc(doc(db,'masraflar',m.id),{status:'Reddedildi'})} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200 transition-colors">{tr548?'Reddet':'Reject'}</button>
+                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Onaylandı',approvedBy:user?.displayName||user?.email||''});}catch(e){console.error('[masraf approve]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200 transition-colors">{tr548?'Onayla':'Approve'}</button>
+                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Reddedildi'});}catch(e){console.error('[masraf reject]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200 transition-colors">{tr548?'Reddet':'Reject'}</button>
                                           </div>
                                         )}
                                       </td>

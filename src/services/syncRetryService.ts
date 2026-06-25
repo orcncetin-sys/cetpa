@@ -38,9 +38,11 @@ function jobRef(id: string) {
   return doc(collection(db, COLLECTION), id);
 }
 
-/** Exponential backoff: 30 s * 2^attempts  (30s → 1m → 2m → 4m → 8m …) */
+/** Exponential backoff: 30 s * 2^attempts  (30s → 1m → 2m … en fazla ~1 saat).
+ *  attempts üst sınırı: büyük değerlerde Infinity'ye taşıp işi kalıcı kuyrukta bırakmasın. */
 function backoffMs(attempts: number): number {
-  return Math.pow(2, attempts) * 30_000;
+  const capped = Math.min(attempts, 7); // 2^7 * 30s ≈ 64 dk tavan
+  return Math.pow(2, capped) * 30_000;
 }
 
 // ---------------------------------------------------------------------------

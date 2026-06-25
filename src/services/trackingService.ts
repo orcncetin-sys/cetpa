@@ -176,9 +176,15 @@ export async function trackShipment(
     if (trCarriers[carrier]) {
       const res = await authFetch(`/api/tracking/${trCarriers[carrier]}/${encodeURIComponent(trackingNumber)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as Record<string, unknown>;
-      // Server already returns a normalized TrackingResult-compatible object
-      return data as unknown as TrackingResult;
+      const data = await res.json() as Partial<TrackingResult>;
+      // Doğrulama: events/durum alanlarını garanti et (undefined events UI'ı çökertmesin).
+      return {
+        ...data,
+        carrier: data.carrier ?? carrier,
+        trackingNumber: data.trackingNumber ?? trackingNumber,
+        status: data.status ?? 'Bilinmiyor',
+        events: Array.isArray(data.events) ? data.events : [],
+      } as TrackingResult;
     }
 
     throw new Error('Unknown carrier');
