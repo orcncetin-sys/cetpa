@@ -1519,11 +1519,21 @@ async function writeAuditLog(
 // kayıt ekler, mevcutları günceller, tedarikçi tipini işler) ve mikro_*
 // aynasına yazar. Gece 04:00: V17+ kurulumlarda stok miktar/maliyet senkronu.
 if (process.env.MIKRO_CRON_SYNC === 'true') {
-  /** Koleksiyondaki ilk dokümanın companyId'si — cron'da req.uid yok. */
+  /**
+   * Mikro cron'un yazacağı hedef tenant. Mikro creds deployment-global olduğundan
+   * tek hedef firma vardır. Öncelik: MIKRO_CRON_COMPANY_ID env. Yoksa kurulumda
+   * tek tenant varsa onu kullan. Çok-tenant'ta belirsizse '' döner → cron senkronu
+   * atlar (yanlış tenant'a yazmamak için). "ilk inventory dokümanı" heuristiği
+   * (kırılgan/rastgele) kaldırıldı.
+   */
   const cronCompanyId = async (): Promise<string> => {
+    if (process.env.MIKRO_CRON_COMPANY_ID) return process.env.MIKRO_CRON_COMPANY_ID;
     if (!adminDb) return '';
-    const snap = await adminDb.collection('inventory').limit(1).get();
-    return (snap.docs[0]?.data()?.companyId as string) || '';
+    const snap = await adminDb.collection('users').get();
+    const cids = new Set(snap.docs.map(d => (d.data().companyId as string) || d.id));
+    if (cids.size === 1) return [...cids][0];
+    console.error(`Mikro cron: ${cids.size} tenant bulundu ve MIKRO_CRON_COMPANY_ID tanımlı değil → senkron atlandı.`);
+    return '';
   };
 
   const cronPullAll = async (
@@ -1547,6 +1557,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     console.log('Mikro cron: stok + cari tam senkron başlatıldı');
     try {
       const companyId = await cronCompanyId();
+      if (!companyId) { console.warn('Mikro cron: hedef tenant belirsiz, senkron atlandı.'); return; }
 
       // ── Stok kartları: tam sayfalama + upsert ──────────────────────────────
       const stoklar = await cronPullAll('StokListesiV2', 'StokListesi', {

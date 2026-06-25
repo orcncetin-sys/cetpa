@@ -476,7 +476,8 @@ function AppContent() {
 
   // ── Zustand store sync ────────────────────────────────────────────────────
   const { setExchangeRates: storeSetRates,
-          setUser: storeSetUser, setUserRole: storeSetRole, setCompanyId: storeSetCompanyId } = useAppStore();
+          setUser: storeSetUser, setUserRole: storeSetRole, setCompanyId: storeSetCompanyId,
+          companyId: storeCompanyId } = useAppStore();
 
   // ── Phase 25: Online / offline indicator ──────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -1200,7 +1201,7 @@ function AppContent() {
         action,
         details,
         userId: user.uid,
-        companyId: user.uid,
+        companyId: storeCompanyId ?? user.uid,
         userName: user?.displayName || user?.email || 'Misafir',
         userEmail: user?.email || '',
         timestamp: serverTimestamp()
@@ -1208,7 +1209,7 @@ function AppContent() {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'auditLog');
     }
-  }, [user]);
+  }, [user, storeCompanyId]);
 
   const [isAddingLead, setIsAddingLead] = useState(false);
   const [isScoring, setIsScoring] = useState(false);
@@ -1827,6 +1828,7 @@ function AppContent() {
   // --- Auth & User Profile ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      let resolvedCompanyId: string | null = null;
       if (u) {
         // 2FA: kullanıcının 2FA'sı açık ama oturum doğrulanmamışsa challenge sür.
         // (Veri yükleyiciler /api/db'ye erişmeden önce doğrulama gerekir.)
@@ -1837,6 +1839,8 @@ function AppContent() {
         // Sync user profile to Firestore
         const userRef = doc(db, 'users', u.uid);
         const userSnap = await getDoc(userRef);
+        // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
+        resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
 
         const fetchLocation = async () => {
           try {
@@ -1881,7 +1885,7 @@ function AppContent() {
       }
       setUser(u);
       storeSetUser(u);
-      storeSetCompanyId(u?.uid ?? null);
+      storeSetCompanyId(resolvedCompanyId);
       setIsAuthReady(true);
     });
     return () => unsubscribe();
@@ -2124,7 +2128,7 @@ function AppContent() {
 
     // Data is scoped by companyId (= uid of the account owner).
     // Documents without a companyId field are legacy/test data and are excluded.
-    const companyId = user.uid;
+    const companyId = storeCompanyId ?? user.uid;
 
     const leadsQuery = (userRole === UserRole.Admin || userRole === UserRole.Manager)
       ? query(collection(db, 'leads'), where('companyId', '==', companyId))
@@ -2272,20 +2276,20 @@ function AppContent() {
       unsubTargets();
       unsubBudgets();
     };
-  }, [user, userRole, isAuthReady]);
+  }, [user, userRole, isAuthReady, storeCompanyId]);
 
   // ── auditLog: yalnızca Admin > Denetim Kaydı açıkken dinle ────────────────
   useEffect(() => {
     if (!user || activeTab !== 'admin') return;
-    const companyId = user.uid;
+    const companyId = storeCompanyId ?? user.uid;
     const unsub = onSnapshot(
       query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)),
       (snapshot) => setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => importedLogFirestoreError(error, OperationType.LIST, 'auditLog', auth.currentUser?.uid)
     );
     return () => unsub();
-   
-  }, [user, activeTab]);
+
+  }, [user, activeTab, storeCompanyId]);
 
   // ── Phase extended collections — Firestore subscriptions ─────────────────
   useEffect(() => {
@@ -2442,7 +2446,7 @@ function AppContent() {
       const docRef = await addDoc(collection(db, 'leads'), {
         ...data, status: 'New', score: scoreResult.score,
         notes: `${data.notes ?? ''}\n\nAI Insights: ${scoreResult.reasoning}`,
-        companyId: user?.uid ?? 'guest',
+        companyId: storeCompanyId ?? user?.uid ?? 'guest',
         assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         customerType: 'B2B' as const,
       });
@@ -2569,7 +2573,7 @@ function AppContent() {
           kdvTutari,
           trackingNumber: `TRK-${orderDocRef.id.slice(0, 12).toUpperCase()}`,
           location: null,
-          companyId: user?.uid ?? null,
+          companyId: storeCompanyId ?? user?.uid ?? null,
           assignedTo: user?.uid ?? null,
           createdAt: serverTimestamp(),
           syncedAt: serverTimestamp()
