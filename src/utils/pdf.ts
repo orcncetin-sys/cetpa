@@ -262,7 +262,7 @@ export const exportCustomerStatement = (
       dateStr2,
       status,
       normTR(itemNames || '—'),
-      o.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 }),
+      (o.totalPrice ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }),
     ];
   });
 

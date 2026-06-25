@@ -507,7 +507,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
 
     // Trend data (mocked dynamically based on qcRecords)
     const trendData = qcRecords.reduce((acc: Record<string, { samples: number, defects: number }>, r) => {
-      const month = r.date.substring(5, 7); // YYYY-MM-DD -> MM
+      if (!r.date || String(r.date).length < 7) return acc; // tarihsiz kayıt trendi çökertmesin
+      const month = String(r.date).substring(5, 7); // YYYY-MM-DD -> MM
       const monthName = new Date(2000, parseInt(month) - 1).toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
       if (!acc[monthName]) acc[monthName] = { samples: 0, defects: 0 };
       acc[monthName].samples += r.sampleSize;

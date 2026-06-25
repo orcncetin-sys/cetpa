@@ -170,9 +170,10 @@ export default function MRPModule({
 
     // For each active production order, find its routing and compute hours
     productionOrders.filter(o => o.status !== 'Tamamlandı' && o.status !== 'İptal').forEach(po => {
+      const poSku = ((po as unknown as { productSku?: string; sku?: string }).productSku || (po as unknown as { sku?: string }).sku || '').toLowerCase();
       const routing = routings.find(r =>
-        r.productName.toLowerCase() === po.productName.toLowerCase() ||
-        r.productSku.toLowerCase() === (po.productName || '').toLowerCase()
+        r.productName.toLowerCase() === (po.productName || '').toLowerCase() ||
+        (!!poSku && r.productSku.toLowerCase() === poSku) // SKU'yu po.productName ile değil po SKU'su ile eşleştir
       );
 
       if (routing) {
@@ -205,6 +206,9 @@ export default function MRPModule({
   const runMRP = () => {
     setMrpRunning(true);
     const suggestions: MRPSuggestion[] = [];
+    // Paylaşılan bileşen stoğu talep satırları arasında çift tahsis edilmesin —
+    // tüketildikçe azalan kalan stok takibi.
+    const remaining: Record<string, number> = {};
 
     Object.entries(mrpQtyInput).forEach(([productName, demandQty]) => {
       if (!demandQty) return;
@@ -228,7 +232,9 @@ export default function MRPModule({
           const required = comp.quantity * demandQty;
           const stock = inventory.find(i => i.id === comp.inventoryId);
           const onHand = stock?.quantity ?? stock?.stockLevel ?? 0;
-          const shortage = required - onHand;
+          const avail = remaining[comp.inventoryId] ?? onHand; // önceki satırların tükettiği düşülmüş
+          const shortage = required - avail;
+          remaining[comp.inventoryId] = Math.max(0, avail - required);
           if (shortage > 0) {
             suggestions.push({
               type: 'purchase',
@@ -237,8 +243,8 @@ export default function MRPModule({
               unit: comp.unit,
               neededBy: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
               reason: tr
-                ? `Stok: ${onHand} ${comp.unit}, Gereken: ${required} ${comp.unit}`
-                : `Stock: ${onHand} ${comp.unit}, Required: ${required} ${comp.unit}`,
+                ? `Kalan stok: ${avail} ${comp.unit}, Gereken: ${required} ${comp.unit}`
+                : `Available: ${avail} ${comp.unit}, Required: ${required} ${comp.unit}`,
             });
           }
         });

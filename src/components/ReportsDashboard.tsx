@@ -1099,7 +1099,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           {inventory.length > 0 && orders.length > 0 && (() => {
             const catMap: Record<string, { totalCOGS: number; avgStock: number; turnover: number }> = {};
             for (const i of inventory) {
-              const cat = i.category || currentLanguage === 'tr' ? 'Diğer' : 'Other';
+              const cat = i.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other'); // parantez: önce tüm kategoriler 'Diğer'e çöküyordu
               if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
               catMap[cat].avgStock += (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates);
             }

@@ -352,7 +352,8 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 <div className="apple-card p-4 flex flex-col gap-2">
                   <div className="flex items-center justify-between"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Teklif Toplamı' : 'Quote Total'}</p><CurrencyToggle /></div>
                   <p className="text-2xl font-bold text-purple-600">
-                    {dcSym}{(dealerCurrency === 'TRY' ? quotations.reduce((s, q) => s + (Number(q.total) || 0), 0) : quotations.reduce((s, q) => s + (Number(q.total) || 0), 0) / dcRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                    {/* q.total alanı yok → totalAmount, yoksa lineItems'tan hesapla (önce hep ₺0 gösteriyordu) */}
+                    {dcSym}{((qt => dealerCurrency === 'TRY' ? qt : qt / dcRate)(quotations.reduce((s, q) => s + (Number(q.totalAmount) || ((q.lineItems || q.items || []) as QuotationItem[]).reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0)), 0))).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
                   </p>
                 </div>
               </div>

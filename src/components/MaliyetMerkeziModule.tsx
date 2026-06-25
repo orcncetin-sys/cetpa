@@ -283,8 +283,9 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
       err => addToast('error', t.hataBaslik, err.message)
     );
 
+    let unsub2: (() => void) | undefined; // setTimeout return'ü cleanup'a ulaşmıyordu → sızıntı
     const timer = setTimeout(() => {
-      const unsub2 = onSnapshot(
+      unsub2 = onSnapshot(
         query(collection(db, 'maliyetKalemleri')),
         snap => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as MaliyetKalemi));
@@ -292,12 +293,12 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
         },
         err => addToast('error', t.hataBaslik, err.message)
       );
-      return unsub2;
     }, 200);
 
     return () => {
       unsub1();
       clearTimeout(timer);
+      unsub2?.();
     };
   }, [isAuthenticated]);
 
@@ -347,6 +348,9 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
 
   const deleteMerkez = async (id: string) => {
     try {
+      // Cascade: merkeze bağlı gider kalemlerini de sil (orphan kalmasın).
+      const related = kalemler.filter(k => k.merkezId === id);
+      await Promise.all(related.map(k => deleteDoc(doc(db, 'maliyetKalemleri', k.id))));
       await deleteDoc(doc(db, 'maliyetMerkezleri', id));
       addToast('success', t.basariBaslik, t.merkezSilindi);
     } catch (e: unknown) {

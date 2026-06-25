@@ -280,7 +280,7 @@ export default function OrdersPage({
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp(), ...(status === 'Delivered' ? { deliveredAt: serverTimestamp() } : {}) });
       const ord = orders.find(o => o.id === orderId);
       const applied = (ord as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
       if (ord && !applied && (status === 'Shipped' || status === 'Delivered')) {
@@ -2017,8 +2017,8 @@ export default function OrdersPage({
                                   {item.sku && <p className="text-[10px] text-gray-400">{item.sku}</p>}
                                 </td>
                                 <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
-                                <td className="px-4 py-3 text-right text-gray-500">${item.price.toFixed(2)}</td>
-                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">${(item.price * item.quantity).toFixed(2)}</td>
+                                <td className="px-4 py-3 text-right text-gray-500">₺{(item.price ?? 0).toFixed(2)}</td>
+                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">₺{((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2)}</td>
                               </tr>
                             ))}
                           </tbody>

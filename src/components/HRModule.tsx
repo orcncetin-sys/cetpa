@@ -296,16 +296,21 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
     if (!leaveForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
     const emp = employees.find(e => e.id === leaveForm.employeeId);
+    // Gün sayısını başlangıç/bitiş tarihinden hesapla (dahil); önce hep 1 kalıyordu.
+    const leaveMs = Date.parse(leaveForm.endDate) - Date.parse(leaveForm.startDate);
+    const days = Number.isFinite(leaveMs) && leaveMs >= 0 ? Math.floor(leaveMs / 86400000) + 1 : (leaveForm.days || 1);
     try {
       if (editingLeaveId) {
         await updateDoc(doc(db, 'leaveRequests', editingLeaveId), {
           ...leaveForm,
+          days,
           employeeName: emp?.name || 'Unknown',
         });
         showToast(currentLanguage === 'tr' ? 'İzin güncellendi.' : 'Leave updated.');
       } else {
         await addDoc(collection(db, 'leaveRequests'), {
           ...leaveForm,
+          days,
           employeeName: emp?.name || 'Unknown',
           createdAt: serverTimestamp()
         });
@@ -510,7 +515,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                         </td>
                         <td className="py-3 px-5 text-gray-600">{emp.position}</td>
                         <td className="py-3 px-5 text-gray-500">{emp.department}</td>
-                        <td className="py-3 px-5 text-right font-medium">₺{emp.salary.toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right font-medium">₺{(emp.salary ?? 0).toLocaleString()}</td>
                         <td className="py-3 px-5 text-center text-gray-400">{emp.startDate}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${emp.status === 'Aktif' ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
@@ -637,15 +642,15 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {sortData(payrolls.filter(p => 
-                      p.employeeName.toLowerCase().includes(payrollSearch.toLowerCase())
+                      (p.employeeName ?? '').toLowerCase().includes(payrollSearch.toLowerCase())
                     ), payrollSort.key, payrollSort.dir).map(p => (
                       <tr key={p.id} className="hover:bg-gray-50 transition-all group">
                         <td className="py-3 px-5 font-bold text-gray-900">{p.employeeName}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{p.month}/{p.year}</td>
-                        <td className="py-3 px-5 text-right">₺{p.baseSalary.toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right text-green-600">+₺{p.bonus.toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right text-red-500">-₺{p.deduction.toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right font-bold text-gray-900">₺{p.netSalary.toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right">₺{(p.baseSalary ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right text-green-600">+₺{(p.bonus ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right text-red-500">-₺{(p.deduction ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right font-bold text-gray-900">₺{(p.netSalary ?? 0).toLocaleString()}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status === 'Ödendi' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'}`}>
                             {p.status}
@@ -989,7 +994,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                         <td className="py-3 px-5 text-gray-600">{req.destination}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{req.startDate}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{req.endDate}</td>
-                        <td className="py-3 px-5 text-right font-bold">₺{req.advanceAmount.toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right font-bold">₺{(req.advanceAmount ?? 0).toLocaleString()}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${req.status === 'Onaylandı' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'}`}>
                             {req.status}

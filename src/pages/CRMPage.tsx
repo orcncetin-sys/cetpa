@@ -460,7 +460,7 @@ export default function CRMPage({
                         <tbody className="divide-y divide-gray-100">
                           {(() => {
                             const filtered = orders.filter(o =>
-                              o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                              (o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                               o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
                               o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase())
                             );
@@ -513,7 +513,7 @@ export default function CRMPage({
                                         <FileText className="w-2.5 h-2.5 text-amber-600" />
                                       </span>
                                     )}
-                                    ₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ₺{(order.totalPrice ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
