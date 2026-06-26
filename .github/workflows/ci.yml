@@ -56,7 +56,7 @@ jobs:
         if: steps.check.outputs.enabled == 'true'
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
-            'cd /opt/cetpa && git pull origin main && docker compose up -d --build'
+            'cd /opt/cetpa && git pull origin main && docker compose up -d --build && { docker image prune -f || true; docker builder prune -f --keep-storage=10GB || docker builder prune -f || true; }'
 
       - name: Health check
         if: steps.check.outputs.enabled == 'true'
