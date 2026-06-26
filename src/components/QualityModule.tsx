@@ -133,33 +133,13 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
   };
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
   
-  // New Module States
-  const [fmeaRecords, setFmeaRecords] = useState<FMEARecord[]>([
-    { id: '1', process: 'Montaj', failureMode: 'Vida gevşekliği', rpn: 96 },
-    { id: '2', process: 'Kaynak', failureMode: 'Gözenek', rpn: 120 },
-    { id: '3', process: 'Boya', failureMode: 'Akıntı', rpn: 45 }
-  ]);
-  const [pfmeaRecords, setPfmeaRecords] = useState<PFMEARecord[]>([
-    { id: '1', process: 'Enjeksiyon', failureMode: 'Çapaklanma', rpn: 80 },
-    { id: '2', process: 'Paketleme', failureMode: 'Eksik Parça', rpn: 150 }
-  ]);
-  const [ctpatRecords, setCtpatRecords] = useState<CTPATRecord[]>([
-    { id: '1', point: 'Fiziksel Erişim', status: 'Uyumlu' },
-    { id: '2', point: 'Personel Güvenliği', status: 'İnceleniyor' },
-    { id: '3', point: 'Bilişim Güvenliği', status: 'Uyumsuz' }
-  ]);
-  const [kaizenRecords, setKaizenRecords] = useState<KaizenRecord[]>([
-    { id: '1', problem: 'Yüksek enerji tüketimi', responsible: 'Ahmet Y.', status: 'Devam Ediyor', savings: 45000 },
-    { id: '2', problem: 'Hurda oranının yüksekliği', responsible: 'Mehmet K.', status: 'Tamamlandı', savings: 120000 }
-  ]);
-  const [fiveSRecords, setFiveSRecords] = useState<FiveSRecord[]>([
-    { id: '1', area: 'Üretim Hattı A', score: 4.5, inspector: 'Mehmet D.' },
-    { id: '2', area: 'Depo', score: 2.5, inspector: 'Ali Y.' }
-  ]);
-  const [eightDRecords, setEightDRecords] = useState<EightDRecord[]>([
-    { id: '1', problem: 'Hatalı sevkiyat', responsible: 'Ayşe K.', stage: 'D4 (Kök Neden)' },
-    { id: '2', problem: 'Müşteri iadesi', responsible: 'Fatma S.', stage: 'D8 (Kapanış)' }
-  ]);
+  // New Module States — snapshot'tan doldurulur (sahte seed yok; çift/üzerine-yazma engeli)
+  const [fmeaRecords, setFmeaRecords] = useState<FMEARecord[]>([]);
+  const [pfmeaRecords, setPfmeaRecords] = useState<PFMEARecord[]>([]);
+  const [ctpatRecords, setCtpatRecords] = useState<CTPATRecord[]>([]);
+  const [kaizenRecords, setKaizenRecords] = useState<KaizenRecord[]>([]);
+  const [fiveSRecords, setFiveSRecords] = useState<FiveSRecord[]>([]);
+  const [eightDRecords, setEightDRecords] = useState<EightDRecord[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [complaintFilter, setComplaintFilter] = useState<'All' | 'Critical' | 'Major' | 'Minor'>('All');

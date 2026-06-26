@@ -179,7 +179,10 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
               email: q.customerEmail,
               note: `Converted from Quotation #${q.id}. Notes: ${q.notes || ''}`,
               lineItems: (q.lineItems || q.items || []).map((item: QuotationItem) => ({
-                title: item.name, sku: item.sku, price: item.price, quantity: item.quantity,
+                title: item.name, sku: item.sku,
+                // KDV dahil (brüt) fiyat — önce KDV-hariç gönderiliyordu, sipariş toplamı eksikti.
+                price: Math.round((Number(item.price) || 0) * (1 + (Number(item.vatRate) || 0) / 100) * 100) / 100,
+                quantity: item.quantity,
               })),
             }),
           });

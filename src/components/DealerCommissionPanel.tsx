@@ -207,7 +207,7 @@ export default function DealerCommissionPanel({
       const bonusRate = rule?.bonusRate || 0;
       const achievementRate = targetAmount > 0 ? (actualSales / targetAmount) * 100 : 0;
       const effectiveRate = achievementRate >= 100 ? baseRate + bonusRate : baseRate * (achievementRate / 100);
-      const commissionEarned = actualSales * (effectiveRate / 100);
+      const commissionEarned = Math.round(actualSales * (effectiveRate / 100) * 100) / 100; // kuruş yuvarlama
 
       return {
         id: dealer.id,

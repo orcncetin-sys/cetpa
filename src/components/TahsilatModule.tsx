@@ -1074,7 +1074,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                 <div className="bg-gray-50 rounded-2xl p-3 flex justify-between text-sm">
                   <span className="text-[#86868B]">{t.acik}</span>
                   <span className="font-semibold text-[#ff4000]">
-                    {formatCurrency(paymentKaydi.toplamTutar - paymentKaydi.tahsilEdilen)}
+                    {formatCurrency(paymentKaydi.toplamTutar - paymentKaydi.tahsilEdilen, paymentKaydi.currency)}
                   </span>
                 </div>
 
