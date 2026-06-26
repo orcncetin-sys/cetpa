@@ -3002,6 +3002,12 @@ export default function OrdersPage({
                   disabled={!returnReason.trim()}
                   onClick={async () => {
                     const o = returnModal.order!;
+                    // İade tutarı 0 < x ≤ sipariş toplamı olmalı (negatif/aşırı engeli).
+                    const maxRet = Number(o.totalPrice) || 0;
+                    if (returnAmount <= 0 || returnAmount > maxRet + 0.01) {
+                      toast(currentLanguage === 'tr' ? `İade tutarı 0 ile ${maxRet.toLocaleString('tr-TR')} arasında olmalı.` : `Return amount must be between 0 and ${maxRet}.`, 'error');
+                      return;
+                    }
                     try {
                       await addDoc(collection(db, 'orderReturns'), {
                         orderId: o.id, customerName: o.customerName ?? '', amount: returnAmount,

@@ -599,6 +599,11 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
   // ── Ters Kayıt: Firestore transaction ile uygula ───────────────────────────
   const executeTersKayit = useCallback(async () => {
     if (!tersKayitOrder) return;
+    // Negatif stoğa düşürecek backflush engellenir (uyarı artık sadece önizleme değil).
+    if (tersKayitLines.some(l => l.hasStockWarning)) {
+      alert(currentLanguage === 'tr' ? 'Yetersiz hammadde stoğu — bazı kalemler stoğu negatife düşürür. İşlem iptal edildi.' : 'Insufficient raw-material stock — operation aborted.');
+      return;
+    }
     setTersKayitLoading(true);
     const order = tersKayitOrder;
     const producedQty = order.quantity - order.completedQuantity;
@@ -1579,7 +1584,8 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                 </button>
                 <button
                   onClick={executeTersKayit}
-                  disabled={tersKayitLoading}
+                  disabled={tersKayitLoading || tersKayitLines.some(l => l.hasStockWarning)}
+                  title={tersKayitLines.some(l => l.hasStockWarning) ? (tr ? 'Yetersiz hammadde stoğu' : 'Insufficient raw-material stock') : undefined}
                   className="apple-button-primary flex-1 justify-center py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
                 >
                   {tersKayitLoading ? (
