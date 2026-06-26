@@ -5,7 +5,7 @@
  * Tüm veriler props olarak App.tsx'teki onSnapshot aboneliklerinden gelir.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area,
@@ -130,9 +130,9 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
   }, [reportsTab, userRole]);
 
   // KPI Calculations
-  const totalRevenueTRY = orders
+  const totalRevenueTRY = useMemo(() => orders
     .filter(o => o.status !== 'Cancelled')
-    .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0);
+    .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0), [orders]);
   const revenueSymbol = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
   const revenueFormatted = formatInCurrency(totalRevenueTRY, revenueCurrency, exchangeRates);
   const totalOrders = orders.length;
@@ -141,7 +141,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
   const lowStockItems = inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length;
 
   // Sales Trend Data
-  const salesByDate = orders.reduce((acc: Record<string, number>, o) => {
+  const salesByDate = useMemo(() => orders.reduce((acc: Record<string, number>, o) => {
     let date = currentT.unknown;
     if (o.syncedAt) {
       try {
@@ -153,9 +153,9 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
     }
     acc[date] = (acc[date] || 0) + (Number(o.totalPrice) || 0);
     return acc;
-  }, {});
+  }, {}), [orders, currentT, currentLanguage]);
 
-  const trendData = Object.entries(salesByDate)
+  const trendData = useMemo(() => Object.entries(salesByDate)
     .map(([name, value]) => ({ name, value: Number(value) }))
     .sort((a, b) => {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -165,20 +165,20 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       if (monthA !== monthB) return monthA - monthB;
       return getDay(a.name) - getDay(b.name);
     })
-    .slice(-30);
+    .slice(-30), [salesByDate]);
 
   // Category Data
-  const categoryData = inventory.reduce((acc: Record<string, number>, item) => {
+  const categoryData = useMemo(() => inventory.reduce((acc: Record<string, number>, item) => {
     const category = item.category || currentT.other;
     acc[category] = (acc[category] || 0) + item.stockLevel;
     return acc;
-  }, {});
-  const categoryChartData = Object.entries(categoryData).map(([name, value]) => ({ name, value: Number(value) }));
+  }, {}), [inventory, currentT]);
+  const categoryChartData = useMemo(() => Object.entries(categoryData).map(([name, value]) => ({ name, value: Number(value) })), [categoryData]);
 
   // --- CRM sub-data ---
-  const ordersByStatus = orders.reduce((acc: Record<string, number>, o) => { acc[o.status] = (acc[o.status]||0)+1; return acc; }, {});
-  const statusChartData = Object.entries(ordersByStatus).map(([name, value]) => ({ name, value: Number(value) }));
-  const topCustomers = Object.values(
+  const ordersByStatus = useMemo(() => orders.reduce((acc: Record<string, number>, o) => { acc[o.status] = (acc[o.status]||0)+1; return acc; }, {}), [orders]);
+  const statusChartData = useMemo(() => Object.entries(ordersByStatus).map(([name, value]) => ({ name, value: Number(value) })), [ordersByStatus]);
+  const topCustomers = useMemo(() => Object.values(
     orders.reduce((acc: Record<string, { name: string; total: number; count: number }>, o) => {
       const k = o.customerName || '—';
       if (!acc[k]) acc[k] = { name: k, total: 0, count: 0 };
@@ -186,18 +186,18 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
       acc[k].count += 1;
       return acc;
     }, {})
-  ).sort((a, b) => b.total - a.total).slice(0, 8);
+  ).sort((a, b) => b.total - a.total).slice(0, 8), [orders]);
 
   // --- Inventory sub-data ---
-  const totalInventoryValueTRY = inventory.reduce((s, i) => s + (i.stockLevel * ((i.prices?.['Retail']) || 0)), 0);
-  const categoryValueData = inventory.reduce((acc: Record<string, { name: string; count: number; value: number }>, item) => {
+  const totalInventoryValueTRY = useMemo(() => inventory.reduce((s, i) => s + (i.stockLevel * ((i.prices?.['Retail']) || 0)), 0), [inventory]);
+  const categoryValueData = useMemo(() => inventory.reduce((acc: Record<string, { name: string; count: number; value: number }>, item) => {
     const cat = item.category || 'Diğer';
     if (!acc[cat]) acc[cat] = { name: cat, count: 0, value: 0 };
     acc[cat].count += item.stockLevel;
     acc[cat].value += item.stockLevel * ((item.prices?.['Retail']) || 0);
     return acc;
-  }, {});
-  const categoryValueChartData = Object.values(categoryValueData);
+  }, {}), [inventory]);
+  const categoryValueChartData = useMemo(() => Object.values(categoryValueData), [categoryValueData]);
 
   const COLORS = ['#ff4000', '#007AFF', '#34C759', '#FF9500', '#AF52DE', '#00C7BE', '#FF2D55'];
 
