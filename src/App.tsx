@@ -466,6 +466,30 @@ const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v:
 // $/€ diye gösteriyordu → `?? FX_FALLBACK` ile gerçek oran kullanılır.
 const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
 
+// Modül seviyesinde (render-içi tanım yerine) — her render'da yeni identity/remount engeli.
+function DeltaBadge({ delta }: { delta: number | null | undefined }) {
+  if (delta == null || isNaN(delta)) return null;
+  const up = delta >= 0;
+  return (
+    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+      {up ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+    </span>
+  );
+}
+
+function KpiCurrencyToggle({ kpiCurrency, setKpiCurrency }: { kpiCurrency: 'TRY'|'USD'|'EUR'; setKpiCurrency: (c: 'TRY'|'USD'|'EUR') => void }) {
+  return (
+    <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+      {(['TRY','USD','EUR'] as const).map(c => (
+        <button key={c} onClick={() => setKpiCurrency(c)}
+          className={`text-[11px] font-bold px-2 py-1 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -694,16 +718,6 @@ function AppContent() {
     if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
   };
-  const KpiCurrencyToggle = () => (
-    <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-      {(['TRY','USD','EUR'] as const).map(c => (
-        <button key={c} onClick={() => setKpiCurrency(c)}
-          className={`text-[11px] font-bold px-2 py-1 rounded-md transition-all ${kpiCurrency===c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-          {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-        </button>
-      ))}
-    </div>
-  );
 
   // ── Commission Rules (for lead detail commission summary) ─────────────────
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
@@ -4313,15 +4327,6 @@ function AppContent() {
 
               {/* KPI Cards */}
               {(() => {
-                const DeltaBadge = ({ delta }: { delta: number | null | undefined }) => {
-                  if (delta == null || isNaN(delta)) return null;
-                  const up = delta >= 0;
-                  return (
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-                      {up ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
-                    </span>
-                  );
-                };
                 return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
@@ -9715,7 +9720,7 @@ function AppContent() {
                                 <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
                                   {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?totalCost6m:totalCost6m/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
                                 </span>
-                                <KpiCurrencyToggle />
+                                <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                               </div>
                             </div>
                             <div className="flex items-end gap-1.5 h-16">
@@ -10970,7 +10975,7 @@ function AppContent() {
                             <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bordro Özeti' : 'Payroll Summary'}</h3>
                           </div>
                           <div className="flex items-center gap-2">
-                            <KpiCurrencyToggle />
+                            <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                             <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} className="apple-input text-xs px-2 py-1" />
                             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                               {(['summary', 'detail'] as const).map(v => (
@@ -12831,7 +12836,7 @@ function AppContent() {
                         <Calculator className="w-3.5 h-3.5" />
                         {currentLanguage === 'tr' ? 'Stok Sayımı' : 'Stock Count'}
                       </button>
-                      <KpiCurrencyToggle />
+                      <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

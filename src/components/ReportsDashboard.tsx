@@ -65,8 +65,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
   const [logisticsSummarySort, setLogisticsSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'customerName', dir: 'asc'});
   // fmtAna uses revenueCurrency (same as the per-card toggle — no separate global state needed)
   const fmtAna = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 32;
-    const eur = exchangeRates?.EUR ?? 35;
+    const usd = exchangeRates?.USD ?? 38; // FX fallback (App.tsx FX_FALLBACK ile hizalı)
+    const eur = exchangeRates?.EUR ?? 41;
     const rate = revenueCurrency === 'USD' ? usd : revenueCurrency === 'EUR' ? eur : 1;
     const sym = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
     const locale = revenueCurrency === 'USD' ? 'en-US' : revenueCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
