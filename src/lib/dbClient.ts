@@ -247,6 +247,22 @@ export async function incrementField(
   if (!res.ok) throw new Error(`incrementField ${coll}/${id} → ${res.status}`);
 }
 
+/** Atomik compare-and-set — yarış koşulsuz "claim". data[field] === expect ise set
+ *  uygulanır. true (claim alındı) / false (başkası aldı) döner. Tek SQL UPDATE. */
+export async function compareAndSet(
+  coll: string, id: string, field: string, expect: unknown, set: Record<string, unknown>,
+): Promise<boolean> {
+  const token = await getToken();
+  const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/cas`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field, expect, set }),
+  });
+  if (!res.ok) throw new Error(`compareAndSet ${coll}/${id} → ${res.status}`);
+  const json = await res.json().catch(() => ({ claimed: false }));
+  return !!(json as { claimed?: boolean }).claimed;
+}
+
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const token = await getToken();
   const res = await fetch(`/api/db/${path}`, {

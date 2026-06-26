@@ -2363,6 +2363,35 @@ async function startServer() {
         res.json({ id, data });
       } catch (e) { dbErr(e, res, 'INCREMENT', coll); }
     });
+
+    // Atomik compare-and-set (CAS) — yarış koşulsuz "claim" için.
+    // Body: { field, expect, set } → set uygulanır YALNIZCA data[field] === expect ise.
+    // claimed=true (güncellendi) / false (koşul tutmadı, başkası aldı). Tek SQL UPDATE.
+    app.patch('/api/db/:coll/:id/cas', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
+      const coll = String(req.params.coll), id = String(req.params.id);
+      if (!validColl(coll, res)) return;
+      if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
+      const { field, expect, set } = (req.body ?? {}) as { field?: string; expect?: unknown; set?: Record<string, unknown> };
+      if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof set !== 'object' || set === null) {
+        return res.status(400).json({ error: 'field (alfasayısal) ve set (nesne) gerekli.' });
+      }
+      if (await denied(req, res, coll, 'write', id)) return;
+      try {
+        const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+        if (!rows.length) return res.status(404).json({ error: 'Not found.' });
+        if ((TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) {
+          return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
+        }
+        const upd = await docsDb.query(
+          `UPDATE docs SET data = data || $4::jsonb, updated_at = now()
+           WHERE coll = $1 AND id = $2 AND data->>$3 = $5 RETURNING data`,
+          [coll, id, field, JSON.stringify(set), String(expect)],
+        );
+        const claimed = upd.rows.length > 0;
+        if (claimed) broadcastDocChange(coll, 'set', id, upd.rows[0].data as Record<string, unknown>);
+        res.json({ claimed, data: claimed ? upd.rows[0].data : null });
+      } catch (e) { dbErr(e, res, 'CAS', coll); }
+    });
   }
 
   const apiLimiter = rateLimit({

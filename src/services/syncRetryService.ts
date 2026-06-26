@@ -8,6 +8,7 @@ import {
   query,
   where,
   limit,
+  compareAndSet,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 
@@ -115,11 +116,14 @@ export async function processPendingSyncJobs(
     jobs.map(async (job) => {
       const ref = jobRef(job.id);
 
-      // Mark in-progress
-      await updateDoc(ref, {
+      // Atomik claim: yalnız hâlâ 'queued' ise 'in-progress' yap. Eşzamanlı başka
+      // bir çalıştırma işi zaten aldıysa CAS false döner → bu çalıştırma atlar
+      // (çift Mikro push engeli — önceki oku-sonra-yaz yarış koşuluydu).
+      const claimed = await compareAndSet(COLLECTION, job.id, 'status', 'queued', {
         status: 'in-progress',
         updatedAt: Date.now(),
       });
+      if (!claimed) return;
 
       try {
         await executor(job);
