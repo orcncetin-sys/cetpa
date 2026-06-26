@@ -1864,7 +1864,9 @@ async function startServer() {
     contentSecurityPolicy: isProd ? {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", 'https://apis.google.com', 'https://www.gstatic.com', 'https://accounts.google.com'],
+        // 'unsafe-inline' kaldırıldı (inline SW script harici dosyaya alındı /sw-register.js).
+        // style-src'de korunur — Tailwind/motion runtime inline stil enjekte ediyor.
+        scriptSrc: ["'self'", 'https://apis.google.com', 'https://www.gstatic.com', 'https://accounts.google.com'],
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
