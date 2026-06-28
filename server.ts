@@ -471,7 +471,7 @@ const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnbo
 // Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
 // ERP/email/iyzico gibi deployment-seviyesi creds GLOBAL kalır (server cron/API okur).
 // docs tablosu PK (coll,id) olduğu için id companyId ile namespace'lenir: `${cid}__{key}`.
-const PER_COMPANY_SETTINGS = new Set(['app', 'erpHub', 'workingCapital', 'companyProfile']);
+const PER_COMPANY_SETTINGS = new Set(['app', 'erpHub', 'workingCapital', 'companyProfile', 'gib']);
 
 // Kullanıcının firma kimliği: users/{uid}.companyId, yoksa uid (sahip = kendi firması).
 const companyIdCache = new Map<string, { cid: string; exp: number }>();

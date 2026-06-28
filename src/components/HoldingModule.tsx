@@ -8,6 +8,7 @@ import { Building2, Plus, BarChart3, FileText, ArrowLeftRight, TrendingUp, Trend
 interface HoldingModuleProps {
   currentLanguage: string;
   isAuthenticated: boolean;
+  exchangeRates?: Record<string, number> | null;
 }
 
 interface Entity {
@@ -62,8 +63,15 @@ function fmt(n: number, currency = 'TRY') {
   return new Intl.NumberFormat('tr-TR', { style: 'currency', currency, minimumFractionDigits: 0 }).format(n);
 }
 
-export default function HoldingModule({ currentLanguage, isAuthenticated }: HoldingModuleProps) {
+export default function HoldingModule({ currentLanguage, isAuthenticated, exchangeRates }: HoldingModuleProps) {
   const tr = currentLanguage === 'tr';
+  // Konsolidasyon tek raporlama para birimine (₺) çevrilir. Canlı kur yoksa yedek.
+  const toTRY = (amount: number, currency = 'TRY') => {
+    const amt = Number(amount) || 0;
+    if (currency === 'USD') return amt * (exchangeRates?.USD ?? 38);
+    if (currency === 'EUR') return amt * (exchangeRates?.EUR ?? 41);
+    return amt;
+  };
   const [view, setView] = useState<'entities' | 'coa' | 'intercompany' | 'consolidation'>('entities');
   const [entities, setEntities] = useState<Entity[]>([]);
   const [accounts, setAccounts] = useState<GLAccount[]>([]);
@@ -136,22 +144,27 @@ export default function HoldingModule({ currentLanguage, isAuthenticated }: Hold
       const entity = entities.find(e => e.id === a.entityId);
       const ownershipFactor = (entity?.ownership ?? 100) / 100;
       const key = `${a.type}||${a.code}||${a.name}`;
-      if (!map[key]) map[key] = { balance: 0, currency: a.currency, type: a.type, name: a.name, code: a.code };
-      map[key].balance += a.balance * ownershipFactor;
-    });
-    // Subtract eliminated intercompany
-    intercompany.filter(ic => ic.eliminated).forEach(ic => {
-      // reduce from both receivable and payable (simplified: reduce asset + liability by same amount)
+      // Tüm bakiyeler ₺'ye çevrilip ağırlıklandırılır (önce karışık para birimi ham toplanıyordu).
+      if (!map[key]) map[key] = { balance: 0, currency: 'TRY', type: a.type, name: a.name, code: a.code };
+      map[key].balance += toTRY(a.balance, a.currency) * ownershipFactor;
     });
     Object.values(map).forEach(item => {
-      result[item.type].push({ code: item.code, name: item.name, balance: item.balance, currency: item.currency });
+      result[item.type].push({ code: item.code, name: item.name, balance: item.balance, currency: 'TRY' });
     });
     Object.values(result).forEach(arr => arr.sort((a,b) => a.code.localeCompare(b.code)));
     return result;
-  }, [accounts, entities, intercompany]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, entities, exchangeRates]);
 
-  const totalAssets = consolidation.asset.reduce((s,a) => s + a.balance, 0);
-  const totalLiabilities = consolidation.liability.reduce((s,a) => s + a.balance, 0);
+  // Elimine edilen şirketler-arası işlemler ₺ cinsinden (konsolide varlık+borçtan düşülür).
+  const icEliminatedTRY = useMemo(
+    () => intercompany.filter(ic => ic.eliminated).reduce((s, ic) => s + toTRY(ic.amount, ic.currency), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [intercompany, exchangeRates]
+  );
+
+  const totalAssets = consolidation.asset.reduce((s,a) => s + a.balance, 0) - icEliminatedTRY;
+  const totalLiabilities = consolidation.liability.reduce((s,a) => s + a.balance, 0) - icEliminatedTRY;
   const totalEquity = consolidation.equity.reduce((s,a) => s + a.balance, 0);
   const totalRevenue = consolidation.revenue.reduce((s,a) => s + a.balance, 0);
   const totalExpense = consolidation.expense.reduce((s,a) => s + a.balance, 0);
@@ -165,12 +178,13 @@ export default function HoldingModule({ currentLanguage, isAuthenticated }: Hold
       if (!totals[ic.fromEntityId]) totals[ic.fromEntityId] = { receivable: 0, payable: 0 };
       if (!totals[ic.toEntityId]) totals[ic.toEntityId] = { receivable: 0, payable: 0 };
       if (!ic.eliminated) {
-        totals[ic.fromEntityId].receivable += ic.amount;
-        totals[ic.toEntityId].payable += ic.amount;
+        totals[ic.fromEntityId].receivable += toTRY(ic.amount, ic.currency);
+        totals[ic.toEntityId].payable += toTRY(ic.amount, ic.currency);
       }
     });
     return totals;
-  }, [intercompany]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intercompany, exchangeRates]);
 
   const tabs = [
     { id: 'entities', label: tr ? 'Şirketler' : 'Entities', icon: Building2 },
@@ -281,8 +295,8 @@ export default function HoldingModule({ currentLanguage, isAuthenticated }: Hold
                             <span>{e.ownership}%</span>
                           </div>
                         </td>
-                        <td className="p-3 text-right text-green-600">{ic.receivable > 0 ? fmt(ic.receivable, e.currency) : '-'}</td>
-                        <td className="p-3 text-right text-red-500">{ic.payable > 0 ? fmt(ic.payable, e.currency) : '-'}</td>
+                        <td className="p-3 text-right text-green-600">{ic.receivable > 0 ? fmt(ic.receivable, 'TRY') : '-'}</td>
+                        <td className="p-3 text-right text-red-500">{ic.payable > 0 ? fmt(ic.payable, 'TRY') : '-'}</td>
                       </tr>
                     );
                   })}

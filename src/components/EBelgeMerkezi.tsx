@@ -198,6 +198,8 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   };
 
   const handleResend = async (belge: EBelge) => {
+    // GIB bağlı değilken "Gönderildi" yapma (sahte başarı engeli).
+    if (!gibConnected) { showToast('GIB bağlantısı yok — önce bağlanın.', 'error'); return; }
     try {
       await updateDoc(doc(db, 'eBelgeler', belge.id), { durum: 'Gönderildi' });
       showToast(`${belge.belgeNo} yeniden gönderildi.`);
@@ -207,6 +209,9 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   };
 
   const handleDelete = async (id: string) => {
+    // Gönderilmiş e-Belge yasal olarak silinemez (iptal edilmeli) — koruma.
+    const belge = belgeler.find(b => b.id === id);
+    if (belge?.durum === 'Gönderildi') { showToast('Gönderilmiş belge silinemez; iptal edilmelidir.', 'error'); setDeleting(null); return; }
     if (!await confirmDelete()) return;
     try {
       await deleteDoc(doc(db, 'eBelgeler', id));
@@ -235,7 +240,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   const bekleyen = belgeler.filter(b => b.durum === 'Bekliyor').length;
 
   const fmt = (n: number) =>
-    n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="space-y-5">

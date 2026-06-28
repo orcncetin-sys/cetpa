@@ -12638,6 +12638,7 @@ function AppContent() {
                 <HoldingModule
                   currentLanguage={currentLanguage}
                   isAuthenticated={!!user}
+                  exchangeRates={exchangeRates}
                 />
               </React.Suspense>
             </motion.div>
