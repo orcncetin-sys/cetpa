@@ -167,6 +167,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
 
   async function closeTalep() {
     if (!closingTalep) return;
+    if (!cozumAciklama.trim()) { alert(_lang === 'tr' ? 'Çözüm açıklaması zorunlu.' : 'Resolution note required.'); return; }
     await updateDoc(doc(db, 'servisTalepleri', closingTalep.id), {
       durum: 'Çözüldü',
       cozumAciklamasi: cozumAciklama,

@@ -231,10 +231,12 @@ export default function MRPModule({
         bom.components.forEach(comp => {
           const required = comp.quantity * demandQty;
           const stock = inventory.find(i => i.id === comp.inventoryId);
-          const onHand = stock?.quantity ?? stock?.stockLevel ?? 0;
-          const avail = remaining[comp.inventoryId] ?? onHand; // önceki satırların tükettiği düşülmüş
+          // Boş inventoryId'li (serbest-metin) bileşenler tek '' bucket'ında çakışmasın → ada göre ayrı anahtar.
+          const key = comp.inventoryId || `name:${comp.name}`;
+          const onHand = comp.inventoryId ? (stock?.quantity ?? stock?.stockLevel ?? 0) : 0;
+          const avail = remaining[key] ?? onHand; // önceki satırların tükettiği düşülmüş
           const shortage = required - avail;
-          remaining[comp.inventoryId] = Math.max(0, avail - required);
+          remaining[key] = Math.max(0, avail - required);
           if (shortage > 0) {
             suggestions.push({
               type: 'purchase',

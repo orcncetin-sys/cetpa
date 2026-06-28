@@ -91,7 +91,14 @@ function statusBadge(durum: string) {
   return `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${map[durum] ?? 'bg-gray-100 text-gray-600'}`;
 }
 
-export default function IhracatModule({ currentLanguage, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+export default function IhracatModule({ currentLanguage, isAuthenticated, exchangeRates }: { currentLanguage: string; isAuthenticated: boolean; exchangeRates?: Record<string, number> | null }) {
+  // Karışık dövizleri (USD/EUR) ₺'ye çevir (önce ham toplanıp USD etiketleniyordu).
+  const toTRY = (amount: number, doviz?: string) => {
+    const a = Number(amount) || 0;
+    if (doviz === 'EUR') return a * (exchangeRates?.EUR ?? 41);
+    if (doviz === 'USD') return a * (exchangeRates?.USD ?? 38);
+    return a;
+  };
   const [activeTab, setActiveTab] = useState<'ihracat' | 'ithalat' | 'akreditif' | 'gumruk'>('ihracat');
   const [ihracatlar, setIhracatlar] = useState<Ihracat[]>([]);
   const [ithalatlar, setIthalatlar] = useState<Ithalat[]>([]);
@@ -192,7 +199,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
     setSaving(false);
   }
 
-  const ihracatToplam = ihracatlar.reduce((s, i) => s + (i.tutar || 0), 0);
+  const ihracatToplam = ihracatlar.reduce((s, i) => s + toTRY(i.tutar, i.doviz), 0);
   const bekleyenGumruk = ihracatlar.filter(i => i.gumrukDurumu === 'Bekliyor' || i.gumrukDurumu === 'Gümrükte').length;
 
   const tabs = [
@@ -209,7 +216,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated }: { cu
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Toplam İhracat', value: ihracatlar.length, color: 'text-brand' },
-            { label: 'Aylık Tutar (USD)', value: `$${ihracatToplam.toLocaleString()}`, color: 'text-green-600' },
+            { label: 'Toplam Tutar (₺)', value: `₺${Math.round(ihracatToplam).toLocaleString('tr-TR')}`, color: 'text-green-600' },
             { label: 'Bekleyen Gümrük', value: bekleyenGumruk, color: 'text-amber-600' },
             { label: 'Ort. Teslimat (gün)', value: '14', color: 'text-blue-600' },
           ].map(kpi => (

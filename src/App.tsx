@@ -12562,7 +12562,7 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'Dış ticaret, akreditif ve gümrük beyanname yönetimi' : 'Foreign trade, letters of credit and customs declarations'}
                     icon={Ship}
                   />
-                  <IhracatModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ihracat')} />
+                  <IhracatModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ihracat')} exchangeRates={exchangeRates} />
                 </>
               )}
             </motion.div>

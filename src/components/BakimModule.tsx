@@ -164,7 +164,15 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
   }
 
   async function deleteEkipman(id: string) {
-    if (!confirm('Ekipman silinsin mi?')) return;
+    // İlişkili iş emri / arıza varsa silme (orphan engeli).
+    const refCount = isEmirleri.filter(i => i.ekipmanId === id).length + arizalar.filter(a => a.ekipmanId === id).length;
+    if (refCount > 0) {
+      alert(_lang === 'tr'
+        ? `Bu ekipmana bağlı ${refCount} iş emri/arıza var. Önce onları kaldırın.`
+        : `${refCount} work orders/faults reference this equipment. Remove them first.`);
+      return;
+    }
+    if (!confirm(_lang === 'tr' ? 'Ekipman silinsin mi?' : 'Delete equipment?')) return;
     await deleteDoc(doc(db, 'ekipmanlar', id));
   }
 

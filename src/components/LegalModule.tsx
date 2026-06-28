@@ -353,9 +353,9 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
   };
 
-  // KPIs
-  const activeContractsValue = contracts.filter(c => c.status === 'Aktif').reduce((sum, c) => sum + c.value, 0);
-  const totalCasesValue = cases.reduce((sum, c) => sum + c.amount, 0);
+  // KPIs — null-guard (undefined value/amount crash engeli).
+  const activeContractsValue = contracts.filter(c => c.status === 'Aktif').reduce((sum, c) => sum + (Number(c.value) || 0), 0);
+  const totalCasesValue = cases.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
   return (
     <div className="space-y-6">

@@ -184,6 +184,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
       } else {
         await addDoc(collection(db, 'shareholders'), {
           ...shareholderForm,
+          createdAt: serverTimestamp(), // önce yoktu → liste sıralaması bozuluyordu
           updatedAt: serverTimestamp()
         });
         showToast(currentLanguage === 'tr' ? 'Ortak kaydedildi.' : 'Shareholder saved.');
