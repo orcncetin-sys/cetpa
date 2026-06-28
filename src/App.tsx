@@ -7113,6 +7113,7 @@ function AppContent() {
                       <SabitKiymetModule
                         currentLanguage={currentLanguage}
                         isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                        exchangeRates={exchangeRates}
                       />
                     </motion.div>
                   )}

@@ -82,15 +82,19 @@ interface Props {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function calcConfiguredPrice(template: ProductTemplate, selectedOptions: Record<string, string>): number {
-  let price = template.basePrice;
+  // Sıra-bağımsız: tüm deltalar toplanır, tüm çarpanlar çarpılır, sonra uygulanır.
+  // (Önce `price += delta; price *= mult` çarpanı önceki deltalara da uyguluyordu →
+  //  nitelik sırasına bağlı, özetle uzlaşmayan fiyat.)
+  let deltaSum = 0;
+  let multiplier = 1;
   template.attributes.forEach(attr => {
-    const selected = selectedOptions[attr.name];
-    const option = attr.options.find(o => o.label === selected);
+    const option = attr.options.find(o => o.label === selectedOptions[attr.name]);
     if (option) {
-      price += option.priceDelta;
-      price *= option.priceMultiplier;
+      deltaSum += option.priceDelta || 0;
+      multiplier *= (option.priceMultiplier ?? 1);
     }
   });
+  const price = (template.basePrice + deltaSum) * multiplier;
   return Math.round(price * 100) / 100;
 }
 

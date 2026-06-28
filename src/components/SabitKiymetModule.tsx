@@ -91,6 +91,9 @@ const formatDateTR = (str: string): string => {
 
 function calcYillikAmort(item: SabitKiymet): number {
   if (item.faydaliOmur <= 0) return 0;
+  // Tamamen amortismana tabi tutulmuşsa yıllık amortisman 0 (önce azalan-bakiyede
+  // ömür sonrası sonsuz amortisman gösteriyordu).
+  if (calcBirikmisSalinma(item) >= item.alisBedeli) return 0;
   if (item.amortYontemi === 'Doğrusal') {
     return item.alisBedeli / item.faydaliOmur;
   }
@@ -101,6 +104,8 @@ function calcYillikAmort(item: SabitKiymet): number {
 }
 
 function calcBirikmisSalinma(item: SabitKiymet): number {
+  // Manuel override (0 = otomatik hesapla) — önce sessizce yok sayılıyordu.
+  if (item.birikmisSalinma > 0) return Math.min(item.birikmisSalinma, item.alisBedeli);
   if (!item.alisTarihi) return 0;
   const alis = new Date(item.alisTarihi);
   const now = new Date();
@@ -354,10 +359,19 @@ const emptySigorta = (): Omit<SigortaKayit, 'id'> => ({
 export default function SabitKiymetModule({
   currentLanguage,
   isAuthenticated,
+  exchangeRates,
 }: {
   currentLanguage: string;
   isAuthenticated: boolean;
+  exchangeRates?: Record<string, number> | null;
 }) {
+  // KPI toplamları tek para birimine (₺) çevrilir (önce karışık para birimi ham toplanıyordu).
+  const toTRY = (amount: number, currency?: string) => {
+    const a = Number(amount) || 0;
+    if (currency === 'USD') return a * (exchangeRates?.USD ?? 38);
+    if (currency === 'EUR') return a * (exchangeRates?.EUR ?? 41);
+    return a;
+  };
   const tr = currentLanguage === 'tr';
   const L = (key: LabelKey) => t(key, currentLanguage);
 
@@ -431,11 +445,12 @@ export default function SabitKiymetModule({
   }, [isAuthenticated]);
 
   // ── KPI stats ─────────────────────────────────────────────────────────────
-  const aktifVarliklar = varliklar.filter(v => v.durum === 'Aktif');
+  // Elden çıkarılan/hurda hariç tüm sahip olunan varlıklar (Bakımda dahil — önce dışlanıyordu).
+  const aktifVarliklar = varliklar.filter(v => v.durum === 'Aktif' || v.durum === 'Bakımda');
   const kpi = {
     count: varliklar.length,
-    toplamDeger: aktifVarliklar.reduce((s, v) => s + calcNetDeger(v), 0),
-    toplamBirikmiS: aktifVarliklar.reduce((s, v) => s + calcBirikmisSalinma(v), 0),
+    toplamDeger: aktifVarliklar.reduce((s, v) => s + toTRY(calcNetDeger(v), v.paraBirimi), 0),
+    toplamBirikmiS: aktifVarliklar.reduce((s, v) => s + toTRY(calcBirikmisSalinma(v), v.paraBirimi), 0),
   };
 
   // ── Filtering & sorting (Varlıklar) ───────────────────────────────────────
@@ -607,6 +622,16 @@ export default function SabitKiymetModule({
     if (!deleteTarget) return;
     try {
       await deleteDoc(doc(db, deleteTarget.col, deleteTarget.id));
+      // Varlık silinince ilişkili amortisman/bakım/sigorta kayıtları da silinir (orphan engeli).
+      if (deleteTarget.col === 'sabitKiymetler') {
+        const vid = deleteTarget.id;
+        const dels = [
+          ...amortKayitlar.filter(a => a.varlikId === vid).map(a => deleteDoc(doc(db, 'amortismanKayitlari', a.id))),
+          ...bakimlar.filter(b => b.varlikId === vid).map(b => deleteDoc(doc(db, 'sabitKiymetBakim', b.id))),
+          ...sigortalar.filter(s => s.varlikId === vid).map(s => deleteDoc(doc(db, 'sabitKiymetSigorta', s.id))),
+        ];
+        await Promise.allSettled(dels);
+      }
       showToast(L('basarili'));
     } catch (err) {
       console.error(err);

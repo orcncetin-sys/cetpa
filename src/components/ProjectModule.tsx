@@ -344,6 +344,10 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
         try {
           const col = type === 'project' ? 'projects' : type === 'task' ? 'tasks' : 'resources';
           await deleteDoc(doc(db, col, id));
+          // Proje silinince görevleri de silinir (orphan görev engeli).
+          if (type === 'project') {
+            await Promise.allSettled(tasks.filter(t => t.projectId === id).map(t => deleteDoc(doc(db, 'tasks', t.id))));
+          }
           showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
         } catch (err) {
           logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
@@ -604,33 +608,26 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
             <ResponsiveContainer width="100%" height={600}>
               <ComposedChart 
                 layout="vertical" 
-                data={projects.flatMap(p => {
-                  const projectTasks = tasks.filter(t => t.projectId === p.id);
-                  const minDate = new Date(Math.min(...projects.map(p => parseISO(p.startDate).getTime())));
-                  
-                  return [
-                    {
-                      id: p.id,
-                      name: p.name,
-                      type: 'project',
-                      start: differenceInDays(parseISO(p.startDate), minDate),
-                      duration: Math.max(1, differenceInDays(parseISO(p.endDate), parseISO(p.startDate))),
-                      progress: p.progress,
-                      startDate: p.startDate,
-                      endDate: p.endDate
-                    },
-                    ...projectTasks.map(t => ({
-                      id: t.id,
-                      name: `  ↳ ${t.title}`,
-                      type: 'task',
-                      start: differenceInDays(parseISO(t.startDate), minDate),
-                      duration: Math.max(1, differenceInDays(parseISO(t.dueDate), parseISO(t.startDate))),
-                      progress: t.status === 'Done' ? 100 : t.status === 'In-Progress' ? 50 : 0,
-                      startDate: t.startDate,
-                      endDate: t.dueDate
-                    }))
-                  ];
-                })} 
+                data={(() => {
+                  // Güvenli tarih ayrıştırma: geçersiz/boş startDate NaN crash'ine yol açmaz.
+                  const ts = (s?: string) => { const d = s ? parseISO(s) : null; return d && !isNaN(d.getTime()) ? d.getTime() : NaN; };
+                  const valid = projects.map(p => ts(p.startDate)).filter(t => !isNaN(t));
+                  const minDate = new Date(valid.length ? Math.min(...valid) : Date.now());
+                  const startOf = (s?: string) => { const t = ts(s); return isNaN(t) ? 0 : Math.max(0, differenceInDays(new Date(t), minDate)); };
+                  const durOf = (s?: string, e?: string) => { const a = ts(s), b = ts(e); return (isNaN(a) || isNaN(b)) ? 1 : Math.max(1, differenceInDays(new Date(b), new Date(a))); };
+                  return projects.flatMap(p => {
+                    const projectTasks = tasks.filter(t => t.projectId === p.id);
+                    return [
+                      { id: p.id, name: p.name, type: 'project', start: startOf(p.startDate), duration: durOf(p.startDate, p.endDate), progress: p.progress, startDate: p.startDate, endDate: p.endDate },
+                      ...projectTasks.map(t => ({
+                        id: t.id, name: `  ↳ ${t.title}`, type: 'task',
+                        start: startOf(t.startDate), duration: durOf(t.startDate, t.dueDate),
+                        progress: t.status === 'Done' ? 100 : t.status === 'In-Progress' ? 50 : 0,
+                        startDate: t.startDate, endDate: t.dueDate,
+                      })),
+                    ];
+                  });
+                })()}
                 margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#F5F5F7" />
