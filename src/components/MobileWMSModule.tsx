@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
+import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, incrementField } from '../lib/dbClient';
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3 } from 'lucide-react';
@@ -184,6 +184,22 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       lines: task.lines,
       completedAt: serverTimestamp(),
     });
+    // Görev tamamlanınca stok hareketi: mal kabul/yerleştirme → giriş, toplama → çıkış.
+    // (Önce stok hiç hareket etmiyordu.) Atomik increment + hareket logu.
+    const dir: 'in' | 'out' | null = (task.type === 'receive' || task.type === 'putaway') ? 'in' : task.type === 'pick' ? 'out' : null;
+    if (dir) {
+      for (const line of task.lines) {
+        const qty = Number(line.qtyDone || line.qty) || 0;
+        if (!line.productId || qty <= 0) continue;
+        try {
+          await incrementField('inventory', line.productId, 'stockLevel', dir === 'out' ? -qty : qty, 0);
+          await addDoc(collection(db, 'inventoryMovements'), {
+            type: dir, productId: line.productId, productName: line.productName, sku: line.sku,
+            quantity: qty, note: `WMS ${task.type}`, timestamp: serverTimestamp(),
+          });
+        } catch (err) { console.error('[completeTask stok]', err); }
+      }
+    }
     setActiveTask(null);
   };
 
@@ -219,10 +235,18 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
         { entityType: 'cycleCount', entityId: new Date().toISOString().slice(0, 10) }
       ).catch(() => { /* syncLog'da görünür */ });
     }
-    // Adjust inventory for discrepancies
+    // Sayım farklarını uygula: kanonik 'stockLevel' alanına yaz (önce 'quantity'ye
+    // yazıyordu — app geneli stockLevel kullanıyor, düzeltme görünmüyordu) + hareket logu.
     for (const item of discrepancies) {
-      if (item.countedQty !== null) {
-        await updateDoc(doc(db, 'inventory', item.productId), { quantity: item.countedQty });
+      if (item.countedQty === null) continue;
+      const counted = Math.max(0, Number(item.countedQty) || 0);
+      await updateDoc(doc(db, 'inventory', item.productId), { stockLevel: counted, quantity: counted });
+      const delta = counted - (Number(item.systemQty) || 0);
+      if (delta !== 0) {
+        await addDoc(collection(db, 'inventoryMovements'), {
+          type: delta >= 0 ? 'in' : 'out', productId: item.productId, productName: item.productName, sku: item.sku,
+          quantity: Math.abs(delta), note: tr ? 'Sayım düzeltmesi' : 'Cycle-count adjustment', timestamp: serverTimestamp(),
+        });
       }
     }
     setCycleItems([]);
@@ -525,11 +549,13 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
+                      min={0}
                       className="apple-input w-20 p-2 rounded-xl text-sm text-right"
                       placeholder={tr ? 'Sayılan' : 'Counted'}
                       value={item.countedQty ?? ''}
                       onChange={e => {
-                        const val = Number(e.target.value);
+                        const raw = Number(e.target.value);
+                        const val = Number.isFinite(raw) ? Math.max(0, raw) : 0; // negatif/NaN engeli
                         setCycleItems(prev => prev.map((ci, j) =>
                           j === i ? { ...ci, countedQty: val, counted: true } : ci
                         ));

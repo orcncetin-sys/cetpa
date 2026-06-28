@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp, FileDown } from 'lucide-react';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp, incrementField } from '../lib/dbClient';
 import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { satinAlmaTalepPayload } from '../services/mikroEvrak';
@@ -121,14 +121,18 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   };
 
   const handleUpdateItem = (id: string, field: string, value: string | number) => {
+    // Sayısal alanlarda negatif/NaN engeli (totalAmount bozulmasın).
+    const v = (field === 'quantity' || field === 'purchasePrice')
+      ? Math.max(0, Number(value) || 0)
+      : value;
     setNewOrder(prev => ({
       ...prev,
-      items: prev.items.map(i => i.id === id ? { ...i, [field]: value } : i)
+      items: prev.items.map(i => i.id === id ? { ...i, [field]: v } : i)
     }));
   };
 
   const calculateTotal = (items: PurchaseOrderItem[]) => {
-    return items.reduce((acc, curr) => acc + (curr.purchasePrice * curr.quantity), 0);
+    return items.reduce((acc, curr) => acc + ((Number(curr.purchasePrice) || 0) * (Number(curr.quantity) || 0)), 0);
   };
 
   const handleSubmitOrder = async () => {
@@ -227,28 +231,24 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
         updatedAt: serverTimestamp()
       });
 
-      // If received, update inventory
+      // Teslim alındıysa stok girişi — idempotent (receivedApplied flag ile çift giriş
+      // engeli) + atomik increment (önce read-modify-write + flag yoktu).
       if (newStatus === 'Teslim Alındı') {
         const order = purchaseOrders.find(o => o.id === orderId);
-        if (order) {
+        if (order && (order as { receivedApplied?: boolean }).receivedApplied !== true) {
           for (const item of order.items) {
             const invItem = inventory.find(i => i.id === item.id || i.sku === item.sku);
-            if (invItem) {
-              await updateDoc(doc(db, 'inventory', invItem.id), {
-                stockLevel: (invItem.stockLevel || 0) + Number(item.quantity)
-              });
-              // Log to inventoryMovements (same collection App.tsx reads)
+            const qty = Number(item.quantity) || 0;
+            if (invItem && qty > 0) {
+              await incrementField('inventory', invItem.id, 'stockLevel', qty, 0);
               await addDoc(collection(db, 'inventoryMovements'), {
-                productId: invItem.id,
-                productName: invItem.name,
-                type: 'in',
-                quantity: Number(item.quantity),
-                reason: `Satın Alma Siparişi #${order.orderNumber}`,
-                notes: `Tedarikçi: ${order.supplier}`,
+                productId: invItem.id, productName: invItem.name, type: 'in', quantity: qty,
+                reason: `Satın Alma Siparişi #${order.orderNumber}`, notes: `Tedarikçi: ${order.supplier}`,
                 timestamp: serverTimestamp()
               });
             }
           }
+          await updateDoc(doc(db, 'purchaseOrders', orderId), { receivedApplied: true });
         }
       }
     } catch (error) {
