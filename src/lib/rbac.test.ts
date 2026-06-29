@@ -38,28 +38,29 @@ describe('isAllowed — RBAC politikası', () => {
     expect(isAllowed('Manager', 'subscriptions', 'read')).toBe(true);
   });
 
-  it('B2B/Dealer (dış roller) yalnız okuyabilir', () => {
+  it('B2B/Dealer sipariş yazabilir, diğerlerinde yalnız okuyabilir', () => {
     expect(isAllowed('B2B', 'inventory', 'read')).toBe(true);
     expect(isAllowed('B2B', 'inventory', 'write')).toBe(false);
-    expect(isAllowed('Dealer', 'orders', 'write')).toBe(false);
+    expect(isAllowed('Dealer', 'orders', 'write')).toBe(true);
     expect(isAllowed('Dealer', 'orders', 'delete')).toBe(false);
   });
 
-  it('append-only koleksiyonlar: yazma (ekleme) var, güncelleme/silme yok', () => {
+  it('append-only koleksiyonlar: yazma var, okuma yalnız Admin, güncelleme/silme yok', () => {
     // personel ekleyebilir
     expect(isAllowed('Sales', 'auditLog', 'write')).toBe(true);
     expect(isAllowed('Sales', 'syncLog', 'write')).toBe(true);
-    // ama güncelleme/silme kimseye yok (Admin hariç — o yukarıda true döner)
+    // ama güncelleme/silme kimseye yok (Admin hariç)
     expect(isAllowed('Sales', 'auditLog', 'delete')).toBe(false);
     expect(isAllowed('Manager', 'auditLog', 'delete')).toBe(false);
     expect(isAllowed('Manager', 'clientErrors', 'delete')).toBe(false);
-    // okuma serbest (personel)
-    expect(isAllowed('Sales', 'auditLog', 'read')).toBe(true);
+    // okuma yalnız Admin/Manager
+    expect(isAllowed('Admin', 'auditLog', 'read')).toBe(true);
+    expect(isAllowed('Sales', 'auditLog', 'read')).toBe(false);
   });
 
-  it('B2B append-only koleksiyona yazamaz (yalnız okuma rolü)', () => {
+  it('B2B append-only koleksiyona ne okuyabilir ne yazabilir', () => {
     expect(isAllowed('B2B', 'auditLog', 'write')).toBe(false);
-    expect(isAllowed('B2B', 'auditLog', 'read')).toBe(true);
+    expect(isAllowed('B2B', 'auditLog', 'read')).toBe(false);
   });
 });
 
