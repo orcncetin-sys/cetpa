@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Search, Tag, TrendingUp, Plus, X, RefreshCw, Store, Lightbulb } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Search, Tag, TrendingUp, Plus, X, RefreshCw, Store, Lightbulb, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { suggestPricing, maxBuyPrice } from '../lib/pricingEngine';
 import type { InventoryItem } from '../types';
@@ -27,6 +27,24 @@ export default function PriceIntelPanel({ inventory, currentLanguage, toast }: P
   const [manualPrice, setManualPrice] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<MarketResult[]>([]);
+  const [mpStatus, setMpStatus] = useState<{ trendyol: boolean; amazon: boolean } | null>(null);
+
+  // Açılışta pazaryeri entegrasyon durumunu çek (banner için).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authedFetch('/api/marketplace/status');
+        if (res.ok && !cancelled) {
+          const d = await res.json() as { trendyol?: { configured?: boolean }; amazon?: { configured?: boolean } };
+          setMpStatus({ trendyol: !!d.trendyol?.configured, amazon: !!d.amazon?.configured });
+        }
+      } catch { /* sessiz */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const anyConfigured = !!(mpStatus && (mpStatus.trendyol || mpStatus.amazon));
 
   const filtered = useMemo(() => {
     if (!q.trim()) return inventory.slice(0, 8);
@@ -79,6 +97,25 @@ export default function PriceIntelPanel({ inventory, currentLanguage, toast }: P
           <p className="text-xs text-[#86868B]">{tr ? 'Pazaryeri rakip fiyatları + alış/satış fiyatlandırma önerisi' : 'Marketplace competitor prices + buy/sell pricing suggestions'}</p>
         </div>
       </div>
+
+      {/* Pazaryeri entegrasyon durumu */}
+      {mpStatus && (
+        anyConfigured ? (
+          <div className="apple-card p-3 flex items-center gap-2 text-sm text-green-600 bg-green-50">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            {tr ? 'Pazaryeri bağlı:' : 'Marketplace connected:'} {[mpStatus.trendyol && 'Trendyol', mpStatus.amazon && 'Amazon'].filter(Boolean).join(', ')}
+          </div>
+        ) : (
+          <div className="apple-card p-3 flex items-start gap-2 text-sm text-amber-800 bg-amber-50">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              {tr
+                ? 'Pazaryeri otomatik çekimi KAPALI (Trendyol/Amazon API anahtarı yok). “Pazaryeri Ara” sonuç döndürmez — aşağıdan rakip fiyatları manuel girin, öneriler yine hesaplanır. Otomatik çekim için Ayarlar’dan API anahtarlarını ekleyin.'
+                : 'Marketplace auto-fetch is OFF (no Trendyol/Amazon API keys). “Search Marketplace” returns nothing — enter competitor prices manually below; suggestions still compute. Add API keys in Settings to enable auto-fetch.'}
+            </span>
+          </div>
+        )
+      )}
 
       {/* Ürün seçimi */}
       <div className="apple-card p-4">
