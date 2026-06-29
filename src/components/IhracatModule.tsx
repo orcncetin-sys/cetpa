@@ -341,7 +341,17 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 font-medium text-gray-900">{a.banka}</td>
                   <td className="py-3 px-3 text-gray-600">{a.lehdarAmir}</td>
                   <td className="py-3 px-3 font-semibold">{a.doviz} {a.tutar?.toLocaleString()}</td>
-                  <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{a.vadesi}</td>
+                  <td className="py-3 px-3 text-gray-600 whitespace-nowrap">
+                    {a.vadesi}
+                    {(() => {
+                      const d = a.vadesi ? new Date(a.vadesi) : null;
+                      if (!d || isNaN(d.getTime()) || a.durum === 'Kapandı' || a.durum === 'Tamamlandı') return null;
+                      const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
+                      if (days < 0) return <span className="block text-[10px] mt-1 bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-semibold w-fit">{Math.abs(days)}g geçti</span>;
+                      if (days <= 7) return <span className="block text-[10px] mt-1 bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold w-fit">{days}g kaldı</span>;
+                      return null;
+                    })()}
+                  </td>
                   <td className="py-3 px-3">
                     <span className="bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded-full font-medium">{a.tur}</span>
                     {a.lcTur && <span className="block text-[10px] text-gray-400 mt-1">{a.lcTur}</span>}

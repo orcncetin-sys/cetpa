@@ -193,6 +193,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
   const [quoteCustomer, setQuoteCustomer] = useState('');
   const [quoteValidDays, setQuoteValidDays] = useState(30);
   const [quoteNotes, setQuoteNotes] = useState('');
+  const [quoteKdvOran, setQuoteKdvOran] = useState(20);
 
   const emptyTemplate: Omit<ProductTemplate, 'id' | 'createdAt'> = {
     name: '', description: '', basePrice: 0, currency: 'TRY',
@@ -234,12 +235,14 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
 
   const createQuote = async () => {
     if (!quoteCustomer.trim() || cartItems.length === 0) return;
-    const total = cartItems.reduce((s, i) => s + i.totalPrice, 0);
+    const netToplam = cartItems.reduce((s, i) => s + i.totalPrice, 0);
+    const kdvTutari = Math.round(netToplam * (quoteKdvOran / 100) * 100) / 100;
+    const total = Math.round((netToplam + kdvTutari) * 100) / 100; // KDV dahil brüt
     const validUntil = new Date(Date.now() + quoteValidDays * 86400000).toISOString().slice(0, 10);
     const qNum = `CPQ-${Date.now().toString(36).toUpperCase()}`;
     await addDoc(collection(db, 'cpqQuotes'), {
       quoteNumber: qNum, customerName: quoteCustomer, validUntil,
-      items: cartItems, totalAmount: total, notes: quoteNotes,
+      items: cartItems, netToplam, kdvOran: quoteKdvOran, kdvTutari, totalAmount: total, notes: quoteNotes,
       status: 'Taslak', createdAt: serverTimestamp(),
     });
     setCartItems([]); setQuoteCustomer(''); setQuoteNotes('');
@@ -539,14 +542,27 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                 <textarea value={quoteNotes} onChange={e => setQuoteNotes(e.target.value)}
                   placeholder={tr ? 'Notlar' : 'Notes'} className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
               </div>
-              <div className="flex items-center justify-between">
-                <p className="font-bold text-gray-900">
-                  {tr ? 'Toplam:' : 'Total:'} {fmtTRY(cartItems.reduce((s, i) => s + i.totalPrice, 0))}
-                </p>
-                <button onClick={createQuote} className="apple-button-primary px-5 py-2 text-sm">
-                  {tr ? 'Teklifi Kaydet' : 'Save Quote'}
-                </button>
-              </div>
+              {(() => {
+                const net = cartItems.reduce((s, i) => s + i.totalPrice, 0);
+                const kdv = net * (quoteKdvOran / 100);
+                return (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-sm">
+                      <div className="text-gray-500">{tr ? 'Ara Toplam (net):' : 'Subtotal (net):'} {fmtTRY(net)}</div>
+                      <div className="flex items-center gap-1.5 text-gray-500">
+                        {tr ? 'KDV' : 'VAT'} %
+                        <input type="number" value={quoteKdvOran} onChange={e => setQuoteKdvOran(Math.max(0, Number(e.target.value) || 0))}
+                          className="apple-input px-2 py-1 text-xs w-14" />
+                        : {fmtTRY(kdv)}
+                      </div>
+                      <div className="font-bold text-gray-900 mt-0.5">{tr ? 'Genel Toplam:' : 'Total:'} {fmtTRY(net + kdv)}</div>
+                    </div>
+                    <button onClick={createQuote} className="apple-button-primary px-5 py-2 text-sm">
+                      {tr ? 'Teklifi Kaydet' : 'Save Quote'}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
 

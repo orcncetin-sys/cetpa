@@ -174,6 +174,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
   };
 
   const handleSaveShareholder = async () => {
+    // Pay oranı 0-100 aralığında olmalı; toplam %100'ü aşıyorsa uyar (yumuşak).
+    const pay = Number(shareholderForm.sharePercentage) || 0;
+    if (pay < 0 || pay > 100) { showToast(currentLanguage === 'tr' ? 'Pay oranı 0-100 arası olmalı.' : 'Share % must be 0-100.', 'error'); return; }
+    const digerToplam = shareholders.filter(s => s.id !== editingShareholderId).reduce((t, s) => t + (Number(s.sharePercentage) || 0), 0);
+    if (digerToplam + pay > 100.01) {
+      showToast(currentLanguage === 'tr' ? `Toplam pay %${(digerToplam + pay).toFixed(1)} — %100'ü aşıyor.` : `Total shares ${(digerToplam + pay).toFixed(1)}% exceeds 100%.`, 'error');
+      return;
+    }
     try {
       if (editingShareholderId) {
         await updateDoc(doc(db, 'shareholders', editingShareholderId), {
@@ -416,6 +424,15 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#ff4000]/20 outline-none w-full transition-all"
               />
             </div>
+            {(() => {
+              const toplamPay = shareholders.reduce((t, s) => t + (Number(s.sharePercentage) || 0), 0);
+              const tam = Math.abs(toplamPay - 100) < 0.5;
+              return (
+                <div className={`text-xs font-semibold px-3 py-1.5 rounded-lg w-fit ${tam ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-700'}`}>
+                  {currentLanguage === 'tr' ? 'Toplam Pay' : 'Total Shares'}: %{toplamPay.toFixed(1)}{!tam && (currentLanguage === 'tr' ? ' (≠ %100)' : ' (≠ 100%)')}
+                </div>
+              );
+            })()}
             <div className="apple-card overflow-hidden">
             <table className="w-full text-sm">
               <thead>

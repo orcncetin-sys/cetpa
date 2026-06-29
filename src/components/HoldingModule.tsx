@@ -470,6 +470,19 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
             ))}
           </div>
 
+          {/* Bilanço eşitliği kontrolü: Varlık = Borç + Özkaynak (net gelir dahil) */}
+          {(() => {
+            const fark = totalAssets - (totalLiabilities + totalEquity + netIncome);
+            const dengeli = Math.abs(fark) < 1;
+            return (
+              <div className={`apple-card p-3 flex items-center gap-2 text-sm ${dengeli ? 'text-green-600' : 'text-amber-700 bg-amber-50'}`}>
+                {dengeli
+                  ? (tr ? '✓ Bilanço dengeli (Varlık = Borç + Özkaynak)' : '✓ Balance sheet balanced')
+                  : (tr ? `⚠️ Denge farkı: ${fmt(fark)} — Varlık ≠ Borç + Özkaynak (hesap/işaret kontrolü gerekli)` : `⚠️ Imbalance: ${fmt(fark)}`)}
+              </div>
+            );
+          })()}
+
           {/* P&L */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="apple-card p-4 space-y-3">
