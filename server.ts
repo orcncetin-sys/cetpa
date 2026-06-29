@@ -7028,6 +7028,94 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // PAZARYERİ FİYAT İSTİHBARATI — Trendyol + Amazon SP-API (env-gated, ERP deseni)
+  // Rakip fiyatları çeker; pricingEngine (client) fiyatlandırma önerisi üretir.
+  // Creds yoksa { configured:false } döner; client manuel fiyat girişine düşer.
+  // ─────────────────────────────────────────────────────────────────────────────
+  // getTrendyolCreds yukarıda zaten tanımlı (Trendyol Seller API) — tekrar kullanılır.
+  type AmazonCreds = { clientId: string; clientSecret: string; refreshToken: string; marketplaceId: string; region: string };
+  async function getAmazonCreds(): Promise<AmazonCreds | null> {
+    const clientId = process.env.AMAZON_SP_CLIENT_ID, clientSecret = process.env.AMAZON_SP_CLIENT_SECRET, refreshToken = process.env.AMAZON_SP_REFRESH_TOKEN;
+    const marketplaceId = process.env.AMAZON_SP_MARKETPLACE_ID || 'A33AVAJ2PDY3EV'; // Amazon TR
+    const region = process.env.AMAZON_SP_REGION || 'eu';
+    if (clientId && clientSecret && refreshToken) return { clientId, clientSecret, refreshToken, marketplaceId, region };
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('settings').doc('amazon').get();
+    if (!snap.exists) return null;
+    const d = snap.data() as Record<string, string>;
+    if (!d.clientId || !d.clientSecret || !d.refreshToken) return null;
+    return { clientId: d.clientId, clientSecret: d.clientSecret, refreshToken: d.refreshToken, marketplaceId: d.marketplaceId || marketplaceId, region: d.region || region };
+  }
+
+  app.get('/api/marketplace/status', requireAuth, async (_req: Request, res: Response) => {
+    res.json({
+      trendyol: { configured: !!(await getTrendyolCreds()) },
+      amazon: { configured: !!(await getAmazonCreds()) },
+    });
+  });
+
+  // Amazon SP-API LWA access token (refresh_token → access_token)
+  async function amazonAccessToken(c: AmazonCreds): Promise<string | null> {
+    try {
+      const r = await fetch('https://api.amazon.com/auth/o2/token', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: c.refreshToken, client_id: c.clientId, client_secret: c.clientSecret }),
+        signal: AbortSignal.timeout(12000),
+      });
+      const d = await r.json() as { access_token?: string };
+      return d.access_token || null;
+    } catch { return null; }
+  }
+
+  // POST /api/marketplace/search { query?, barcode?, sku? } → rakip fiyatları
+  app.post('/api/marketplace/search', requireAuth, async (req: Request, res: Response) => {
+    const { query, barcode, sku } = (req.body ?? {}) as { query?: string; barcode?: string; sku?: string };
+    const term = (barcode || sku || query || '').toString().trim();
+    if (!term) return res.status(400).json({ error: 'query, barcode veya sku gerekli.' });
+    const results: Array<{ source: string; title: string; price: number; currency: string; url?: string }> = [];
+    const providers: string[] = [];
+    const trendyol = await getTrendyolCreds();
+    const amazon = await getAmazonCreds();
+    if (!trendyol && !amazon) return res.json({ configured: false, results: [], providers: [] });
+
+    // ── Trendyol: tedarikçi ürün/fiyat API ──
+    if (trendyol) {
+      providers.push('trendyol');
+      try {
+        const auth = Buffer.from(`${trendyol.apiKey}:${trendyol.apiSecret}`).toString('base64');
+        const url = `https://api.trendyol.com/sapigw/suppliers/${trendyol.supplierId}/products?barcode=${encodeURIComponent(barcode || sku || '')}&size=20`;
+        const r = await fetch(url, { headers: { Authorization: `Basic ${auth}`, 'User-Agent': `${trendyol.supplierId} - SelfIntegration` }, signal: AbortSignal.timeout(12000) });
+        if (r.ok) {
+          const d = await r.json() as { content?: Array<{ title?: string; salePrice?: number; listPrice?: number; productUrl?: string }> };
+          (d.content || []).forEach(p => results.push({ source: 'Trendyol', title: p.title || term, price: Number(p.salePrice ?? p.listPrice) || 0, currency: 'TRY', url: p.productUrl }));
+        }
+      } catch (e) { console.warn('trendyol search:', (e as Error).message); }
+    }
+
+    // ── Amazon SP-API: competitivePrice (rakip teklif fiyatları) ──
+    if (amazon) {
+      providers.push('amazon');
+      const token = await amazonAccessToken(amazon);
+      if (token) {
+        try {
+          const host = amazon.region === 'na' ? 'sellingpartnerapi-na.amazon.com' : amazon.region === 'fe' ? 'sellingpartnerapi-fe.amazon.com' : 'sellingpartnerapi-eu.amazon.com';
+          const url = `https://${host}/products/pricing/v0/competitivePrice?MarketplaceId=${amazon.marketplaceId}&Skus=${encodeURIComponent(sku || barcode || '')}&ItemType=Sku`;
+          const r = await fetch(url, { headers: { 'x-amz-access-token': token }, signal: AbortSignal.timeout(12000) });
+          if (r.ok) {
+            const d = await r.json() as { payload?: Array<{ Product?: { CompetitivePricing?: { CompetitivePrices?: Array<{ Price?: { ListingPrice?: { Amount?: number; CurrencyCode?: string } } }> } } }> };
+            (d.payload || []).forEach(p => (p.Product?.CompetitivePricing?.CompetitivePrices || []).forEach(cp => {
+              const amt = cp.Price?.ListingPrice?.Amount;
+              if (amt) results.push({ source: 'Amazon', title: term, price: amt, currency: cp.Price?.ListingPrice?.CurrencyCode || 'TRY' });
+            }));
+          }
+        } catch (e) { console.warn('amazon search:', (e as Error).message); }
+      }
+    }
+
+    res.json({ configured: true, providers, results });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // ERP PLUGIN ROUTES
   // Each ERP follows the same contract:
   //   GET  /api/{erpId}/status          → { configured, connected, error? }

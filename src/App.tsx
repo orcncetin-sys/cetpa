@@ -3,6 +3,7 @@ import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import AIInlineNudge from './components/AIInlineNudge';
 const InventoryViewComponent = React.lazy(() => import('./components/InventoryView'));
+const PriceIntelPanel        = React.lazy(() => import('./components/PriceIntelPanel'));
 const RaporlarPage            = React.lazy(() => import('./pages/RaporlarPage'));
 const SettingsPage            = React.lazy(() => import('./pages/SettingsPage'));
 const AdminPage               = React.lazy(() => import('./pages/AdminPage'));
@@ -3878,12 +3879,13 @@ function AppContent() {
             },
             {
               id: 'inventory', label: tr ? 'Envanter' : 'Inventory', icon: List,
-              childIds: ['lotseri', 'bakim', 'mrp'],
+              childIds: ['lotseri', 'bakim', 'mrp', 'fiyat-istihbarat'],
               children: [
                 { label: tr ? 'Stok Yönetimi' : 'Stock Mgmt',     subId: 'inventory', action: () => setActiveTab('inventory') },
                 { label: tr ? 'Lot / Seri Takip' : 'Lot/Serial',  subId: 'lotseri',   action: () => setActiveTab('lotseri') },
                 { label: tr ? 'Bakım-Onarım' : 'Maintenance',     subId: 'bakim',     action: () => setActiveTab('bakim') },
                 { label: tr ? 'MRP II / Kapasite' : 'MRP II',     subId: 'mrp',       action: () => setActiveTab('mrp') },
+                { label: tr ? 'Fiyat İstihbaratı' : 'Price Intel', subId: 'fiyat-istihbarat', action: () => setActiveTab('fiyat-istihbarat') },
               ],
             },
             {
@@ -12782,6 +12784,15 @@ function AppContent() {
                   <LotSeriModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('lotseri')} />
                 </>
               )}
+            </motion.div>
+          )}
+
+          {/* ── Fiyat İstihbaratı ── */}
+          {activeTab === 'fiyat-istihbarat' && (
+            <motion.div key="fiyat-istihbarat" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <React.Suspense fallback={<div className="p-8 text-center text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Yükleniyor...' : 'Loading...'}</div>}>
+                <PriceIntelPanel inventory={inventory} currentLanguage={currentLanguage} toast={toast as (m: string, t?: 'success' | 'error' | 'info') => void} />
+              </React.Suspense>
             </motion.div>
           )}
 
