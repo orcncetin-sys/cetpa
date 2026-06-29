@@ -19,6 +19,7 @@
  * runTransaction/writeBatch are emulated as sequential writes (NOT atomic).
  */
 import { auth } from '../firebase';
+import { PUBLIC_WRITE_COLLECTIONS } from './rbac';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** Loose document payload — interfaces without index signatures must be accepted, like Firestore does. */
@@ -264,11 +265,12 @@ export async function compareAndSet(
 }
 
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
-  const token = await getToken();
+  const isPublicWrite = method === 'POST' && PUBLIC_WRITE_COLLECTIONS.has(decodeURIComponent(path));
+  const token = isPublicWrite ? '' : await getToken();
   const res = await fetch(`/api/db/${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

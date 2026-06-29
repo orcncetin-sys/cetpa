@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import compression from "compression";
 import helmet from "helmet";
 import {
-  type AppRole, type DbOp, ADMIN_ROLES, APPEND_ONLY_COLLECTIONS,
+  type AppRole, type DbOp, ADMIN_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
   isAllowed, isSelfDocAccess, blocksRoleEscalation,
 } from "./src/lib/rbac.js";
 import pg from "pg";
@@ -131,6 +131,13 @@ try {
 async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = req.headers.authorization?.replace(/^Bearer\s+/, '');
   if (!token) {
+    // Halka açık formlara kimlik doğrulaması olmadan POST atılabilir (ör: demoRequests)
+    if (req.method === 'POST' && req.path.startsWith('/api/db/')) {
+      const coll = req.path.split('/')[3];
+      if (coll && PUBLIC_WRITE_COLLECTIONS.has(coll)) {
+        return next();
+      }
+    }
     res.status(401).json({ error: 'Missing Authorization header.' });
     return;
   }
@@ -1906,6 +1913,20 @@ async function startServer() {
       legacyHeaders: false,
       message: { error: 'Too many database requests.' },
     });
+    const publicWriteLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 10, // Max 10 submissions per IP
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Çok fazla form gönderdiniz. Lütfen daha sonra tekrar deneyin.' },
+    });
+    const conditionalPublicLimiter = (req: Request, res: Response, next: NextFunction) => {
+      const coll = String(req.params.coll);
+      if (PUBLIC_WRITE_COLLECTIONS.has(coll)) {
+        return publicWriteLimiter(req, res, next);
+      }
+      return next();
+    };
     const dbJson = express.json({ limit: '10mb' });
     const COLL_RE = /^[A-Za-z0-9_-]{1,64}$/;
     const validColl = (c: string, res: Response): boolean => {
@@ -2208,9 +2229,45 @@ async function startServer() {
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
-    app.post('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
+    // ── Data Integrity (Zod Schemas for DB Writes) ──────────────────────────────
+    const dbSchemas: Record<string, z.ZodSchema> = {
+      users: z.object({
+        name: z.string().max(100).optional(),
+        email: z.string().email().optional(),
+        role: z.enum(['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality']).optional(),
+        suspended: z.boolean().optional(),
+      }).passthrough(),
+      projects: z.object({
+        name: z.string().max(200).optional(),
+        client: z.string().max(100).optional(),
+        manager: z.string().max(100).optional(),
+        status: z.enum(['Active', 'Completed', 'On-Hold', 'Planning']).optional(),
+        priority: z.enum(['High', 'Medium', 'Low']).optional(),
+      }).passthrough(),
+      tasks: z.object({
+        projectId: z.string().optional(),
+        title: z.string().max(200).optional(),
+        assignee: z.string().max(100).optional(),
+        status: z.enum(['Todo', 'In-Progress', 'Review', 'Done']).optional(),
+        priority: z.enum(['High', 'Medium', 'Low']).optional(),
+      }).passthrough(),
+    };
+
+    function validateCollectionWrite(coll: string, data: unknown, res: Response): boolean {
+      if (coll in dbSchemas) {
+        const result = dbSchemas[coll].safeParse(data);
+        if (!result.success) {
+          res.status(400).json({ error: `Geçersiz veri: ${coll}`, details: result.error.flatten() });
+          return false;
+        }
+      }
+      return true;
+    }
+
+    app.post('/api/db/:coll', dbLimiter, conditionalPublicLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
       if (!validColl(coll, res)) return;
+      if (!validateCollectionWrite(coll, req.body, res)) return;
       if (await denied(req, res, coll, 'write')) return;
       try {
         const id = genDocId();
@@ -2234,6 +2291,7 @@ async function startServer() {
     app.put('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (!validateCollectionWrite(coll, req.body, res)) return;
       // Append-only koleksiyonlarda mevcut kaydın üzerine yazma yok
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
       if (rejectNamespacedSettings(coll, id, res)) return;
@@ -2277,6 +2335,7 @@ async function startServer() {
     app.patch('/api/db/:coll/:id', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (!validateCollectionWrite(coll, req.body, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
       if (rejectNamespacedSettings(coll, id, res)) return;
       if (await denied(req, res, coll, 'write', id)) return;

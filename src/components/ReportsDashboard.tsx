@@ -141,30 +141,30 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
   const lowStockItems = inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length;
 
   // Sales Trend Data
-  const salesByDate = useMemo(() => orders.reduce((acc: Record<string, number>, o) => {
-    let date = currentT.unknown;
+  const salesByDate = useMemo(() => orders.reduce((acc: Record<string, { label: string; total: number }>, o) => {
+    let dateKey = 'unknown';
+    let label = currentT.unknown;
     if (o.syncedAt) {
       try {
         const d = typeof (o.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (o.syncedAt as { toDate: () => Date }).toDate() : new Date(o.syncedAt as unknown as string | number | Date);
-        date = format(d, 'dd MMM', { locale: currentLanguage === 'tr' ? tr : enUS });
+        dateKey = format(d, 'yyyy-MM-dd');
+        label = format(d, 'dd MMM', { locale: currentLanguage === 'tr' ? tr : enUS });
       } catch (e) {
         console.error("Error formatting date:", e);
       }
     }
-    acc[date] = (acc[date] || 0) + (Number(o.totalPrice) || 0);
+    if (!acc[dateKey]) acc[dateKey] = { label, total: 0 };
+    acc[dateKey].total += (Number(o.totalPrice) || 0);
     return acc;
   }, {}), [orders, currentT, currentLanguage]);
 
   const trendData = useMemo(() => Object.entries(salesByDate)
-    .map(([name, value]) => ({ name, value: Number(value) }))
-    .sort((a, b) => {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
-      const getMonthIndex = (dateStr: string) => { const parts = dateStr.split(' '); if (parts.length < 2) return -1; return months.indexOf(parts[1]); };
-      const getDay = (dateStr: string) => parseInt(dateStr.split(' ')[0]);
-      const monthA = getMonthIndex(a.name); const monthB = getMonthIndex(b.name);
-      if (monthA !== monthB) return monthA - monthB;
-      return getDay(a.name) - getDay(b.name);
+    .sort(([keyA], [keyB]) => {
+      if (keyA === 'unknown') return 1;
+      if (keyB === 'unknown') return -1;
+      return keyA.localeCompare(keyB);
     })
+    .map(([, val]) => ({ name: val.label, value: val.total }))
     .slice(-30), [salesByDate]);
 
   // Category Data

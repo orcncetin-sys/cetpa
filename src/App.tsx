@@ -159,8 +159,18 @@ import BarcodeScanner from './components/BarcodeScanner';
 import DateRangePicker from './components/DateRangePicker';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { ToastProvider, useToast } from './components/Toast';
+import EmailComposeModal from './components/EmailComposeModal';
+import ShortcutModal from './components/ShortcutModal';
+import ReturnModal from './components/ReturnModal';
+import CustomerStatementModal from './components/CustomerStatementModal';
+import DeliveryNoteModal from './components/DeliveryNoteModal';
+import StockCountModal from './components/StockCountModal';
+import QuickShipmentModal from './components/QuickShipmentModal';
+import OverduePanel from './components/OverduePanel';
+import PaymentMethodModal from './components/PaymentMethodModal';
 import { translations, type Language } from './translations';
 import { optimizeRoute } from './utils/logistics';
+import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
 const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
@@ -686,22 +696,25 @@ function AppContent() {
       return next;
     });
   };
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const {
+    leads, setLeads,
+    orders, setOrders,
+    shipments, setShipments,
+    inventory, setInventory,
+    appQuotations, setAppQuotations,
+    warehouses, setWarehouses,
+    inventoryMovements, setInventoryMovements,
+    employees, setEmployees,
+    payrolls, setPayrolls
+  } = useDataStore();
+
   const [dateRange, setDateRange] = useState({
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd')
   });
 
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [shipments, setShipments] = useState<Shipment[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [appQuotations, setAppQuotations] = useState<Quotation[]>([]);
   // eBA approval queue pending count (badge on nav tab)
   const pendingApprovalsCount = usePendingApprovalCount(userRole, user?.email);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [payrolls, setPayrolls] = useState<Payroll[]>([]);
   const [exchangeRates, setExchangeRates] = useState<Record<string, number> | null>(null);
   const [notifications, setNotifications] = useState<Record<string, unknown>[]>([]);
   const [gibConnected, setGibConnected] = useState<boolean>(false);
@@ -14767,837 +14780,115 @@ function AppContent() {
       />
 
       {/* ── Phase 112: RMA / Return Modal ── */}
-      <AnimatePresence>
-        {returnModal.open && returnModal.order && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
-            >
-              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-orange-50/60">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-100 rounded-xl">
-                    <RefreshCw className="w-5 h-5 text-orange-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-gray-900">{currentLanguage === 'tr' ? 'İade Talebi' : 'Return Request'}</h2>
-                    <p className="text-xs text-gray-500">#{returnModal.order.shopifyOrderId || returnModal.order.id.slice(-8)} · {returnModal.order.customerName}</p>
-                  </div>
-                </div>
-                <button onClick={() => setReturnModal({ open: false, order: null })} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
-              <div className="p-5 space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Nedeni' : 'Return Reason'}</label>
-                  <select
-                    value={returnReason}
-                    onChange={e => setReturnReason(e.target.value)}
-                    className="apple-input w-full"
-                  >
-                    <option value="">{currentLanguage === 'tr' ? 'Sebep seçin...' : 'Select reason...'}</option>
-                    {[
-                      currentLanguage === 'tr' ? 'Hasarlı ürün' : 'Damaged product',
-                      currentLanguage === 'tr' ? 'Yanlış ürün gönderildi' : 'Wrong item shipped',
-                      currentLanguage === 'tr' ? 'Müşteri vazgeçti' : 'Customer changed mind',
-                      currentLanguage === 'tr' ? 'Kalite sorunu' : 'Quality issue',
-                      currentLanguage === 'tr' ? 'Geç teslimat' : 'Late delivery',
-                      currentLanguage === 'tr' ? 'Diğer' : 'Other',
-                    ].map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Edilecek Ürünler / Açıklama' : 'Items to Return / Description'}</label>
-                  <textarea
-                    value={returnItems}
-                    onChange={e => setReturnItems(e.target.value)}
-                    className="apple-input w-full min-h-[72px] resize-none"
-                    placeholder={currentLanguage === 'tr' ? 'Ürün adları, miktarlar...' : 'Product names, quantities...'}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Tutarı (₺)' : 'Refund Amount (₺)'}</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">₺</span>
-                    <input
-                      type="number"
-                      value={returnAmount}
-                      onChange={e => setReturnAmount(Number(e.target.value))}
-                      className="apple-input w-full pl-7"
-                      max={returnModal.order.totalPrice}
-                    />
-                  </div>
-                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} {fmtKpi((returnModal.order.totalPrice || 0))}</p>
-                </div>
-              </div>
-              <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
-                <button onClick={() => setReturnModal({ open: false, order: null })} className="apple-button-secondary px-6">
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
-                </button>
-                <button
-                  disabled={!returnReason || returnSubmitting}
-                  onClick={async () => {
-                    if (!returnReason || !returnModal.order) return;
-                    setReturnSubmitting(true);
-                    try {
-                      await addDoc(collection(db, 'returns'), {
-                        orderId: returnModal.order.id,
-                        orderNumber: returnModal.order.shopifyOrderId || returnModal.order.id.slice(-8),
-                        customerName: returnModal.order.customerName,
-                        reason: returnReason,
-                        items: returnItems,
-                        refundAmount: returnAmount,
-                        status: 'pending',
-                        createdAt: serverTimestamp(),
-                        createdBy: user?.email || 'guest',
-                      });
-                      // Update order status to indicate return pending
-                      await updateDoc(doc(db, 'orders', returnModal.order.id), { hasReturn: true, returnStatus: 'pending' });
-                      toast(currentLanguage === 'tr' ? 'İade talebi oluşturuldu.' : 'Return request created.', 'success');
-                      setReturnModal({ open: false, order: null });
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
-                    finally { setReturnSubmitting(false); }
-                  }}
-                  className="apple-button-primary px-8 flex items-center gap-2 disabled:opacity-50"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  {returnSubmitting ? (currentLanguage === 'tr' ? 'Kaydediliyor...' : 'Saving...') : (currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Submit Return')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {returnModal.open && returnModal.order && (
+        <ReturnModal
+          order={returnModal.order}
+          onClose={() => setReturnModal({ open: false, order: null })}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+          userEmail={user?.email || 'guest'}
+          onSuccess={(msg) => toast(msg, 'success')}
+          onError={(msg) => toast(msg, 'error')}
+        />
+      )}
 
       {/* ── Phase 100: In-App Email Compose Modal ── */}
-      <AnimatePresence>
-        {emailCompose.open && (
-          <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, y: 40 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 40 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-purple-100 rounded-xl flex items-center justify-center">
-                    <Mail className="w-4 h-4 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni E-posta' : 'New Email'}</p>
-                    <p className="text-[10px] text-gray-400">{emailCompose.to}</p>
-                  </div>
-                </div>
-                <button onClick={() => setEmailCompose(e => ({ ...e, open: false }))} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                  <X className="w-4 h-4 text-gray-500" />
-                </button>
-              </div>
-              {/* Fields */}
-              <div className="p-5 space-y-3 flex-1">
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Alıcı' : 'To'}</label>
-                  <input
-                    readOnly
-                    value={`${emailCompose.name} <${emailCompose.to}>`}
-                    className="apple-input w-full text-sm bg-gray-50 text-gray-500 cursor-default"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
-                  <input
-                    value={emailCompose.subject}
-                    onChange={e => setEmailCompose(c => ({ ...c, subject: e.target.value }))}
-                    className="apple-input w-full text-sm"
-                    placeholder={currentLanguage === 'tr' ? 'E-posta konusu' : 'Email subject'}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Mesaj' : 'Message'}</label>
-                  <textarea
-                    value={emailCompose.body}
-                    onChange={e => setEmailCompose(c => ({ ...c, body: e.target.value }))}
-                    rows={7}
-                    className="apple-input w-full text-sm resize-none leading-relaxed"
-                    placeholder={currentLanguage === 'tr' ? 'Mesajınızı buraya yazın…' : 'Write your message here…'}
-                  />
-                </div>
-              </div>
-              {/* Footer */}
-              <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
-                <button onClick={() => setEmailCompose(e => ({ ...e, open: false }))} className="apple-button-secondary px-5">
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
-                </button>
-                <button
-                  disabled={emailSending || !emailCompose.subject || !emailCompose.body}
-                  onClick={async () => {
-                    setEmailSending(true);
-                    try {
-                      const res = await fetch('/api/email/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ to: emailCompose.to, subject: emailCompose.subject, text: emailCompose.body }),
-                      });
-                      const d = await res.json();
-                      if (d.success) {
-                        toast(currentLanguage === 'tr' ? `E-posta gönderildi → ${emailCompose.to}` : `Email sent → ${emailCompose.to}`, 'success');
-                        // Save to lead emails array
-                        const lead = leads.find(l => l.email === emailCompose.to);
-                        if (lead) {
-                          const lead101 = lead as unknown as Record<string, unknown>;
-                          const existing = Array.isArray(lead101.emails) ? lead101.emails as unknown[] : [];
-                          await updateDoc(doc(db, 'leads', lead.id), {
-                            emails: [...existing, { subject: emailCompose.subject, body: emailCompose.body, sentAt: Date.now(), sentBy: user?.email || 'system' }]
-                          });
-                        }
-                        setEmailCompose(e => ({ ...e, open: false }));
-                      } else if (d.notConfigured) {
-                        toast(currentLanguage === 'tr' ? 'E-posta servisi yapılandırılmamış. Ayarlar > Resend API.' : 'Email not configured. Add Resend API key in Settings.', 'error');
-                      } else {
-                        toast(d.error || 'Gönderilemedi', 'error');
-                      }
-                    } catch(err) {
-                      toast(err instanceof Error ? err.message : 'Hata', 'error');
-                    } finally { setEmailSending(false); }
-                  }}
-                  className="apple-button-primary px-6 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {emailSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                  {emailSending ? (currentLanguage === 'tr' ? 'Gönderiliyor…' : 'Sending…') : (currentLanguage === 'tr' ? 'Gönder' : 'Send')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {emailCompose.open && (
+        <EmailComposeModal
+          emailCompose={emailCompose}
+          setEmailCompose={setEmailCompose}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+          userEmail={user?.email || 'system'}
+          onSuccess={(msg) => toast(msg, 'success')}
+          onError={(msg) => toast(msg, 'error')}
+          leads={leads}
+        />
+      )}
 
       {/* ── Phase 28: Keyboard Shortcut Cheat-Sheet ── */}
-      <AnimatePresence>
-        {shortcutModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
-            onClick={() => setShortcutModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.94, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.94, opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              onClick={e => e.stopPropagation()}
-              className="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden"
-            >
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                <h2 className="font-bold text-gray-900">
-                  {currentLanguage === 'tr' ? 'Klavye Kısayolları' : 'Keyboard Shortcuts'}
-                </h2>
-                <button onClick={() => setShortcutModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
-                {[
-                  {
-                    section: currentLanguage === 'tr' ? 'Genel' : 'General',
-                    shortcuts: [
-                      { keys: ['⌘', 'K'], desc: currentLanguage === 'tr' ? 'Global arama' : 'Global search' },
-                      { keys: ['?'],       desc: currentLanguage === 'tr' ? 'Bu ekranı göster' : 'Show this screen' },
-                      { keys: ['Esc'],     desc: currentLanguage === 'tr' ? 'Kapat / Geri dön' : 'Close / Go back' },
-                    ],
-                  },
-                  {
-                    section: currentLanguage === 'tr' ? 'Navigasyon' : 'Navigation',
-                    shortcuts: [
-                      { keys: ['D'],   desc: currentLanguage === 'tr' ? 'Dashboard' : 'Dashboard' },
-                      { keys: ['O'],   desc: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
-                      { keys: ['C'],   desc: 'CRM' },
-                      { keys: ['I'],   desc: currentLanguage === 'tr' ? 'Envanter' : 'Inventory' },
-                      { keys: ['R'],   desc: currentLanguage === 'tr' ? 'Raporlar' : 'Reports' },
-                    ],
-                  },
-                  {
-                    section: currentLanguage === 'tr' ? 'Oluştur' : 'Create',
-                    shortcuts: [
-                      { keys: ['N'], desc: currentLanguage === 'tr' ? 'Yeni sipariş / müşteri adayı (aktif sekme)' : 'New order / lead (active tab)' },
-                    ],
-                  },
-                  {
-                    section: currentLanguage === 'tr' ? 'Arama & Dışa Aktarma' : 'Search & Export',
-                    shortcuts: [
-                      { keys: ['⌘', 'E'], desc: currentLanguage === 'tr' ? 'CSV dışa aktar (aktif modül)' : 'Export CSV (active module)' },
-                      { keys: ['⌘', 'P'], desc: currentLanguage === 'tr' ? 'PDF oluştur / Yazdır' : 'Generate PDF / Print' },
-                    ],
-                  },
-                ].map(group => (
-                  <div key={group.section}>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">{group.section}</p>
-                    <div className="space-y-1.5">
-                      {group.shortcuts.map((sc, i) => (
-                        <div key={i} className="flex items-center justify-between">
-                          <span className="text-sm text-gray-700">{sc.desc}</span>
-                          <div className="flex items-center gap-1">
-                            {sc.keys.map((k, ki) => (
-                              <React.Fragment key={ki}>
-                                <kbd className="text-[10px] font-mono font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200 shadow-sm">{k}</kbd>
-                                {ki < sc.keys.length - 1 && <span className="text-gray-300 text-xs">+</span>}
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-center">
-                <p className="text-[10px] text-gray-400">
-                  {currentLanguage === 'tr' ? 'Kısayolları kapatmak için ' : 'Press '}
-                  <kbd className="text-[10px] font-mono bg-white border border-gray-200 px-1 py-0.5 rounded shadow-sm">Esc</kbd>
-                  {currentLanguage === 'tr' ? ' tuşuna basın' : ' to close'}
-                </p>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {shortcutModalOpen && (
+        <ShortcutModal
+          isOpen={shortcutModalOpen}
+          onClose={() => setShortcutModalOpen(false)}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+        />
+      )}
 
       {/* ── Phase 502: Customer Statement Modal ── */}
-      <AnimatePresence>
-        {showStmtModal && (() => {
-          const stmtLead = leads.find(l => l.id === showStmtModal);
-          const stmtOrders = orders.filter(o => o.leadId === showStmtModal || o.customerName === stmtLead?.name);
-          const totalRev = stmtOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const paidRev = stmtOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const unpaidRev = totalRev - paidRev;
-          return (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
-              >
-                {/* Header */}
-                <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-brand/5 to-transparent">
-                  <div>
-                    <p className="text-[10px] font-bold text-brand uppercase tracking-widest mb-0.5">
-                      {currentLanguage === 'tr' ? 'Hesap Ekstresi' : 'Account Statement'}
-                    </p>
-                    <h3 className="text-lg font-black text-gray-900">{stmtLead?.name || showStmtModal}</h3>
-                    {stmtLead?.company && <p className="text-xs text-gray-400">{stmtLead.company}</p>}
-                  </div>
-                  <button onClick={() => setShowStmtModal(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                    <X className="w-5 h-5 text-gray-500" />
-                  </button>
-                </div>
-                {/* KPI strip */}
-                <div className="grid grid-cols-3 gap-px bg-gray-100 shrink-0">
-                  {[
-                    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: totalRev, color: 'text-gray-900' },
-                    { label: currentLanguage === 'tr' ? 'Tahsil Edilen' : 'Collected', value: paidRev, color: 'text-emerald-600' },
-                    { label: currentLanguage === 'tr' ? 'Alacak' : 'Outstanding', value: unpaidRev, color: unpaidRev > 0 ? 'text-red-600' : 'text-gray-400' },
-                  ].map(k => (
-                    <div key={k.label} className="bg-white px-5 py-4">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
-                      <p className={cn("text-lg font-black", k.color)}>₺{k.value.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</p>
-                    </div>
-                  ))}
-                </div>
-                {/* Order list */}
-                <div className="overflow-y-auto flex-1">
-                  {stmtOrders.length === 0 ? (
-                    <div className="flex items-center justify-center h-40 text-gray-400 text-sm">
-                      {currentLanguage === 'tr' ? 'Sipariş bulunamadı' : 'No orders found'}
-                    </div>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 sticky top-0">
-                        <tr>
-                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Sipariş' : 'Order'}</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
-                          <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tutar' : 'Amount'}</th>
-                          <th className="px-5 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {stmtOrders.sort((a, b) => {
-                          const ta = a.createdAt ? (typeof (a.createdAt as { toDate?: () => Date }).toDate === 'function' ? (a.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(a.createdAt as string | number).getTime()) : 0;
-                          const tb = b.createdAt ? (typeof (b.createdAt as { toDate?: () => Date }).toDate === 'function' ? (b.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(b.createdAt as string | number).getTime()) : 0;
-                          return tb - ta;
-                        }).map(o => {
-                          const rawDate = o.createdAt ?? o.syncedAt;
-                          const oDate = rawDate ? (typeof (rawDate as { toDate?: () => Date }).toDate === 'function' ? (rawDate as { toDate: () => Date }).toDate() : new Date(rawDate as string | number)) : null;
-                          const statusColors: Record<string, string> = { Pending: 'bg-amber-50 text-amber-600', Processing: 'bg-purple-50 text-purple-600', Shipped: 'bg-blue-50 text-blue-600', Delivered: 'bg-emerald-50 text-emerald-600', Cancelled: 'bg-gray-100 text-gray-500' };
-                          const statusTR: Record<string, string> = { Pending: 'Bekliyor', Processing: 'Hazırlanıyor', Shipped: 'Kargoda', Delivered: 'Teslim', Cancelled: 'İptal' };
-                          return (
-                            <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-5 py-3 font-medium text-gray-800">#{o.shopifyOrderId || o.id.slice(-6)}</td>
-                              <td className="px-5 py-3 text-gray-500">{oDate?.toLocaleDateString('tr-TR') || '—'}</td>
-                              <td className="px-5 py-3">
-                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", statusColors[o.status] || 'bg-gray-100 text-gray-500')}>
-                                  {currentLanguage === 'tr' ? (statusTR[o.status] || o.status) : o.status}
-                                </span>
-                              </td>
-                              <td className="px-5 py-3 text-right font-bold text-gray-900">₺{(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
-                              <td className="px-5 py-3 text-center">
-                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", o.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-50 text-amber-600')}>
-                                  {o.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
-                  <button
-                    onClick={async () => { const stmtLead2 = leads.find(l => l.id === showStmtModal); if (stmtLead2) { const { exportCustomerStatement } = await import('./utils/pdf'); exportCustomerStatement(stmtLead2, stmtOrders, currentLanguage as 'tr' | 'en'); } }}
-                    className="apple-button-secondary flex items-center gap-2 text-sm"
-                  >
-                    <FileDown className="w-4 h-4" />
-                    {currentLanguage === 'tr' ? 'PDF İndir' : 'Download PDF'}
-                  </button>
-                  <button onClick={() => setShowStmtModal(null)} className="apple-button-primary text-sm px-5">
-                    {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
+      {showStmtModal && (
+        <CustomerStatementModal
+          leadId={showStmtModal}
+          onClose={() => setShowStmtModal(null)}
+          leads={leads}
+          orders={orders}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+        />
+      )}
 
       {/* ── Phase 506: Delivery Note Modal ── */}
-      <AnimatePresence>
-        {deliveryNoteOrder && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-            >
-              <div className="px-6 pt-6 pb-2 flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Teslim Onayı' : 'Confirm Delivery'}</h3>
-                  <p className="text-xs text-gray-400">#{deliveryNoteOrder.shopifyOrderId || deliveryNoteOrder.id.slice(-6)} · {deliveryNoteOrder.customerName}</p>
-                </div>
-              </div>
-              <div className="px-6 py-4 space-y-3">
-                <p className="text-sm text-gray-600">
-                  {currentLanguage === 'tr' ? 'Siparişi teslim edildi olarak işaretlemek üzeresiniz. İsterseniz bir teslimat notu ekleyin.' : 'You are about to mark this order as delivered. Optionally add a delivery note.'}
-                </p>
-                <textarea
-                  value={deliveryNoteText}
-                  onChange={e => setDeliveryNoteText(e.target.value)}
-                  rows={3}
-                  placeholder={currentLanguage === 'tr' ? 'Teslimat notu (isteğe bağlı)…' : 'Delivery note (optional)…'}
-                  className="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-200 resize-none"
-                />
-              </div>
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={() => { setDeliveryNoteOrder(null); setDeliveryNoteText(''); }}
-                  className="flex-1 apple-button-secondary"
-                >
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
-                </button>
-                <button
-                  onClick={async () => {
-                    const ord = deliveryNoteOrder;
-                    await handleUpdateOrderStatus(ord.id, 'Delivered');
-                    if (deliveryNoteText.trim()) {
-                      await updateDoc(doc(db, 'orders', ord.id), { deliveryNote: deliveryNoteText.trim(), deliveredAt: serverTimestamp() });
-                    }
-                    if (selectedOrder?.id === ord.id) setSelectedOrder({ ...selectedOrder!, status: 'Delivered' });
-                    setDeliveryNoteOrder(null);
-                    setDeliveryNoteText('');
-                    toast(currentLanguage === 'tr' ? 'Sipariş teslim edildi ✓' : 'Order marked as delivered ✓', 'success');
-                  }}
-                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Teslim Edildi' : 'Mark Delivered'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {deliveryNoteOrder && (
+        <DeliveryNoteModal
+          order={deliveryNoteOrder}
+          deliveryNoteText={deliveryNoteText}
+          setDeliveryNoteText={setDeliveryNoteText}
+          onClose={() => { setDeliveryNoteOrder(null); setDeliveryNoteText(''); }}
+          onConfirm={async () => {
+            const ord = deliveryNoteOrder;
+            await handleUpdateOrderStatus(ord.id, 'Delivered');
+            if (deliveryNoteText.trim()) {
+              await updateDoc(doc(db, 'orders', ord.id), { deliveryNote: deliveryNoteText.trim(), deliveredAt: serverTimestamp() });
+            }
+            if (selectedOrder?.id === ord.id) setSelectedOrder({ ...selectedOrder, status: 'Delivered' });
+            setDeliveryNoteOrder(null);
+            setDeliveryNoteText('');
+            toast(currentLanguage === 'tr' ? 'Sipariş teslim edildi ✓' : 'Order marked as delivered ✓', 'success');
+          }}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+        />
+      )}
 
       {/* ── Phase 507: Quick Stock Count Modal ── */}
-      <AnimatePresence>
-        {showStockCount && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden"
-            >
-              <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-bold text-brand uppercase tracking-widest mb-0.5">{currentLanguage === 'tr' ? 'Hızlı Stok Sayımı' : 'Quick Stock Count'}</p>
-                  <h3 className="text-lg font-black text-gray-900">{currentLanguage === 'tr' ? 'Stok Seviyelerini Güncelle' : 'Update Stock Levels'}</h3>
-                </div>
-                <button onClick={() => setShowStockCount(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-5 h-5 text-gray-500" /></button>
-              </div>
-              {/* Search */}
-              <div className="px-6 py-3 border-b border-gray-100">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  <input type="text" value={stockCountSearch} onChange={e => setStockCountSearch(e.target.value)}
-                    placeholder={currentLanguage === 'tr' ? 'Ürün ara…' : 'Search products…'}
-                    className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand"
-                  />
-                </div>
-                {Object.keys(stockCountDraft).length > 0 && (
-                  <p className="text-[10px] text-amber-600 font-bold mt-2">
-                    ⚠ {Object.keys(stockCountDraft).length} {currentLanguage === 'tr' ? 'üründe değişiklik var' : 'items have pending changes'}
-                  </p>
-                )}
-              </div>
-              {/* Items */}
-              <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-                {inventory
-                  .filter(i => !stockCountSearch || i.name.toLowerCase().includes(stockCountSearch.toLowerCase()) || (i.sku || '').toLowerCase().includes(stockCountSearch.toLowerCase()))
-                  .map(item => {
-                    const current = item.stockLevel ?? 0;
-                    const draft = stockCountDraft[item.id] ?? current;
-                    const changed = draft !== current;
-                    return (
-                      <div key={item.id} className={cn("flex items-center gap-4 px-6 py-3", changed ? "bg-amber-50" : "hover:bg-gray-50")}>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-800 truncate">{item.name}</p>
-                          <p className="text-[10px] text-gray-400">{item.sku}{item.category ? ` · ${item.category}` : ''}</p>
-                        </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
-                          <span className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Mevcut:' : 'Current:'} <strong className="text-gray-700">{current}</strong></span>
-                          {changed && <span className="text-[10px] font-bold text-amber-600">→ {draft}</span>}
-                          <input
-                            type="number"
-                            min={0}
-                            value={draft}
-                            onChange={e => {
-                              const v = parseInt(e.target.value, 10);
-                              setStockCountDraft(prev => {
-                                const next = { ...prev };
-                                if (!isNaN(v) && v !== current) next[item.id] = v;
-                                else delete next[item.id];
-                                return next;
-                              });
-                            }}
-                            className="w-20 text-center text-sm font-bold bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-brand"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-              {/* Footer */}
-              <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-gray-50/50">
-                <button onClick={() => setStockCountDraft({})} className="text-xs font-semibold text-gray-500 hover:text-gray-700 transition-colors">
-                  {currentLanguage === 'tr' ? 'Sıfırla' : 'Reset changes'}
-                </button>
-                <div className="flex gap-3">
-                  <button onClick={() => setShowStockCount(false)} className="apple-button-secondary text-sm px-5">
-                    {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
-                  </button>
-                  <button
-                    disabled={Object.keys(stockCountDraft).length === 0 || stockCountSaving}
-                    onClick={async () => {
-                      if (Object.keys(stockCountDraft).length === 0) return;
-                      setStockCountSaving(true);
-                      try {
-                        await Promise.all(Object.entries(stockCountDraft).map(([id, qty]) =>
-                          updateDoc(doc(db, 'inventory', id), { stockLevel: qty, updatedAt: serverTimestamp() })
-                        ));
-                        toast(currentLanguage === 'tr' ? `${Object.keys(stockCountDraft).length} ürün güncellendi ✓` : `${Object.keys(stockCountDraft).length} items updated ✓`, 'success');
-                        setStockCountDraft({});
-                        setShowStockCount(false);
-                      } catch (e) { console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error saving', 'error'); } finally { setStockCountSaving(false); }
-                    }}
-                    className="apple-button-primary text-sm px-5 disabled:opacity-40"
-                  >
-                    {stockCountSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    {currentLanguage === 'tr' ? `Kaydet (${Object.keys(stockCountDraft).length})` : `Save (${Object.keys(stockCountDraft).length})`}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {showStockCount && (
+        <StockCountModal
+          isOpen={showStockCount}
+          onClose={() => setShowStockCount(false)}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+          inventory={inventory}
+          onSuccess={(msg) => toast(msg, 'success')}
+          onError={(msg) => toast(msg, 'error')}
+        />
+      )}
 
       {/* ── Phase 512: Quick Shipment Modal ── */}
-      <AnimatePresence>
-        {showQuickShipment && (() => {
-          const qsOrder = showQuickShipment;
-          const today = new Date().toISOString().slice(0, 10);
-          return (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-              >
-                <div className="px-6 pt-6 pb-2 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center shrink-0">
-                    <Truck className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
-                    <p className="text-xs text-gray-400">#{qsOrder.shopifyOrderId || qsOrder.id.slice(-6)} · {qsOrder.customerName}</p>
-                  </div>
-                  <button onClick={() => setShowQuickShipment(null)} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-4 h-4 text-gray-400" /></button>
-                </div>
-                <form
-                  className="px-6 py-4 space-y-3"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const fd = new FormData(e.currentTarget);
-                    try {
-                      await addDoc(collection(db, 'shipments'), {
-                        customerName: qsOrder.customerName,
-                        orderId: qsOrder.id,
-                        destination: fd.get('destination') || qsOrder.shippingAddress || '',
-                        cargoFirm: fd.get('cargoFirm') || '',
-                        driver: fd.get('driver') || '',
-                        date: fd.get('date') || today,
-                        status: 'Pending',
-                        trackingNo: fd.get('trackingNo') || qsOrder.trackingNumber || '',
-                        createdAt: serverTimestamp(),
-                      });
-                      toast(currentLanguage === 'tr' ? 'Sevkiyat oluşturuldu ✓' : 'Shipment created ✓', 'success');
-                      setShowQuickShipment(null);
-                    } catch (err) { console.error(err); }
-                  }}
-                >
-                  {[
-                    { name: 'destination', label: currentLanguage === 'tr' ? 'Adres' : 'Destination', defaultValue: qsOrder.shippingAddress || '' },
-                    { name: 'cargoFirm',   label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Company', defaultValue: qsOrder.cargoCompany || '' },
-                    { name: 'driver',      label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver', defaultValue: '' },
-                    { name: 'trackingNo',  label: currentLanguage === 'tr' ? 'Takip No' : 'Tracking No', defaultValue: qsOrder.trackingNumber || '' },
-                    { name: 'date',        label: currentLanguage === 'tr' ? 'Tarih' : 'Date', defaultValue: today, type: 'date' },
-                  ].map(f => (
-                    <div key={f.name}>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{f.label}</label>
-                      <input
-                        name={f.name}
-                        type={f.type || 'text'}
-                        defaultValue={f.defaultValue}
-                        className="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 outline-none focus:border-brand"
-                      />
-                    </div>
-                  ))}
-                  <div className="flex gap-3 pt-2">
-                    <button type="button" onClick={() => setShowQuickShipment(null)} className="flex-1 apple-button-secondary">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                    <button type="submit" className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm">
-                      <Truck className="w-4 h-4" />
-                      {currentLanguage === 'tr' ? 'Sevkiyat Oluştur' : 'Create Shipment'}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
+      {showQuickShipment && (
+        <QuickShipmentModal
+          order={showQuickShipment}
+          onClose={() => setShowQuickShipment(null)}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+          onSuccess={(msg) => {
+            toast(msg, 'success');
+            setShowQuickShipment(null);
+          }}
+        />
+      )}
 
       {/* ── Phase 538: Overdue Payments Slide-in Panel ── */}
-      <AnimatePresence>
-        {showOverduePanel && (() => {
-          const nowMs538 = Date.now();
-          const getAge = (o: Order): number => {
-            const raw = o.createdAt ?? o.syncedAt;
-            if (!raw) return 0;
-            const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-              ? (raw as { toDate: () => Date }).toDate()
-              : new Date(raw as string | number);
-            return Math.floor((nowMs538 - d.getTime()) / 86400000);
-          };
-          const overdueList = orders
-            .filter(o => !o.paid && o.status !== 'Cancelled')
-            .sort((a, b) => getAge(b) - getAge(a));
-          const totalOwed = overdueList.reduce((s, o) => s + (o.totalPrice ?? o.totalAmount ?? 0), 0);
-          return (
-            <div className="fixed inset-0 z-[9998] flex items-stretch justify-end">
-              {/* Backdrop */}
-              <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="flex-1 bg-black/30 backdrop-blur-[2px]"
-                onClick={() => setShowOverduePanel(false)}
-              />
-              {/* Drawer */}
-              <motion.div
-                initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-                className="w-full max-w-md bg-white shadow-2xl flex flex-col overflow-hidden"
-              >
-                {/* Header */}
-                <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
-                    <CreditCard className="w-5 h-5 text-red-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-black text-gray-900">
-                      {currentLanguage === 'tr' ? 'Vadesi Geçmiş Ödemeler' : 'Overdue Payments'}
-                    </h3>
-                    <p className="text-xs text-gray-400">
-                      {overdueList.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · ₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'toplam' : 'total'}
-                    </p>
-                  </div>
-                  <button onClick={() => setShowOverduePanel(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                    <X className="w-4 h-4 text-gray-400" />
-                  </button>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-                  {overdueList.length === 0 ? (
-                    <div className="text-center py-12">
-                      <CheckCircle2 className="w-12 h-12 text-emerald-300 mx-auto mb-3" />
-                      <p className="text-gray-400 font-medium">
-                        {currentLanguage === 'tr' ? 'Gecikmiş ödeme yok 🎉' : 'No overdue payments 🎉'}
-                      </p>
-                    </div>
-                  ) : overdueList.map(order => {
-                    const age = getAge(order);
-                    const isOld = age > 30;
-                    const amount = order.totalPrice ?? order.totalAmount ?? 0;
-                    return (
-                      <div key={order.id} className={`rounded-2xl border p-4 ${isOld ? 'border-red-200 bg-red-50/50' : 'border-gray-200 bg-white'}`}>
-                        <div className="flex items-start gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="font-bold text-sm text-gray-900 truncate">{order.customerName}</p>
-                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${isOld ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {age}{currentLanguage === 'tr' ? 'g' : 'd'}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-gray-400">#{order.shopifyOrderId || order.id.slice(-6)} · {order.status}</p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="font-black text-gray-900">₺{amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
-                            <button
-                              onClick={() => {
-                                setShowOverduePanel(false);
-                                handleToggleOrderPaid(order);
-                              }}
-                              className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 mt-1"
-                            >
-                              {currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Mark Paid'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Footer total */}
-                {overdueList.length > 0 && (
-                  <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between">
-                    <span className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable'}</span>
-                    <span className="text-lg font-black text-red-600">₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
+      <OverduePanel
+        isOpen={showOverduePanel}
+        onClose={() => setShowOverduePanel(false)}
+        currentLanguage={currentLanguage as 'tr' | 'en'}
+        orders={orders}
+        onMarkPaid={handleToggleOrderPaid}
+      />
 
       {/* ── Phase 532: Payment Method Picker Modal ── */}
-      <AnimatePresence>
-        {p532PayOrder && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
-            >
-              <div className="px-6 pt-6 pb-2 flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
-                  <CreditCard className="w-5 h-5 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Ödeme Al' : 'Record Payment'}</h3>
-                  <p className="text-xs text-gray-400">
-                    #{p532PayOrder.shopifyOrderId || p532PayOrder.id.slice(-6)} · {p532PayOrder.customerName}
-                    {' · '}₺{(p532PayOrder.totalPrice ?? p532PayOrder.totalAmount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <button onClick={() => setP532PayOrder(null)} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <X className="w-4 h-4 text-gray-400" />
-                </button>
-              </div>
-
-              <div className="px-6 py-4">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-                  {currentLanguage === 'tr' ? 'Ödeme Yöntemi' : 'Payment Method'}
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { key: 'cash',          icon: '💵', label: currentLanguage === 'tr' ? 'Nakit'    : 'Cash'          },
-                    { key: 'bank_transfer', icon: '🏦', label: currentLanguage === 'tr' ? 'EFT/Havale' : 'Bank Transfer' },
-                    { key: 'credit_card',   icon: '💳', label: currentLanguage === 'tr' ? 'Kredi Kartı' : 'Credit Card'  },
-                    { key: 'check',         icon: '📄', label: currentLanguage === 'tr' ? 'Çek'       : 'Cheque'         },
-                    { key: 'other',         icon: '🔄', label: currentLanguage === 'tr' ? 'Diğer'     : 'Other'          },
-                  ] as { key: NonNullable<Order['paymentMethod']>; icon: string; label: string }[]).map(opt => (
-                    <button
-                      key={opt.key}
-                      onClick={() => setP532Method(opt.key)}
-                      className={cn(
-                        "flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 text-sm font-semibold transition-all",
-                        p532Method === opt.key
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                          : "border-gray-100 bg-gray-50 text-gray-600 hover:border-emerald-200"
-                      )}
-                    >
-                      <span className="text-lg leading-none">{opt.icon}</span>
-                      <span className="text-xs">{opt.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setP532PayOrder(null)}
-                  className="flex-1 apple-button-secondary"
-                >
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmPayment}
-                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
-                >
-                  <Check className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Ödemeyi Onayla' : 'Confirm Payment'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {p532PayOrder && (
+        <PaymentMethodModal
+          order={p532PayOrder}
+          onClose={() => setP532PayOrder(null)}
+          onConfirm={handleConfirmPayment}
+          currentLanguage={currentLanguage as 'tr' | 'en'}
+        />
+      )}
 
     </div>
   );
