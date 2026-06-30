@@ -45,6 +45,14 @@ describe('isAllowed — RBAC politikası', () => {
     expect(isAllowed('Dealer', 'orders', 'delete')).toBe(false);
   });
 
+  it('B2B/Dealer fiyat listesi/override YAZAMAZ (kendine indirim açığı kapalı)', () => {
+    // Fiyatları okuyabilir ama değiştiremez — aksi halde kendine indirim tanımlar
+    expect(isAllowed('B2B', 'priceLists', 'read')).toBe(true);
+    expect(isAllowed('B2B', 'priceLists', 'write')).toBe(false);
+    expect(isAllowed('Dealer', 'priceLists', 'write')).toBe(false);
+    expect(isAllowed('B2B', 'priceOverrides', 'write')).toBe(false);
+  });
+
   it('append-only koleksiyonlar: yazma var, okuma yalnız Admin, güncelleme/silme yok', () => {
     // personel ekleyebilir
     expect(isAllowed('Sales', 'auditLog', 'write')).toBe(true);

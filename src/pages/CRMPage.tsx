@@ -72,7 +72,6 @@ interface Props {
   supportTickets: SupportTicket[];
   commissionRules: CommissionRule[];
   trackView: (item: { type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }) => void;
-  setEditingLeadData: React.Dispatch<React.SetStateAction<Partial<Lead>>>;
   setIsEditingLead: React.Dispatch<React.SetStateAction<boolean>>;
   setEmailCompose: React.Dispatch<React.SetStateAction<{ open: boolean; to: string; name: string; subject: string; body: string }>>;
   setNewOrder: React.Dispatch<React.SetStateAction<Partial<Order>>>;
@@ -93,7 +92,7 @@ export default function CRMPage({
   orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
   appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [],
-  trackView, setEditingLeadData, setIsEditingLead, setEmailCompose,
+  trackView, setIsEditingLead, setEmailCompose,
   setNewOrder, setOrderCustomerSearch, handleToggleOrderPaid, openConfirm,
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,
   logAuditAction,
@@ -2937,7 +2936,7 @@ export default function CRMPage({
                   className="mb-0 w-full"
                   actionButton={
                     <div className="flex gap-2 flex-wrap">
-                      <button onClick={() => { setEditingLeadData(selectedLead); setIsEditingLead(true); }} className="apple-button-secondary">
+                      <button onClick={() => { setIsEditingLead(true); }} className="apple-button-secondary">
                         <Edit2 className="w-4 h-4" /> {currentT.edit}
                       </button>
                       <button onClick={() => handleDeleteLead(selectedLead.id)} className="apple-button-secondary text-red-600 hover:bg-red-50">

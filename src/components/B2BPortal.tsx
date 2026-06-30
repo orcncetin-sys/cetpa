@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { confirmDelete } from '../lib/confirm';
 import { authFetch } from '../services/authFetch';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AlertCircle, AlertTriangle, CheckCircle2, Download, Edit2, Eye,
   FilePlus, FileText, Globe, List, Plus, RefreshCw, Search,
@@ -63,6 +63,8 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   user, userRole, leads, inventory, orders: portalOrders = [],
   currentT, currentLanguage, exchangeRates,
 }) => {
+  // Fiyat listesi yönetimi yalnız personel (Admin/Manager/Sales). Dış roller (B2B/Dealer) fiyatları salt-okur — rbac.ts ile hizalı.
+  const canManagePrices = userRole === 'Admin' || userRole === 'Manager' || userRole === 'Sales';
   const [b2bTab, setB2bTab] = useState<'quotations' | 'dealers' | 'pricelists' | 'komisyon'>('quotations');
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -231,7 +233,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
             <button onClick={() => { setEditingDealer(null); setDealerForm({ name: '', company: '', email: '', phone: '', taxId: '', creditLimit: 500000, priceTier: 'Dealer', paymentTerms: '30', address: '' }); setIsDealerModalOpen(true); }} className="apple-button-primary">
               <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Bayi' : 'New Dealer'}
             </button>
-          ) : b2bTab === 'pricelists' ? (
+          ) : b2bTab === 'pricelists' && canManagePrices ? (
             <button onClick={() => setIsAddingPrice(true)} className="apple-button-primary">
               <Plus className="w-4 h-4" /> {currentT.new_price_list}
             </button>
@@ -465,12 +467,14 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <td className="text-right text-gray-500 hidden sm:table-cell">{(pl.prices?.['B2B Premium'] ?? 0).toLocaleString('tr-TR')}</td>
                       <td className="text-right text-brand font-bold">{(pl.prices?.['Dealer'] ?? 0).toLocaleString('tr-TR')}</td>
                       <td><div className="flex items-center justify-end gap-1">
-                        <button onClick={() => { setSelectedPriceList(pl); setIsEditingPriceList(true); }} className="action-btn-edit"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; await deleteDoc(doc(db, 'priceLists', pl.id)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canManagePrices ? (<>
+                          <button onClick={() => { setSelectedPriceList(pl); setIsEditingPriceList(true); }} className="action-btn-edit"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; await deleteDoc(doc(db, 'priceLists', pl.id)); }} className="action-btn-delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </>) : <span className="text-[10px] text-gray-300">—</span>}
                       </div></td>
                     </tr>
                   ))}
-                {priceLists.length === 0 && (<tr><td colSpan={6} className="text-center py-12"><div className="flex flex-col items-center gap-3"><p className="text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Henüz fiyat listesi eklenmedi.' : 'No price lists yet.'}</p><button onClick={() => setIsAddingPrice(true)} className="apple-button-primary text-sm px-5 py-2 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Fiyat Listesi Ekle' : 'Add Price List'}</button></div></td></tr>)}
+                {priceLists.length === 0 && (<tr><td colSpan={6} className="text-center py-12"><div className="flex flex-col items-center gap-3"><p className="text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Henüz fiyat listesi eklenmedi.' : 'No price lists yet.'}</p>{canManagePrices && (<button onClick={() => setIsAddingPrice(true)} className="apple-button-primary text-sm px-5 py-2 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Fiyat Listesi Ekle' : 'Add Price List'}</button>)}</div></td></tr>)}
               </tbody>
             </table>
           </div>

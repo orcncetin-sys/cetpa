@@ -50,8 +50,9 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   customers: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   orders: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing', 'B2B', 'Dealer'], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'B2B', 'Dealer'] },
   recurringOrders: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting', 'Logistics'], write: ['Admin', 'Manager', 'Sales', 'B2B'] },
-  priceLists: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'B2B'] },
-  priceOverrides: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'B2B'] },
+  // Güvenlik: B2B/Dealer dış rolleri fiyat listesi/override YAZAMAZ (kendine indirim verme açığı). Yalnız okur.
+  priceLists: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
+  priceOverrides: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   quotations: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer'] },
   campaigns: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   returns: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing'], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },

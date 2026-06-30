@@ -210,6 +210,10 @@ const MaliyetMerkeziModule    = React.lazy(() => import('./components/MaliyetMer
 const KasaModule              = React.lazy(() => import('./components/KasaModule'));
 const TahsilatModule          = React.lazy(() => import('./components/TahsilatModule'));
 import NewLeadModal, { type NewLeadData } from './components/NewLeadModal';
+import AddOrderModal from './components/AddOrderModal';
+import AddShipmentModal from './components/AddShipmentModal';
+import EditLeadModal from './components/EditLeadModal';
+import EditOrderModal from './components/EditOrderModal';
 import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
   type UserSubscription,
@@ -1249,9 +1253,12 @@ function AppContent() {
     }
   }, [user, storeCompanyId]);
 
+  // ── Add/Edit Lead ──────────────────────────────────────────────────────────
   const [isAddingLead, setIsAddingLead] = useState(false);
-  const [isScoring, setIsScoring] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<string|null>(null);
 
+  // ── Add Order ──────────────────────────────────────────────────────────────
+  const [isScoring, setIsScoring] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
@@ -1260,13 +1267,10 @@ function AppContent() {
   // Public order tracking — read from URL on mount
   const trackOrderId = new URLSearchParams(window.location.search).get('track') ?? null;
   const [isEditingOrder, setIsEditingOrder] = useState(false);
-  const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isAddingShipment, setIsAddingShipment] = useState(false);
-  const [newShipment, setNewShipment] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
-  const [shipmentCustomerSearch, setShipmentCustomerSearch] = useState('');
-  const [shipmentCustomerOpen, setShipmentCustomerOpen] = useState(false);
+  const [shipmentInitialData, setShipmentInitialData] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [newOrder, setNewOrder] = useState<Partial<Order>>({
     totalPrice: 0,
     status: 'Pending',
@@ -1281,7 +1285,6 @@ function AppContent() {
   const [orderCustomerOpen, setOrderCustomerOpen] = useState(false);
   const leadFromOrderRef = useRef(false); // Phase 82: track lead-modal opened from order form
   const [isEditingLead, setIsEditingLead] = useState(false);
-  const [editingLeadData, setEditingLeadData] = useState<Partial<Lead>>({});
 
   // --- Filters ---
   // ── Phase 501-515 ────────────────────────────────────────────────────────────
@@ -2459,26 +2462,21 @@ function AppContent() {
     setIsRouteOptimized(false);
   };
 
-  const handleAddShipment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddShipmentSubmit = async (formData: Partial<Shipment>) => {
     if (!user) return;
     try {
       if (editingShipmentId) {
-        // Update existing shipment
         await updateDoc(doc(db, 'shipments', editingShipmentId), {
-          ...newShipment,
+          ...formData,
           updatedAt: serverTimestamp()
         });
       } else {
-        // Create new shipment
         await addDoc(collection(db, 'shipments'), {
-          ...newShipment,
+          ...formData,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
       }
-      setNewShipment({ status: 'Pending' });
-      setShipmentCustomerSearch('');
       setEditingShipmentId(null);
       setIsAddingShipment(false);
     } catch (error) {
@@ -2518,58 +2516,16 @@ function AppContent() {
     }
   };
 
-  const handleAddLineItem = (item: InventoryItem) => {
-    // Automatically set KDV (vatRate) from product if not already set or if explicitly requested
-    const vatRate = (item.vatRate as number | undefined) || 20;
-    setNewOrder(prev => ({ ...prev, kdvOran: vatRate as number, faturali: true }));
-
-    const existing = orderLineItems.findIndex(l => l.inventoryId === item.id);
-    if (existing >= 0) {
-      const updated = [...orderLineItems];
-      updated[existing].quantity += 1;
-      setOrderLineItems(updated);
-    } else {
-      setOrderLineItems([...orderLineItems, {
-        id: crypto.randomUUID(),
-        inventoryId: item.id,
-        name: item.name,
-        title: item.name,
-        sku: item.sku,
-        price: item.price || (typeof item.prices === 'object' && item.prices ? (item.prices as Record<string, number>).Retail || 0 : 0),
-        quantity: 1,
-        vatRate: vatRate as number
-      }]);
-    }
-    setShowProductPicker(false);
-    setProductSearch('');
-  };
-
-  const handleUpdateLineItemQty = (idx: number, qty: number) => {
-    if (qty < 1) {
-      setOrderLineItems(orderLineItems.filter((_, i) => i !== idx));
-      return;
-    }
-    const updated = [...orderLineItems];
-    updated[idx].quantity = qty;
-    setOrderLineItems(updated);
-  };
-
-  const handleUpdateLineItemPrice = (idx: number, price: number) => {
-    const updated = [...orderLineItems];
-    updated[idx].price = price;
-    setOrderLineItems(updated);
-  };
-
-  const computedTotal = orderLineItems.reduce((sum, l) => sum + l.price * l.quantity, 0);
-
   // ── Generic sort helper ──────────────────────────────────────────────────
 
-  const handleAddOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddOrder = async (
+    newOrder: Partial<Order>,
+    orderLineItems: OrderLineItem[],
+    computedTotal: number
+  ) => {
     const customerName = selectedLead ? selectedLead.name : newOrder.customerName || 'Unknown Customer';
     const email = selectedLead ? selectedLead.email : undefined;
 
-    setIsPushingToShopify(true);
     // Pre-generate the Firestore doc ref so its ID can be reused as a stable order reference
     const orderDocRef = doc(collection(db, 'orders'));
     let shopifyOrderId = `SHP-${orderDocRef.id.slice(0, 8).toUpperCase()}`;
@@ -2700,13 +2656,9 @@ function AppContent() {
         handleFirestoreError(error, OperationType.CREATE, 'orders');
       }
 
-      setIsAddingOrder(false);
-      setNewOrder({ totalPrice: 0, status: 'Pending', shippingAddress: '', customerName: '' });
-      setOrderLineItems([]);
+      // AddOrderModal handles closing its own state
     } catch (error) {
       console.error("Error adding order:", error);
-    } finally {
-      setIsPushingToShopify(false);
     }
   };
 
@@ -2943,24 +2895,22 @@ function AppContent() {
     }
   };
 
-  const handleEditLead = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditLeadSubmit = async (updatedData: Partial<Lead>) => {
     if (!selectedLead) return;
     try {
-      await updateDoc(doc(db, 'leads', selectedLead.id), { ...editingLeadData, updatedAt: serverTimestamp() });
-      setSelectedLead({ ...selectedLead, ...editingLeadData } as Lead);
+      await updateDoc(doc(db, 'leads', selectedLead.id), { ...updatedData, updatedAt: serverTimestamp() });
+      setSelectedLead({ ...selectedLead, ...updatedData } as Lead);
       setIsEditingLead(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `leads/${selectedLead.id}`);
     }
   };
 
-  const handleEditOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditOrderSubmit = async (updatedData: Partial<Order>) => {
     if (!selectedOrder) return;
     try {
-      await updateDoc(doc(db, 'orders', selectedOrder.id), { ...editingOrderData, updatedAt: serverTimestamp() });
-      setSelectedOrder({ ...selectedOrder, ...editingOrderData } as Order);
+      await updateDoc(doc(db, 'orders', selectedOrder.id), { ...updatedData, updatedAt: serverTimestamp() });
+      setSelectedOrder({ ...selectedOrder, ...updatedData } as Order);
       setIsEditingOrder(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${selectedOrder.id}`);
@@ -4970,7 +4920,7 @@ function AppContent() {
                 );
               })()}
 
-              {/* ── Phase 125: KPI Alert Thresholds ── */}
+              {/* ── Phase 124: KPI Alert Thresholds ── */}
               {(() => {
                 const alerts125: Array<{ level: 'warn' | 'danger'; icon: string; message: string }> = [];
                 // Low stock items
@@ -5072,7 +5022,9 @@ function AppContent() {
                 const getOD159 = (o: Order): Date => {
                   const raw = o.createdAt ?? o.syncedAt;
                   if (!raw) return new Date(0);
-                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
+                  return typeof (raw as { toDate?: () => Date }).toDate === 'function'
+                    ? (raw as { toDate: () => Date }).toDate()
+                    : new Date(raw as string | number);
                 };
                 const last30 = orders.filter(o => { const d = getOD159(o); return d >= d30ago && o.status !== 'Cancelled'; });
                 const prev30 = orders.filter(o => { const d = getOD159(o); return d >= d60ago && d < d30ago && o.status !== 'Cancelled'; });
@@ -13941,7 +13893,6 @@ function AppContent() {
                 supportTickets={supportTickets}
                 commissionRules={commissionRules}
                 trackView={trackView}
-                setEditingLeadData={setEditingLeadData}
                 setIsEditingLead={setIsEditingLead}
                 setEmailCompose={setEmailCompose}
                 setNewOrder={setNewOrder}
@@ -14039,640 +13990,50 @@ function AppContent() {
       />
 
       {/* ── Add Order Modal ── */}
-      <AnimatePresence>
-        {isAddingOrder && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { if (!isPushingToShopify) { setIsAddingOrder(false); setOrderLineItems([]); setShowProductPicker(false); } }}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200 max-h-[90vh] flex flex-col">
-
-              {/* Header */}
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between shrink-0">
-                <div>
-                  <h3 className="text-xl font-bold">{selectedLead ? `${currentT.new_order} — ${selectedLead.name}` : currentT.create_new_order}</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">{currentT.products_pulled_from_shopify}</p>
-                </div>
-                <button onClick={() => { if (!isPushingToShopify) { setIsAddingOrder(false); setOrderLineItems([]); setShowProductPicker(false); } }}
-                  className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
-              </div>
-
-              <form onSubmit={handleAddOrder} className="flex flex-col flex-1 overflow-hidden">
-                <div className="overflow-y-auto flex-1 p-6 space-y-5">
-
-                  {/* Resmi / Faturasız toggle — resmi işlemler Mikro'ya kaydedilir */}
-                  <div className={`rounded-xl border p-3 flex items-center justify-between gap-3 ${newOrder.faturali ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                    <div className="min-w-0">
-                      <p className={`text-xs font-bold ${newOrder.faturali ? 'text-emerald-700' : 'text-amber-700'}`}>
-                        {newOrder.faturali
-                          ? (currentLanguage === 'tr' ? 'Resmi (Faturalı) İşlem' : 'Official (Invoiced) Sale')
-                          : (currentLanguage === 'tr' ? 'Faturasız İşlem' : 'Unofficial Sale')}
-                      </p>
-                      <p className={`text-[11px] mt-0.5 ${newOrder.faturali ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {newOrder.faturali
-                          ? (currentLanguage === 'tr' ? 'KDV hesaplanır, yevmiye kaydı atılır ve Mikro\'ya sipariş kaydı gönderilir.' : 'VAT applied, journal entry created, order pushed to Mikro.')
-                          : (currentLanguage === 'tr' ? 'Mikro\'ya kayıt GÖNDERİLMEZ — stok yalnızca yerel sistemde düşülür.' : 'NOT sent to Mikro — stock tracked locally only.')}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setNewOrder(prev => ({ ...prev, faturali: !prev.faturali }))}
-                      className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${newOrder.faturali ? 'bg-emerald-500' : 'bg-gray-300'}`}
-                      aria-label="Resmi işlem"
-                    >
-                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${newOrder.faturali ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                    </button>
-                  </div>
-
-                  {/* Customer */}
-                  {!selectedLead && (
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.customer_name}</label>
-                      <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                        <input
-                          type="text"
-                          value={newOrder.customerName || ''}
-                          onChange={e => {
-                            setNewOrder({ ...newOrder, customerName: e.target.value, shippingAddress: newOrder.shippingAddress });
-                            setOrderCustomerSearch(e.target.value);
-                            setOrderCustomerOpen(true);
-                          }}
-                          onFocus={() => setOrderCustomerOpen(true)}
-                          onBlur={() => setTimeout(() => setOrderCustomerOpen(false), 200)}
-                          className="apple-input pl-9"
-                          placeholder={currentLanguage === 'tr' ? 'Müşteri ara veya yaz...' : 'Search or type customer...'}
-                        />
-                        {orderCustomerOpen && (
-                          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto">
-                            {leads.filter(l =>
-                              !orderCustomerSearch ||
-                              l.name.toLowerCase().includes(orderCustomerSearch.toLowerCase()) ||
-                              l.company?.toLowerCase().includes(orderCustomerSearch.toLowerCase())
-                            ).slice(0, 8).map(lead => (
-                              <button key={lead.id} type="button"
-                                onMouseDown={() => {
-                                  const isEFatura = lead.customerType === 'B2B' || (lead.taxId && lead.taxId.length >= 10);
-                                  setNewOrder({ 
-                                    ...newOrder, 
-                                    customerName: lead.name, 
-                                    shippingAddress: lead.company || '',
-                                    faturali: true,
-                                    faturaTipi: isEFatura ? 'e-fatura' : 'e-arsiv'
-                                  });
-                                  setOrderCustomerSearch(lead.name);
-                                  setOrderCustomerOpen(false);
-                                  setSelectedLead(lead);
-                                }}
-                                className="w-full text-left px-4 py-2.5 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
-                                <p className="text-sm font-semibold text-[#1D1D1F]">{lead.name}</p>
-                                <p className="text-[11px] text-[#86868B]">{lead.company} • {lead.email}</p>
-                              </button>
-                            ))}
-                            {leads.length === 0 && (
-                              <p className="px-4 py-3 text-xs text-[#86868B]">{currentLanguage === 'tr' ? 'Henüz müşteri yok' : 'No customers yet'}</p>
-                            )}
-                            <button type="button"
-                              onMouseDown={() => { setOrderCustomerOpen(false); leadFromOrderRef.current = true; setIsAddingLead(true); }}
-                              className="w-full text-left px-4 py-2.5 text-xs font-bold text-brand hover:bg-brand/5 flex items-center gap-2">
-                              <Plus className="w-3.5 h-3.5" />
-                              {currentLanguage === 'tr' ? 'Yeni müşteri adayı ekle' : 'Add new lead'}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Product Picker ── */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.products_line_items}</label>
-                      <div className="flex items-center gap-3">
-                        {orderLineItems.length > 0 && (
-                          <button type="button" onClick={() => setOrderLineItems([])}
-                            className="text-gray-400 text-[10px] font-bold hover:text-red-500 transition-colors">
-                            {currentT.clear_all}
-                          </button>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => setIsOrderScannerOpen(true)}
-                            className="text-gray-500 text-xs font-bold flex items-center gap-1 hover:text-brand hover:underline transition-colors">
-                            <Scan className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Tara' : 'Scan'}
-                          </button>
-                          <button type="button" onClick={() => setShowProductPicker(!showProductPicker)}
-                            className="text-brand text-xs font-bold flex items-center gap-1 hover:underline">
-                            <Plus className="w-3.5 h-3.5" /> {currentT.add_product}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Order barcode scanner */}
-                    <BarcodeScanner
-                      isOpen={isOrderScannerOpen}
-                      onClose={() => setIsOrderScannerOpen(false)}
-                      currentLanguage={currentLanguage as 'tr' | 'en'}
-                      title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
-                      onScan={(barcode) => {
-                        const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
-                        if (match) handleAddLineItem(match);
-                        else setProductSearch(barcode);
-                        setShowProductPicker(true);
-                      }}
-                    />
-
-                    {/* Inventory search dropdown */}
-                    {showProductPicker && (
-                      <div className="border border-gray-200 rounded-xl overflow-hidden shadow-lg">
-                        <div className="p-3 border-b border-gray-100 bg-gray-50">
-                          <div className="flex items-center gap-2">
-                            <Search className="w-4 h-4 text-gray-400 shrink-0" />
-                            <input autoFocus type="text" placeholder={currentT.search_products} value={productSearch}
-                              onChange={e => setProductSearch(e.target.value)}
-                              className="flex-1 bg-transparent outline-none text-sm" />
-                          </div>
-                        </div>
-                        <div className="max-h-52 overflow-y-auto">
-                          {inventory.length === 0 ? (
-                            <div className="p-6 text-center text-sm text-gray-400">
-                              <Package className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                              {currentT.no_inventory_synced}{' '}
-                              <button type="button" onClick={() => { setIsAddingOrder(false); setActiveTab('inventory'); }}
-                                className="text-brand font-bold hover:underline">{currentT.go_sync_shopify}</button>
-                            </div>
-                          ) : (
-                            inventory
-                              .filter(item => item.name.toLowerCase().includes(productSearch.toLowerCase()) || item.sku.toLowerCase().includes(productSearch.toLowerCase()))
-                              .map(item => (
-                                <button key={item.id} type="button" onClick={() => handleAddLineItem(item)}
-                                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0">
-                                  <div>
-                                    <p className="font-bold text-sm text-[#1D2226]">{item.name}</p>
-                                    <p className="text-[10px] text-gray-400">{item.sku} • Stock: {item.stockLevel}</p>
-                                  </div>
-                                  <div className="text-right shrink-0 ml-4">
-                                    <p className="font-bold text-sm text-brand">${item.price.toFixed(2)}</p>
-                                    {item.stockLevel <= item.lowStockThreshold && (
-                                      <span className="text-[9px] font-bold text-red-500 uppercase">Low Stock</span>
-                                    )}
-                                  </div>
-                                </button>
-                              ))
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Selected line items */}
-                    {orderLineItems.length > 0 ? (
-                      <div className="border border-gray-200 rounded-xl overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-gray-50 border-b border-gray-100">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Product</th>
-                              <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase">Price</th>
-                              <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase">Qty</th>
-                              <th className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase">Total</th>
-                              <th className="px-2 py-2"></th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-50">
-                            {orderLineItems.map((item, idx) => (
-                              <tr key={idx}>
-                                <td className="px-4 py-2.5">
-                                  <p className="font-bold text-[#1D2226]">{item.title}</p>
-                                  <p className="text-[10px] text-gray-400">{item.sku}</p>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-gray-400 text-xs">$</span>
-                                    <input type="number" step="0.01" value={item.price} onChange={e => handleUpdateLineItemPrice(idx, parseFloat(e.target.value) || 0)}
-                                      className="w-16 text-center font-bold text-sm bg-gray-50 border border-gray-100 rounded px-1 py-0.5 focus:ring-0" />
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <button type="button" onClick={() => handleUpdateLineItemQty(idx, item.quantity - 1)}
-                                      className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-sm leading-none">−</button>
-                                    <input type="number" value={item.quantity} onChange={e => handleUpdateLineItemQty(idx, parseInt(e.target.value) || 0)}
-                                      className="w-10 text-center font-bold text-sm bg-transparent border-none focus:ring-0 p-0" />
-                                    <button type="button" onClick={() => handleUpdateLineItemQty(idx, item.quantity + 1)}
-                                      className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-sm leading-none">+</button>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5 text-right font-bold text-[#1D2226]">
-                                  ${(item.price * item.quantity).toFixed(2)}
-                                </td>
-                                <td className="px-2 py-2.5">
-                                  <button type="button" onClick={() => setOrderLineItems(orderLineItems.filter((_, i) => i !== idx))}
-                                    className="text-gray-300 hover:text-red-500 transition-colors">
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="border-t border-gray-200 bg-gray-50">
-                            <tr>
-                              <td colSpan={2} className="px-4 py-3 text-sm font-bold text-gray-500">{currentT.order_total}</td>
-                              <td className="px-4 py-3 text-right text-lg font-bold text-brand">${computedTotal.toFixed(2)}</td>
-                              <td></td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="border-2 border-dashed border-gray-100 rounded-xl p-6 text-center text-gray-400 text-sm">
-                        <Package className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                        {currentT.no_products_added}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Status + Address */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.status}</label>
-                      <select value={newOrder.status} onChange={e => setNewOrder({ ...newOrder, status: e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' })}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors">
-                        <option value="Pending">{currentT.pending}</option>
-                        <option value="Processing">{currentT.processing}</option>
-                        <option value="Shipped">{currentT.shipped}</option>
-                        <option value="Delivered">{currentT.delivered}</option>
-                        <option value="Cancelled">{currentT.cancelled}</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.shipping_address}</label>
-                      <input type="text" value={newOrder.shippingAddress || ''} onChange={e => setNewOrder({ ...newOrder, shippingAddress: e.target.value })}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" placeholder={currentT.city_district} />
-                    </div>
-                    {branchNames.length > 0 && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase">
-                          {currentLanguage === 'tr' ? 'Şube' : 'Branch'}
-                        </label>
-                        <select
-                          value={(newOrder as Record<string, unknown>).subeAdi as string || ''}
-                          onChange={e => setNewOrder({ ...newOrder, subeAdi: e.target.value } as typeof newOrder)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors"
-                        >
-                          <option value="">{currentLanguage === 'tr' ? '— Şube seç (opsiyonel) —' : '— Select branch (optional) —'}</option>
-                          {branchNames.map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Fatura / KDV Seçimi */}
-                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-bold text-gray-700">{currentLanguage === 'tr' ? 'Faturalı Satış' : 'Invoice Required'}</p>
-                        <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Kapalı = faturasız sevk, KDV yok' : 'Off = shipped without invoice, no VAT'}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setNewOrder(prev => ({ ...prev, faturali: !prev.faturali, kdvOran: !prev.faturali ? 20 : 0 }))}
-                        className={cn(
-                          'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none',
-                          newOrder.faturali ? 'bg-brand' : 'bg-gray-300'
-                        )}
-                      >
-                        <span className={cn('inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform', newOrder.faturali ? 'translate-x-6' : 'translate-x-1')} />
-                      </button>
-                    </div>
-                    {newOrder.faturali && (
-                      <div className="space-y-3">
-                        {/* Invoice Type */}
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Fatura Türü' : 'Invoice Type'}</label>
-                          <div className="grid grid-cols-3 gap-2">
-                            {([
-                              { value: 'e-fatura', label: 'e-Fatura', desc: currentLanguage==='tr'?'Kayıtlı mükellef':'Registered taxpayer' },
-                              { value: 'e-arsiv', label: 'e-Arşiv', desc: currentLanguage==='tr'?'Kayıtsız / bireysel':'Unregistered / individual' },
-                              { value: 'ihracat', label: currentLanguage==='tr'?'İhracat':'Export', desc: currentLanguage==='tr'?'Yurt dışı satış':'International sale' },
-                            ] as const).map(type => (
-                              <button key={type.value} type="button"
-                                onClick={() => setNewOrder(prev => ({ ...prev, faturaTipi: type.value } as Order & {faturaTipi?: string}))}
-                                className={cn('p-2 rounded-xl border text-left transition-all',
-                                  (newOrder as Order & {faturaTipi?: string}).faturaTipi === type.value ? 'border-brand bg-brand/5' : 'border-gray-200 hover:border-gray-300'
-                                )}>
-                                <p className={`text-[10px] font-bold ${(newOrder as Order & {faturaTipi?: string}).faturaTipi === type.value ? 'text-brand' : 'text-gray-700'}`}>{type.label}</p>
-                                <p className="text-[9px] text-gray-400 leading-tight mt-0.5">{type.desc}</p>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'KDV Oranı' : 'VAT Rate'}</label>
-                            {orderLineItems.length > 0 && (
-                              <span className="text-[9px] font-bold text-brand bg-brand/10 px-1.5 py-0.5 rounded-full">
-                                ↑ {currentLanguage === 'tr' ? 'üründen otomatik' : 'auto from product'}
-                              </span>
-                            )}
-                          </div>
-                          {/* Dropdown — auto from product, manual override */}
-                          <select
-                            value={newOrder.kdvOran ?? 20}
-                            onChange={e => setNewOrder(prev => ({ ...prev, kdvOran: Number(e.target.value) }))}
-                            className="apple-input w-full mb-2 text-sm font-bold text-gray-700"
-                          >
-                            {[0, 1, 8, 10, 18, 20].map(rate => (
-                              <option key={rate} value={rate}>
-                                {'%' + rate + ' KDV' + (rate === 0 ? ' — İstisna/İhracat' : rate === 1 ? ' — Temel Gıda' : rate === 8 ? ' — İndirimli' : rate === 20 ? ' — Genel Oran' : '')}
-                              </option>
-                            ))}
-                          </select>
-                          {/* Quick-pick buttons */}
-                          <div className="flex gap-1.5">
-                            {[0, 1, 8, 10, 18, 20].map(rate => (
-                              <button
-                                key={rate}
-                                type="button"
-                                onClick={() => setNewOrder(prev => ({ ...prev, kdvOran: rate }))}
-                                className={cn(
-                                  'flex-1 py-1 rounded-lg text-[10px] font-bold transition-colors',
-                                  newOrder.kdvOran === rate ? 'bg-brand text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-500 hover:border-brand hover:text-brand'
-                                )}
-                              >
-                                %{rate}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {orderLineItems.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-gray-200 space-y-0.5 text-xs text-gray-500">
-                            <div className="flex justify-between">
-                              <span>{currentLanguage === 'tr' ? 'Matrah (KDV hariç)' : 'Net (excl. VAT)'}</span>
-                              <span className="font-semibold">₺{(computedTotal / (1 + (newOrder.kdvOran || 0) / 100)).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between text-brand">
-                              <span>KDV %{newOrder.kdvOran || 0}</span>
-                              <span className="font-semibold">₺{(computedTotal - computedTotal / (1 + (newOrder.kdvOran || 0) / 100)).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between font-bold text-gray-800 pt-0.5">
-                              <span>{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</span>
-                              <span>₺{computedTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.notes}</label>
-                    <textarea value={newOrder.notes || ''} onChange={e => setNewOrder({ ...newOrder, notes: e.target.value })} rows={2}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors resize-none" placeholder={currentT.add_notes} />
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="p-6 border-t border-gray-100 shrink-0 space-y-2">
-                  {/* Fatura özeti */}
-                  {newOrder.faturali ? (
-                    <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-green-600 bg-green-50 rounded-lg py-1.5">
-                      <FileText className="w-3 h-3" />
-                      {currentLanguage === 'tr' ? `Faturalı • KDV %${newOrder.kdvOran || 0}` : `Invoiced • VAT %${newOrder.kdvOran || 0}`}
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-gray-400 bg-gray-50 rounded-lg py-1.5">
-                      <FileText className="w-3 h-3" />
-                      {currentLanguage === 'tr' ? 'Faturasız sevkiyat — KDV yok' : 'Shipped without invoice — no VAT'}
-                    </div>
-                  )}
-                  {orderLineItems.length > 0 && (
-                    <p className="text-[11px] text-center text-gray-400 flex items-center justify-center gap-1">
-                      <RefreshCw className="w-3 h-3" />
-                      {currentT.create_draft_order_shopify}
-                    </p>
-                  )}
-                  <button type="submit" disabled={isPushingToShopify}
-                    className="apple-button-primary w-full">
-                    {isPushingToShopify ? (
-                      <><RefreshCw className="w-4 h-4 animate-spin" /> {currentT.saving_and_pushing}</>
-                    ) : (
-                      <>{currentT.create_order} {orderLineItems.length > 0 && `• $${computedTotal.toFixed(2)}`}</>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <AddOrderModal
+        isOpen={isAddingOrder}
+        onClose={() => setIsAddingOrder(false)}
+        selectedLead={selectedLead}
+        setSelectedLead={setSelectedLead}
+        leads={leads}
+        inventory={inventory}
+        branchNames={branchNames}
+        currentLanguage={currentLanguage}
+        currentT={currentT}
+        onSubmit={handleAddOrder}
+        onAddLeadClick={() => { leadFromOrderRef.current = true; setIsAddingLead(true); }}
+        onGoToInventory={() => setActiveTab('inventory')}
+      />
 
       {/* ── Add Shipment Modal ── */}
-      <AnimatePresence>
-        {isAddingShipment && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' }); }} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold">{editingShipmentId ? 'Sevkiyatı Düzenle' : 'Sevkiyat Ekle'}</h3>
-                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' }); }} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
-              </div>
-              <form onSubmit={handleAddShipment} className="p-6 space-y-4">
-                {/* Customer picker with address auto-fill */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">Müşteri Seç</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={shipmentCustomerSearch}
-                      placeholder="Müşteri ara..."
-                      onChange={e => { setShipmentCustomerSearch(e.target.value); setShipmentCustomerOpen(true); }}
-                      onFocus={() => setShipmentCustomerOpen(true)}
-                      onBlur={() => setTimeout(() => setShipmentCustomerOpen(false), 200)}
-                      className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-brand transition-colors"
-                    />
-                    {shipmentCustomerOpen && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl z-20 max-h-44 overflow-y-auto">
-                        {leads.filter(l => !shipmentCustomerSearch || l.name.toLowerCase().includes(shipmentCustomerSearch.toLowerCase()) || l.company?.toLowerCase().includes(shipmentCustomerSearch.toLowerCase())).slice(0, 6).map(lead => (
-                          <button key={lead.id} type="button"
-                            onMouseDown={() => {
-                              setNewShipment({ ...newShipment, customerName: lead.name, destination: lead.company || '' });
-                              setShipmentCustomerSearch(lead.name);
-                              setShipmentCustomerOpen(false);
-                            }}
-                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0">
-                            <p className="text-sm font-semibold">{lead.name}</p>
-                            <p className="text-[11px] text-[#86868B]">{lead.company} • {lead.phone}</p>
-                          </button>
-                        ))}
-                        {leads.length === 0 && <p className="px-4 py-3 text-xs text-[#86868B]">Henüz müşteri yok</p>}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Müşteri Adı</label>
-                    <input required value={newShipment.customerName || ''} onChange={e => setNewShipment({ ...newShipment, customerName: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Varış</label>
-                    <input required value={newShipment.destination || ''} onChange={e => setNewShipment({ ...newShipment, destination: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Sürücü</label>
-                    <input required value={newShipment.driver || ''} onChange={e => setNewShipment({ ...newShipment, driver: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Kargo Firması</label>
-                    <input required value={newShipment.cargoFirm || ''} onChange={e => setNewShipment({ ...newShipment, cargoFirm: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Tarih</label>
-                    <input required type="date" value={newShipment.date || ''} onChange={e => setNewShipment({ ...newShipment, date: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">Durum</label>
-                    <select value={newShipment.status} onChange={e => setNewShipment({ ...newShipment, status: e.target.value as 'Pending' | 'In Transit' | 'Delivered' | 'Cancelled' })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors">
-                      <option value="Pending">Pending</option>
-                      <option value="In Transit">In Transit</option>
-                      <option value="Delivered">Delivered</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">Takip No</label>
-                  <input required value={newShipment.trackingNo || ''} onChange={e => setNewShipment({ ...newShipment, trackingNo: e.target.value })}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                </div>
-                <button type="submit" className="apple-button-primary w-full mt-4">
-                  {editingShipmentId ? 'Değişiklikleri Kaydet' : 'Sevkiyat Ekle'}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <AddShipmentModal
+        isOpen={isAddingShipment}
+        onClose={() => {
+          setIsAddingShipment(false);
+          setEditingShipmentId(null);
+        }}
+        leads={leads}
+        initialData={shipmentInitialData}
+        onSubmit={handleAddShipmentSubmit}
+      />
 
       {/* ── Edit Lead Modal ── */}
-      <AnimatePresence>
-        {isEditingLead && selectedLead && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsEditingLead(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold">{currentT.edit_lead}</h3>
-                <button onClick={() => setIsEditingLead(false)} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
-              </div>
-              <form onSubmit={handleEditLead} className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.contact_name}</label>
-                    <input required value={editingLeadData.name || ''} onChange={e => setEditingLeadData({ ...editingLeadData, name: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.company}</label>
-                    <input required value={editingLeadData.company || ''} onChange={e => setEditingLeadData({ ...editingLeadData, company: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.email}</label>
-                    <input type="email" value={editingLeadData.email || ''} onChange={e => setEditingLeadData({ ...editingLeadData, email: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.phone}</label>
-                    <input value={editingLeadData.phone || ''} onChange={e => setEditingLeadData({ ...editingLeadData, phone: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.notes}</label>
-                  <textarea value={editingLeadData.notes || ''} onChange={e => setEditingLeadData({ ...editingLeadData, notes: e.target.value })} rows={3}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors resize-none" />
-                </div>
-                <button type="submit" className="apple-button-primary w-full mt-4">
-                  {currentT.save_changes}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <EditLeadModal
+        isOpen={isEditingLead}
+        onClose={() => setIsEditingLead(false)}
+        lead={selectedLead}
+        currentT={currentT}
+        onSubmit={handleEditLeadSubmit}
+      />
 
       {/* ── Edit Order Modal ── */}
-      <AnimatePresence>
-        {isEditingOrder && selectedOrder && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsEditingOrder(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold">{currentT.edit_order}</h3>
-                <button onClick={() => setIsEditingOrder(false)} className="text-gray-400 hover:text-gray-600"><Plus className="w-6 h-6 rotate-45" /></button>
-              </div>
-              <form onSubmit={handleEditOrder} className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.customer_name}</label>
-                    <input required value={editingOrderData.customerName || ''} onChange={e => setEditingOrderData({ ...editingOrderData, customerName: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.total_price}</label>
-                    <input required type="number" step="0.01" value={editingOrderData.totalPrice || ''} onChange={e => setEditingOrderData({ ...editingOrderData, totalPrice: parseFloat(e.target.value) })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.tracking_number}</label>
-                    <input value={editingOrderData.trackingNumber || ''} onChange={e => setEditingOrderData({ ...editingOrderData, trackingNumber: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.status}</label>
-                    <select value={editingOrderData.status || 'Pending'} onChange={e => setEditingOrderData({ ...editingOrderData, status: e.target.value as Order['status'] })}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors">
-                      <option value="Pending">{currentT.pending}</option>
-                      <option value="Processing">{currentT.processing}</option>
-                      <option value="Shipped">{currentT.shipped}</option>
-                      <option value="Delivered">{currentT.delivered}</option>
-                      <option value="Cancelled">{currentT.cancelled}</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.shipping_address}</label>
-                  <textarea value={editingOrderData.shippingAddress || ''} onChange={e => setEditingOrderData({ ...editingOrderData, shippingAddress: e.target.value })} rows={2}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors resize-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.notes}</label>
-                  <textarea value={editingOrderData.notes || ''} onChange={e => setEditingOrderData({ ...editingOrderData, notes: e.target.value })} rows={3}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors resize-none" />
-                </div>
-                <button type="submit" className="apple-button-primary w-full mt-4">
-                  {currentT.save_changes}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <EditOrderModal
+        isOpen={isEditingOrder}
+        onClose={() => setIsEditingOrder(false)}
+        order={selectedOrder}
+        currentT={currentT}
+        onSubmit={handleEditOrderSubmit}
+      />
       {/* Global search palette (⌘K) */}
       {globalSearchOpen && (
         <GlobalSearch
