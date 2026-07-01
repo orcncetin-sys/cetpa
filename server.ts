@@ -1865,8 +1865,20 @@ async function startServer() {
   const PORT = parseInt(process.env.PORT || '5173', 10);
   const isProd = process.env.NODE_ENV === 'production';
 
-  // Trust the first proxy (nginx/Cloudflare) so express-rate-limit reads real IP
+  // Trust the first proxy (nginx/Cloudflare/IIS ARR) so express-rate-limit reads real IP
   app.set('trust proxy', 1);
+
+  // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
+  // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
+  // boğmasını önler; saldırgan token başına da sınırlanır. Tüm rate limiter'lar
+  // bunu kullanmalı — ham req.ip (varsayılan anahtar üretici) IIS ARR reverse
+  // proxy arkasında "IP:port" birleşik string döndürüyor ve express-rate-limit
+  // v7 bunu ERR_ERL_INVALID_IP_ADDRESS ile reddediyor; ipKeyGenerator bunu
+  // güvenle normalize eder.
+  const userOrIpKey = (req: Request): string => {
+    const uid = (req as Request & { uid?: string }).uid;
+    return uid ? `u:${uid}` : ipKeyGenerator(req.ip ?? '');
+  };
 
   // ── Güvenlik başlıkları (helmet) ──────────────────────────────────────────
   // CSP: React + inline runtime + Firebase Auth/Storage + SSE (self) + harici
@@ -1915,6 +1927,7 @@ async function startServer() {
       max: 2000,
       standardHeaders: true,
       legacyHeaders: false,
+      keyGenerator: userOrIpKey,
       message: { error: 'Too many database requests.' },
     });
     const publicWriteLimiter = rateLimit({
@@ -1922,6 +1935,7 @@ async function startServer() {
       max: 10, // Max 10 submissions per IP
       standardHeaders: true,
       legacyHeaders: false,
+      keyGenerator: userOrIpKey,
       message: { error: 'Çok fazla form gönderdiniz. Lütfen daha sonra tekrar deneyin.' },
     });
     const conditionalPublicLimiter = (req: Request, res: Response, next: NextFunction) => {
@@ -2464,6 +2478,7 @@ async function startServer() {
     max: 300,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: userOrIpKey,
     message: { error: 'Too many requests, please try again later.' },
   });
 
@@ -2473,18 +2488,9 @@ async function startServer() {
     max: 20,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: userOrIpKey,
     message: { error: 'Too many authentication attempts, please try again later.' },
   });
-
-  // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
-  // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
-  // boğmasını önler; saldırgan token başına da sınırlanır.
-  const userOrIpKey = (req: Request): string => {
-    const uid = (req as Request & { uid?: string }).uid;
-    // IPv6 güvenliği: ham req.ip yerine kütüphanenin ipKeyGenerator helper'ı
-    // (express-rate-limit v7 ham IP'yi reddeder — ERR_ERL_KEY_GEN_IPV6).
-    return uid ? `u:${uid}` : ipKeyGenerator(req.ip ?? '');
-  };
 
   /** Stripe / payment — very strict: 10 req / 10 min per kullanıcı (veya IP) */
   const paymentLimiter = rateLimit({
