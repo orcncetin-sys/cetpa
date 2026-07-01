@@ -40,10 +40,31 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 $appCmd = "$env:windir\System32\inetsrv\appcmd.exe"
 if (-not (Test-Path $appCmd)) { throw 'appcmd.exe not found - is IIS installed?' }
 
-# 1) ARR + URL Rewrite (iis-arr pulls in urlrewrite as a dependency)
-Info 'Installing iis-arr (ARR + URL Rewrite modules)...'
-choco install iis-arr -y --no-progress
-Ok 'ARR/URL Rewrite installed.'
+function Test-IisModulePresent($pattern) {
+    (& $appCmd list config -section:system.webServer/globalModules) -join "`n" -match $pattern
+}
+
+# 1) ARR + URL Rewrite. Plesk for Windows commonly ships these already (it depends on
+# them internally) - check first so we don't fight a redundant/conflicting reinstall.
+$hasRewrite = Test-IisModulePresent 'RewriteModule'
+$hasArr     = Test-IisModulePresent 'ApplicationRequestRouting'
+if ($hasRewrite -and $hasArr) {
+    Ok 'URL Rewrite + ARR already present in IIS (likely via Plesk) - skipping choco install.'
+} else {
+    Info 'Installing iis-arr (ARR + URL Rewrite modules)...'
+    choco install iis-arr -y --no-progress
+    if ($LASTEXITCODE -ne 0) {
+        $hasRewrite = Test-IisModulePresent 'RewriteModule'
+        $hasArr     = Test-IisModulePresent 'ApplicationRequestRouting'
+        if ($hasRewrite -and $hasArr) {
+            Ok 'choco install failed (likely "already installed" MSI conflict) but modules ARE present in IIS - continuing.'
+        } else {
+            throw "choco install failed AND modules are not present in IIS (Rewrite=$hasRewrite, ARR=$hasArr). Check C:\ProgramData\chocolatey\logs\chocolatey.log."
+        }
+    } else {
+        Ok 'ARR/URL Rewrite installed.'
+    }
+}
 
 # 2) Enable ARR's proxy feature server-wide (off by default after install)
 Info 'Enabling ARR proxy feature...'
@@ -51,24 +72,39 @@ Info 'Enabling ARR proxy feature...'
 Ok 'ARR proxy enabled.'
 
 # 3) Allow the HTTP_X_FORWARDED_PROTO server variable used by web.config's rewrite rule
-Info 'Allowing HTTP_X_FORWARDED_PROTO server variable for URL Rewrite...'
-& $appCmd set config -section:system.webServer/rewrite/allowedServerVariables /+"[name='HTTP_X_FORWARDED_PROTO']" /commit:apphost 2>$null
-Ok 'Server variable allowed (or already present).'
+$alreadyAllowed = (& $appCmd list config -section:system.webServer/rewrite/allowedServerVariables) -join "`n" -match 'HTTP_X_FORWARDED_PROTO'
+if ($alreadyAllowed) {
+    Ok 'HTTP_X_FORWARDED_PROTO server variable already allowed.'
+} else {
+    Info 'Allowing HTTP_X_FORWARDED_PROTO server variable for URL Rewrite...'
+    & $appCmd set config -section:system.webServer/rewrite/allowedServerVariables /+"[name='HTTP_X_FORWARDED_PROTO']" /commit:apphost | Out-Null
+    Ok 'Server variable allowed.'
+}
 
-# 4) Locate the Plesk-created site folder for app.cetpa.com.tr
+# 4) Locate the Plesk-created site's physical path. Query IIS directly (source of
+# truth) instead of guessing Plesk's on-disk folder layout, which varies.
 if (-not $SiteDocRoot) {
-    Info 'Auto-detecting Plesk site folder for app.cetpa.com.tr...'
-    $candidates = Get-ChildItem -Path 'C:\inetpub\vhosts' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -eq 'httpdocs' -and $_.FullName -match 'app\.cetpa\.com\.tr' }
-    if ($candidates.Count -eq 1) {
-        $SiteDocRoot = $candidates[0].FullName
-        Ok "Found: $SiteDocRoot"
-    } elseif ($candidates.Count -gt 1) {
-        Write-Host 'Multiple matches found:' -ForegroundColor Yellow
-        $candidates.FullName | ForEach-Object { Write-Host "  $_" }
-        throw 'Ambiguous - rerun with -SiteDocRoot "<exact path>".'
-    } else {
-        throw 'Could not auto-detect. Create app.cetpa.com.tr in Plesk first (see header comment), then rerun with -SiteDocRoot "C:\inetpub\vhosts\cetpa.com.tr\app.cetpa.com.tr\httpdocs" (adjust to what Plesk shows under Hosting Settings > Document root).'
+    Info 'Looking up app.cetpa.com.tr site in IIS...'
+    $siteMatch = (& $appCmd list sites) | Select-String -Pattern 'SITE "([^"]*cetpa[^"]*)"'
+    if ($siteMatch) {
+        $siteName = $siteMatch.Matches[0].Groups[1].Value
+        Ok "IIS site found: $siteName"
+        $physicalPath = ((& $appCmd list vdir "$siteName/" /text:physicalPath) -join '').Trim()
+        if ($physicalPath -and (Test-Path $physicalPath)) {
+            $SiteDocRoot = $physicalPath
+            Ok "Found via IIS config: $SiteDocRoot"
+        }
+    }
+    if (-not $SiteDocRoot) {
+        Info 'IIS lookup inconclusive, falling back to filesystem search...'
+        $candidates = Get-ChildItem -Path 'C:\inetpub' -Recurse -Depth 4 -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'app\.cetpa\.com\.tr' -and ($_.Name -eq 'httpdocs' -or $_.Name -match 'app\.cetpa\.com\.tr$') }
+        if ($candidates.Count -ge 1) {
+            $SiteDocRoot = $candidates[0].FullName
+            Ok "Found via filesystem: $SiteDocRoot"
+        } else {
+            throw 'Could not find app.cetpa.com.tr anywhere. Confirm the subdomain exists in Plesk (Websites & Domains), then rerun with -SiteDocRoot "<exact Document root from Plesk Hosting Settings>".'
+        }
     }
 }
 if (-not (Test-Path $SiteDocRoot)) { throw "Path does not exist: $SiteDocRoot" }
