@@ -71,14 +71,19 @@ Info 'Enabling ARR proxy feature...'
 & $appCmd set config -section:system.webServer/proxy /enabled:"True" /commit:apphost
 Ok 'ARR proxy enabled.'
 
-# 3) Allow the HTTP_X_FORWARDED_PROTO server variable used by web.config's rewrite rule
-$alreadyAllowed = (& $appCmd list config -section:system.webServer/rewrite/allowedServerVariables) -join "`n" -match 'HTTP_X_FORWARDED_PROTO'
-if ($alreadyAllowed) {
-    Ok 'HTTP_X_FORWARDED_PROTO server variable already allowed.'
+# 3) DO NOT add HTTP_X_FORWARDED_PROTO to allowedServerVariables. Confirmed by A/B
+# test on 2026-07-01: Plesk's own control panel site (port 8443) manages this exact
+# variable internally; adding it at the apphost (machine) level collides with
+# Plesk's handling and breaks the ENTIRE panel with HTTP 500.50 / Win32 183
+# (ERROR_ALREADY_EXISTS) on every request, not just our site. web.config no longer
+# references it. Actively remove it if a stale/cached run added it previously.
+$stillPresent = (& $appCmd list config -section:system.webServer/rewrite/allowedServerVariables) -join "`n" -match 'HTTP_X_FORWARDED_PROTO'
+if ($stillPresent) {
+    Info 'Removing HTTP_X_FORWARDED_PROTO from allowedServerVariables (breaks Plesk panel)...'
+    & $appCmd set config -section:system.webServer/rewrite/allowedServerVariables /-"[name='HTTP_X_FORWARDED_PROTO']" /commit:apphost | Out-Null
+    Ok 'Removed.'
 } else {
-    Info 'Allowing HTTP_X_FORWARDED_PROTO server variable for URL Rewrite...'
-    & $appCmd set config -section:system.webServer/rewrite/allowedServerVariables /+"[name='HTTP_X_FORWARDED_PROTO']" /commit:apphost | Out-Null
-    Ok 'Server variable allowed.'
+    Ok 'HTTP_X_FORWARDED_PROTO correctly absent from allowedServerVariables.'
 }
 
 # 4) Locate the Plesk-created site's physical path. Query IIS directly (source of
