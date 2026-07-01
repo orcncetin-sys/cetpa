@@ -8,6 +8,9 @@ param(
     [string]$Branch  = 'main'
 )
 $ErrorActionPreference = 'Stop'
+# CI/CD runs this over SSH (no console buffer) -> suppress progress bars.
+$ProgressPreference = 'SilentlyContinue'
+$env:CHOCOLATEY_NO_PROGRESS = 'true'
 function Info($m){ Write-Host "==> $m" -ForegroundColor Cyan }
 
 Set-Location $AppDir

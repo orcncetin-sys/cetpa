@@ -9,6 +9,10 @@ param(
     [int]   $AppPort = 5173
 )
 $ErrorActionPreference = 'Stop'
+# Non-interactive/web consoles have no console buffer -> Write-Progress throws
+# "Access is denied ... reading the console output buffer". Suppress all progress.
+$ProgressPreference = 'SilentlyContinue'
+$env:CHOCOLATEY_NO_PROGRESS = 'true'
 function Info($m){ Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m){ Write-Host "    $m" -ForegroundColor Green }
 
