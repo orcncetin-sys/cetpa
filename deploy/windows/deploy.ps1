@@ -19,13 +19,22 @@ Info "git fetch + reset --hard origin/$Branch"
 git fetch origin $Branch --quiet
 git reset --hard "origin/$Branch"
 
+# Stop the service BEFORE npm ci: the running "cetpa" process (tsx, which uses
+# esbuild internally) holds a lock on node_modules/@esbuild/win32-x64/esbuild.exe.
+# npm ci tries to unlink/replace it while installing and fails with EPERM if the
+# service is still running, which then cascades into a broken build and a
+# service that fails to restart. Stop first so the file handle is released.
+Info 'Stopping cetpa service (releases node_modules file locks before npm ci)'
+Stop-Service cetpa -Force -ErrorAction SilentlyContinue
+Start-Sleep 2
+
 Info 'npm ci --legacy-peer-deps'
 npm ci --legacy-peer-deps
 
 Info 'npm run build'
 npm run build
 
-Info 'Restarting cetpa service'
+Info 'Starting cetpa service'
 Restart-Service cetpa -Force
 
 # Local health check (no TLS - independent of the IIS/Plesk reverse proxy in front)
