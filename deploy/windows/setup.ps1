@@ -1,9 +1,9 @@
 #requires -RunAsAdministrator
-<#
-    Cetpa — Windows Server 2022 tek seferlik kurulum (idempotent).
-    Native Node (NSSM servisi) + Caddy + OpenSSH + PostgreSQL (yoksa).
-    Çalıştır:  powershell -ExecutionPolicy Bypass -File .\deploy\windows\setup.ps1
-#>
+# Cetpa - Windows Server 2022 one-time setup (idempotent). ASCII-only on purpose:
+# Windows PowerShell 5.1 reads BOM-less .ps1 as Windows-1252, so non-ASCII breaks parsing.
+# Native Node (NSSM service) + Caddy + OpenSSH + PostgreSQL (installed only if missing).
+# Run:  powershell -ExecutionPolicy Bypass -File .\deploy\windows\setup.ps1
+
 param(
     [string]$AppDir  = 'C:\cetpa',
     [int]   $AppPort = 5173
@@ -12,78 +12,74 @@ $ErrorActionPreference = 'Stop'
 function Info($m){ Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m){ Write-Host "    $m" -ForegroundColor Green }
 
-# ── 1) Chocolatey ─────────────────────────────────────────────────────────────
+# 1) Chocolatey
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-    Info 'Chocolatey kuruluyor...'
+    Info 'Installing Chocolatey...'
     Set-ExecutionPolicy Bypass -Scope Process -Force
     [System.Net.ServicePointManager]::SecurityProtocol = 3072
     Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
     $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine')
-} else { Ok 'Chocolatey zaten kurulu.' }
+} else { Ok 'Chocolatey already installed.' }
 
-# ── 2) Paketler ───────────────────────────────────────────────────────────────
+# 2) Packages (choco install is idempotent - safe to re-run)
 foreach ($pkg in 'nodejs-lts','git','nssm','caddy') {
-    $installed = (choco list --local-only --limit-output --exact $pkg) -ne $null -and
-                 (choco list --local-only --limit-output --exact $pkg).Length -gt 0
-    if (-not $installed) { Info "$pkg kuruluyor..."; choco install $pkg -y --no-progress }
-    else { Ok "$pkg zaten kurulu." }
+    Info "Installing/verifying $pkg ..."
+    choco install $pkg -y --no-progress
 }
 $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine')
 
-# ── 3) OpenSSH Server (CI/CD deploy için) ─────────────────────────────────────
+# 3) OpenSSH Server (for CI/CD deploy over SSH)
 if ((Get-WindowsCapability -Online -Name 'OpenSSH.Server*').State -ne 'Installed') {
-    Info 'OpenSSH Server kuruluyor...'
+    Info 'Installing OpenSSH Server...'
     Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-} else { Ok 'OpenSSH Server zaten kurulu.' }
+} else { Ok 'OpenSSH Server already installed.' }
 Set-Service sshd -StartupType Automatic
 Start-Service sshd
-# ssh "komut" Windows PowerShell'de koşsun (default shell):
-$ps = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+# Make "ssh host <cmd>" run under Windows PowerShell:
+$psExe = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 New-Item -Path 'HKLM:\SOFTWARE\OpenSSH' -Force | Out-Null
-New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -Value $ps -PropertyType String -Force | Out-Null
+New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -Value $psExe -PropertyType String -Force | Out-Null
 if (-not (Get-NetFirewallRule -Name sshd -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True `
-        -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+    New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
 }
-Ok 'OpenSSH hazır. (deploy public anahtarını administrators_authorized_keys''e ekle — RUNBOOK [8])'
+Ok 'OpenSSH ready. Add the deploy public key to administrators_authorized_keys (RUNBOOK step 8).'
 
-# ── 4) Firewall: HTTP/HTTPS (Caddy) ───────────────────────────────────────────
+# 4) Firewall for Caddy (HTTP/HTTPS)
 foreach ($p in 80,443) {
-    $name = "Caddy-$p"
-    if (-not (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -Name $name -DisplayName "Caddy TCP $p" -Enabled True `
-            -Direction Inbound -Protocol TCP -Action Allow -LocalPort $p | Out-Null
+    $ruleName = "Caddy-$p"
+    if (-not (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name $ruleName -DisplayName "Caddy TCP $p" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort $p | Out-Null
     }
 }
-Ok 'Firewall 80/443 açık.'
+Ok 'Firewall 80/443 open.'
 
-# ── 5) PostgreSQL tespit / kurulum ────────────────────────────────────────────
-$pgSvc = Get-Service | Where-Object Name -like 'postgresql*'
+# 5) PostgreSQL: detect, install only if missing
+$pgSvc = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue
 if (-not $pgSvc) {
-    Info 'PostgreSQL bulunamadı — kuruluyor (choco postgresql15)...'
+    Info 'PostgreSQL not found - installing (choco postgresql15)...'
     choco install postgresql15 -y --no-progress --params "/Password:postgres"
-    Ok 'PostgreSQL kuruldu. RUNBOOK [4] ile db/kullanıcı oluştur + veri taşı.'
+    Ok 'PostgreSQL installed (superuser postgres / pw postgres). Create app db+user and migrate data: RUNBOOK step 4.'
 } else {
-    Ok "PostgreSQL zaten var: $($pgSvc.Name) [$($pgSvc.Status)]. Veri taşıma için RUNBOOK [4]."
+    Ok ('PostgreSQL present: ' + $pgSvc.Name + ' [' + $pgSvc.Status + ']. Migrate data: RUNBOOK step 4.')
 }
 
-# ── 6) NSSM servisi (cetpa) ───────────────────────────────────────────────────
-# node --import tsx server.ts  (tsx loader; build ayrı, `npm run build` deploy.ps1'de)
+# 6) NSSM service (cetpa): node --import tsx server.ts
 $node = (Get-Command node.exe).Source
-$svc  = Get-Service cetpa -ErrorAction SilentlyContinue
+$svc  = Get-Service -Name cetpa -ErrorAction SilentlyContinue
 if (-not $svc) {
-    Info 'cetpa Windows servisi oluşturuluyor...'
-    nssm install cetpa $node '--import' 'tsx' "$AppDir\server.ts"
+    Info 'Creating cetpa Windows service...'
+    nssm install cetpa $node
+    nssm set cetpa AppParameters "--import tsx `"$AppDir\server.ts`""
     nssm set cetpa AppDirectory $AppDir
     nssm set cetpa AppEnvironmentExtra "NODE_ENV=production" "PORT=$AppPort"
+    New-Item -ItemType Directory -Force -Path "$AppDir\logs" | Out-Null
     nssm set cetpa AppStdout "$AppDir\logs\service-out.log"
     nssm set cetpa AppStderr "$AppDir\logs\service-err.log"
     nssm set cetpa Start SERVICE_AUTO_START
-    New-Item -ItemType Directory -Force -Path "$AppDir\logs" | Out-Null
-    Ok 'Servis kuruldu. Sırayla: .env oluştur → npm ci → npm run build → nssm start cetpa.'
+    Ok 'Service created (not started). Next: create .env, npm ci, npm run build, then start it.'
 } else {
-    Ok "cetpa servisi zaten var [$($svc.Status)]. Güncelleme için deploy.ps1."
+    Ok ('cetpa service already exists [' + $svc.Status + ']. Use deploy.ps1 to update.')
 }
 
-Write-Host ""
-Info 'Bootstrap tamam. Şimdi RUNBOOK [1a] (IIS/Plesk port), [3] (.env+build), [4] (DB), [5] (test).'
+Write-Host ''
+Info 'Bootstrap done. Next: RUNBOOK step 1a (free IIS 80/443), step 3 (.env + build), step 4 (DB), step 5 (test).'
