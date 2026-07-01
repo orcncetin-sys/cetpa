@@ -52,9 +52,17 @@ npm ci --legacy-peer-deps
 ```
 
 ### 2c. .env taşı
-Eski box'taki `/opt/cetpa/.env` içeriğini **birebir** `C:\cetpa\.env` olarak oluştur (dosya olarak kopyala — sohbete yapıştırma, secret içeriyor). Sadece şu satırları Windows'a göre güncelle:
-- `DATABASE_URL=postgresql://cetpa:<PAROLA>@localhost:5432/cetpa` (Unix socket değil, TCP localhost)
-- `PORT=5173`  · `APP_URL=https://app.cetpa.com.tr`
+Gerçek prod dosyası eski box'ta `/opt/cetpa/.env` DEĞİL, **`/opt/cetpa/.env.production`** (docker-compose `env_file` ile kullanılıyor). Doğrudan eski sunucudan yeni sunucuya (aradan geçmeden) taşı:
+```bash
+# eski sunucuda (root):
+scp /opt/cetpa/.env.production "administrator@213.238.190.124:C:/cetpa/.env"
+```
+Sonra yeni box'ta `DATABASE_URL` satırını TCP'ye çevir — eski box'ta **Unix domain socket** (`?host=/var/run/postgresql`) kullanılıyordu, Windows'ta bu yol yok:
+```powershell
+$newLine = "DATABASE_URL=postgresql://<KULLANICI>:<PAROLA>@localhost:5432/<DBADI>"
+(Get-Content C:\cetpa\.env) -replace '^DATABASE_URL=.*', $newLine | Set-Content C:\cetpa\.env
+```
+(KULLANICI/PAROLA/DBADI'yi eski `.env.production`'daki `DATABASE_URL`'den al — parolayı sohbete/repoya yazma.)
 
 ```powershell
 npm run build   # vite build -> dist/
@@ -64,22 +72,23 @@ npm run build   # vite build -> dist/
 
 ## [3] Veritabanı taşıma (PostgreSQL yeni kuruldu, BOŞ — taşıma zorunlu)
 
-**Eski box'ta (AlmaLinux, hâlâ canlı)** — veriyi dök:
+**Eski box'ta (AlmaLinux, hâlâ canlı)** — gerçek db adını ve kullanıcıyı `.env.production`'daki `DATABASE_URL`'den al, sonra dök:
 ```bash
-pg_dump -Fc -h localhost -U cetpa cetpa > /root/cetpa_$(date +%F).dump
-# Yeni box'a kopyala (scp / RDP dosya paylaşımı):
+PGPASSWORD='<PAROLA>' pg_dump -Fc -h /var/run/postgresql -U <KULLANICI> <DBADI> > /root/cetpa_db_$(date +%F).dump
+scp /root/cetpa_db_*.dump "administrator@213.238.190.124:C:/cetpa/cetpa_db.dump"
 ```
 
-**Yeni box'ta** — db/kullanıcı oluştur + geri yükle:
+**Yeni box'ta** — db/kullanıcı oluştur (eski box'takiyle AYNI kullanıcı/parola/db adı — `.env`'i hiç değiştirmemize gerek kalmaz) + geri yükle:
 ```powershell
-& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "CREATE USER cetpa WITH PASSWORD '<GUCLU_PAROLA>';"
-& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "CREATE DATABASE cetpa OWNER cetpa;"
-& "C:\Program Files\PostgreSQL\15\bin\pg_restore.exe" -h localhost -U cetpa -d cetpa --no-owner "C:\cetpa_YYYY-MM-DD.dump"
+& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "CREATE USER <KULLANICI> WITH PASSWORD '<PAROLA>';"
+& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "CREATE DATABASE <DBADI> OWNER <KULLANICI>;"
+& "C:\Program Files\PostgreSQL\15\bin\pg_restore.exe" -h localhost -U <KULLANICI> -d <DBADI> --no-owner "C:\cetpa\cetpa_db.dump"
 ```
-> Bu adımdaki `<GUCLU_PAROLA>`, `.env`'deki `DATABASE_URL`'de kullanılan parolayla **aynı** olmalı. Ayrıca kurulumda geçici verilen `postgres` süper-kullanıcı parolasını da (`postgres/postgres`) burada güçlü bir parolayla değiştir:
+> Kurulumda geçici verilen `postgres` süper-kullanıcı parolasını (`postgres/postgres`) da burada güçlü bir parolayla değiştir:
 ```powershell
-& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "ALTER USER postgres WITH PASSWORD '<BASKA_GUCLU_PAROLA>';"
+& "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "ALTER USER postgres WITH PASSWORD '<GUCLU_PAROLA>';"
 ```
+> ⚠️ **2026-07-01 geçişinde bir PG uygulama parolası yanlışlıkla bir sohbet kanalında göründü** (PowerShell'in `[Uri]` dönüşüm hata mesajı ham değeri echo etti). Geçiş bitince — [10]'daki temizlikle birlikte — bu parolayı da `ALTER USER <KULLANICI> WITH PASSWORD '<YENI_PAROLA>';` ile değiştir ve `.env`'i güncelle.
 
 ---
 
@@ -140,6 +149,8 @@ Cutover doğrulandıktan sonra:
 - `https://app.cetpa.com.tr` tarayıcıda sertifika uyarısı olmadan açılıyor mu? `https://cetpa.com.tr` (kök) ve mail hâlâ çalışıyor mu (regresyon kontrolü)?
 - Login, PG'ye bağlı veri, **SSE canlı senkron** (ARR responseBufferLimit fix'i test et — bir sekmede değişiklik yap, başka sekmede anlık görünüyor mu?), Mikro V17 entegrasyonu çalışıyor mu?
 - 24-48 saat sorunsuzsa eski AlmaLinux box'ı kapat. **Admin şifresini değiştir** (bu geçişte bir kanalda paylaşıldı).
+- **PG uygulama parolasını değiştir** (bkz. [3]'teki uyarı — bir sohbet kanalında göründü): yeni box'ta `ALTER USER <KULLANICI> WITH PASSWORD '<YENI>'` + `.env`'deki `DATABASE_URL`'i güncelle + `Restart-Service cetpa`.
+- `postgres` süper-kullanıcı parolasının geçici `postgres/postgres` DEĞİL, [3]'te belirlediğin güçlü parola olduğunu doğrula.
 
 ---
 
