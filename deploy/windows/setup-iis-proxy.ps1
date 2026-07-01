@@ -85,7 +85,9 @@ if ($alreadyAllowed) {
 # truth) instead of guessing Plesk's on-disk folder layout, which varies.
 if (-not $SiteDocRoot) {
     Info 'Looking up app.cetpa.com.tr site in IIS...'
-    $siteMatch = (& $appCmd list sites) | Select-String -Pattern 'SITE "([^"]*cetpa[^"]*)"'
+    # EXACT match only - "cetpa" alone would also match the live root site
+    # "cetpa.com.tr" and silently redirect production traffic. Never loosen this.
+    $siteMatch = (& $appCmd list sites) | Select-String -Pattern 'SITE "(app\.cetpa\.com\.tr)"'
     if ($siteMatch) {
         $siteName = $siteMatch.Matches[0].Groups[1].Value
         Ok "IIS site found: $siteName"
@@ -97,8 +99,10 @@ if (-not $SiteDocRoot) {
     }
     if (-not $SiteDocRoot) {
         Info 'IIS lookup inconclusive, falling back to filesystem search...'
+        # Exact leaf-folder match only (app.cetpa.com.tr or its httpdocs) - never a
+        # loose "contains cetpa" match, to avoid ever touching the live root site.
         $candidates = Get-ChildItem -Path 'C:\inetpub' -Recurse -Depth 4 -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match 'app\.cetpa\.com\.tr' -and ($_.Name -eq 'httpdocs' -or $_.Name -match 'app\.cetpa\.com\.tr$') }
+            Where-Object { $_.FullName -match '\\app\.cetpa\.com\.tr(\\httpdocs)?$' }
         if ($candidates.Count -ge 1) {
             $SiteDocRoot = $candidates[0].FullName
             Ok "Found via filesystem: $SiteDocRoot"
@@ -108,6 +112,11 @@ if (-not $SiteDocRoot) {
     }
 }
 if (-not (Test-Path $SiteDocRoot)) { throw "Path does not exist: $SiteDocRoot" }
+# Safety rail: never let this land on the live root site's folder, whatever the
+# lookup path was (IIS query, filesystem fallback, or manual -SiteDocRoot).
+if ($SiteDocRoot -notmatch 'app\.cetpa\.com\.tr') {
+    throw "Refusing to write web.config to '$SiteDocRoot' - path does not contain 'app.cetpa.com.tr'. This guard exists because an earlier version of this script once matched the live root site by mistake."
+}
 
 # 5) Drop the reverse-proxy web.config into the site root
 Info "Copying web.config to $SiteDocRoot ..."
