@@ -1,9 +1,10 @@
 # Cetpa CI/CD — WINDOWS SERVER 2022 hedefi (native Node + NSSM, SSH ile deploy).
 #
-# ⚠️ Bu dosya HENÜZ AKTİF DEĞİL. GitHub Actions yalnız .github/workflows/*.yml okur.
-# Cutover'da (RUNBOOK [8]) içeriği .github/workflows/ci.yml ÜZERİNE alınacak.
-# Şart: Secrets VDS_HOST=213.238.190.124, VDS_USER=administrator, VDS_SSH_KEY=<private key>
-# ve yeni box'ta administrators_authorized_keys içinde eşleşen public key + OpenSSH sshd açık.
+# 2026-07-01: Bu icerik .github/workflows/ci.yml UZERINE ALINDI (cutover tamamlandi).
+# Bu dosya artik referans/tarihce amaclidir; gercek CI GitHub Actions'in okudugu
+# .github/workflows/ci.yml'dir. Secrets VDS_HOST/VDS_USER/VDS_SSH_KEY GitHub repo
+# secrets'ta tanimli; VDS_SSH_KEY'in public esi Windows kutusunda
+# administrators_authorized_keys icinde.
 
 name: CI & Deploy
 

@@ -12,27 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
-
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
-
       - name: Typecheck
         run: npx tsc --noEmit
-
+      - name: Test
+        run: npx vitest run
       - name: Build
         run: npm run build
 
   deploy:
-    name: Deploy to VDS
+    name: Deploy to Windows VDS
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # VDS_SSH_KEY secret'ı tanımlı değilse bu job atlanır (CI yine de çalışır)
     steps:
       - name: Check deploy secrets
         id: check
@@ -41,7 +38,7 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::VDS_SSH_KEY secret tanımlı değil — deploy atlandı (yalnızca CI çalıştı)."
+            echo "::notice::VDS_SSH_KEY tanımlı değil — deploy atlandı."
           fi
 
       - name: Setup SSH
@@ -52,13 +49,13 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Pull & rebuild on VDS
+      - name: Deploy (SSH → PowerShell)
         if: steps.check.outputs.enabled == 'true'
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
-            'cd /opt/cetpa && git pull origin main && docker compose up -d --build && { docker image prune -f || true; docker builder prune -f --keep-storage=10GB || docker builder prune -f || true; }'
+            "powershell -ExecutionPolicy Bypass -File C:\\cetpa\\deploy\\windows\\deploy.ps1"
 
-      - name: Health check
+      - name: Health check (public HTTPS)
         if: steps.check.outputs.enabled == 'true'
         run: |
           sleep 10
