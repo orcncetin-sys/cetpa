@@ -1,0 +1,71 @@
+# Cetpa CI/CD — WINDOWS SERVER 2022 hedefi (native Node + NSSM, SSH ile deploy).
+#
+# ⚠️ Bu dosya HENÜZ AKTİF DEĞİL. GitHub Actions yalnız .github/workflows/*.yml okur.
+# Cutover'da (RUNBOOK [8]) içeriği .github/workflows/ci.yml ÜZERİNE alınacak.
+# Şart: Secrets VDS_HOST=213.238.190.124, VDS_USER=administrator, VDS_SSH_KEY=<private key>
+# ve yeni box'ta administrators_authorized_keys içinde eşleşen public key + OpenSSH sshd açık.
+
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Typecheck & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npx vitest run
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy to Windows VDS
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy secrets
+        id: check
+        run: |
+          if [ -n "${{ secrets.VDS_SSH_KEY }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VDS_SSH_KEY tanımlı değil — deploy atlandı."
+          fi
+
+      - name: Setup SSH
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy (SSH → PowerShell)
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -ExecutionPolicy Bypass -File C:\\cetpa\\deploy\\windows\\deploy.ps1"
+
+      - name: Health check (public HTTPS)
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          sleep 10
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://app.cetpa.com.tr/api/health)
+          echo "Health: HTTP $code"
+          [ "$code" = "200" ] || exit 1
