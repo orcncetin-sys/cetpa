@@ -28,7 +28,7 @@ npm run build
 Info 'Restarting cetpa service'
 Restart-Service cetpa -Force
 
-# Local health check (no TLS - independent of Caddy)
+# Local health check (no TLS - independent of the IIS/Plesk reverse proxy in front)
 $ok = $false
 foreach ($i in 1..10) {
     Start-Sleep 3

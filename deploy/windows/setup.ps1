@@ -1,7 +1,9 @@
 #requires -RunAsAdministrator
 # Cetpa - Windows Server 2022 one-time setup (idempotent). ASCII-only on purpose:
 # Windows PowerShell 5.1 reads BOM-less .ps1 as Windows-1252, so non-ASCII breaks parsing.
-# Native Node (NSSM service) + Caddy + OpenSSH + PostgreSQL (installed only if missing).
+# Native Node (NSSM service) + OpenSSH + PostgreSQL (installed only if missing).
+# TLS/reverse-proxy is handled separately by Plesk+IIS+ARR (setup-iis-proxy.ps1) -
+# cetpa.com.tr and mail already run on this box's IIS, so we never touch 80/443 ownership.
 # Run:  powershell -ExecutionPolicy Bypass -File .\deploy\windows\setup.ps1
 
 param(
@@ -26,7 +28,10 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 } else { Ok 'Chocolatey already installed.' }
 
 # 2) Packages (choco install is idempotent - safe to re-run)
-foreach ($pkg in 'nodejs-lts','git','nssm','caddy') {
+# NOTE: reverse proxy/TLS is handled by Plesk+IIS+ARR (see setup-iis-proxy.ps1),
+# not Caddy - cetpa.com.tr and mail are already live on this box's IIS, so we
+# never take over/replace ports 80/443.
+foreach ($pkg in 'nodejs-lts','git','nssm') {
     Info "Installing/verifying $pkg ..."
     choco install $pkg -y --no-progress
 }
@@ -48,11 +53,12 @@ if (-not (Get-NetFirewallRule -Name sshd -ErrorAction SilentlyContinue)) {
 }
 Ok 'OpenSSH ready. Add the deploy public key to administrators_authorized_keys (RUNBOOK step 8).'
 
-# 4) Firewall for Caddy (HTTP/HTTPS)
+# 4) Firewall sanity check for HTTP/HTTPS (IIS already serves cetpa.com.tr, so these
+# are almost certainly already open - this is just a safety net, additive only).
 foreach ($p in 80,443) {
-    $ruleName = "Caddy-$p"
+    $ruleName = "Cetpa-Web-$p"
     if (-not (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -Name $ruleName -DisplayName "Caddy TCP $p" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort $p | Out-Null
+        New-NetFirewallRule -Name $ruleName -DisplayName "Cetpa Web TCP $p" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort $p | Out-Null
     }
 }
 Ok 'Firewall 80/443 open.'
@@ -86,4 +92,4 @@ if (-not $svc) {
 }
 
 Write-Host ''
-Info 'Bootstrap done. Next: RUNBOOK step 1a (free IIS 80/443), step 3 (.env + build), step 4 (DB), step 5 (test).'
+Info 'Bootstrap done. Next: RUNBOOK step 3 (.env + build), step 4 (DB migrate), step 5 (local test), step 6 (Plesk subdomain + setup-iis-proxy.ps1).'
