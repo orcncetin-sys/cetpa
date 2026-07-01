@@ -1605,6 +1605,10 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           name: (s.sto_isim as string) || sku,
           unit: (s.sto_birim1_ad as string) || 'ADET',
           vatRate: Number(s.sto_perakende_vergi) || 20,
+          // sto_mevcut_mik: StokListesiV2'nin gercek mevcut miktar alani (bkz.
+          // POST /api/mikro/stok/listesi ile ayni eslesme) - onceden burada hic
+          // yazilmiyordu, tum urunler otomatik senkronda stockLevel=0 kaliyordu.
+          stockLevel: Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
           mikroStoKod: sku, mikroSynced: true,
           mikroSyncedAt: pgServerTimestamp(),
         };
@@ -1612,7 +1616,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (ref) { batch.update(ref, fields); stokGuncel++; }
         else {
           batch.set(adminDb.collection('inventory').doc(), {
-            ...fields, companyId, sku, category: 'Genel', stockLevel: 0,
+            ...fields, companyId, sku, category: 'Genel',
             lowStockThreshold: 5, prices: {}, price: 0,
             source: 'mikro_cron', createdAt: pgServerTimestamp(),
           });
