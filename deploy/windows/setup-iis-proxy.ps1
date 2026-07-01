@@ -23,6 +23,20 @@ $env:CHOCOLATEY_NO_PROGRESS = 'true'
 function Info($m){ Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m){ Write-Host "    $m" -ForegroundColor Green }
 
+# This script may run in a shell opened before Chocolatey was installed (PATH set
+# machine-wide but not yet visible to already-running/newly-spawned sessions in some
+# Windows/RDP configurations). Refresh PATH in-process so 'choco' resolves without
+# needing to close and reopen the shell.
+$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+    $chocoExe = 'C:\ProgramData\chocolatey\bin\choco.exe'
+    if (Test-Path $chocoExe) {
+        Set-Alias -Name choco -Value $chocoExe -Scope Script
+    } else {
+        throw 'choco.exe not found. Run setup.ps1 first (it installs Chocolatey).'
+    }
+}
+
 $appCmd = "$env:windir\System32\inetsrv\appcmd.exe"
 if (-not (Test-Path $appCmd)) { throw 'appcmd.exe not found - is IIS installed?' }
 
