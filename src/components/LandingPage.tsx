@@ -3,7 +3,7 @@
  * Claude Design system · SAP-inspired corporate sections · 2026
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useId } from 'react';
 import { motion, useInView, AnimatePresence } from 'motion/react';
 import {
   ArrowRight, LayoutDashboard, Zap, Package, Truck, Landmark, Users,
@@ -545,18 +545,21 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
 
 function FAQItem({ q, a, darkMode }: { q: string; a: string; darkMode: boolean }) {
   const [open, setOpen] = useState(false);
+  const panelId = useId();
   return (
     <div className={cn('border rounded-2xl overflow-hidden transition-colors', darkMode ? 'border-white/8' : 'border-black/8')}>
       <button
-        className={cn('w-full flex items-center justify-between px-6 py-5 text-left font-semibold text-sm gap-4', darkMode ? 'hover:bg-white/4' : 'hover:bg-black/3')}
+        className={cn('w-full flex items-center justify-between px-6 py-5 text-left font-semibold text-sm gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset', darkMode ? 'hover:bg-white/4' : 'hover:bg-black/3')}
         onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
       >
         {q}
-        <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform duration-300', open && 'rotate-180')} />
+        <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform duration-300', open && 'rotate-180')} aria-hidden="true" />
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}>
+          <motion.div id={panelId} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}>
             <p className={cn('px-6 pb-6 text-sm leading-relaxed', darkMode ? 'text-white/50' : 'text-black/50')}>{a}</p>
           </motion.div>
         )}
@@ -781,15 +784,17 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
             <button
               onClick={() => setPaused(p => !p)}
               className={cn(
-                'mt-3 w-8 h-8 rounded-full border flex items-center justify-center transition-all',
+                'mt-3 w-8 h-8 rounded-full border flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
                 d('border-white/15 text-white/35 hover:text-white/65 hover:bg-white/6',
                   'border-black/12 text-black/30 hover:text-black/55 hover:bg-black/5')
               )}
               title={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
+              aria-label={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
+              aria-pressed={!paused}
             >
               {paused
-                ? <Play className="w-3 h-3" />
-                : <Pause className="w-3 h-3" />}
+                ? <Play className="w-3 h-3" aria-hidden="true" />
+                : <Pause className="w-3 h-3" aria-hidden="true" />}
             </button>
           </motion.div>
 
@@ -1065,7 +1070,8 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder={isTR ? 'iş e-posta adresiniz' : 'your business email'}
-                  className={cn('flex-1 px-4 py-3 rounded-xl text-sm outline-none transition-all', d('bg-white/8 border border-white/10 text-white placeholder:text-white/30 focus:border-brand/40', 'bg-[#f5f5f7] border border-transparent text-[#111] placeholder:text-black/30 focus:border-brand/30'))}
+                  aria-label={isTR ? 'İş e-posta adresiniz' : 'Your business email'}
+                  className={cn('flex-1 px-4 py-3 rounded-xl text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('bg-white/8 border border-white/10 text-white placeholder:text-white/30 focus:border-brand/40', 'bg-[#f5f5f7] border border-transparent text-[#111] placeholder:text-black/30 focus:border-brand/30'))}
                 />
                 <button
                   type="submit"
@@ -1236,6 +1242,11 @@ export default function LandingPage({
   return (
     <div className={cn('min-h-screen font-sans overflow-x-hidden transition-colors duration-500', d('bg-[#05050a] text-[#f5f5f7]', 'bg-[#fafafa] text-[#111]'))}>
 
+      {/* Skip link: hidden until keyboard-focused, lets keyboard users bypass the nav */}
+      <a href="#main-content" className="skip-link">
+        {isTR ? 'Ana içeriğe geç' : 'Skip to main content'}
+      </a>
+
       {/* CSS keyframes */}
       <style>{`
         @keyframes cetpa-sparkle {
@@ -1325,12 +1336,15 @@ export default function LandingPage({
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-4">
               <button onClick={onLanguageToggle}
-                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                aria-label={isTR ? 'Dili İngilizce yap' : 'Switch to Turkish'}
+                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
               <button onClick={onDarkModeToggle}
-                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
-                {darkMode ? <Sun className="w-[15px] h-[15px]" /> : <Moon className="w-[15px] h-[15px]" />}
+                aria-label={darkMode ? (isTR ? 'Açık moda geç' : 'Switch to light mode') : (isTR ? 'Koyu moda geç' : 'Switch to dark mode')}
+                aria-pressed={darkMode}
+                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                {darkMode ? <Sun className="w-[15px] h-[15px]" aria-hidden="true" /> : <Moon className="w-[15px] h-[15px]" aria-hidden="true" />}
               </button>
               {!isLoggedIn ? (
                 <>
@@ -1356,6 +1370,7 @@ export default function LandingPage({
         </div>
       </nav>
 
+      <main id="main-content">
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
       <section className={cn('relative min-h-screen flex flex-col items-center justify-center pt-24 pb-16 overflow-hidden cetpa-grid-bg')}>
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full blur-[200px] pointer-events-none"
@@ -2028,6 +2043,7 @@ export default function LandingPage({
           </motion.div>
         </div>
       </section>
+      </main>
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className={cn('border-t pt-16 pb-10', d('border-white/6', 'border-black/6'))}>
