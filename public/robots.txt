@@ -3,4 +3,4 @@ Allow: /
 Disallow: /api/
 Disallow: /admin/
 
-Sitemap: https://cetpa.io/sitemap.xml
+Sitemap: https://app.cetpa.com.tr/sitemap.xml
