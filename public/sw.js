@@ -40,17 +40,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  // Skip non-GET and cross-origin Firebase/Google APIs — they need live data
+  // Skip non-GET, our own /api/ (live data), and ANY cross-origin request.
+  // SW only manages this origin's assets — third-party scripts (Google
+  // Sign-In's apis.google.com/accounts.google.com, fonts.gstatic.com,
+  // Firebase/Google APIs) must load natively so the browser applies the
+  // page's script-src/connect-src CSP directly. A SW-mediated fetch() is
+  // ALWAYS bound by connect-src regardless of resource type, so the old
+  // per-domain googleapis.com skip-list silently let apis.google.com's
+  // .js request fall through to the generic cache handler below, which
+  // re-fetched it inside the SW and got CSP-blocked (connect-src lacked
+  // apis.google.com) — breaking Google sign-in with auth/internal-error.
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (
-    url.hostname.includes('firestore.googleapis.com') ||
-    url.hostname.includes('firebase.googleapis.com') ||
-    url.hostname.includes('identitytoolkit.googleapis.com') ||
-    url.hostname.includes('securetoken.googleapis.com') ||
-    url.hostname.includes('googleapis.com') ||
-    url.pathname.startsWith('/api/')
-  ) return;
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
   // HTML shell → NETWORK FIRST. Cache-first here is what broke every deploy:
   // the cached index.html kept referencing deleted chunk hashes forever.

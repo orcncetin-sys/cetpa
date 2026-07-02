@@ -1895,7 +1895,10 @@ async function startServer() {
         imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
         connectSrc: ["'self'", 'https://*.googleapis.com', 'https://*.firebaseio.com',
           'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com',
-          'wss://*.firebaseio.com', 'https://api.tcmb.gov.tr', 'https://accounts.google.com'],
+          'wss://*.firebaseio.com', 'https://api.tcmb.gov.tr', 'https://accounts.google.com',
+          // apis.google.com != *.googleapis.com (different domain) - GAPI's own script
+          // (loaded for Google Sign-In) makes its own fetch/XHR calls here.
+          'https://apis.google.com', 'https://www.gstatic.com'],
         // Google Sign-In (popup/iframe): firebaseapp.com auth handler + Google OAuth
         frameSrc: ["'self'", 'https://*.firebaseapp.com', 'https://accounts.google.com', 'https://apis.google.com'],
         objectSrc: ["'none'"],
