@@ -134,19 +134,44 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     }
   };
 
+  // VKN (vergi kimlik no) rakam-disi karakterleri (bosluk/tire) yok sayarak
+  // kiyaslar - Mikro ve yerel kayit ayni numarayi farkli bicimlendirebilir.
+  const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
+
   const handleImportMikroSupplier = async (c: MikroCariItem) => {
     setSupplierActionLoading(true);
     try {
-      const docRef = await addDoc(collection(db, 'suppliers'), {
-        name: c.cari_unvan1,
-        email: c.cari_EMail || '',
-        phone: c.cari_CepTel || '',
-        taxNo: c.cari_vdaire_no || '',
-        mikroCariKod: c.cari_kod,
-        createdAt: serverTimestamp(),
-      });
-      setNewOrder(prev => ({ ...prev, supplier: c.cari_unvan1 }));
-      setSelectedSupplierId(docRef.id);
+      const vkn = normalizeVkn(c.cari_vdaire_no as string | undefined);
+      // Duplicate onleme: once VKN (en guvenilir), sonra mikroCariKod, sonra
+      // isim (case-insensitive) ile mevcut tedarikcilerde eslesme ara.
+      const existing = suppliers.find(s =>
+        (vkn && normalizeVkn(s.taxNo) === vkn) ||
+        s.mikroCariKod === c.cari_kod ||
+        s.name.toLowerCase() === c.cari_unvan1.toLowerCase()
+      );
+
+      let targetId: string;
+      if (existing) {
+        await updateDoc(doc(db, 'suppliers', existing.id), {
+          email: existing.email || c.cari_EMail || '',
+          phone: existing.phone || c.cari_CepTel || '',
+          taxNo: existing.taxNo || c.cari_vdaire_no || '',
+          mikroCariKod: c.cari_kod,
+        });
+        targetId = existing.id;
+      } else {
+        const docRef = await addDoc(collection(db, 'suppliers'), {
+          name: c.cari_unvan1,
+          email: c.cari_EMail || '',
+          phone: c.cari_CepTel || '',
+          taxNo: c.cari_vdaire_no || '',
+          mikroCariKod: c.cari_kod,
+          createdAt: serverTimestamp(),
+        });
+        targetId = docRef.id;
+      }
+      setNewOrder(prev => ({ ...prev, supplier: existing?.name || c.cari_unvan1 }));
+      setSelectedSupplierId(targetId);
       setSupplierDropdownOpen(false);
       setMikroSearchResults(null);
     } catch (error) {
@@ -160,6 +185,12 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     if (!supplierQuery) return;
     setSupplierActionLoading(true);
     try {
+      // Isim zaten kayitliysa yeni kopya acma - mevcut olani sec.
+      const existing = suppliers.find(s => s.name.toLowerCase() === supplierQuery);
+      if (existing) {
+        handleSelectSupplier(existing);
+        return;
+      }
       const docRef = await addDoc(collection(db, 'suppliers'), {
         name: newOrder.supplier.trim(),
         createdAt: serverTimestamp(),
