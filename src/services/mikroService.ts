@@ -147,13 +147,28 @@ export async function syncLeadToMikro(
 
 /**
  * Pull cari list from Mikro (CariListesiV2) and mirror to Firebase.
+ * Pass `nameSearch` for a safe (server-escaped) unvan/name search — do not
+ * try to build a custom `whereStr` from user input, the server rejects that
+ * in favor of nameSearch to avoid injecting into Mikro's own query.
  */
 export async function pullCariFromMikro(options?: {
   whereStr?: string;
+  nameSearch?: string;
   size?: number;
   index?: number;
 }): Promise<MikroListResult<MikroCariItem>> {
   return apiPost<MikroListResult<MikroCariItem>>('/api/mikro/cari/listesi', options ?? {});
+}
+
+/**
+ * Push a supplier to Mikro (CariKaydetV2). Mirrors syncLeadToMikro but writes
+ * mikroCariKod back to Firebase suppliers/{firebaseId} instead of leads/.
+ */
+export async function syncSupplierToMikro(
+  supplier: Record<string, unknown>,
+  firebaseId: string
+): Promise<MikroCariSyncResult> {
+  return apiPost<MikroCariSyncResult>('/api/mikro/cari/kaydet', { lead: supplier, firebaseId, collection: 'suppliers' });
 }
 
 // ── Sipariş (Order) ───────────────────────────────────────────────────────────

@@ -12,8 +12,9 @@ import ConfirmModal from './ConfirmModal';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
-import { InventoryItem, Order } from '../types';
+import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
+import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -91,6 +92,91 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   });
   const [productSearch, setProductSearch] = useState('');
 
+  // Tedarikci: yerel 'suppliers' koleksiyonundan oto-tamamlama + Mikro Cari
+  // arama/olusturma. Musteri (CRM) tarafindaki ayni mikroCariKod deseniyle
+  // tutarli olmasi icin suppliers koleksiyonuna mikroCariKod eklendi.
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  const [mikroSearchResults, setMikroSearchResults] = useState<MikroCariItem[] | null>(null);
+  const [mikroSearching, setMikroSearching] = useState(false);
+  const [supplierActionLoading, setSupplierActionLoading] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
+      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)));
+    }, (error) => logFirestoreError(error, OperationType.LIST, 'suppliers'));
+    return () => unsub();
+  }, []);
+
+  const supplierQuery = newOrder.supplier.trim().toLowerCase();
+  const matchingSuppliers = supplierQuery
+    ? suppliers.filter(s => s.name.toLowerCase().includes(supplierQuery))
+    : [];
+  const exactSupplierMatch = suppliers.find(s => s.name.toLowerCase() === supplierQuery);
+
+  const handleSelectSupplier = (s: Supplier) => {
+    setNewOrder(prev => ({ ...prev, supplier: s.name }));
+    setSelectedSupplierId(s.id);
+    setSupplierDropdownOpen(false);
+    setMikroSearchResults(null);
+  };
+
+  const handleSearchMikroSupplier = async () => {
+    if (!supplierQuery) return;
+    setMikroSearching(true);
+    setMikroSearchResults(null);
+    try {
+      const result = await pullCariFromMikro({ nameSearch: newOrder.supplier.trim(), size: 10 });
+      setMikroSearchResults(result.success ? result.data : []);
+    } finally {
+      setMikroSearching(false);
+    }
+  };
+
+  const handleImportMikroSupplier = async (c: MikroCariItem) => {
+    setSupplierActionLoading(true);
+    try {
+      const docRef = await addDoc(collection(db, 'suppliers'), {
+        name: c.cari_unvan1,
+        email: c.cari_EMail || '',
+        phone: c.cari_CepTel || '',
+        taxNo: c.cari_vdaire_no || '',
+        mikroCariKod: c.cari_kod,
+        createdAt: serverTimestamp(),
+      });
+      setNewOrder(prev => ({ ...prev, supplier: c.cari_unvan1 }));
+      setSelectedSupplierId(docRef.id);
+      setSupplierDropdownOpen(false);
+      setMikroSearchResults(null);
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.WRITE, 'suppliers');
+    } finally {
+      setSupplierActionLoading(false);
+    }
+  };
+
+  const handleCreateLocalSupplier = async () => {
+    if (!supplierQuery) return;
+    setSupplierActionLoading(true);
+    try {
+      const docRef = await addDoc(collection(db, 'suppliers'), {
+        name: newOrder.supplier.trim(),
+        createdAt: serverTimestamp(),
+      });
+      setSelectedSupplierId(docRef.id);
+      setSupplierDropdownOpen(false);
+      setMikroSearchResults(null);
+      // Yeni tedarikciyi hemen Mikro'ya da kaydetmeyi dene - basarisiz olursa
+      // sessizce yerel kalir, kullanici istediginde daha sonra tekrar dener.
+      void syncSupplierToMikro({ name: newOrder.supplier.trim() }, docRef.id);
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.WRITE, 'suppliers');
+    } finally {
+      setSupplierActionLoading(false);
+    }
+  };
+
   // Phase 102: auto-open form when a prefill product is passed from low-stock panel
   useEffect(() => {
     if (!prefillProduct) return;
@@ -156,11 +242,15 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       const poDocRef = doc(collection(db, 'purchaseOrders'));
       const orderNumber = `PO-${poDocRef.id.slice(0, 8).toUpperCase()}`;
 
+      const linkedSupplier = selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) : undefined;
+
       if (isPrivileged) {
         // Admin/Manager/Purchasing → create directly
         await setDoc(poDocRef, {
           orderNumber,
           supplier: newOrder.supplier,
+          supplierId: selectedSupplierId || null,
+          mikroCariKod: linkedSupplier?.mikroCariKod || null,
           items: newOrder.items,
           status: 'Taslak',
           totalAmount: total,
@@ -202,6 +292,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
       setIsAddingOrder(false);
       setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
+      setSelectedSupplierId(null);
+      setMikroSearchResults(null);
     } catch (error) {
       console.error('Error adding purchase order:', error);
       showValidationError(currentLanguage === 'tr' ? 'Hata oluştu. Tekrar deneyin.' : 'Error occurred. Please try again.');
@@ -220,8 +312,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     }
 
     try {
+      const linkedSupplier = selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) : undefined;
       await updateDoc(doc(db, 'purchaseOrders', editingOrder.id), {
         supplier: newOrder.supplier,
+        supplierId: selectedSupplierId || null,
+        mikroCariKod: linkedSupplier?.mikroCariKod || null,
         items: newOrder.items,
         totalAmount: calculateTotal(newOrder.items),
         expectedDate: newOrder.expectedDate,
@@ -230,6 +325,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       });
       setEditingOrder(null);
       setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
+      setSelectedSupplierId(null);
+      setMikroSearchResults(null);
     } catch (error) {
       console.error('Error updating purchase order:', error);
     }
@@ -605,6 +702,9 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                             expectedDate: typeof order.expectedDate === 'string' ? order.expectedDate : (order.expectedDate && typeof order.expectedDate === 'object' && 'toDate' in order.expectedDate && typeof order.expectedDate.toDate === 'function' ? format(order.expectedDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'))
                           });
                           setEditingOrder(order);
+                          const match = suppliers.find(s => s.name.toLowerCase() === order.supplier.trim().toLowerCase());
+                          setSelectedSupplierId(match?.id ?? null);
+                          setMikroSearchResults(null);
                         }}
                         className="p-2 hover:bg-gray-100 rounded-xl text-gray-500 transition-all"
                         title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}
@@ -672,6 +772,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     setEditingOrder(null);
                     setViewingOrder(null);
                     setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
+      setSelectedSupplierId(null);
+      setMikroSearchResults(null);
                   }}
                   className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400 hover:text-gray-600"
                 >
@@ -682,19 +784,93 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               <div className="flex-1 overflow-y-auto p-8 space-y-8">
                 {/* Supplier & Date */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
+                  <div className="space-y-2 relative">
                     <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{t.supplier}</label>
-                    <input
-                      type="text"
-                      placeholder={currentLanguage === 'tr' ? 'Tedarikçi adı girin...' : 'Enter supplier name...'}
-                      value={viewingOrder ? viewingOrder.supplier : newOrder.supplier}
-                      onChange={e => setNewOrder(prev => ({ ...prev, supplier: e.target.value }))}
-                      disabled={!!viewingOrder}
-                      className={cn(
-                        "apple-input w-full",
-                        !!validationError && !newOrder.supplier.trim() && "ring-2 ring-red-400"
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder={currentLanguage === 'tr' ? 'Tedarikçi adı girin veya arayın...' : 'Enter or search supplier...'}
+                        value={viewingOrder ? viewingOrder.supplier : newOrder.supplier}
+                        onChange={e => {
+                          setNewOrder(prev => ({ ...prev, supplier: e.target.value }));
+                          setSelectedSupplierId(null);
+                          setMikroSearchResults(null);
+                          setSupplierDropdownOpen(true);
+                        }}
+                        onFocus={() => setSupplierDropdownOpen(true)}
+                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        disabled={!!viewingOrder}
+                        className={cn(
+                          "apple-input w-full",
+                          !!validationError && !newOrder.supplier.trim() && "ring-2 ring-red-400"
+                        )}
+                      />
+                      {!viewingOrder && selectedSupplierId && (
+                        <CheckCircle className="w-4 h-4 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
                       )}
-                    />
+                    </div>
+
+                    {!viewingOrder && supplierDropdownOpen && supplierQuery && !exactSupplierMatch && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-100 rounded-2xl shadow-lg p-2 space-y-1 max-h-72 overflow-y-auto">
+                        {matchingSuppliers.length > 0 && (
+                          <div className="space-y-1 mb-2">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase px-2">{currentLanguage === 'tr' ? 'Kayıtlı tedarikçiler' : 'Saved suppliers'}</p>
+                            {matchingSuppliers.map(s => (
+                              <button
+                                key={s.id}
+                                onClick={() => handleSelectSupplier(s)}
+                                className="w-full text-left px-3 py-2 rounded-xl hover:bg-gray-50 text-sm flex items-center justify-between"
+                              >
+                                <span>{s.name}</span>
+                                {s.mikroCariKod && <span className="text-[9px] text-emerald-600 font-bold">Mikro</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {mikroSearchResults === null && (
+                          <button
+                            onClick={() => void handleSearchMikroSupplier()}
+                            disabled={mikroSearching}
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 text-sm text-blue-600 font-medium flex items-center gap-2 disabled:opacity-40"
+                          >
+                            <Search className="w-3.5 h-3.5" />
+                            {mikroSearching
+                              ? (currentLanguage === 'tr' ? 'Mikro\'da aranıyor…' : 'Searching Mikro…')
+                              : (currentLanguage === 'tr' ? `Mikro'da "${newOrder.supplier}" ara` : `Search Mikro for "${newOrder.supplier}"`)}
+                          </button>
+                        )}
+
+                        {mikroSearchResults !== null && mikroSearchResults.length > 0 && (
+                          <div className="space-y-1 mb-2">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase px-2">{currentLanguage === 'tr' ? 'Mikro sonuçları' : 'Mikro results'}</p>
+                            {mikroSearchResults.map(c => (
+                              <button
+                                key={c.cari_kod}
+                                onClick={() => void handleImportMikroSupplier(c)}
+                                disabled={supplierActionLoading}
+                                className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-sm flex items-center justify-between disabled:opacity-40"
+                              >
+                                <span>{c.cari_unvan1} <span className="text-gray-400 text-xs">({c.cari_kod})</span></span>
+                                <span className="text-[9px] text-emerald-600 font-bold">{currentLanguage === 'tr' ? 'İçe Aktar' : 'Import'}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {mikroSearchResults !== null && mikroSearchResults.length === 0 && (
+                          <p className="text-xs text-gray-400 px-3 py-1.5">{currentLanguage === 'tr' ? 'Mikro\'da bulunamadı.' : 'Not found in Mikro.'}</p>
+                        )}
+
+                        <button
+                          onClick={() => void handleCreateLocalSupplier()}
+                          disabled={supplierActionLoading}
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-brand/5 text-sm text-brand font-medium flex items-center gap-2 disabled:opacity-40 border-t border-gray-50 pt-2.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          {currentLanguage === 'tr' ? `Yeni tedarikçi oluştur: "${newOrder.supplier}"` : `Create new supplier: "${newOrder.supplier}"`}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{currentLanguage === 'tr' ? 'Beklenen Tarih' : 'Expected Date'}</label>
@@ -866,6 +1042,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     setEditingOrder(null);
                     setViewingOrder(null);
                     setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
+      setSelectedSupplierId(null);
+      setMikroSearchResults(null);
                   }}
                   className="apple-button-secondary"
                 >

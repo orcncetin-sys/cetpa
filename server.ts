@@ -3381,11 +3381,14 @@ async function startServer() {
     }
   });
 
-  /** POST /api/mikro/cari/kaydet — push lead/customer → Mikro CariKaydetV2 */
+  /** POST /api/mikro/cari/kaydet — push lead/customer/supplier → Mikro CariKaydetV2.
+   *  `collection` (varsayilan 'leads') hangi Firebase koleksiyonuna mikroCariKod
+   *  yazilacagini belirler - 'suppliers' icin de kullanilabilir (Satinalma
+   *  modulundeki tedarikci-Mikro eslestirme). */
   app.post('/api/mikro/cari/kaydet', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
-    const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
+    const { lead, firebaseId, collection: targetCollection = 'leads' } = req.body as { lead: Record<string, unknown>; firebaseId: string; collection?: 'leads' | 'suppliers' };
     const t0 = Date.now();
 
     try {
@@ -3397,7 +3400,7 @@ async function startServer() {
         cari_kod:                    cariKod,
         cari_unvan1:                 (lead.company  as string) || (lead.name as string) || '',
         cari_unvan2:                 '',
-        cari_vdaire_no:              (lead.taxId     as string) || (lead.vkn as string) || '',
+        cari_vdaire_no:              (lead.taxId     as string) || (lead.taxNo as string) || (lead.vkn as string) || '',
         cari_vdaire_adi:             (lead.taxOffice as string) || '',
         cari_EMail:                  (lead.email     as string) || '',
         cari_CepTel:                 (lead.phone     as string) || '',
@@ -3435,11 +3438,11 @@ async function startServer() {
       const success = ok && !r0?.IsError;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await writeSyncLog('CariKaydetV2', 'lead', firebaseId, success, cariKod, errorMsg, duration, reqActor(req));
+      await writeSyncLog('CariKaydetV2', targetCollection === 'suppliers' ? 'supplier' : 'lead', firebaseId, success, cariKod, errorMsg, duration, reqActor(req));
       if (success) void mirrorMikroCariler([cari]);
 
       if (adminDb && firebaseId && success) {
-        await adminDb.collection('leads').doc(firebaseId).update({
+        await adminDb.collection(targetCollection).doc(firebaseId).update({
           mikroCariKod:  cariKod,
           mikroSynced:   true,
           mikroSyncedAt: pgServerTimestamp(),
@@ -3450,17 +3453,28 @@ async function startServer() {
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await writeSyncLog('CariKaydetV2', 'lead', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
+      await writeSyncLog('CariKaydetV2', targetCollection === 'suppliers' ? 'supplier' : 'lead', firebaseId || 'unknown', false, null, errorMsg, duration, reqActor(req));
       console.error('Mikro CariKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
   });
 
-  /** POST /api/mikro/cari/listesi — pull Mikro CariListesiV2 → Firebase */
+  /** POST /api/mikro/cari/listesi — pull Mikro CariListesiV2 → Firebase.
+   *  `nameSearch` (serbest kullanici girdisi, ornegin tedarikci arama kutusu)
+   *  ISTEMCIDEN GELEN whereStr'i GECERSIZ KILAR ve sunucu tarafinda tek tirnak
+   *  escape edilerek guvenli bir LIKE filtresine cevrilir - Mikro'nun kendi
+   *  WhereStr'i serbest SQL parcasi kabul ettigi icin (SqlVeriOkuV2/ListesiV2
+   *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
+   *  Mikro'nun sorgusuna enjeksiyon acardi. */
   app.post('/api/mikro/cari/listesi', requireAuth, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
-    const { whereStr = "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'", size = 200, index = 0 } = req.body || {};
+    const body = req.body || {};
+    const nameSearch = typeof body.nameSearch === 'string' ? body.nameSearch.trim().slice(0, 100) : '';
+    const whereStr = nameSearch
+      ? `cari_unvan1 LIKE '%${nameSearch.replace(/'/g, "''")}%'`
+      : (body.whereStr || "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'");
+    const { size = 200, index = 0 } = body;
     const t0 = Date.now();
 
     try {
