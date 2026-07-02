@@ -42,7 +42,7 @@ import ConfirmModal from './ConfirmModal';
 import ModuleHeader from './ModuleHeader';
 import { type LabelItem } from './LabelSheetModal';
 
-import { type InventoryItem, type InventoryMovement, type Warehouse } from '../types';
+import { type InventoryItem, type InventoryMovement, type Warehouse, type Consignment, type StockDiscrepancy } from '../types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,6 +67,8 @@ export interface InventoryViewProps {
   onPrintLabels?: (items: LabelItem[]) => void;
   onQuickPO?: (item: { name: string; sku: string }) => void;
   exchangeRates?: Record<string, number> | null;
+  consignments?: Consignment[];
+  stockDiscrepancies?: StockDiscrepancy[];
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -83,6 +85,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   onPrintLabels,
   onQuickPO,
   exchangeRates,
+  consignments = [],
+  stockDiscrepancies = [],
 }) => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<InventoryItem | null>(null);
@@ -178,6 +182,166 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   // Phase 546: inline notes quick-edit
   const [p546EditingNoteId, setP546EditingNoteId] = useState<string | null>(null);
   const [p546NoteDraft, setP546NoteDraft] = useState('');
+
+  // Numune/promosyon + fire/hasar stok hareketi kaydı
+  const [isStockMovementModalOpen, setIsStockMovementModalOpen] = useState(false);
+  const [movementProductId, setMovementProductId] = useState('');
+  const [movementCategory, setMovementCategory] = useState<'numune_promosyon' | 'fire_hasar'>('numune_promosyon');
+  const [movementQuantity, setMovementQuantity] = useState('1');
+  const [movementNote, setMovementNote] = useState('');
+  const [movementSaving, setMovementSaving] = useState(false);
+
+  const stockMovementLabels: Record<'numune_promosyon' | 'fire_hasar', string> = {
+    numune_promosyon: currentLanguage === 'tr' ? 'Numune / Promosyon' : 'Sample / Promotion',
+    fire_hasar: currentLanguage === 'tr' ? 'Fire / Hasar' : 'Waste / Damage',
+  };
+
+  // Konsinye takip
+  const [isConsignmentModalOpen, setIsConsignmentModalOpen] = useState(false);
+  const [consignProductId, setConsignProductId] = useState('');
+  const [consignRecipient, setConsignRecipient] = useState('');
+  const [consignQuantity, setConsignQuantity] = useState('1');
+  const [consignNotes, setConsignNotes] = useState('');
+  const [consignSaving, setConsignSaving] = useState(false);
+  const [consignActionLoading, setConsignActionLoading] = useState<string | null>(null);
+
+  const handleSendConsignment = async () => {
+    const item = inventory.find(i => i.id === consignProductId);
+    const qty = Math.max(1, Math.floor(Number(consignQuantity) || 0));
+    if (!item || qty <= 0 || !consignRecipient.trim()) return;
+    setConsignSaving(true);
+    try {
+      await incrementField('inventory', item.id, 'stockLevel', -qty, 0);
+      await addDoc(collection(db, 'inventoryMovements'), {
+        productId: item.id,
+        productName: item.name,
+        sku: item.sku,
+        type: 'out',
+        quantity: qty,
+        category: 'konsinye_cikis',
+        reason: currentLanguage === 'tr' ? 'Konsinye Çıkış' : 'Consignment Out',
+        note: consignRecipient.trim(),
+        companyId: (item as unknown as { companyId?: string }).companyId ?? null,
+        timestamp: serverTimestamp(),
+      });
+      await addDoc(collection(db, 'consignments'), {
+        productId: item.id,
+        sku: item.sku,
+        productName: item.name,
+        recipientName: consignRecipient.trim(),
+        quantitySent: qty,
+        quantitySold: 0,
+        quantityReturned: 0,
+        status: 'active',
+        notes: consignNotes || undefined,
+        companyId: (item as unknown as { companyId?: string }).companyId ?? null,
+        createdAt: serverTimestamp(),
+      });
+      setIsConsignmentModalOpen(false);
+      setConsignProductId('');
+      setConsignRecipient('');
+      setConsignQuantity('1');
+      setConsignNotes('');
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.WRITE, 'consignments');
+    } finally {
+      setConsignSaving(false);
+    }
+  };
+
+  // Konsinyeden bir kismi satildiginda: sadece kayit guncellenir (stockLevel zaten
+  // cikiste dusulmustu, tekrar dokunulmaz). Kalan miktar tukenirse otomatik kapanir.
+  const handleConsignmentSold = async (c: Consignment, soldQty: number) => {
+    const outstanding = c.quantitySent - c.quantitySold - c.quantityReturned;
+    const qty = Math.min(Math.max(1, soldQty), outstanding);
+    if (qty <= 0) return;
+    setConsignActionLoading(c.id);
+    try {
+      const newSold = c.quantitySold + qty;
+      await updateDoc(doc(db, 'consignments', c.id), {
+        quantitySold: newSold,
+        status: newSold + c.quantityReturned >= c.quantitySent ? 'closed' : 'active',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.UPDATE, `consignments/${c.id}`);
+    } finally {
+      setConsignActionLoading(null);
+    }
+  };
+
+  // Konsinyeden iade: satilmayan birimler stoga geri doner.
+  const handleConsignmentReturn = async (c: Consignment) => {
+    const outstanding = c.quantitySent - c.quantitySold - c.quantityReturned;
+    if (outstanding <= 0) return;
+    setConsignActionLoading(c.id);
+    try {
+      await incrementField('inventory', c.productId, 'stockLevel', outstanding, 0);
+      await addDoc(collection(db, 'inventoryMovements'), {
+        productId: c.productId,
+        productName: c.productName,
+        sku: c.sku,
+        type: 'in',
+        quantity: outstanding,
+        category: 'konsinye_iade',
+        reason: currentLanguage === 'tr' ? 'Konsinye İade' : 'Consignment Return',
+        note: c.recipientName,
+        companyId: c.companyId ?? null,
+        timestamp: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'consignments', c.id), {
+        quantityReturned: c.quantityReturned + outstanding,
+        status: 'closed',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.UPDATE, `consignments/${c.id}`);
+    } finally {
+      setConsignActionLoading(null);
+    }
+  };
+
+  const [discrepancyResolving, setDiscrepancyResolving] = useState<string | null>(null);
+  const handleResolveDiscrepancy = async (id: string) => {
+    setDiscrepancyResolving(id);
+    try {
+      await updateDoc(doc(db, 'stockDiscrepancies', id), { resolved: true, resolvedAt: serverTimestamp() });
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.UPDATE, `stockDiscrepancies/${id}`);
+    } finally {
+      setDiscrepancyResolving(null);
+    }
+  };
+
+  const handleSaveStockMovement = async () => {
+    const item = inventory.find(i => i.id === movementProductId);
+    const qty = Math.max(1, Math.floor(Number(movementQuantity) || 0));
+    if (!item || qty <= 0) return;
+    setMovementSaving(true);
+    try {
+      await incrementField('inventory', item.id, 'stockLevel', -qty, 0);
+      await addDoc(collection(db, 'inventoryMovements'), {
+        productId: item.id,
+        productName: item.name,
+        sku: item.sku,
+        type: 'out',
+        quantity: qty,
+        category: movementCategory,
+        reason: stockMovementLabels[movementCategory],
+        note: movementNote || undefined,
+        companyId: (item as unknown as { companyId?: string }).companyId ?? null,
+        timestamp: serverTimestamp(),
+      });
+      setIsStockMovementModalOpen(false);
+      setMovementProductId('');
+      setMovementQuantity('1');
+      setMovementNote('');
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.WRITE, 'inventoryMovements');
+    } finally {
+      setMovementSaving(false);
+    }
+  };
 
   // ── CSV Import state ────────────────────────────────────────────────────────
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -930,15 +1094,24 @@ const InventoryView: React.FC<InventoryViewProps> = ({
               <h3 className="text-lg font-bold flex items-center gap-2">
                 <RefreshCw className="w-5 h-5 text-brand" /> {currentT.movements}
               </h3>
-              {movements.length > 0 && (
+              <div className="flex items-center gap-1">
                 <button
-                  onClick={() => exportStockMovementsCSV(movements as unknown as StockMovementRow[], currentLanguage)}
+                  onClick={() => setIsStockMovementModalOpen(true)}
                   className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                  title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download CSV'}
+                  title={currentLanguage === 'tr' ? 'Numune/Fire kaydı ekle' : 'Add sample/waste entry'}
                 >
-                  <Download className="w-4 h-4" />
+                  <Plus className="w-4 h-4" />
                 </button>
-              )}
+                {movements.length > 0 && (
+                  <button
+                    onClick={() => exportStockMovementsCSV(movements as unknown as StockMovementRow[], currentLanguage)}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    title={currentLanguage === 'tr' ? 'CSV olarak indir' : 'Download CSV'}
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="space-y-4">
               {movements.length === 0 ? (
@@ -1000,6 +1173,170 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* ── Mikro Senkron Sayım Farkları ── */}
+      {stockDiscrepancies.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 overflow-hidden">
+          <div className="px-4 py-3 flex items-center gap-2 border-b border-amber-200">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <span className="text-xs font-bold text-amber-800">
+              {currentLanguage === 'tr'
+                ? `${stockDiscrepancies.length} üründe Mikro senkron sayım farkı tespit edildi`
+                : `${stockDiscrepancies.length} products have a Mikro sync count discrepancy`}
+            </span>
+          </div>
+          <div className="divide-y divide-amber-100 max-h-64 overflow-y-auto">
+            {stockDiscrepancies.map(d => (
+              <div key={d.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-800 truncate">{d.productName} <span className="text-gray-400 font-normal">({d.sku})</span></p>
+                  <p className="text-[11px] text-amber-700">
+                    {currentLanguage === 'tr' ? 'Bizde' : 'Ours'}: {d.ourQty} → {currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}: {d.mikroQty}
+                    {' '}({d.diff > 0 ? '+' : ''}{d.diff})
+                  </p>
+                </div>
+                <button
+                  disabled={discrepancyResolving === d.id}
+                  onClick={() => void handleResolveDiscrepancy(d.id)}
+                  className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white text-amber-700 border border-amber-300 hover:bg-amber-100 transition-colors disabled:opacity-40 flex-shrink-0"
+                >
+                  {currentLanguage === 'tr' ? 'İncelendi' : 'Reviewed'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Konsinye Takibi ── */}
+      {(() => {
+        const active = consignments.filter(c => c.status === 'active');
+        return (
+          <div className="apple-card p-6 border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Package className="w-5 h-5 text-brand" />
+                {currentLanguage === 'tr' ? 'Konsinye Çıkış Takibi (Bayi/Müşteride)' : 'Outbound Consignment (at Dealer/Customer)'}
+                {active.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{active.length}</span>
+                )}
+              </h3>
+              <button
+                onClick={() => setIsConsignmentModalOpen(true)}
+                className="apple-button-secondary flex items-center gap-1.5 text-xs px-3 py-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {currentLanguage === 'tr' ? 'Konsinye Gönder' : 'Send Consignment'}
+              </button>
+            </div>
+            {active.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                {currentLanguage === 'tr' ? 'Aktif konsinye kaydı yok.' : 'No active consignments.'}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[10px] font-bold text-[#86868B] uppercase border-b border-gray-100">
+                      <th className="pb-2 pr-4">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                      <th className="pb-2 pr-4">{currentLanguage === 'tr' ? 'Alıcı' : 'Recipient'}</th>
+                      <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Gönderilen' : 'Sent'}</th>
+                      <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Satılan' : 'Sold'}</th>
+                      <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Kalan' : 'Outstanding'}</th>
+                      <th className="pb-2 text-right">{currentLanguage === 'tr' ? 'İşlem' : 'Action'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {active.map(c => {
+                      const outstanding = c.quantitySent - c.quantitySold - c.quantityReturned;
+                      const loading = consignActionLoading === c.id;
+                      return (
+                        <tr key={c.id}>
+                          <td className="py-2.5 pr-4 font-medium">{c.productName}</td>
+                          <td className="py-2.5 pr-4 text-gray-500">{c.recipientName}</td>
+                          <td className="py-2.5 pr-4 text-right tabular-nums">{c.quantitySent}</td>
+                          <td className="py-2.5 pr-4 text-right tabular-nums text-emerald-600">{c.quantitySold}</td>
+                          <td className="py-2.5 pr-4 text-right tabular-nums font-bold">{outstanding}</td>
+                          <td className="py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                disabled={loading}
+                                onClick={() => {
+                                  const input = window.prompt(currentLanguage === 'tr' ? `Satılan adet (max ${outstanding}):` : `Units sold (max ${outstanding}):`, '1');
+                                  const qty = Math.floor(Number(input) || 0);
+                                  if (qty > 0) void handleConsignmentSold(c, qty);
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-40"
+                              >
+                                {currentLanguage === 'tr' ? 'Satıldı' : 'Sold'}
+                              </button>
+                              <button
+                                disabled={loading}
+                                onClick={() => void handleConsignmentReturn(c)}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-40"
+                              >
+                                {currentLanguage === 'tr' ? 'İade Al' : 'Return'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {isConsignmentModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsConsignmentModalOpen(false)}>
+          <div className="apple-card w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold">{currentLanguage === 'tr' ? 'Konsinye Gönder' : 'Send Consignment'}</h3>
+              <button onClick={() => setIsConsignmentModalOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</label>
+                <select value={consignProductId} onChange={e => setConsignProductId(e.target.value)} className="apple-input w-full">
+                  <option value="">{currentLanguage === 'tr' ? 'Seçiniz' : 'Select'}</option>
+                  {inventory.map(item => (
+                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {currentLanguage === 'tr' ? 'stok' : 'stock'}: {item.stockLevel ?? 0}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Alıcı (bayi/müşteri)' : 'Recipient (dealer/customer)'}</label>
+                <input type="text" value={consignRecipient} onChange={e => setConsignRecipient(e.target.value)} className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Örn: ABC Bayi' : 'e.g. ABC Dealer'} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Miktar' : 'Quantity'}</label>
+                <input type="number" min={1} value={consignQuantity} onChange={e => setConsignQuantity(e.target.value)} className="apple-input w-full" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Not (opsiyonel)' : 'Note (optional)'}</label>
+                <input type="text" value={consignNotes} onChange={e => setConsignNotes(e.target.value)} className="apple-input w-full" />
+              </div>
+              <p className="text-[11px] text-gray-400">
+                {currentLanguage === 'tr'
+                  ? 'Ürün mülkiyeti bizde kalır; stoktan düşülür ama satış olarak sayılmaz. Satıldığında veya iade edildiğinde bu ekrandan kapatın.'
+                  : 'Ownership stays with us; deducted from stock but not counted as a sale. Close it out here once sold or returned.'}
+              </p>
+              <button
+                onClick={() => void handleSendConsignment()}
+                disabled={!consignProductId || !consignRecipient.trim() || consignSaving}
+                className="apple-button-primary w-full disabled:opacity-40"
+              >
+                {consignSaving ? '…' : (currentLanguage === 'tr' ? 'Gönder' : 'Send')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Düşük stok uyarıları & akıllı sipariş önerileri (tablonun altına alındı) ── */}
       {/* ── Phase 31: Low-Stock Watchlist Panel ── */}
@@ -1133,6 +1470,83 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         );
       })()}
+
+      {isStockMovementModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsStockMovementModalOpen(false)}>
+          <div className="apple-card w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold">{currentLanguage === 'tr' ? 'Stok Hareketi Ekle' : 'Add Stock Entry'}</h3>
+              <button onClick={() => setIsStockMovementModalOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</label>
+                <select
+                  value={movementProductId}
+                  onChange={e => setMovementProductId(e.target.value)}
+                  className="apple-input w-full"
+                >
+                  <option value="">{currentLanguage === 'tr' ? 'Seçiniz' : 'Select'}</option>
+                  {inventory.map(item => (
+                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {currentLanguage === 'tr' ? 'stok' : 'stock'}: {item.stockLevel ?? 0}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Sebep' : 'Reason'}</label>
+                <div className="flex gap-2">
+                  {(['numune_promosyon', 'fire_hasar'] as const).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setMovementCategory(cat)}
+                      className={cn(
+                        'flex-1 text-xs font-bold px-3 py-2 rounded-xl transition-colors',
+                        movementCategory === cat ? 'bg-brand text-white' : 'bg-gray-50 text-gray-500 hover:bg-gray-100',
+                      )}
+                    >
+                      {stockMovementLabels[cat]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Miktar' : 'Quantity'}</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={movementQuantity}
+                  onChange={e => setMovementQuantity(e.target.value)}
+                  className="apple-input w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Not (opsiyonel)' : 'Note (optional)'}</label>
+                <input
+                  type="text"
+                  value={movementNote}
+                  onChange={e => setMovementNote(e.target.value)}
+                  placeholder={currentLanguage === 'tr' ? 'Örn: fuar numunesi, kırık ürün...' : 'e.g. trade show sample, broken unit...'}
+                  className="apple-input w-full"
+                />
+              </div>
+              <p className="text-[11px] text-gray-400">
+                {currentLanguage === 'tr'
+                  ? 'Bu hareket stoktan düşülür ve Mikro senkronundan bağımsız, sadece satış/gelir raporlarından ayrı olarak izlenir.'
+                  : 'This deducts from stock and is tracked separately from sales/revenue reporting, independent of Mikro sync.'}
+              </p>
+              <button
+                onClick={() => void handleSaveStockMovement()}
+                disabled={!movementProductId || movementSaving}
+                className="apple-button-primary w-full disabled:opacity-40"
+              >
+                {movementSaving ? '…' : (currentLanguage === 'tr' ? 'Kaydet' : 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={confirmState.isOpen}

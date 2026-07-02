@@ -132,6 +132,8 @@ import {
   type Employee,
   type Payroll,
   type InventoryMovement,
+  type Consignment,
+  type StockDiscrepancy,
   type Warehouse,
   type RouteStop,
   type LucaConfig,
@@ -708,6 +710,8 @@ function AppContent() {
     appQuotations, setAppQuotations,
     warehouses, setWarehouses,
     inventoryMovements, setInventoryMovements,
+    consignments, setConsignments,
+    stockDiscrepancies, setStockDiscrepancies,
     employees, setEmployees,
     payrolls, setPayrolls
   } = useDataStore();
@@ -1415,6 +1419,47 @@ function AppContent() {
   // ── Phase 584: Physical Inventory / Cycle Count ───────────────────────────
   const [p584CountItems, setP584CountItems] = useState<Array<{id:string;sku:string;name:string;systemQty:number;countedQty?:number;variance?:number}>>([]);
   const [p584Active, setP584Active] = useState(false);
+  const [p584Finalizing, setP584Finalizing] = useState(false);
+  // Sayimi kapatirken: sayilan (countedQty dolu) ve fark olan her urun icin
+  // stockLevel'i sayilan degere getirir + inventoryMovements'a sayim_duzeltme
+  // kategorisiyle loglar + tum oturumu 'stockCounts'a arsivler. Onceden bu
+  // veriler "Sayımı Kapat"ta sessizce atiliyordu (hicbir stok/kayit etkisi yoktu).
+  const handleFinalizeCycleCount = async () => {
+    setP584Finalizing(true);
+    try {
+      const counted = p584CountItems.filter(i => i.countedQty !== undefined);
+      const variant = counted.filter(i => (i.variance || 0) !== 0);
+      for (const item of variant) {
+        const diff = item.variance || 0;
+        await incrementField('inventory', item.id, 'stockLevel', diff, 0);
+        await addDoc(collection(db, 'inventoryMovements'), {
+          productId: item.id,
+          productName: item.name,
+          sku: item.sku,
+          type: diff > 0 ? 'in' : 'out',
+          quantity: Math.abs(diff),
+          category: 'sayim_duzeltme',
+          reason: currentLanguage === 'tr' ? 'Sayım Düzeltmesi' : 'Count Correction',
+          companyId: user?.uid ?? null,
+          timestamp: serverTimestamp(),
+        });
+      }
+      await addDoc(collection(db, 'stockCounts'), {
+        items: counted.map(i => ({ productId: i.id, sku: i.sku, productName: i.name, systemQty: i.systemQty, countedQty: i.countedQty, variance: i.variance || 0 })),
+        totalCounted: counted.length,
+        totalVariance: variant.length,
+        companyId: user?.uid ?? null,
+        countedBy: user?.email ?? user?.uid ?? null,
+        createdAt: serverTimestamp(),
+      });
+    } catch (error) {
+      importedLogFirestoreError(error as Error, OperationType.WRITE, 'stockCounts', auth.currentUser?.uid);
+    } finally {
+      setP584Finalizing(false);
+      setP584Active(false);
+      setP584CountItems([]);
+    }
+  };
   // ── Phase 585: Customer Loyalty Score ─────────────────────────────────────
   // ── Phase 586: Sales Target by Rep ────────────────────────────────────────
   // ── Phase 587: Quality Inspection Checklist ───────────────────────────────
@@ -2228,6 +2273,14 @@ function AppContent() {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
 
+    const unsubConsignments = onSnapshot(query(collection(db, 'consignments'), where('companyId', '==', companyId)), (snapshot) => {
+      setConsignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Consignment)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'consignments', auth.currentUser?.uid));
+
+    const unsubDiscrepancies = onSnapshot(query(collection(db, 'stockDiscrepancies'), where('companyId', '==', companyId), where('resolved', '==', false), limit(100)), (snapshot) => {
+      setStockDiscrepancies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockDiscrepancy)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'stockDiscrepancies', auth.currentUser?.uid));
+
     const unsubEmployees = onSnapshot(collection(db, 'employees'), (snapshot) => {
       setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Employee)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'employees', auth.currentUser?.uid));
@@ -2313,6 +2366,8 @@ function AppContent() {
       unsubInventory();
       unsubWarehouses();
       unsubMovements();
+      unsubConsignments();
+      unsubDiscrepancies();
       unsubEmployees();
       unsubPayrolls();
       unsubShipments();
@@ -12785,6 +12840,8 @@ function AppContent() {
                 onPrintLabels={setLabelItems}
                 onQuickPO={(item) => { setQuickPOProduct(item); setActiveTab('satin-alma'); }}
                 exchangeRates={exchangeRates}
+                consignments={consignments}
+                stockDiscrepancies={stockDiscrepancies}
               />
 
               {/* ── Phase 94: Inventory KPI Summary Strip ── */}
@@ -13554,7 +13611,7 @@ function AppContent() {
                         <h3 className="font-bold text-gray-900 text-sm">{tr584?'📊 Fiziksel Sayım':'📊 Cycle Count'}</h3>
                         <p className="text-xs text-gray-500">{counted.length}/{p584CountItems.length} {tr584?'sayıldı':'counted'} • {variances.length} {tr584?'fark':'variance(s)'}</p>
                       </div>
-                      <button onClick={()=>{setP584Active(false);setP584CountItems([]);}} className="apple-button-secondary text-xs px-3 py-1.5">{tr584?'Sayımı Kapat':'End Count'}</button>
+                      <button disabled={p584Finalizing} onClick={()=>void handleFinalizeCycleCount()} className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-40">{p584Finalizing?'…':(tr584?'Sayımı Kapat ve Uygula':'End Count & Apply')}</button>
                     </div>
                     <div className="overflow-y-auto max-h-64">
                       <table className="w-full text-xs">

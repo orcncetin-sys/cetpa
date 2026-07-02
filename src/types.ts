@@ -139,13 +139,56 @@ export interface Order {
   paymentMethod?: 'cash' | 'bank_transfer' | 'credit_card' | 'check' | 'other';
 }
 
+export type InventoryMovementCategory =
+  | 'numune_promosyon'
+  | 'fire_hasar'
+  | 'konsinye_cikis'
+  | 'konsinye_iade'
+  | 'sayim_duzeltme';
+
 export interface InventoryMovement {
   id: string;
   type: 'in' | 'out';
+  productId?: string;
   productName: string;
+  sku?: string;
   quantity: number;
+  reason?: string;
+  note?: string;
+  // Yalnizca yeni kayitlarda dolu - eski hareketler icin undefined (geriye donuk uyumlu).
+  category?: InventoryMovementCategory;
+  companyId?: string | null;
   timestamp: unknown;
   [key: string]: unknown;
+}
+
+export interface Consignment {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  recipientName: string;
+  quantitySent: number;
+  quantitySold: number;
+  quantityReturned: number;
+  status: 'active' | 'closed';
+  notes?: string;
+  companyId?: string | null;
+  createdAt: unknown;
+  updatedAt?: unknown;
+}
+
+export interface StockDiscrepancy {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  ourQty: number;
+  mikroQty: number;
+  diff: number;
+  resolved: boolean;
+  companyId?: string | null;
+  detectedAt: unknown;
 }
 
 export interface LeadActivity {

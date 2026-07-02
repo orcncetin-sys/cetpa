@@ -1588,10 +1588,13 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       });
       void mirrorMikroStoklar(stoklar);
       const invSnap = await adminDb.collection('inventory').get();
-      const invBySku = new Map<string, PgDocRef>();
+      const invBySku = new Map<string, { ref: PgDocRef; stockLevel: number; name: string }>();
       for (const d of invSnap.docs) {
-        const sku = (d.data().sku as string)?.trim();
-        if (sku && !invBySku.has(sku)) invBySku.set(sku, d.ref);
+        const data = d.data();
+        const sku = (data.sku as string)?.trim();
+        if (sku && !invBySku.has(sku)) {
+          invBySku.set(sku, { ref: d.ref, stockLevel: Number(data.stockLevel) || 0, name: (data.name as string) || sku });
+        }
       }
       let stokYeni = 0, stokGuncel = 0;
       let batch = adminDb.batch(); let ops = 0;
@@ -1601,6 +1604,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         const sku = (s.sto_kod as string)?.trim();
         if (!sku || seenSku.has(sku)) continue;
         seenSku.add(sku);
+        const mikroQty = Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0);
         const fields = {
           name: (s.sto_isim as string) || sku,
           unit: (s.sto_birim1_ad as string) || 'ADET',
@@ -1608,12 +1612,26 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           // sto_mevcut_mik: StokListesiV2'nin gercek mevcut miktar alani (bkz.
           // POST /api/mikro/stok/listesi ile ayni eslesme) - onceden burada hic
           // yazilmiyordu, tum urunler otomatik senkronda stockLevel=0 kaliyordu.
-          stockLevel: Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
+          stockLevel: mikroQty,
           mikroStoKod: sku, mikroSynced: true,
           mikroSyncedAt: pgServerTimestamp(),
         };
-        const ref = invBySku.get(sku);
-        if (ref) { batch.update(ref, fields); stokGuncel++; }
+        const existing = invBySku.get(sku);
+        if (existing) {
+          // Sayim farki tespiti: senkrondan hemen once bizim mevcut stockLevel'imiz
+          // ile Mikro'nun gonderdigi miktar farkliysa kaydet - ozellikle numune/fire/
+          // konsinye gibi yalniz bizim tarafta bilinen dususleri Mikro'nun (bunlardan
+          // habersiz) eski sayisiyla sessizce ezmesine karsi gorunurluk saglar.
+          if (existing.stockLevel !== mikroQty) {
+            batch.set(adminDb.collection('stockDiscrepancies').doc(), {
+              productId: existing.ref.id, sku, productName: existing.name,
+              ourQty: existing.stockLevel, mikroQty, diff: mikroQty - existing.stockLevel,
+              resolved: false, companyId, detectedAt: pgServerTimestamp(),
+            });
+            ops++; // ayri bir batch islemi - ops sayacina ayrica ekle
+          }
+          batch.update(existing.ref, fields); stokGuncel++;
+        }
         else {
           batch.set(adminDb.collection('inventory').doc(), {
             ...fields, companyId, sku, category: 'Genel',
