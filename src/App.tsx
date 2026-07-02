@@ -2997,7 +2997,7 @@ function AppContent() {
               else setShowDemoForm(true);
             }}
             onDashboardClick={() => setEnteredApp(true)}
-            heroImageUrl="/erp_hero.png"
+            heroImageUrl="/erp_hero.webp"
             isLoggedIn={!!user}
             onLanguageToggle={() => setCurrentLanguage(currentLanguage === 'tr' ? 'en' : 'tr')}
             darkMode={darkMode}

@@ -7493,8 +7493,17 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       maxAge: '1y',
       immutable: true,
     }));
-    // Everything else (index.html, icons) — no cache so new deploys are picked up
-    app.use(express.static(distPath, { maxAge: 0 }));
+    // Everything else (index.html, manifest, etc.) — no cache so new deploys are picked up.
+    // Exception: images/fonts under public/ have no content hash but rarely change on
+    // redeploy, so give them a short cache instead of forcing a re-fetch on every visit.
+    app.use(express.static(distPath, {
+      maxAge: 0,
+      setHeaders: (res, filePath) => {
+        if (/\.(png|jpe?g|webp|avif|svg|ico|woff2?)$/.test(filePath)) {
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+        }
+      },
+    }));
     app.use((req, res) => {
       // Eşleşmeyen /api/* → SPA index.html DEĞİL, JSON 404 (HTML-as-JSON karışıklığı engeli).
       if (req.path.startsWith('/api/')) {

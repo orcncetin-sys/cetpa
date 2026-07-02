@@ -1457,7 +1457,7 @@ export default function LandingPage({
                         {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: d('rgba(255,255,255,0.15)', 'rgba(0,0,0,0.15)') }} />)}
                       </div>
                     </div>
-                    <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} />
+                    <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} width={1024} height={480} fetchPriority="high" loading="eager" />
                   </div>
                 </div>
                 <div className="mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
@@ -1715,7 +1715,7 @@ export default function LandingPage({
           </p>
           <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
             className={cn('relative rounded-3xl border overflow-hidden cursor-pointer group', d('border-white/8', 'border-black/8'))}>
-            <img src={heroImageUrl} alt="Demo" className="w-full h-auto blur-[1px] group-hover:blur-0 transition-all duration-500 brightness-75 group-hover:brightness-90" />
+            <img src={heroImageUrl} alt="Demo" className="w-full h-auto blur-[1px] group-hover:blur-0 transition-all duration-500 brightness-75 group-hover:brightness-90" width={1024} height={1024} loading="lazy" />
             <div className="absolute inset-0 flex items-center justify-center">
               <button onClick={onTryClick}
                 className="relative w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-all duration-300 group-hover:bg-brand">
