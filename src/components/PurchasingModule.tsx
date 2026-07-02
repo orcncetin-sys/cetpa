@@ -136,8 +136,15 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   };
 
   const handleSubmitOrder = async () => {
-    if (!newOrder.supplier || newOrder.items.length === 0) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
+    // İki ayrı, spesifik mesaj: "tedarikçi + ürün" birleşik hatası kullanıcıyı
+    // yanlış alana yönlendiriyordu (ürün seçili olsa da tedarikçi boşsa mesaj
+    // "ürün seçin" gibi okunuyordu). Önce tedarikçiyi kontrol et.
+    if (!newOrder.supplier.trim()) {
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
+      return;
+    }
+    if (newOrder.items.length === 0) {
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen en az bir ürün seçin.' : 'Please select at least one item.');
       return;
     }
 
@@ -203,8 +210,12 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
   const handleUpdateOrder = async () => {
     if (!editingOrder) return;
-    if (!newOrder.supplier || newOrder.items.length === 0) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi ve en az bir ürün seçin.' : 'Please select a supplier and at least one item.');
+    if (!newOrder.supplier.trim()) {
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
+      return;
+    }
+    if (newOrder.items.length === 0) {
+      showValidationError(currentLanguage === 'tr' ? 'Lütfen en az bir ürün seçin.' : 'Please select at least one item.');
       return;
     }
 
@@ -679,7 +690,10 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                       value={viewingOrder ? viewingOrder.supplier : newOrder.supplier}
                       onChange={e => setNewOrder(prev => ({ ...prev, supplier: e.target.value }))}
                       disabled={!!viewingOrder}
-                      className="apple-input w-full"
+                      className={cn(
+                        "apple-input w-full",
+                        !!validationError && !newOrder.supplier.trim() && "ring-2 ring-red-400"
+                      )}
                     />
                   </div>
                   <div className="space-y-2">
