@@ -474,7 +474,7 @@ const TENANT_COLLECTIONS = new Set([
   // Entegrasyon senkron logları (firma-bazlı)
   'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',
 ]);
-const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding']);
+const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding', 'aiConsents']);
 // Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
 // ERP/email/iyzico gibi deployment-seviyesi creds GLOBAL kalır (server cron/API okur).
 // docs tablosu PK (coll,id) olduğu için id companyId ile namespace'lenir: `${cid}__{key}`.
@@ -1653,9 +1653,17 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       void mirrorMikroCariler(cariler);
       const leadSnap = await adminDb.collection('leads').get();
       const leadByKod = new Map<string, PgDocRef>();
+      const leadByVkn = new Map<string, PgDocRef>();
+      const leadByName = new Map<string, PgDocRef>();
+      const normalizeVknCron = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
-        const kod = (d.data().mikroCariKod as string)?.trim();
+        const data = d.data();
+        const kod = (data.mikroCariKod as string)?.trim();
         if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
+        const vkn = normalizeVknCron((data.taxId as string) || (data.taxNo as string));
+        if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
+        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
       let cariYeni = 0, cariGuncel = 0;
       for (const c of cariler) {
@@ -1673,13 +1681,23 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           type: leadType, mikroCariKod: kod,
           mikroSynced: true, mikroSyncedAt: pgServerTimestamp(),
         };
-        const ref = leadByKod.get(kod);
+        // Oncelik: mikroCariKod -> VKN -> case-insensitive isim (bkz.
+        // /api/mikro/import/cari'deki ayni fix - manuel olusturulmus leads'in
+        // mikroCariKod'u olmadigi icin salt-kod eslesme onlari ikinci kez
+        // olusturuyordu).
+        const vkn = normalizeVknCron(fields.taxId);
+        const nameKey = fields.name.trim().toLowerCase();
+        const ref = leadByKod.get(kod)
+          || (vkn ? leadByVkn.get(vkn) : undefined)
+          || (nameKey ? leadByName.get(nameKey) : undefined);
         if (ref) { batch.update(ref, fields); cariGuncel++; }
         else {
-          batch.set(adminDb.collection('leads').doc(), {
+          const newRef = adminDb.collection('leads').doc();
+          batch.set(newRef, {
             ...fields, companyId, status: 'Active', source: 'mikro_cron',
             createdAt: pgServerTimestamp(),
           });
+          leadByKod.set(kod, newRef);
           cariYeni++;
         }
         if (++ops >= 400) await flush();
@@ -3819,13 +3837,24 @@ async function startServer() {
     let hasMore = true;
 
     try {
-      // Prefetch ALL leads → Map<mikroCariKod, ref> (companyId filtresiz:
-      // eski kayıtlar cari koduyla eşleşip companyId ile iyileştirilir)
+      // Prefetch ALL leads → Map<mikroCariKod, ref> + Map<VKN, ref> + Map<isim, ref>
+      // (companyId filtresiz: eski kayıtlar cari koduyla eşleşip companyId ile
+      // iyileştirilir). VKN/isim fallback'i sart: manuel olusturulmus (CRM/
+      // Muhasebe/B2B formlari) bir lead'in hic mikroCariKod'u olmaz - sadece
+      // kod'a bakan eski mantik bu importta onu ikinci kez olusturuyordu.
+      const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
       const existingSnap = await adminDb.collection('leads').get();
       const existingByKod = new Map<string, PgDocRef>();
+      const existingByVkn = new Map<string, PgDocRef>();
+      const existingByName = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
-        const kod = (docSnap.data().mikroCariKod as string)?.trim();
+        const data = docSnap.data();
+        const kod = (data.mikroCariKod as string)?.trim();
         if (kod && !existingByKod.has(kod)) existingByKod.set(kod, docSnap.ref);
+        const vkn = normalizeVkn((data.taxId as string) || (data.taxNo as string));
+        if (vkn && !existingByVkn.has(vkn)) existingByVkn.set(vkn, docSnap.ref);
+        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        if (nameKey && !existingByName.has(nameKey)) existingByName.set(nameKey, docSnap.ref);
       }
 
       let batch = adminDb.batch();
@@ -3874,17 +3903,25 @@ async function startServer() {
               mikroSyncedAt:  pgServerTimestamp(),
             };
 
-            // Upsert by mikroCariKod via batch
-            const existingRef = existingByKod.get(cariKod);
+            // Upsert oncelik sirasi: mikroCariKod (zaten Mikro'yla eslesmis) ->
+            // VKN (en guvenilir kimlik) -> case-insensitive isim.
+            const vkn = normalizeVkn(lead.taxId);
+            const nameKey = unvan.trim().toLowerCase();
+            const existingRef = existingByKod.get(cariKod)
+              || (vkn ? existingByVkn.get(vkn) : undefined)
+              || (nameKey ? existingByName.get(nameKey) : undefined);
+
+            const targetRef = existingRef ?? adminDb.collection('leads').doc();
             if (existingRef) {
-              batch.update(existingRef, lead);
+              batch.update(targetRef, lead);
               updated++;
             } else {
-              const newRef = adminDb.collection('leads').doc();
-              batch.set(newRef, { ...lead, createdAt: pgServerTimestamp() });
-              existingByKod.set(cariKod, newRef);
+              batch.set(targetRef, { ...lead, createdAt: pgServerTimestamp() });
               created++;
             }
+            existingByKod.set(cariKod, targetRef);
+            if (vkn) existingByVkn.set(vkn, targetRef);
+            if (nameKey) existingByName.set(nameKey, targetRef);
             batchOps++;
             if (batchOps >= 450) await commitBatch();
           } catch (itemErr) {
@@ -5081,9 +5118,17 @@ async function startServer() {
       const contacts = await parasutGetAll(creds, 'contacts');
       const leadSnap = await adminDb.collection('leads').get();
       const byParasutId = new Map<string, PgDocRef>();
+      const byVkn = new Map<string, PgDocRef>();
+      const byName = new Map<string, PgDocRef>();
+      const normalizeVknP = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
-        const pid = (d.data().parasutId as string) || '';
+        const data = d.data();
+        const pid = (data.parasutId as string) || '';
         if (pid) byParasutId.set(pid, d.ref);
+        const vkn = normalizeVknP((data.taxId as string) || (data.taxNo as string));
+        if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
+        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
       }
       let created = 0, updated = 0;
       let batch = adminDb.batch(); let ops = 0;
@@ -5105,9 +5150,20 @@ async function startServer() {
           parasutId: pid, source: 'parasut', mikroSynced: false,
           updatedAt: pgServerTimestamp(),
         };
-        const ref = byParasutId.get(pid);
+        // Oncelik: parasutId -> VKN -> case-insensitive isim (ayni mikro/import/cari
+        // fix'i - manuel olusturulmus leads'in parasutId'si olmaz).
+        const vkn = normalizeVknP(fields.taxId);
+        const nameKey = fields.name.trim().toLowerCase();
+        const ref = byParasutId.get(pid)
+          || (vkn ? byVkn.get(vkn) : undefined)
+          || (nameKey ? byName.get(nameKey) : undefined);
         if (ref) { batch.update(ref, fields); updated++; }
-        else { batch.set(adminDb.collection('leads').doc(), { ...fields, companyId, status: 'Active', createdAt: pgServerTimestamp() }); created++; }
+        else {
+          const newRef = adminDb.collection('leads').doc();
+          batch.set(newRef, { ...fields, companyId, status: 'Active', createdAt: pgServerTimestamp() });
+          byParasutId.set(pid, newRef);
+          created++;
+        }
         if (++ops >= 400) await flush();
       }
       await flush();

@@ -303,6 +303,11 @@ export default function CRMPage({
       complete: async (results) => {
         try {
           let importedCount = 0;
+          let skippedCount = 0;
+          // VKN alani bu CSV formatinda yok (Shopify musteri export'u) - kopya
+          // onleme burada yalniz case-insensitive isim+email eslesmesiyle yapilir.
+          const emailKeys = new Set(leads.map(l => (l.email || '').trim().toLowerCase()).filter(Boolean));
+          const nameKeys = new Set(leads.map(l => (l.name || '').trim().toLowerCase()).filter(Boolean));
           for (const row of results.data as Record<string, string>[]) {
             const firstName = row['First Name'] || '';
             const lastName = row['Last Name'] || '';
@@ -310,6 +315,12 @@ export default function CRMPage({
             const company = row['Default Address Company'] || name || 'Unknown Company';
             const email = row['Email'] || '';
             if (!name && !email) continue;
+            const emailKey = email.trim().toLowerCase();
+            const nameKey = (name || company).trim().toLowerCase();
+            if ((emailKey && emailKeys.has(emailKey)) || (nameKey && nameKeys.has(nameKey))) {
+              skippedCount++;
+              continue;
+            }
             await addDoc(collection(db, 'leads'), {
               name: name || company,
               company,
@@ -321,8 +332,14 @@ export default function CRMPage({
               createdAt: serverTimestamp(),
             });
             importedCount++;
+            if (emailKey) emailKeys.add(emailKey);
+            if (nameKey) nameKeys.add(nameKey);
           }
-          toast(`${importedCount} ${currentLanguage === 'tr' ? 'lead içe aktarıldı' : 'leads imported'}`, 'success');
+          toast(
+            `${importedCount} ${currentLanguage === 'tr' ? 'lead içe aktarıldı' : 'leads imported'}` +
+            (skippedCount > 0 ? ` · ${skippedCount} ${currentLanguage === 'tr' ? 'zaten vardı (atlandı)' : 'already existed (skipped)'}` : ''),
+            'success'
+          );
         } catch (error) {
           toast(currentLanguage === 'tr' ? 'İçe aktarma hatası' : 'Import error', 'error');
           console.error(error);

@@ -1167,6 +1167,28 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveCustomer = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!customerForm.name.trim()) return showToast(t.bankNameRequired, 'error');
+
+    // Duplicate onleme (yalniz yeni kayitta - duzenlemede kendisiyle kiyaslamaz):
+    // VKN (normalize) -> case-insensitive isim. PurchasingModule tedarikci
+    // deseniyle ayni oncelik sirasi.
+    if (!editingCustomer) {
+      const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
+      const vkn = normalizeVkn(customerForm.taxNo);
+      const nameKey = customerForm.name.trim().toLowerCase();
+      const dup = customers.find(c => {
+        if (vkn && normalizeVkn(c.taxNo) === vkn) return true;
+        return c.name.trim().toLowerCase() === nameKey;
+      });
+      if (dup) {
+        return showToast(
+          currentLanguage === 'tr'
+            ? `Bu VKN/isimde bir kayıt zaten var: "${dup.name}". Mevcut kaydı düzenleyin.`
+            : `A record with this tax ID/name already exists: "${dup.name}". Please edit the existing record.`,
+          'error'
+        );
+      }
+    }
+
     try {
       // leads koleksiyonuna yaz — CRM ile ortak kaynak (taxNo → taxId eşlemesi)
       const leadPayload = {

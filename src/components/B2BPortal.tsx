@@ -125,6 +125,26 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   }, [user?.email, userRole, user]);
 
   const handleSaveDealer = async () => {
+    // Duplicate onleme (yalniz yeni bayi eklerken): VKN (normalize) -> case-
+    // insensitive isim. PurchasingModule tedarikci deseniyle ayni oncelik sirasi.
+    if (!editingDealer) {
+      const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
+      const vkn = normalizeVkn(dealerForm.taxId);
+      const nameKey = dealerForm.name.trim().toLowerCase();
+      const dup = dealers.find(d => {
+        const dVkn = normalizeVkn(d.taxId as string | undefined);
+        if (vkn && dVkn === vkn) return true;
+        return ((d.name as string) || '').trim().toLowerCase() === nameKey;
+      });
+      if (dup) {
+        window.alert(
+          currentLanguage === 'tr'
+            ? `Bu VKN/isimde bir bayi zaten var: "${dup.name as string}". Mevcut kaydı düzenleyin.`
+            : `A dealer with this tax ID/name already exists: "${dup.name as string}". Please edit the existing record.`
+        );
+        return;
+      }
+    }
     try {
       const data = { ...dealerForm, customerType: 'Dealer', status: 'Active', updatedAt: new Date() };
       if (editingDealer) {

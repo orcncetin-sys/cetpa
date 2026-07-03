@@ -93,6 +93,7 @@ import {
   Target as TargetIcon,
   UserCheck,
   ShieldCheck,
+  Sparkles,
   Scale,
   Activity,
   Building2,
@@ -1600,6 +1601,61 @@ function AppContent() {
     try { await navigator.clipboard.writeText('info@cetpa.com.tr'); setKvkkCopied(true); setTimeout(() => setKvkkCopied(false), 2000); } catch { /* clipboard yok */ }
   };
 
+  // ── Gemini AI (Yapay Zeka Destek Modülü) kullanım onayı ─────────────────────
+  // Mikro'nun kendi AI modülündeki desenle ayni: Aydinlatma Metni + Kullanim
+  // Kosullari icin iki ayri onay, kullanicinin kendi hesabina (aiConsents/{uid})
+  // kalici olarak yazilir - sessionStorage'daki genel KVKK modalinden farkli
+  // olarak burada gercek bir onay kaydi/audit izi tutulur (ne zaman, hangi
+  // versiyon metni onaylandi).
+  const AI_CONSENT_VERSION = 1;
+  const [aiConsentChecked, setAiConsentChecked] = useState(false);
+  const [aiConsentGiven, setAiConsentGiven] = useState(false);
+  const [showAiConsentModal, setShowAiConsentModal] = useState(false);
+  const [aiConsentAydinlatma, setAiConsentAydinlatma] = useState(false);
+  const [aiConsentKosullar, setAiConsentKosullar] = useState(false);
+  const [aiConsentExpanded, setAiConsentExpanded] = useState<'aydinlatma' | 'kosullar' | null>(null);
+
+  useEffect(() => {
+    if (!user) { setAiConsentChecked(false); setAiConsentGiven(false); return; }
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'aiConsents', user.uid));
+        const given = snap.exists() && (snap.data() as { accepted?: boolean; version?: number }).accepted === true
+          && (snap.data() as { version?: number }).version === AI_CONSENT_VERSION;
+        setAiConsentGiven(given);
+      } catch {
+        setAiConsentGiven(false);
+      } finally {
+        setAiConsentChecked(true);
+      }
+    })();
+  }, [user]);
+
+  // Mikro'nun kendi AI modul deseninde oldugu gibi kullanim denenmeden ONCE
+  // proaktif olarak goster (KVKK modaliyla ayni gecikme deseni - ust uste
+  // binmesinler diye biraz daha gec).
+  useEffect(() => {
+    if (aiConsentChecked && !aiConsentGiven && user) {
+      const t = setTimeout(() => setShowAiConsentModal(true), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [aiConsentChecked, aiConsentGiven, user]);
+
+  const acceptAiConsent = async () => {
+    if (!user || !aiConsentAydinlatma || !aiConsentKosullar) return;
+    try {
+      await setDoc(doc(db, 'aiConsents', user.uid), {
+        userId: user.uid,
+        accepted: true,
+        version: AI_CONSENT_VERSION,
+        acceptedAt: serverTimestamp(),
+        acceptedBy: user.email || user.uid,
+      });
+      setAiConsentGiven(true);
+      setShowAiConsentModal(false);
+    } catch { /* kullanici tekrar deneyebilir, modal acik kalir */ }
+  };
+
   // ── Stripe Checkout return handler ───────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2509,19 +2565,53 @@ function AppContent() {
 
   const handleAddLead = async (data: NewLeadData) => {
     if (!user) return;
+
+    // Duplicate onleme: VKN (rakam-disi karakterler yok sayilarak normalize) ->
+    // case-insensitive isim/sirket. PurchasingModule'deki tedarikci deseniyle
+    // ayni oncelik sirasi (VKN en guvenilir kimlik, isim en zayif).
+    const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
+    const vkn = normalizeVkn(data.taxId);
+    const nameKey = data.name.trim().toLowerCase();
+    const companyKey = (data.company || '').trim().toLowerCase();
+    const existingLead = leads.find(l => {
+      const lVkn = normalizeVkn((l as unknown as { taxId?: string }).taxId);
+      if (vkn && lVkn === vkn) return true;
+      const lName = (l.name || '').trim().toLowerCase();
+      if (nameKey && lName === nameKey) return true;
+      const lCompany = ((l as unknown as { company?: string }).company || '').trim().toLowerCase();
+      if (companyKey && lCompany && lCompany === companyKey) return true;
+      return false;
+    });
+    if (existingLead) {
+      toast(
+        currentLanguage === 'tr'
+          ? `Bu VKN/isimde bir kayıt zaten var: "${existingLead.name}". Lütfen mevcut kaydı düzenleyin.`
+          : `A record with this tax ID/name already exists: "${existingLead.name}". Please edit the existing record instead.`,
+        'error'
+      );
+      return;
+    }
+
+    // Gemini AI (lead skorlama) yalnizca kullanici aydinlatma metni + kullanim
+    // kosullarini onaylamissa calisir - onay yoksa modal gosterilir ve lead
+    // AI skorlamasi olmadan (0 / not yok) olusturulur; CRM'in temel islevi
+    // (lead ekleme) bir AI onay karari yuzunden engellenmez.
+    const useAi = aiConsentChecked && aiConsentGiven;
+    if (aiConsentChecked && !aiConsentGiven) setShowAiConsentModal(true);
+
     setIsScoring(true);
     try {
-      const scoreResult = await scoreLead(data);
+      const scoreResult = useAi ? await scoreLead(data) : { score: 0, reasoning: '' };
       const docRef = await addDoc(collection(db, 'leads'), {
         ...data, status: 'New', score: scoreResult.score,
-        notes: `${data.notes ?? ''}\n\nAI Insights: ${scoreResult.reasoning}`,
+        notes: useAi ? `${data.notes ?? ''}\n\nAI Insights: ${scoreResult.reasoning}` : (data.notes ?? ''),
         companyId: storeCompanyId ?? user?.uid ?? 'guest',
         assignedTo: user?.uid ?? 'guest', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         customerType: 'B2B' as const,
       });
       createNotification(
         currentLanguage === 'tr' ? 'Yeni Müşteri Adayı' : 'New Lead',
-        `${data.name}${data.company ? ` — ${data.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'} (AI Skor: ${scoreResult.score}/100)`,
+        `${data.name}${data.company ? ` — ${data.company}` : ''} ${currentLanguage === 'tr' ? 'eklendi' : 'added'}${useAi ? ` (AI Skor: ${scoreResult.score}/100)` : ''}`,
         'info'
       ).catch(() => {});
       if (leadFromOrderRef.current) {
@@ -4185,6 +4275,106 @@ function AppContent() {
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Gemini AI (Yapay Zeka Destek Modülü) kullanım onayı ── */}
+          {showAiConsentModal && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="apple-card max-w-md w-full p-8 space-y-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-5 h-5 text-violet-600" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 text-base">
+                    {currentLanguage === 'tr' ? 'Yapay Zeka Destek Modülü' : 'AI Support Module'}
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  {currentLanguage === 'tr'
+                    ? 'Yapay Zeka Destek Modülünü (lead skorlama, AI sohbet, analiz önerileri) kullanabilmek için aydınlatma metni ve kullanıcı sözleşmesi metnine onay verilmesi gerekmektedir.'
+                    : 'To use the AI Support Module (lead scoring, AI chat, analysis suggestions), you must consent to the disclosure notice and user agreement.'}
+                </p>
+
+                {aiConsentExpanded && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 max-h-56 overflow-y-auto text-xs text-gray-600 leading-relaxed space-y-2">
+                    {aiConsentExpanded === 'aydinlatma' ? (
+                      currentLanguage === 'tr' ? (
+                        <>
+                          <p><strong>Aydınlatma Metni (KVKK m.10):</strong></p>
+                          <p>Bu modülü kullandığınızda; lead/müşteri adı, şirket, iletişim bilgileri ve girdiğiniz notlar gibi kişisel veriler, analiz/skorlama/öneri üretimi amacıyla Google LLC tarafından işletilen Gemini API'ye (ABD merkezli, uluslararası veri aktarımı içerir) iletilir. Veriler Google'ın kendi saklama politikaları kapsamında işlenir, CETPA tarafından reklam/pazarlama amacıyla kullanılmaz veya üçüncü kişilerle paylaşılmaz. Onayınızı istediğiniz zaman Ayarlar'dan geri çekebilirsiniz; geri çekmeniz AI destekli özellikleri devre dışı bırakır, uygulamanın diğer işlevlerini etkilemez.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p><strong>Disclosure Notice:</strong></p>
+                          <p>When you use this module, personal data you enter (lead/customer name, company, contact details, notes) is sent to Google's Gemini API (US-based, involves international data transfer) for analysis/scoring/suggestion generation. Data is processed under Google's own retention policies; CETPA does not use it for advertising and does not share it with other third parties. You may withdraw consent anytime in Settings; withdrawing disables AI-assisted features only.</p>
+                        </>
+                      )
+                    ) : (
+                      currentLanguage === 'tr' ? (
+                        <>
+                          <p><strong>Kullanım Koşulları:</strong></p>
+                          <p>AI çıktıları (skor, öneri, analiz) otomatik üretilmiştir ve bir tavsiye niteliği taşır; nihai iş/finansal kararlar için tek başına dayanak olarak kullanılmamalıdır. CETPA, AI çıktılarının doğruluğunu garanti etmez. Modülü kötüye kullanım (örn. üçüncü kişilere ait hassas veriyi yetkisiz şekilde girme) kullanıcının sorumluluğundadır.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p><strong>Terms of Use:</strong></p>
+                          <p>AI outputs (scores, suggestions, analysis) are automatically generated and advisory in nature; they should not be used as the sole basis for final business/financial decisions. CETPA does not guarantee the accuracy of AI outputs. Misuse of the module (e.g. entering unauthorized sensitive third-party data) is the user's responsibility.</p>
+                        </>
+                      )
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aiConsentAydinlatma}
+                      onChange={e => setAiConsentAydinlatma(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 accent-brand flex-shrink-0"
+                    />
+                    <span className="text-sm text-gray-700">
+                      <button type="button" onClick={(e) => { e.preventDefault(); setAiConsentExpanded(aiConsentExpanded === 'aydinlatma' ? null : 'aydinlatma'); }} className="text-brand font-semibold hover:underline">
+                        {currentLanguage === 'tr' ? "Aydınlatma Metni'ni" : "the Disclosure Notice"}
+                      </button>
+                      {currentLanguage === 'tr'
+                        ? " okudum, verilerin aydınlatma metni kapsamında işlenmesine onay veriyorum."
+                        : " I have read and consent to data processing under it."}
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aiConsentKosullar}
+                      onChange={e => setAiConsentKosullar(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 accent-brand flex-shrink-0"
+                    />
+                    <span className="text-sm text-gray-700">
+                      <button type="button" onClick={(e) => { e.preventDefault(); setAiConsentExpanded(aiConsentExpanded === 'kosullar' ? null : 'kosullar'); }} className="text-brand font-semibold hover:underline">
+                        {currentLanguage === 'tr' ? "Kullanım Koşulları Metni'ni" : "the Terms of Use"}
+                      </button>
+                      {currentLanguage === 'tr' ? " okudum, onaylıyorum." : " I have read and approve."}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => void acceptAiConsent()}
+                    disabled={!aiConsentAydinlatma || !aiConsentKosullar}
+                    className="apple-button-primary w-full py-3 text-sm font-bold disabled:opacity-40"
+                  >
+                    {currentLanguage === 'tr' ? 'Onayla' : 'Accept'}
+                  </button>
+                  <button
+                    onClick={() => setShowAiConsentModal(false)}
+                    className="apple-button-secondary w-full py-3 text-sm font-bold text-center"
+                  >
+                    {currentLanguage === 'tr' ? 'Şimdilik Reddet (AI özellikleri kapalı kalır)' : 'Decline for now (AI features stay off)'}
+                  </button>
+                </div>
               </div>
             </div>
           )}

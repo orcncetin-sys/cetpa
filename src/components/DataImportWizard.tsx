@@ -7,6 +7,7 @@ import {
   serverTimestamp,
   writeBatch,
   doc,
+  getDocs,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 
@@ -188,6 +189,7 @@ export default function DataImportWizard({
   const [importProgress, setImportProgress] = useState(0);
   const [importDone, setImportDone] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [mergedCount, setMergedCount] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -208,6 +210,7 @@ export default function DataImportWizard({
     setImportProgress(0);
     setImportDone(false);
     setImportedCount(0);
+    setMergedCount(0);
     onClose();
   };
 
@@ -284,6 +287,26 @@ export default function DataImportWizard({
     const BATCH_SIZE = 20;
     let done = 0;
 
+    // Duplicate onleme (yalniz musteri importunda): mevcut leads'i tek seferde
+    // cekip VKN (normalize) ve case-insensitive isim anahtariyla Map kur.
+    // Eslesen satirlar yeni doc acmaz, mevcut kaydi merge:true ile gunceller -
+    // ayni dosyanin iki kez yuklenmesi veya CRM'de zaten var olan bir
+    // musterinin tekrar eklenmesi kopya yaratmasin diye.
+    const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
+    const vknMap = new Map<string, string>();
+    const nameMap = new Map<string, string>();
+    if (importType === 'customers') {
+      const snap = await getDocs(collection(db, 'leads'));
+      for (const d of snap.docs) {
+        const data = d.data() as Record<string, unknown>;
+        const vkn = normalizeVkn((data.taxId as string) || (data.taxNo as string));
+        if (vkn) vknMap.set(vkn, d.id);
+        const nameKey = ((data.name as string) || '').trim().toLowerCase();
+        if (nameKey) nameMap.set(nameKey, d.id);
+      }
+    }
+    let merged = 0;
+
     try {
       for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = writeBatch(db);
@@ -312,19 +335,41 @@ export default function DataImportWizard({
               createdAt: serverTimestamp(),
             });
           } else {
-            const ref = doc(collection(db, 'leads'));
-            batch.set(ref, {
-              name: mapped.name ?? '',
-              email: mapped.email ?? '',
-              phone: mapped.phone ?? '',
-              company: mapped.company ?? '',
-              address: mapped.address ?? '',
-              taxNo: mapped.taxNo ?? '',
-              status: 'New',
-              assignedTo: userId,
-              customerType: 'B2B',
-              createdAt: serverTimestamp(),
-            });
+            const vkn = normalizeVkn(mapped.taxNo as string | undefined);
+            const nameKey = ((mapped.name as string) ?? '').trim().toLowerCase();
+            const existingId = (vkn && vknMap.get(vkn)) || (nameKey && nameMap.get(nameKey));
+
+            if (existingId) {
+              // Mevcut kayda merge et - yeni kopya acma.
+              batch.set(doc(db, 'leads', existingId), {
+                name: mapped.name ?? '',
+                email: mapped.email ?? '',
+                phone: mapped.phone ?? '',
+                company: mapped.company ?? '',
+                address: mapped.address ?? '',
+                taxId: mapped.taxNo ?? '',
+                updatedAt: serverTimestamp(),
+              }, { merge: true });
+              merged++;
+            } else {
+              const ref = doc(collection(db, 'leads'));
+              batch.set(ref, {
+                name: mapped.name ?? '',
+                email: mapped.email ?? '',
+                phone: mapped.phone ?? '',
+                company: mapped.company ?? '',
+                address: mapped.address ?? '',
+                taxNo: mapped.taxNo ?? '',
+                status: 'New',
+                assignedTo: userId,
+                customerType: 'B2B',
+                createdAt: serverTimestamp(),
+              });
+              // Ayni import icinde tekrar eden satirlar da eslessin diye
+              // yeni olusturulani da anlik olarak Map'e ekle.
+              if (vkn) vknMap.set(vkn, ref.id);
+              if (nameKey) nameMap.set(nameKey, ref.id);
+            }
           }
         }
 
@@ -334,6 +379,7 @@ export default function DataImportWizard({
       }
 
       setImportedCount(done);
+      setMergedCount(merged);
       setImportDone(true);
     } catch (err) {
       console.error('Import error:', err);
@@ -643,6 +689,11 @@ export default function DataImportWizard({
                     {lang === 'tr'
                       ? (importType === 'products' ? 'ürün' : 'müşteri') + ' başarıyla aktarıldı.'
                       : (importType === 'products' ? 'products' : 'customers') + ' imported successfully.'}
+                    {mergedCount > 0 && (
+                      <><br />{lang === 'tr'
+                        ? `${mergedCount} kayıt zaten mevcuttu, tekrar oluşturulmadı (mevcut kayıt güncellendi).`
+                        : `${mergedCount} already existed and were not duplicated (existing record updated instead).`}</>
+                    )}
                   </p>
                   <button onClick={handleClose} className="apple-button-primary mt-2">
                     {lang === 'tr' ? 'Kapat' : 'Close'}
