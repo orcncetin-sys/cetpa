@@ -1657,7 +1657,7 @@ export default function OrdersPage({
                           const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
                           doc505.text(`${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${o.status} · ${o.paid ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓') : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending')}`, 14, finalY505 + 10);
-                          doc505.text('CETPA Business Suite — cetpa.io', W / 2, finalY505 + 18, { align: 'center' });
+                          doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, finalY505 + 18, { align: 'center' });
                           doc505.save(`receipt-${o.shopifyOrderId || o.id.slice(-8)}.pdf`);
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"

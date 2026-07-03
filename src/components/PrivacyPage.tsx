@@ -42,7 +42,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '7. İletişim',
-      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.io | Adres: CETPA Technology, Levent, Beşiktaş, İstanbul 34330 | Talep yanıt süresi: 30 gün içinde.'
+      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA Technology, Levent, Beşiktaş, İstanbul 34330 | Talep yanıt süresi: 30 gün içinde.'
     }
   ] : [
     {
@@ -67,11 +67,11 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '6. Your Rights (GDPR)',
-      content: 'Under GDPR, you have the right to: access your personal data, rectify inaccurate data, erase your data ("right to be forgotten"), restrict processing, data portability, object to processing, and withdraw consent at any time. To exercise any of these rights, contact us at privacy@cetpa.io. We will respond within 30 days.'
+      content: 'Under GDPR, you have the right to: access your personal data, rectify inaccurate data, erase your data ("right to be forgotten"), restrict processing, data portability, object to processing, and withdraw consent at any time. To exercise any of these rights, contact us at privacy@cetpa.com.tr. We will respond within 30 days.'
     },
     {
       title: '7. Contact',
-      content: 'For questions about this policy or data requests: Email: privacy@cetpa.io | Address: CETPA Technology, Levent, Beşiktaş, Istanbul 34330, Turkey | Response time: within 30 days.'
+      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA Technology, Levent, Beşiktaş, Istanbul 34330, Turkey | Response time: within 30 days.'
     }
   ];
 

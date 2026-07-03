@@ -11,8 +11,7 @@ import {
   Activity, Scale, Building2, Code, Database, Moon, Sun,
   TrendingUp, Play, Pause, ChevronDown, Mail, Star, X, Minus,
 } from 'lucide-react';
-import PrivacyPage from './PrivacyPage';
-import TermsPage from './TermsPage';
+import { Link } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from '../lib/dbClient';
 import { byField } from '../utils/fsSort';
@@ -1063,7 +1062,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
               {isTR ? 'Mali müşavir ortaklık programına başvurun' : 'Apply for the CPA partner program'}
             </p>
             {!submitted ? (
-              <form onSubmit={handleSubmit} action={`mailto:info@cetpa.io`} className="flex flex-col sm:flex-row gap-3">
+              <form onSubmit={handleSubmit} action={`mailto:info@cetpa.com.tr`} className="flex flex-col sm:flex-row gap-3">
                 <input
                   type="email"
                   required
@@ -1088,8 +1087,8 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
               >
                 <p className="text-sm font-semibold">
                   {isTR
-                    ? 'Başvurunuz alındı! info@cetpa.io adresinden size ulaşacağız.'
-                    : "Application received! We'll reach out via info@cetpa.io."}
+                    ? 'Başvurunuz alındı! info@cetpa.com.tr adresinden size ulaşacağız.'
+                    : "Application received! We'll reach out via info@cetpa.com.tr."}
                 </p>
               </motion.div>
             )}
@@ -1107,7 +1106,6 @@ export default function LandingPage({
   heroImageUrl, isLoggedIn, onLanguageToggle, darkMode, onDarkModeToggle,
 }: LandingPageProps) {
   const isTR = currentLanguage === 'tr';
-  const [activePage, setActivePage] = useState<null | 'privacy' | 'terms'>(null);
   const [scrolled, setScrolled] = useState(false);
   const [pricingAnnual, setPricingAnnual] = useState(true);
   const d = (dk: string, lt: string) => darkMode ? dk : lt;
@@ -1148,9 +1146,6 @@ export default function LandingPage({
     }, () => setFirestoreTestimonials(null));
     return unsub;
   }, [isTR]);
-
-  if (activePage === 'privacy') return <PrivacyPage currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
-  if (activePage === 'terms')   return <TermsPage   currentLanguage={currentLanguage} darkMode={darkMode} onBack={() => { setActivePage(null); window.scrollTo(0, 0); }} />;
 
   const brand = '#ff4000';
 
@@ -1450,7 +1445,7 @@ export default function LandingPage({
                       </div>
                       <div style={{ flex: 1, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.07)'), borderRadius: 6, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 40px' }}>
                         <span style={{ fontSize: 10, color: d('rgba(255,255,255,0.35)', 'rgba(0,0,0,0.4)'), fontFamily: 'system-ui, sans-serif', letterSpacing: '0.01em' }}>
-                          🔒 app.cetpa.io/dashboard
+                          🔒 app.cetpa.com.tr/dashboard
                         </span>
                       </div>
                       <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
@@ -2030,7 +2025,7 @@ export default function LandingPage({
                   {isTR ? 'Ücretsiz Başla' : 'Start for Free'}
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
-                <a href="mailto:info@cetpa.io"
+                <a href="mailto:info@cetpa.com.tr"
                   className={cn('w-full sm:w-auto px-10 py-5 rounded-2xl font-bold text-lg border transition-all hover:scale-105 flex items-center justify-center gap-3', d('border-white/15 text-white hover:bg-white/8', 'border-black/12 text-black hover:bg-black/5'))}>
                   <Mail className="w-5 h-5" />
                   {isTR ? 'Demo Talebi' : 'Request Demo'}
@@ -2075,10 +2070,10 @@ export default function LandingPage({
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   Changelog
                 </button>
-                <a href="mailto:info@cetpa.io?subject=API%20Dokümantasyonu"
+                <Link to="/api"
                   className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   API
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2090,15 +2085,15 @@ export default function LandingPage({
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Hakkımızda' : 'About'}
                 </button>
-                <a href="mailto:info@cetpa.io?subject=Kariyer"
+                <Link to="/careers"
                   className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Kariyer' : 'Careers'}
-                </a>
-                <a href="mailto:info@cetpa.io?subject=Blog"
+                </Link>
+                <Link to="/blog"
                   className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   Blog
-                </a>
-                <a href="mailto:info@cetpa.io?subject=Basin"
+                </Link>
+                <a href="mailto:info@cetpa.com.tr?subject=Basin"
                   className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Basın' : 'Press'}
                 </a>
@@ -2109,17 +2104,17 @@ export default function LandingPage({
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Yasal' : 'Legal'}</p>
               <div className="space-y-3">
-                <button onClick={() => { setActivePage('privacy'); window.scrollTo(0, 0); }}
+                <Link to="/privacy"
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}
-                </button>
-                <button onClick={() => { setActivePage('terms'); window.scrollTo(0, 0); }}
+                </Link>
+                <Link to="/terms"
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
                   {isTR ? 'Kullanım Koşulları' : 'Terms of Service'}
-                </button>
-                <a href="mailto:info@cetpa.io"
+                </Link>
+                <a href="mailto:info@cetpa.com.tr"
                   className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
-                  info@cetpa.io
+                  info@cetpa.com.tr
                 </a>
               </div>
             </div>

@@ -684,16 +684,14 @@ function AppContent() {
   const [accessMatrix, setAccessMatrix] = useState(defaultAccessMatrix);
   const [firestoreUsers, setFirestoreUsers] = useState<Record<string, unknown>[]>([]);
   const [auditLogs, setAuditLogs] = useState<Record<string, unknown>[]>([]);
-  const [companySettings, setCompanySettings] = useState<Record<string, unknown>>({});
-  // Firma logosu özelleştirmesi — settings/app.logoUrl'den yüklenir, header'da gösterilir
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-  const [geminiApiKeySetting, setGeminiApiKeySetting] = useState('');
 
-  const [lucaSettings, setLucaSettings] = useState<Partial<LucaConfig>>({});
-  const [mikroSettings, setMikroSettings] = useState<Partial<MikroConfig>>({});
+  // Firma logosu özelleştirmesi — settings/app.logoUrl'den yüklenir, header'da gösterilir
+
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+
   // Notification preferences — must be top-level (not inside conditional IIFE) to respect Rules of Hooks
-  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
+
   const toggleNotifPref = (key: string) => {
     setNotifPrefs(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -713,7 +711,22 @@ function AppContent() {
     consignments, setConsignments,
     stockDiscrepancies, setStockDiscrepancies,
     employees, setEmployees,
-    payrolls, setPayrolls
+    payrolls, setPayrolls,
+    commissionRules, setCommissionRules,
+    suppliers, setSuppliers,
+    userSubscription, setUserSubscription,
+    paymentHistory, setPaymentHistory,
+    notifications, setNotifications,
+    fxPos, setFxPos,
+    companySettings, setCompanySettings,
+    logoUrl, setLogoUrl,
+    geminiApiKeySetting, setGeminiApiKeySetting,
+    mikroSettings, setMikroSettings,
+    lucaSettings, setLucaSettings,
+    gibConnected, setGibConnected,
+    exchangeRates, setExchangeRates,
+    branchNames, setBranchNames,
+    notifPrefs, setNotifPrefs
   } = useDataStore();
 
   const [dateRange, setDateRange] = useState({
@@ -723,10 +736,7 @@ function AppContent() {
 
   // eBA approval queue pending count (badge on nav tab)
   const pendingApprovalsCount = usePendingApprovalCount(userRole, user?.email);
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number> | null>(null);
-  const [notifications, setNotifications] = useState<Record<string, unknown>[]>([]);
-  const [gibConnected, setGibConnected] = useState<boolean>(false);
-  const [branchNames, setBranchNames] = useState<string[]>([]);
+
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
@@ -743,7 +753,7 @@ function AppContent() {
 
   // ── Commission Rules (for lead detail commission summary) ─────────────────
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
-  const [commissionRules, setCommissionRules] = useState<CommissionRuleApp[]>([]);
+
   useEffect(() => {
     if (!user || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
     const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
@@ -754,7 +764,7 @@ function AppContent() {
   }, [user, activeTab]);
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
   const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
@@ -850,7 +860,7 @@ function AppContent() {
   };
 
   // ─── Subscription State ─────────────────────────────────────────────────
-  const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
+
   const [showLoginPage, setShowLoginPage] = useState(false);
   const [showDemoForm, setShowDemoForm] = useState(false);
   const [demoForm, setDemoForm] = useState({ name: '', company: '', email: '', phone: '', message: '' });
@@ -859,7 +869,7 @@ function AppContent() {
   const [enteredApp, setEnteredApp] = useState(false);
   const [showPricingPage, setShowPricingPage] = useState(false);
   const [subscriptionLoaded, setSubscriptionLoaded] = useState(false);
-  const [paymentHistory, setPaymentHistory] = useState<{ id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' }[]>([]);
+
 
   // Admin emails that bypass subscription gating entirely
   const ADMIN_EMAILS = ['orcncetin@gmail.com'];
@@ -1634,15 +1644,9 @@ function AppContent() {
   // ── Phase 635: Kur Değerleme (FX Revaluation) ─────────────────────────────
   // Kur Değerleme: açık döviz pozisyonu (foreign tutar) + defterdeki kur — editlenebilir,
   // settings/fxRevaluation'da saklanır. Güncel kur canlı TCMB'den (exchangeRates).
-  const [fxPos, setFxPos] = useState({ usdBalance: 0, usdBookRate: 0, eurBalance: 0, eurBookRate: 0 });
+
   const [fxRefreshing, setFxRefreshing] = useState(false);
-  useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(doc(db, 'settings', 'fxRevaluation'), s => {
-      if (s.exists()) setFxPos(prev => ({ ...prev, ...(s.data() as typeof fxPos) }));
-    }, () => { /* yoksa 0 */ });
-    return () => unsub();
-  }, [user]);
+  
   const fxSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const updateFx = (field: keyof typeof fxPos, value: number) => {
     setFxPos(prev => {
@@ -1979,52 +1983,16 @@ function AppContent() {
   }, []);
 
   // --- Real-time Logo & Settings ---
-  useEffect(() => {
-    if (!user) return;
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'app'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setLogoUrl(data.logoUrl || null);
-        setCompanySettings(data.companySettings || {});
-      }
-    }, (error) => importedLogFirestoreError(error, OperationType.GET, 'settings/app', user.uid));
-    return () => unsubSettings();
-  }, [user]);
+  
 
   // --- AI Config (Gemini key) ---
-  useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(doc(db, 'settings', 'aiConfig'), snap => {
-      if (snap.exists()) setGeminiApiKeySetting((snap.data()?.geminiApiKey as string) ?? '');
-    });
-    return unsub;
-  }, [user]);
+  
 
   // --- Real-time Mikro & Luca Settings ---
-  useEffect(() => {
-    if (!user) return;
-    const unsubMikro = onSnapshot(doc(db, 'settings', 'mikro'), (docSnap) => {
-      if (docSnap.exists()) setMikroSettings(docSnap.data() as Partial<MikroConfig>);
-    });
-    const unsubLuca = onSnapshot(doc(db, 'settings', 'luca'), (docSnap) => {
-      if (docSnap.exists()) setLucaSettings(docSnap.data() as Partial<LucaConfig>);
-    });
-    return () => { unsubMikro(); unsubLuca(); };
-  }, [user]);
+  
 
   // --- GIB connection status + Branch names for order form ---
-  useEffect(() => {
-    if (!user) return;
-    const unsubGib = onSnapshot(doc(db, 'settings', 'gib'), snap => {
-      setGibConnected(snap.exists() ? (snap.data().connected ?? false) : false);
-    });
-    const unsubBranches = onSnapshot(collection(db, 'subeler'), snap => {
-      setBranchNames(
-        sortByCreatedAt(snap.docs.map(d => (d.data() as { subeAdi?: string }).subeAdi ?? '')).filter(Boolean)
-      );
-    });
-    return () => { unsubGib(); unsubBranches(); };
-  }, [user]);
+  
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
