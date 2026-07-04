@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
-import { createHmac, createHash } from "crypto";
+import { createHmac, createHash, randomUUID } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
@@ -3193,6 +3193,106 @@ async function startServer() {
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
+  /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).
+   *  Body: { productId, sku?, productName?, quantity, from?, to?, note? }
+   *    from/to: { type:'warehouse'|'vehicle', id, name? } | null
+   *    - from+to dolu  → gerçek transfer (depo↔depo, araç↔depo, depo↔araç)
+   *    - from null     → lokasyona giriş (başlangıç stok atama / mal kabul)
+   *    - to null       → lokasyondan çıkış (sevkiyat/fire)
+   *  locationStocks doc id biçimi: `<type>__<locationId>__<productId>`.
+   *  Global inventory.stockLevel'a DOKUNMAZ — transfer toplam stoğu değiştirmez,
+   *  yalnız lokasyon dağılımını günceller (bkz. Faz 2 kararı). Tek PG
+   *  transaction'da: kaynak azalt (yetersizse rollback) + hedef artır/oluştur +
+   *  inventoryMovements kaydı. */
+  app.post('/api/logistics/transfer', requireAuth, async (req: Request, res: Response) => {
+    if (!pgPool) return res.status(503).json({ success: false, error: 'Veritabanı yok.' });
+    const uid = (req as Request & { uid: string }).uid;
+    const companyId = await getUserCompanyId(uid);
+    const b = (req.body ?? {}) as {
+      productId?: string; sku?: string; productName?: string; quantity?: number; note?: string;
+      from?: { type: 'warehouse' | 'vehicle'; id: string; name?: string } | null;
+      to?:   { type: 'warehouse' | 'vehicle'; id: string; name?: string } | null;
+    };
+    const qty = Number(b.quantity);
+    if (!b.productId || !Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ success: false, error: 'productId ve pozitif quantity gerekli.' });
+    }
+    if (!b.from && !b.to) {
+      return res.status(400).json({ success: false, error: 'En az bir taraf (from veya to) gerekli.' });
+    }
+    const locId = (loc: { type: string; id: string }) => `${loc.type}__${loc.id}__${b.productId}`;
+
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Kaynak: yeterli stok kontrolü + azalt (locationStock yoksa 0 kabul → hata)
+      if (b.from) {
+        const fromDocId = locId(b.from);
+        const r = await client.query('SELECT data FROM docs WHERE coll = $1 AND id = $2 FOR UPDATE', ['locationStocks', fromDocId]);
+        const cur = r.rows.length ? Number((r.rows[0].data as Record<string, unknown>).quantity) || 0 : 0;
+        if (cur < qty) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ success: false, error: `Kaynak lokasyonda yeterli stok yok (mevcut: ${cur}, istenen: ${qty}).`, available: cur });
+        }
+        const fromData = {
+          id: fromDocId, locationType: b.from.type, locationId: b.from.id, locationName: b.from.name ?? '',
+          productId: b.productId, sku: b.sku ?? '', productName: b.productName ?? '',
+          quantity: cur - qty, companyId, updatedAt: new Date().toISOString(),
+        };
+        await client.query(
+          `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+          ['locationStocks', fromDocId, JSON.stringify(fromData)],
+        );
+        broadcastDocChange('locationStocks', 'set', fromDocId, fromData);
+      }
+
+      // Hedef: artır (yoksa oluştur)
+      if (b.to) {
+        const toDocId = locId(b.to);
+        const r = await client.query('SELECT data FROM docs WHERE coll = $1 AND id = $2 FOR UPDATE', ['locationStocks', toDocId]);
+        const cur = r.rows.length ? Number((r.rows[0].data as Record<string, unknown>).quantity) || 0 : 0;
+        const toData = {
+          id: toDocId, locationType: b.to.type, locationId: b.to.id, locationName: b.to.name ?? '',
+          productId: b.productId, sku: b.sku ?? '', productName: b.productName ?? '',
+          quantity: cur + qty, companyId, updatedAt: new Date().toISOString(),
+        };
+        await client.query(
+          `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
+           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+          ['locationStocks', toDocId, JSON.stringify(toData)],
+        );
+        broadcastDocChange('locationStocks', 'set', toDocId, toData);
+      }
+
+      // Hareket kaydı (kategori: her iki taraf da lokasyonsa transfer; biri araçsa arac_transfer)
+      const involvesVehicle = b.from?.type === 'vehicle' || b.to?.type === 'vehicle';
+      const category = !b.from ? 'lokasyon_atama' : involvesVehicle ? 'arac_transfer' : 'depo_transfer';
+      const fromLabel = b.from ? (b.from.name || b.from.id) : 'Dış';
+      const toLabel = b.to ? (b.to.name || b.to.id) : 'Dış';
+      const movId = randomUUID();
+      const movData = {
+        id: movId, type: b.to ? 'in' : 'out', productId: b.productId, sku: b.sku ?? '',
+        productName: b.productName ?? '', quantity: qty, category,
+        reason: `Transfer: ${fromLabel} → ${toLabel}`, note: b.note ?? '',
+        fromLocation: b.from ?? null, toLocation: b.to ?? null,
+        companyId, timestamp: new Date().toISOString(),
+      };
+      await client.query('INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)', ['inventoryMovements', movId, JSON.stringify(movData)]);
+      broadcastDocChange('inventoryMovements', 'set', movId, movData);
+
+      await client.query('COMMIT');
+      res.json({ success: true, movementId: movId, category });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[logistics/transfer]', err);
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      client.release();
+    }
+  });
+
   app.post('/api/inventory/auto-reorder', requireAuth, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {

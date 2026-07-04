@@ -144,7 +144,10 @@ export type InventoryMovementCategory =
   | 'fire_hasar'
   | 'konsinye_cikis'
   | 'konsinye_iade'
-  | 'sayim_duzeltme';
+  | 'sayim_duzeltme'
+  | 'depo_transfer'
+  | 'arac_transfer'
+  | 'lokasyon_atama';
 
 export interface InventoryMovement {
   id: string;
