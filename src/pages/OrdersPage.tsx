@@ -29,6 +29,7 @@ const LogisticsMap = LogisticsMapLazy;
 import type { Lead, Order, OrderLineItem, Employee, InventoryItem, RouteStop, Shipment, Warehouse, Vehicle, LocationStock } from '../types';
 import LocationQRModal from '../components/LocationQRModal';
 import TransferScanPanel from '../components/TransferScanPanel';
+import LocationStockReport from '../components/LocationStockReport';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -2442,15 +2443,18 @@ export default function OrdersPage({
 
               {/* ── Phase 593: Araç Filosu Takibi ──────────────────────────────── */}
               {lojistikTab === 'qr-transfer' && (
-                <TransferScanPanel
-                  currentLanguage={currentLanguage}
-                  inventory={inventory}
-                  warehouses={warehouses}
-                  vehicles={vehicles}
-                  locationStocks={locationStocks}
-                  hasFullAccess={hasFullAccess}
-                  toast={toast}
-                />
+                <div className="space-y-4">
+                  <TransferScanPanel
+                    currentLanguage={currentLanguage}
+                    inventory={inventory}
+                    warehouses={warehouses}
+                    vehicles={vehicles}
+                    locationStocks={locationStocks}
+                    hasFullAccess={hasFullAccess}
+                    toast={toast}
+                  />
+                  <LocationStockReport currentLanguage={currentLanguage} locationStocks={locationStocks} />
+                </div>
               )}
 
               {lojistikTab === 'arac-takip' && (() => {
