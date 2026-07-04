@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type {
   Order, Lead, InventoryItem, Shipment, Quotation,
-  Warehouse, InventoryMovement, Employee, Payroll, Consignment, StockDiscrepancy
+  Warehouse, InventoryMovement, Employee, Payroll, Consignment, StockDiscrepancy,
+  Vehicle, LocationStock
 } from '../types';
 
 interface DataState {
@@ -52,6 +53,12 @@ interface DataState {
 
   warehouses: Warehouse[];
   setWarehouses: (warehouses: Warehouse[]) => void;
+
+  vehicles: Vehicle[];
+  setVehicles: (vehicles: Vehicle[]) => void;
+
+  locationStocks: LocationStock[];
+  setLocationStocks: (locationStocks: LocationStock[]) => void;
 
   inventoryMovements: InventoryMovement[];
   setInventoryMovements: (movements: InventoryMovement[]) => void;
@@ -188,6 +195,12 @@ export const useDataStore = create<DataState>((set) => ({
 
   warehouses: [],
   setWarehouses: (warehouses) => set({ warehouses }),
+
+  vehicles: [],
+  setVehicles: (vehicles) => set({ vehicles }),
+
+  locationStocks: [],
+  setLocationStocks: (locationStocks) => set({ locationStocks }),
 
   inventoryMovements: [],
   setInventoryMovements: (inventoryMovements) => set({ inventoryMovements }),

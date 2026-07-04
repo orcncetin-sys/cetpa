@@ -454,7 +454,7 @@ const TENANT_COLLECTIONS = new Set([
   'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
   'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
-  'wmsLocations', 'dataRequests',
+  'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',
   'bankAccounts', 'bankTransactions', 'boardMeetings', 'bom', 'campaigns', 'cargoTracking',

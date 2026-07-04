@@ -431,6 +431,37 @@ export interface WaybillItem { productName: string; sku: string; quantity: numbe
 export interface Waybill { id: string; waybillNo: string; invoiceNo?: string; party: string; date: string; items: WaybillItem[]; total?: number; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; type: 'giden' | 'gelen'; createdAt?: unknown; }
 export interface Budget { id: string; category: string; amount: number; period: string; }
 export interface Warehouse { id: string; name: string; location?: string; manager?: string; notes?: string; createdAt?: unknown; }
+
+// Araç filosu — kalıcı (Firestore 'vehicles'). QR-tabanlı depo/araç transferinde
+// araçlar da bir "lokasyon" olarak kullanılır (bkz. locationQrValue / parseLocationQr).
+export interface Vehicle {
+  id: string;
+  plate: string;
+  driver?: string;
+  model?: string;
+  status: 'Müsait' | 'Yolda' | 'Bakımda' | 'Arızalı';
+  lastService?: string;
+  nextService?: string;
+  km?: number;
+  fuel?: 'Benzin' | 'Dizel' | 'LPG' | 'Elektrik';
+  companyId?: string | null;
+  createdAt?: unknown;
+}
+
+// Konum-bazlı stok — her depo/araç + ürün için ayrı miktar (Faz 2). Global
+// InventoryItem.stockLevel = tüm locationStocks'un toplamı olarak korunur.
+export interface LocationStock {
+  id: string;              // `${locationType}:${locationId}:${productId}`
+  locationType: 'warehouse' | 'vehicle';
+  locationId: string;
+  locationName?: string;
+  productId: string;
+  sku?: string;
+  productName?: string;
+  quantity: number;
+  companyId?: string | null;
+  updatedAt?: unknown;
+}
 export interface BoardMeeting { id: string; title: string; date: string; location: string; attendees: string; decisions: string; status: 'Planlandı' | 'Tamamlandı' | 'İptal'; createdAt?: unknown; updatedAt?: unknown; }
 export interface AssemblyMeeting { id: string; title: string; date: string; type: 'Olağan' | 'Olağanüstü'; decisions: string; attendees: string; createdAt?: unknown; }
 export interface Shareholder { id: string; name: string; shareCount: number; sharePercentage: number; type: 'Gerçek Kişi' | 'Tüzel Kişi'; contact?: string; createdAt?: unknown; updatedAt?: unknown; }

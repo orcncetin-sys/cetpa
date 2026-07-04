@@ -6,7 +6,7 @@ import {
 import { db, auth } from '../firebase';
 import { useDataStore } from '../store/dataStore';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
-import type { Lead, Order, InventoryItem, Warehouse, InventoryMovement, Consignment, StockDiscrepancy, Employee, Payroll, Shipment, Quotation } from '../types';
+import type { Lead, Order, InventoryItem, Warehouse, InventoryMovement, Consignment, StockDiscrepancy, Employee, Payroll, Shipment, Quotation, Vehicle, LocationStock } from '../types';
 import { UserRole } from '../types';
 import { User } from 'firebase/auth';
 
@@ -50,7 +50,7 @@ export function useDataSync({
     setCommissionRules, setSuppliers, setUserSubscription, setPaymentHistory,
     setNotifications, setFxPos, setCompanySettings, setLogoUrl,
     setGeminiApiKeySetting, setMikroSettings, setLucaSettings, setGibConnected,
-    setBranchNames
+    setBranchNames, setVehicles, setLocationStocks
   } = useDataStore();
 
   const sortByCreatedAt = (arr: any[]) =>
@@ -194,6 +194,14 @@ export function useDataSync({
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
 
+    const unsubVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {
+      setVehicles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vehicle)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'vehicles', auth.currentUser?.uid));
+
+    const unsubLocationStocks = onSnapshot(query(collection(db, 'locationStocks'), where('companyId', '==', companyId)), (snapshot) => {
+      setLocationStocks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocationStock)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'locationStocks', auth.currentUser?.uid));
+
     const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), where('companyId', '==', companyId), limit(200)), (snapshot) => {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
@@ -288,6 +296,8 @@ export function useDataSync({
       unsubOrders();
       unsubInventory();
       unsubWarehouses();
+      unsubVehicles();
+      unsubLocationStocks();
       unsubMovements();
       unsubConsignments();
       unsubDiscrepancies();

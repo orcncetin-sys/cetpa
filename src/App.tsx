@@ -701,6 +701,8 @@ function AppContent() {
     inventory, setInventory,
     appQuotations, setAppQuotations,
     warehouses, setWarehouses,
+    vehicles, setVehicles,
+    locationStocks,
     inventoryMovements, setInventoryMovements,
     consignments, setConsignments,
     stockDiscrepancies, setStockDiscrepancies,
@@ -10056,6 +10058,8 @@ function AppContent() {
                 activeTab={activeTab}
                 darkMode={darkMode}
                 warehouses={warehouses}
+                vehicles={vehicles}
+                locationStocks={locationStocks}
                 shipments={shipments}
                 newOrder={newOrder}
                 setNewOrder={setNewOrder}

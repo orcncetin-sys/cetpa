@@ -9,7 +9,7 @@ import {
   Copy, Download,
   FileText, FileDown, FileUp, MessageSquare, GripVertical, Building2, Globe,
   Navigation, Users, Bell, Check, CreditCard,
-  ArrowRightLeft, Link, Route, Ship, History,
+  ArrowRightLeft, Link, Route, Ship, History, QrCode,
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import {
@@ -26,7 +26,8 @@ import AccountingModule from '../components/AccountingModule';
 const CargoTrackingTab = React.lazy(() => import('../components/CargoTrackingTab'));
 const LogisticsMapLazy = React.lazy(() => import('../components/LogisticsMap'));
 const LogisticsMap = LogisticsMapLazy;
-import type { Lead, Order, OrderLineItem, Employee, InventoryItem, RouteStop, Shipment, Warehouse } from '../types';
+import type { Lead, Order, OrderLineItem, Employee, InventoryItem, RouteStop, Shipment, Warehouse, Vehicle, LocationStock } from '../types';
+import LocationQRModal from '../components/LocationQRModal';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -128,6 +129,8 @@ interface Props {
   activeTab: string;
   darkMode: boolean;
   warehouses: Warehouse[];
+  vehicles: Vehicle[];
+  locationStocks: LocationStock[];
   shipments: Shipment[];
   newOrder: Partial<Order>;
   setNewOrder: React.Dispatch<React.SetStateAction<Partial<Order>>>;
@@ -153,7 +156,7 @@ export default function OrdersPage({
   routeStops, isRouteOptimized, selectedDepot, setSelectedDepot, DEPOTS,
   recurringOrders, hasFullAccess, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
-  userRole, user, kpiCurrency, activeTab, darkMode, warehouses, shipments,
+  userRole, user, kpiCurrency, activeTab, darkMode, warehouses, vehicles, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
   handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute,
   handleToggleOrderPaid, trackView, openConfirm,
@@ -205,8 +208,12 @@ export default function OrdersPage({
   const [p583Requests, setP583Requests] = useState<Array<{id:string;customerName:string;productName:string;serialNo?:string;issueDate?:string;warrantyEnd?:string;description:string;status:'Açık'|'İşlemde'|'Kapatıldı';priority:'Düşük'|'Orta'|'Yüksek'}>>([]);
   const [p583ShowForm, setP583ShowForm] = useState(false);
   const [p583Draft, setP583Draft] = useState({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'});
-  const [p593Vehicles, setP593Vehicles] = useState<Array<{id:string;plate:string;driver:string;model:string;status:'Müsait'|'Yolda'|'Bakımda'|'Arızalı';lastService?:string;nextService?:string;km?:number;fuel?:'Benzin'|'Dizel'|'LPG'|'Elektrik'}>>([]);
+  // Araçlar artık kalıcı (Firestore 'vehicles', vehicles prop). Eski in-memory
+  // p593Vehicles kaldırıldı; ekleme/güncelleme/silme Firestore'a yazar.
+  const p593Vehicles = vehicles;
   const [p593ShowForm, setP593ShowForm] = useState(false);
+  // Depo/araç QR etiket modalı
+  const [locationQrModal, setLocationQrModal] = useState<{ type: 'warehouse' | 'vehicle'; id: string; name: string; subtitle?: string } | null>(null);
   const [p593Draft, setP593Draft] = useState({plate:'',driver:'',model:'',status:'Müsait' as 'Müsait'|'Yolda'|'Bakımda'|'Arızalı',lastService:'',nextService:'',km:'',fuel:'Dizel' as 'Benzin'|'Dizel'|'LPG'|'Elektrik'});
   const [p609Tickets, setP609Tickets] = useState<Array<{id:string;customer:string;subject:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';status:'Açık'|'İşlemde'|'Çözüldü'|'Kapatıldı';createdAt:string;resolvedAt?:string;slaHours:number;satisfaction?:1|2|3|4|5}>>([]);
   const [p609ShowForm, setP609ShowForm] = useState(false);
@@ -2461,11 +2468,13 @@ export default function OrdersPage({
                           <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sonraki Bakım':'Next Service'} value={p593Draft.nextService} onChange={e=>setP593Draft(d=>({...d,nextService:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={()=>{
+                          <button onClick={async ()=>{
                             if(!p593Draft.plate) return;
-                            setP593Vehicles(prev=>[...prev,{id:Date.now().toString(),plate:p593Draft.plate,driver:p593Draft.driver,model:p593Draft.model,status:p593Draft.status,lastService:p593Draft.lastService||undefined,nextService:p593Draft.nextService||undefined,km:Number(p593Draft.km)||undefined,fuel:p593Draft.fuel}]);
-                            setP593Draft({plate:'',driver:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
-                            setP593ShowForm(false);
+                            try {
+                              await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate,driver:p593Draft.driver||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',km:Number(p593Draft.km)||0,fuel:p593Draft.fuel,createdAt:serverTimestamp()});
+                              setP593Draft({plate:'',driver:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
+                              setP593ShowForm(false);
+                            } catch(e){ console.error('[vehicle add]',e); toast(tr593?'Araç kaydedilemedi.':'Failed to save vehicle.','error'); }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{tr593?'Kaydet':'Save'}</button>
                           <button onClick={()=>setP593ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr593?'İptal':'Cancel'}</button>
                         </div>
@@ -2484,7 +2493,7 @@ export default function OrdersPage({
                                   <p className="font-bold text-gray-900 text-sm font-mono">{v.plate}</p>
                                   <p className="text-xs text-gray-500">{v.model} {v.fuel?`• ${v.fuel}`:''}</p>
                                 </div>
-                                <select value={v.status} onChange={e=>setP593Vehicles(prev=>prev.map(x=>x.id===v.id?{...x,status:e.target.value as typeof v.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors593[v.status]}`}>
+                                <select value={v.status} onChange={async e=>{ try{ await updateDoc(doc(db,'vehicles',v.id),{status:e.target.value}); }catch(err){ console.error('[vehicle status]',err); } }} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors593[v.status]}`}>
                                   {(['Müsait','Yolda','Bakımda','Arızalı'] as const).map(s=><option key={s}>{s}</option>)}
                                 </select>
                               </div>
@@ -2493,11 +2502,46 @@ export default function OrdersPage({
                                 <div><p className="text-gray-400">KM</p><p className="font-medium text-gray-700">{v.km?.toLocaleString()||'—'}</p></div>
                                 {v.nextService&&<div className="col-span-2"><p className="text-gray-400">{tr593?'Sonraki Bakım':'Next Service'}</p><p className={`font-medium ${isDue?'text-amber-600 font-bold':'text-gray-700'}`}>{v.nextService} {isDue?'⚠️':''}</p></div>}
                               </div>
+                              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                                <button onClick={()=>setLocationQrModal({type:'vehicle',id:v.id,name:v.plate,subtitle:v.driver||v.model})} className="flex-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors flex items-center justify-center gap-1.5">
+                                  <QrCode className="w-3.5 h-3.5" />{tr593?'QR Etiketi':'QR Label'}
+                                </button>
+                                {hasFullAccess('lojistik')&&(
+                                  <button onClick={async()=>{ if(!await confirmDelete(v.plate,currentLanguage))return; try{ await deleteDoc(doc(db,'vehicles',v.id)); }catch(err){ console.error('[vehicle delete]',err); } }} className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
                       </div>
                     )}
+
+                    {/* Depo QR etiketleri — transfer taramasında kaynak/hedef olarak okunur */}
+                    <div className="apple-card p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Building2 className="w-4 h-4 text-brand" />
+                        <h4 className="font-bold text-gray-900 text-sm">{tr593?'Depo QR Etiketleri':'Warehouse QR Labels'}</h4>
+                      </div>
+                      {warehouses.length===0?(
+                        <p className="text-xs text-gray-400">{tr593?'Henüz depo tanımlı değil. Muhasebe → Depo bölümünden ekleyin.':'No warehouses yet. Add them under Accounting → Warehouse.'}</p>
+                      ):(
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {warehouses.map(w=>(
+                            <div key={w.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gray-50">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{w.name}</p>
+                                {w.location&&<p className="text-[10px] text-gray-400 truncate">{w.location}</p>}
+                              </div>
+                              <button onClick={()=>setLocationQrModal({type:'warehouse',id:w.id,name:w.name,subtitle:w.location})} className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors flex items-center gap-1 shrink-0">
+                                <QrCode className="w-3 h-3" />QR
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 );
               })()}
@@ -3213,6 +3257,18 @@ export default function OrdersPage({
           </div>
         )}
       </AnimatePresence>
+
+      {locationQrModal && (
+        <LocationQRModal
+          isOpen={true}
+          onClose={() => setLocationQrModal(null)}
+          currentLanguage={currentLanguage}
+          locationType={locationQrModal.type}
+          locationId={locationQrModal.id}
+          locationName={locationQrModal.name}
+          subtitle={locationQrModal.subtitle}
+        />
+      )}
     </>
   );
 }
