@@ -28,6 +28,7 @@ const LogisticsMapLazy = React.lazy(() => import('../components/LogisticsMap'));
 const LogisticsMap = LogisticsMapLazy;
 import type { Lead, Order, OrderLineItem, Employee, InventoryItem, RouteStop, Shipment, Warehouse, Vehicle, LocationStock } from '../types';
 import LocationQRModal from '../components/LocationQRModal';
+import TransferScanPanel from '../components/TransferScanPanel';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -2108,6 +2109,8 @@ export default function OrdersPage({
                     { id: 'depo', label: currentLanguage === 'tr' ? 'Depo' : 'Warehouse', icon: Building2 },
                     { id: 'wms', label: currentLanguage === 'tr' ? 'Bin/Lokasyon' : 'Bin/Location', icon: MapPin },
                     { id: 'transfer', label: currentLanguage === 'tr' ? 'Depolar Arası' : 'Transfer', icon: ArrowRightLeft },
+                    { id: 'qr-transfer', label: currentLanguage === 'tr' ? 'QR Transfer' : 'QR Transfer', icon: QrCode },
+                    { id: 'arac-takip', label: currentLanguage === 'tr' ? 'Araç Takip' : 'Vehicles', icon: Truck },
                     { id: 'giden_irsaliye', label: currentLanguage === 'tr' ? 'Giden İrsaliye' : 'Outgoing', icon: FileUp },
                     { id: 'gelen_irsaliye', label: currentLanguage === 'tr' ? 'Gelen İrsaliye' : 'Incoming', icon: FileDown },
                   ].map(tab => {
@@ -2438,6 +2441,18 @@ export default function OrdersPage({
               })()}
 
               {/* ── Phase 593: Araç Filosu Takibi ──────────────────────────────── */}
+              {lojistikTab === 'qr-transfer' && (
+                <TransferScanPanel
+                  currentLanguage={currentLanguage}
+                  inventory={inventory}
+                  warehouses={warehouses}
+                  vehicles={vehicles}
+                  locationStocks={locationStocks}
+                  hasFullAccess={hasFullAccess}
+                  toast={toast}
+                />
+              )}
+
               {lojistikTab === 'arac-takip' && (() => {
                 const tr593 = currentLanguage === 'tr';
                 const statusColors593: Record<string,string> = {'Müsait':'bg-green-100 text-green-700','Yolda':'bg-blue-100 text-blue-700','Bakımda':'bg-amber-100 text-amber-700','Arızalı':'bg-red-100 text-red-700'};

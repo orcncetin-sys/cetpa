@@ -3968,6 +3968,7 @@ function AppContent() {
                 { label: tr ? 'Depo' : 'Warehouse',                  subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
                 { label: tr ? 'Bin / Lokasyon' : 'Bin / Location',   subId: 'wms',              action: () => { setActiveTab('lojistik'); setLojistikTab('wms'); } }, // Phase 554
                 { label: tr ? 'Transfer' : 'Transfer',               subId: 'transfer',         action: () => { setActiveTab('lojistik'); setLojistikTab('transfer'); } },
+                { label: tr ? 'QR Transfer' : 'QR Transfer',         subId: 'qr-transfer',      action: () => { setActiveTab('lojistik'); setLojistikTab('qr-transfer'); } },
                 { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes',   subId: 'giden_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
                 { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
                 { label: tr ? 'Tedarik Zinciri KPI' : 'Supply Chain KPI', subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
