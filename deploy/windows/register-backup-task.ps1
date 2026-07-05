@@ -1,9 +1,13 @@
 #requires -RunAsAdministrator
-# Cetpa - one-time setup: daily off-server DB backup via Windows Task Scheduler.
-# Runs scripts/backup-db-offsite.mjs (pg_dump -> Firebase Storage), independent
-# of the VDS provider (ODEA) - protects against a repeat of the 2026-07-02
-# "wrong server suspended" incident, where local-only backups would have been
-# unreachable for as long as the box itself was down.
+# Cetpa - daily off-server backup via Windows Task Scheduler.
+# Runs scripts/backup-db-offsite.mjs (pg_dump + uploads/ tar.gz -> Firebase
+# Storage), independent of the VDS provider (ODEA) - protects against a repeat
+# of the 2026-07-02 "wrong server suspended" incident.
+#
+# NOTE (2026-07-05): deploy.ps1 now registers this SAME task idempotently on
+# EVERY deploy, so this standalone script is normally NOT needed - it stays as
+# a manual fallback (e.g. to (re)register without a full deploy, or to change
+# the run time via -RunTime). deploy.ps1 self-heals the task going forward.
 # ASCII-only on purpose: Windows PowerShell 5.1 reads BOM-less .ps1 as
 # Windows-1252, non-ASCII breaks parsing.
 # Run:  powershell -ExecutionPolicy Bypass -File .\deploy\windows\register-backup-task.ps1
