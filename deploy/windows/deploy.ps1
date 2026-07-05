@@ -37,6 +37,32 @@ npm run build
 Info 'Starting cetpa service'
 Restart-Service cetpa -Force
 
+# Off-server backup scheduled task - idempotent, registered on every deploy so it
+# self-heals if it was never set up or got removed. Runs backup-db-offsite.mjs
+# (pg_dump + uploads/ tar.gz -> Firebase Storage) daily at 03:30 as SYSTEM.
+# Wrapped in try/catch: this is NOT on the critical deploy path, so a failure
+# here (e.g. non-elevated SSH token) must not fail the deploy.
+try {
+    $bkTask = 'CetpaDbBackupOffsite'
+    $bkScript = Join-Path $AppDir 'scripts\backup-db-offsite.mjs'
+    $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+    if ($nodeExe -and (Test-Path $bkScript)) {
+        if (Get-ScheduledTask -TaskName $bkTask -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $bkTask -Confirm:$false
+        }
+        $bkAction    = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$bkScript`"" -WorkingDirectory $AppDir
+        $bkTrigger   = New-ScheduledTaskTrigger -Daily -At '03:30'
+        $bkSettings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
+        $bkPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $bkTask -Action $bkAction -Trigger $bkTrigger -Settings $bkSettings -Principal $bkPrincipal -Description 'Cetpa: gunluk pg_dump + uploads -> Firebase Storage off-server yedek.' | Out-Null
+        Info "Backup scheduled task '$bkTask' ensured (daily 03:30, SYSTEM)."
+    } else {
+        Write-Host "    Backup task skipped: node veya script bulunamadi." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "    Backup task kaydedilemedi (deploy etkilenmez): $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # Local health check (no TLS - independent of the IIS/Plesk reverse proxy in front)
 $ok = $false
 foreach ($i in 1..10) {
