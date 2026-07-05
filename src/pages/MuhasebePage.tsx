@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import BankStatementImportModal from '../components/BankStatementImportModal';
 import {
   Calculator, DollarSign, Building2, BarChart3, CreditCard,
   Package, Users, Activity, TrendingUp, Wallet, FileText, Receipt,
@@ -217,6 +218,9 @@ export default function MuhasebePage(props: Props) {
     p640Subs, setP640Subs, p640ShowForm, setP640ShowForm, p640Draft, setP640Draft,
     p643Txns, setP643Txns, p643ShowForm, setP643ShowForm, p643Draft, setP643Draft,
   } = props;
+
+  // Banka ekstresi CSV içe aktarma modalı
+  const [showBankImport, setShowBankImport] = useState(false);
 
   return (
             <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -759,6 +763,10 @@ export default function MuhasebePage(props: Props) {
                                 <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}:</label>
                                 <input type="month" value={reconMonth} onChange={e => setReconMonth(e.target.value)} className="apple-input text-sm px-3 py-1.5" />
                               </div>
+                              <button onClick={() => setShowBankImport(true)} className="apple-button-secondary text-sm px-4 py-1.5 flex items-center gap-1.5 ml-auto">
+                                <Upload className="w-4 h-4" />
+                                {currentLanguage === 'tr' ? 'CSV Ekstre Yükle' : 'Import CSV Statement'}
+                              </button>
                             </div>
 
                             {/* Main reconciliation card */}
@@ -836,6 +844,14 @@ export default function MuhasebePage(props: Props) {
                           </>
                         );
                       })()}
+
+                      <BankStatementImportModal
+                        isOpen={showBankImport}
+                        onClose={() => setShowBankImport(false)}
+                        currentLanguage={currentLanguage}
+                        bankAccounts={p547BankAccounts.map(a => ({ id: a.id, bankName: a.bankName, currency: a.currency }))}
+                        toast={toast}
+                      />
 
                       {/* ── Phase 623: Akreditif & Ödeme Belgesi ─────────────────── */}
                       {hasFullAccess('muhasebe') && (() => {
