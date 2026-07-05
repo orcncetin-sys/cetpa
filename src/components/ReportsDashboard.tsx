@@ -8313,7 +8313,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           const cat = item.category || 'Uncategorized';
           if (!catCost[cat]) catCost[cat] = { items: 0, value: 0, units: 0 };
           catCost[cat].items++;
-          catCost[cat].value += item.stockLevel * (item.costPrice||0);
+          catCost[cat].value += item.stockLevel * itemCostTRY(item, exchangeRates);
           catCost[cat].units += item.stockLevel;
         });
         const cats = Object.entries(catCost).sort((a,b)=>b[1].value-a[1].value);
@@ -8688,8 +8688,8 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
         const critical = inventory.filter(i => i.stockLevel === 0);
         const low = inventory.filter(i => i.stockLevel > 0 && i.stockLevel <= i.lowStockThreshold);
         const healthy = inventory.filter(i => i.stockLevel > i.lowStockThreshold);
-        const totalValue = inventory.reduce((s, i) => s + i.stockLevel * (i.costPrice || 0), 0);
-        const criticalValue = critical.reduce((s, i) => s + i.lowStockThreshold * (i.costPrice || 0), 0);
+        const totalValue = inventory.reduce((s, i) => s + i.stockLevel * itemCostTRY(i, exchangeRates), 0);
+        const criticalValue = critical.reduce((s, i) => s + i.lowStockThreshold * itemCostTRY(i, exchangeRates), 0);
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-4">Inventory Reorder Alert Dashboard</h3>
@@ -9556,7 +9556,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           if (!catVal[cat]) catVal[cat] = {count: 0, value: 0, stock: 0};
           catVal[cat].count++;
           catVal[cat].stock += item.stockLevel;
-          catVal[cat].value += item.stockLevel * (item.costPrice || 0);
+          catVal[cat].value += item.stockLevel * itemCostTRY(item, exchangeRates);
         });
         const cats334 = Object.entries(catVal).map(([cat, d]) => ({cat, ...d})).sort((a, b) => b.value - a.value).slice(0, 8);
         if (cats334.length < 2) return null;
@@ -10473,7 +10473,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           .map(item => {
             const lastTs = lastSale358[item.name];
             const days = lastTs ? Math.floor((now358 - lastTs) / 86400000) : 999;
-            return { name: item.name, stock: item.stockLevel, value: item.stockLevel * (item.costPrice || 0), days };
+            return { name: item.name, stock: item.stockLevel, value: item.stockLevel * itemCostTRY(item, exchangeRates), days };
           })
           .sort((a, b) => b.value - a.value)
           .slice(0, 7);
@@ -10652,7 +10652,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           if (!suppMap[s]) suppMap[s] = {count: 0, stock: 0, value: 0};
           suppMap[s].count++;
           suppMap[s].stock += item.stockLevel;
-          suppMap[s].value += item.stockLevel * (item.costPrice || 0);
+          suppMap[s].value += item.stockLevel * itemCostTRY(item, exchangeRates);
         });
         const supps363 = Object.entries(suppMap).filter(([s]) => s !== 'Unknown').map(([s, d]) => ({supplier: s, ...d})).sort((a, b) => b.value - a.value).slice(0, 7);
         if (supps363.length < 2) return null;
@@ -16068,7 +16068,7 @@ const ReportsDashboard = ({ orders, inventory, exchangeRates, currentT, currentL
           return {
             ...t,
             count: items.length,
-            value: items.reduce((s, i) => s + i.stockLevel * (i.costPrice || 0), 0),
+            value: items.reduce((s, i) => s + i.stockLevel * itemCostTRY(i, exchangeRates), 0),
           };
         });
         const totalValue = tierData.reduce((s, t) => s + t.value, 0);
