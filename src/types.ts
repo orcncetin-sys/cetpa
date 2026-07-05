@@ -391,6 +391,8 @@ export interface BankAccount {
   currency: 'TRY' | 'USD' | 'EUR';
   balance: number;
   accountType: 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa';
+  openingBalance?: number;   // dönem/hesap açılış (devir) bakiyesi — hesabın kendi para biriminde
+  openingDate?: string;      // açılış bakiyesinin geçerli olduğu tarih (YYYY-MM-DD)
   updatedAt?: unknown;
 }
 

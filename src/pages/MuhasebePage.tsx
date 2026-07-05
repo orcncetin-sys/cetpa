@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import BankStatementImportModal from '../components/BankStatementImportModal';
+import BankBalanceReport from '../components/BankBalanceReport';
 import {
   Calculator, DollarSign, Building2, BarChart3, CreditCard,
   Package, Users, Activity, TrendingUp, Wallet, FileText, Receipt,
@@ -844,6 +845,12 @@ export default function MuhasebePage(props: Props) {
                           </>
                         );
                       })()}
+
+                      <BankBalanceReport
+                        currentLanguage={currentLanguage}
+                        exchangeRates={exchangeRates}
+                        toast={toast}
+                      />
 
                       <BankStatementImportModal
                         isOpen={showBankImport}
