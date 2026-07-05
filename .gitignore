@@ -11,3 +11,6 @@ coverage/
 # Service account keys — NEVER commit
 firebase-service-account*.json
 *service-account*.json
+
+# Kullanıcı yüklemeleri (tahsilat makbuzları vb.) - sunucu diski, repo dışı
+uploads/

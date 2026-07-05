@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   DollarSign, AlertTriangle, Clock, CheckCircle, Plus, Search, Download,
   X, Edit2, Trash2, CreditCard, TrendingDown, Calendar,
-  Filter, FileText, ChevronUp, ChevronDown
+  Filter, FileText, ChevronUp, ChevronDown, Upload, Camera
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
@@ -37,6 +37,7 @@ interface TahsilatOdeme {
   tutar: number;
   odemeTipi: 'Nakit' | 'Havale/EFT' | 'Çek' | 'Kredi Kartı' | 'Mahsup';
   notlar: string;
+  makbuzUrl?: string;   // sunucu diskindeki makbuz fotoğrafı (korumalı serve URL'i)
 }
 
 interface TahsilatModuleProps {
@@ -326,6 +327,26 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     odemeTipi: 'Havale/EFT' as TahsilatOdeme['odemeTipi'],
     notlar: '',
   });
+  // Makbuz fotoğrafı (sunucu diski upload)
+  const [makbuzUrl, setMakbuzUrl] = useState('');
+  const [makbuzUploading, setMakbuzUploading] = useState(false);
+
+  const handleMakbuzUpload = async (file: File | undefined | null) => {
+    if (!file) return;
+    setMakbuzUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await authFetch('/api/upload/tahsilat', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (data.success && data.url) setMakbuzUrl(data.url as string);
+      else showToast(data.error || 'Makbuz yüklenemedi.', 'error');
+    } catch {
+      showToast('Makbuz yükleme hatası.', 'error');
+    } finally {
+      setMakbuzUploading(false);
+    }
+  };
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<TahsilatKaydi | null>(null);
@@ -562,6 +583,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
         tutar,
         odemeTipi: paymentForm.odemeTipi,
         notlar: paymentForm.notlar.trim(),
+        makbuzUrl: makbuzUrl || '',
         createdAt: serverTimestamp(),
       });
 
@@ -590,6 +612,8 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
 
       showToast('Ödeme kaydedildi.');
       setPaymentKaydi(null);
+      setMakbuzUrl('');
+      setPaymentForm({ tarih: format(new Date(), 'yyyy-MM-dd'), tutar: '', odemeTipi: 'Havale/EFT', notlar: '' });
     } catch (e) {
       console.error(e);
       showToast('Hata oluştu.', 'error');
@@ -1123,6 +1147,37 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                     value={paymentForm.notlar}
                     onChange={(e) => setPaymentForm((f) => ({ ...f, notlar: e.target.value }))}
                   />
+                </div>
+
+                {/* Makbuz fotoğrafı — dosya yükleme + kamera çekimi (sunucu diski) */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#86868B] uppercase tracking-wider mb-1.5">
+                    {currentLanguage === 'tr' ? 'Makbuz / Dekont' : 'Receipt'}
+                  </label>
+                  {makbuzUrl ? (
+                    <div className="flex items-center justify-between gap-2 apple-input px-3 py-2 text-sm">
+                      <a href={makbuzUrl} target="_blank" rel="noopener noreferrer" className="text-brand font-medium truncate hover:underline">
+                        {currentLanguage === 'tr' ? '✓ Makbuz yüklendi — görüntüle' : '✓ Receipt uploaded — view'}
+                      </a>
+                      <button onClick={() => setMakbuzUrl('')} className="text-gray-300 hover:text-red-500 shrink-0">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <label className={cn('flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-xs font-semibold cursor-pointer transition-colors', makbuzUploading ? 'opacity-50 pointer-events-none' : 'text-gray-500 hover:border-brand hover:text-brand')}>
+                        <Upload className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Dosya Seç' : 'Choose File'}
+                        <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { void handleMakbuzUpload(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
+                      <label className={cn('flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-xs font-semibold cursor-pointer transition-colors', makbuzUploading ? 'opacity-50 pointer-events-none' : 'text-gray-500 hover:border-brand hover:text-brand')}>
+                        <Camera className="w-4 h-4" />
+                        {currentLanguage === 'tr' ? 'Fotoğraf Çek' : 'Take Photo'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { void handleMakbuzUpload(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                  )}
+                  {makbuzUploading && <p className="text-[11px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Yükleniyor…' : 'Uploading…'}</p>}
                 </div>
 
                 <div className="flex gap-3 pt-1">

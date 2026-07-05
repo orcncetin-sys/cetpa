@@ -9,6 +9,8 @@ import pg from "pg";
 import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
+import fs from "fs";
+import multer from "multer";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
@@ -3204,6 +3206,60 @@ async function startServer() {
    *  yalnız lokasyon dağılımını günceller (bkz. Faz 2 kararı). Tek PG
    *  transaction'da: kaynak azalt (yetersizse rollback) + hedef artır/oluştur +
    *  inventoryMovements kaydı. */
+  // ── Tahsilat makbuz fotoğrafı — SUNUCU DİSKİ upload (kullanıcı tercihi) ──────
+  // Dosyalar C:\cetpa\uploads\tahsilat\<companyId>\ altına yazılır. Erişim
+  // requireAuth + companyId sahiplik kontrolü ile korunur (public static DEĞİL).
+  // NOT: bu klasör off-server yedeklemeye (pg_dump → Firebase Storage) DAHİL
+  // DEĞİL; sunucu diski ODEA'da askıya alınırsa erişilemez (kullanıcıya bildirildi).
+  const UPLOAD_ROOT = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
+  const TAHSILAT_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'tahsilat');
+  try { fs.mkdirSync(TAHSILAT_UPLOAD_DIR, { recursive: true }); } catch { /* zaten var */ }
+
+  const makbuzUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, _file, cb) => {
+        const uid = (req as Request & { uid?: string }).uid || 'unknown';
+        const dir = path.join(TAHSILAT_UPLOAD_DIR, uid.replace(/[^A-Za-z0-9_-]/g, ''));
+        fs.mkdir(dir, { recursive: true }, (err) => cb(err, dir));
+      },
+      filename: (_req, file, cb) => {
+        const ext = (path.extname(file.originalname || '').toLowerCase().match(/^\.(jpe?g|png|webp|heic|pdf)$/) || ['.jpg'])[0];
+        cb(null, `${randomUUID()}${ext}`);
+      },
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+    fileFilter: (_req, file, cb) => {
+      const ok = /^(image\/(jpe?g|png|webp|heic)|application\/pdf)$/.test(file.mimetype);
+      if (ok) cb(null, true);
+      else cb(new Error('Yalnız görsel (jpg/png/webp/heic) veya PDF yüklenebilir.'));
+    },
+  });
+
+  app.post('/api/upload/tahsilat', requireAuth, (req: Request, res: Response) => {
+    makbuzUpload.single('file')(req, res, (err) => {
+      if (err) return res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      const f = (req as Request & { file?: { filename: string } }).file;
+      if (!f) return res.status(400).json({ success: false, error: 'Dosya bulunamadı.' });
+      const uid = (req as Request & { uid: string }).uid;
+      const safeUid = uid.replace(/[^A-Za-z0-9_-]/g, '');
+      // Dönen URL korumalı serve endpoint'ine işaret eder (public path değil).
+      res.json({ success: true, url: `/api/uploads/tahsilat/${safeUid}/${f.filename}`, filename: f.filename });
+    });
+  });
+
+  // Korumalı makbuz servis — sadece kendi firmasının dosyalarına erişim.
+  app.get('/api/uploads/tahsilat/:uid/:file', requireAuth, (req: Request, res: Response) => {
+    const reqUid = (req as Request & { uid: string }).uid.replace(/[^A-Za-z0-9_-]/g, '');
+    const uid = String(req.params.uid).replace(/[^A-Za-z0-9_-]/g, '');
+    const file = String(req.params.file).replace(/[^A-Za-z0-9_.-]/g, '');
+    if (uid !== reqUid) return res.status(403).json({ error: 'Bu dosyaya erişim yetkiniz yok.' });
+    const filePath = path.join(TAHSILAT_UPLOAD_DIR, uid, file);
+    // Path traversal koruması: çözülen yol klasörün içinde mi?
+    if (!filePath.startsWith(path.join(TAHSILAT_UPLOAD_DIR, uid) + path.sep)) return res.status(400).json({ error: 'Geçersiz yol.' });
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Dosya bulunamadı.' });
+    res.sendFile(filePath);
+  });
+
   app.post('/api/logistics/transfer', requireAuth, async (req: Request, res: Response) => {
     if (!pgPool) return res.status(503).json({ success: false, error: 'Veritabanı yok.' });
     const uid = (req as Request & { uid: string }).uid;
