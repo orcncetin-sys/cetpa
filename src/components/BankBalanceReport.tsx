@@ -14,8 +14,11 @@ import { useEffect, useState, useMemo } from 'react';
 import { Landmark, RefreshCw, Save } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc } from '../lib/dbClient';
+import { authFetch } from '../services/authFetch';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import type { BankAccount, BankTransaction } from '../types';
+
+type RateHistory = Array<Record<string, number | string>>;
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -32,16 +35,19 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [openingDraft, setOpeningDraft] = useState<Record<string, string>>({});
+  const [rateHistory, setRateHistory] = useState<RateHistory>([]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [aSnap, tSnap] = await Promise.all([
+      const [aSnap, tSnap, histRes] = await Promise.all([
         getDocs(collection(db, 'bankAccounts')),
         getDocs(collection(db, 'bankTransactions')),
+        authFetch('/api/exchange-rates/history').then(r => r.json()).catch(() => ({ history: [] })),
       ]);
       setAccounts(aSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankAccount)));
       setTxns(tSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction)));
+      setRateHistory(Array.isArray(histRes.history) ? histRes.history : []);
     } catch (e) {
       logFirestoreError(e as Error, OperationType.LIST, 'bankAccounts');
     } finally {
@@ -50,7 +56,16 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   };
   useEffect(() => { void load(); }, []);
 
-  const rate = (cur: string) => cur === 'TRY' ? 1 : (exchangeRates?.[cur] ?? FX_FALLBACK[cur] ?? 1);
+  // Seçilen tarih (asOf) için o güne eşit/küçük en yakın arşiv kurunu bulur;
+  // yoksa güncel kura (exchangeRates) düşer. history tarih azalan sıralı gelir.
+  const rate = (cur: string): number => {
+    if (cur === 'TRY') return 1;
+    const hit = rateHistory.find(h => String(h.date) <= asOf && typeof h[cur] === 'number');
+    if (hit && typeof hit[cur] === 'number') return hit[cur] as number;
+    return exchangeRates?.[cur] ?? FX_FALLBACK[cur] ?? 1;
+  };
+  // Seçilen tarihte tam arşiv kuru var mı? (yoksa güncel kur kullanıldı — nota basar)
+  const hasHistoricalRate = rateHistory.some(h => String(h.date) <= asOf);
 
   // Her hesap için: açılış + (asOf tarihine/dahil kadar) hareket toplamı = bakiye (kendi para biriminde).
   const rows = useMemo(() => accounts.map(acc => {
@@ -145,7 +160,11 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
             </tfoot>
           </table>
           {rows.some(r => r.cur !== 'TRY') && (
-            <p className="text-[11px] text-gray-400 mt-2">{tr ? 'Döviz hesaplar güncel TCMB kuruyla TRY\'ye çevrildi. (Geçmiş tarihli kur değerlemesi için o günün kuru gerekir — şu an güncel kur kullanılıyor.)' : 'FX accounts converted at current CBRT rate.'}</p>
+            <p className="text-[11px] text-gray-400 mt-2">
+              {hasHistoricalRate
+                ? (tr ? `Döviz hesaplar ${asOf} tarihinin arşiv TCMB kuruyla değerlendi.` : `FX accounts valued at archived CBRT rate for ${asOf}.`)
+                : (tr ? 'Bu tarih için arşiv kuru henüz yok — güncel TCMB kuru kullanıldı. Arşiv her gün otomatik büyür.' : 'No archived rate for this date yet — current CBRT rate used. Archive grows daily.')}
+            </p>
           )}
         </div>
       )}

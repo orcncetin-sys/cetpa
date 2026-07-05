@@ -1130,6 +1130,22 @@ function parseTCMBRate(xml: string, currencyCode: string, tag: string): number |
   return parseFloat(tagMatch[1].replace(',', '.'));
 }
 
+// Günün kurunu exchangeRateHistory/<YYYY-MM-DD> dokümanına arşivler (tarihsel
+// kur değerlemesi için — banka bakiye raporu geçmiş tarihte doğru kur kullanır).
+// Global veri (firma-bağımsız), TENANT_COLLECTIONS dışında; erişim özel endpoint'ten.
+async function archiveExchangeRates(rates: Record<string, number>) {
+  if (!adminDb) return;
+  try {
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    await adminDb.collection('exchangeRateHistory').doc(dateStr).set({
+      date: dateStr, ...rates, updatedAt: pgServerTimestamp(),
+    });
+  } catch (e) {
+    console.warn('exchangeRateHistory arşivleme hatası:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function fetchAndCacheExchangeRates() {
   // --- Primary: exchangerate-api.com ---
   try {
@@ -1154,6 +1170,7 @@ async function fetchAndCacheExchangeRates() {
       source: 'exchangerate-api',
       updatedAt: new Date().toISOString()
     };
+    void archiveExchangeRates(rates);
     console.log(`Exchange rates updated from exchangerate-api: 1 USD = ${tryPerUsd} TRY`);
     return;
   } catch (error: unknown) {
@@ -1194,6 +1211,7 @@ async function fetchAndCacheExchangeRates() {
           source: 'TCMB',
           updatedAt: new Date().toISOString()
         };
+        void archiveExchangeRates(rates);
         console.log(`Exchange rates updated from TCMB: 1 USD = ${usdSelling} TRY, 1 EUR = ${eurSelling} TRY`);
         return;
       }
@@ -3195,6 +3213,25 @@ async function startServer() {
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
+  /** GET /api/exchange-rates/history — arşivlenmiş günlük TCMB kurları.
+   *  Banka bakiye raporu geçmiş tarihte doğru kur değerlemesi için kullanır.
+   *  Global veri (firma-bağımsız); son ~500 gün döner. Belirli tarihe eşit/küçük
+   *  en yakın kur client tarafında bulunur (hafta sonu/tatil boşluğu için). */
+  app.get('/api/exchange-rates/history', requireAuth, async (_req: Request, res: Response) => {
+    if (!adminDb) return res.json({ success: true, history: [] });
+    try {
+      const snap = await adminDb.collection('exchangeRateHistory').get();
+      const history = snap.docs
+        .map(d => d.data() as Record<string, unknown>)
+        .filter(r => r.date)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+        .slice(0, 500);
+      res.json({ success: true, history });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).
    *  Body: { productId, sku?, productName?, quantity, from?, to?, note? }
    *    from/to: { type:'warehouse'|'vehicle', id, name? } | null
