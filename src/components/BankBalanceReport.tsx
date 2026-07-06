@@ -11,14 +11,15 @@
  * Veriyi kendi çeker (bankAccounts + bankTransactions getDocs, firma-filtreli).
  */
 import { useEffect, useState, useMemo } from 'react';
-import { Landmark, RefreshCw, Save } from 'lucide-react';
+import { Landmark, RefreshCw, Save, Bookmark, Trash2 } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, updateDoc } from '../lib/dbClient';
+import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import type { BankAccount, BankTransaction } from '../types';
+import type { BankAccount, BankTransaction, BankReportPreset } from '../types';
 
 type RateHistory = Array<Record<string, number | string>>;
+interface CostCenter { id: string; kod: string; ad: string }
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -36,17 +37,24 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   const [loading, setLoading] = useState(false);
   const [openingDraft, setOpeningDraft] = useState<Record<string, string>>({});
   const [rateHistory, setRateHistory] = useState<RateHistory>([]);
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [costCenterFilter, setCostCenterFilter] = useState('');
+  const [presets, setPresets] = useState<BankReportPreset[]>([]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [aSnap, tSnap, histRes] = await Promise.all([
+      const [aSnap, tSnap, ccSnap, prSnap, histRes] = await Promise.all([
         getDocs(collection(db, 'bankAccounts')),
         getDocs(collection(db, 'bankTransactions')),
+        getDocs(collection(db, 'maliyetMerkezleri')),
+        getDocs(collection(db, 'bankReportPresets')),
         authFetch('/api/exchange-rates/history').then(r => r.json()).catch(() => ({ history: [] })),
       ]);
       setAccounts(aSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankAccount)));
       setTxns(tSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction)));
+      setCostCenters(ccSnap.docs.map(d => ({ id: d.id, ...(d.data() as { kod: string; ad: string }) })));
+      setPresets(prSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankReportPreset)));
       setRateHistory(Array.isArray(histRes.history) ? histRes.history : []);
     } catch (e) {
       logFirestoreError(e as Error, OperationType.LIST, 'bankAccounts');
@@ -55,6 +63,25 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
     }
   };
   useEffect(() => { void load(); }, []);
+
+  // Kayıtlı filtre (preset): mevcut tarih + maliyet merkezi kombinasyonunu sakla/yükle.
+  const savePreset = async () => {
+    const name = window.prompt(tr ? 'Filtre şablonu adı:' : 'Preset name:');
+    if (!name || !name.trim()) return;
+    try {
+      const ref = await addDoc(collection(db, 'bankReportPresets'), { name: name.trim(), asOf, costCenterId: costCenterFilter || '', createdAt: serverTimestamp() });
+      setPresets(p => [...p, { id: ref.id, name: name.trim(), asOf, costCenterId: costCenterFilter || '' }]);
+      toast(tr ? 'Filtre kaydedildi.' : 'Preset saved.', 'success');
+    } catch { toast(tr ? 'Kaydedilemedi.' : 'Save failed.', 'error'); }
+  };
+  const applyPreset = (p: BankReportPreset) => {
+    if (p.asOf) setAsOf(p.asOf);
+    setCostCenterFilter(p.costCenterId || '');
+  };
+  const deletePreset = async (id: string) => {
+    try { await deleteDoc(doc(db, 'bankReportPresets', id)); setPresets(list => list.filter(x => x.id !== id)); }
+    catch { /* yok say */ }
+  };
 
   // Seçilen tarih (asOf) için o güne eşit/küçük en yakın arşiv kurunu bulur;
   // yoksa güncel kura (exchangeRates) düşer. history tarih azalan sıralı gelir.
@@ -67,17 +94,20 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   // Seçilen tarihte tam arşiv kuru var mı? (yoksa güncel kur kullanıldı — nota basar)
   const hasHistoricalRate = rateHistory.some(h => String(h.date) <= asOf);
 
-  // Her hesap için: açılış + (asOf tarihine/dahil kadar) hareket toplamı = bakiye (kendi para biriminde).
+  // Her hesap için: açılış + (asOf tarihine/dahil kadar) hareket toplamı = bakiye.
+  // Maliyet merkezi filtresi seçiliyse: açılış hariç (merkez-bağımsız), yalnız o
+  // merkezin hareketleri gösterilir (o merkezin banka hareket toplamı).
   const rows = useMemo(() => accounts.map(acc => {
-    const opening = Number(acc.openingBalance) || 0;
+    const opening = costCenterFilter ? 0 : (Number(acc.openingBalance) || 0);
     const movement = txns
-      .filter(t => t.accountId === acc.id && (!t.date || t.date <= asOf) && (!acc.openingDate || !t.date || t.date >= acc.openingDate))
+      .filter(t => t.accountId === acc.id && (!t.date || t.date <= asOf) && (!acc.openingDate || !t.date || t.date >= acc.openingDate)
+        && (!costCenterFilter || t.costCenterId === costCenterFilter))
       .reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const balance = opening + movement;
     const cur = acc.currency || 'TRY';
     const tryValue = balance * rate(cur);
     return { acc, opening, movement, balance, cur, tryValue };
-  }), [accounts, txns, asOf, exchangeRates]);
+  }), [accounts, txns, asOf, exchangeRates, costCenterFilter]);
 
   const totalTRY = rows.reduce((s, r) => s + r.tryValue, 0);
 
@@ -100,13 +130,32 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
 
   return (
     <div className="apple-card p-5">
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
         <h3 className="font-bold text-gray-900 flex items-center gap-2"><Landmark className="w-4 h-4 text-brand" />{tr ? 'Banka Bakiye Durum Raporu' : 'Bank Balance Report'}</h3>
-        <div className="flex items-center gap-2 ml-auto">
-          <label className="text-xs font-bold text-gray-500">{tr ? 'Tarih itibarıyla' : 'As of'}:</label>
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          <label className="text-xs font-bold text-gray-500">{tr ? 'Tarih' : 'Date'}:</label>
           <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="apple-input text-sm px-3 py-1.5" />
+          {costCenters.length > 0 && (
+            <select value={costCenterFilter} onChange={e => setCostCenterFilter(e.target.value)} className="apple-input text-sm px-3 py-1.5" title={tr ? 'Maliyet merkezi' : 'Cost center'}>
+              <option value="">{tr ? 'Tüm merkezler' : 'All centers'}</option>
+              {costCenters.map(c => <option key={c.id} value={c.id}>{c.kod} — {c.ad}</option>)}
+            </select>
+          )}
           <button onClick={() => void load()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title={tr ? 'Yenile' : 'Refresh'}><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
         </div>
+      </div>
+
+      {/* Kayıtlı filtre şablonları */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Bookmark className="w-3.5 h-3.5 text-gray-400" />
+        <button onClick={() => void savePreset()} className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">{tr ? '+ Filtre Kaydet' : '+ Save Preset'}</button>
+        {presets.map(p => (
+          <span key={p.id} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-brand/5 text-brand">
+            <button onClick={() => applyPreset(p)} className="font-bold hover:underline">{p.name}</button>
+            <button onClick={() => void deletePreset(p.id)} className="text-brand/40 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+          </span>
+        ))}
+        {costCenterFilter && <span className="text-[11px] text-gray-400 ml-1">{tr ? '(sadece seçili merkez hareketleri — açılış hariç)' : '(selected center only)'}</span>}
       </div>
 
       {accounts.length === 0 ? (

@@ -408,6 +408,19 @@ export interface BankTransaction {
   currency: 'TRY' | 'USD' | 'EUR';
   reference?: string;
   source: 'mikro' | 'manual' | 'import';
+  costCenterId?: string;     // maliyet/sorumluluk merkezi (opsiyonel)
+  costCenterName?: string;
+  companyId?: string | null;
+  createdAt?: unknown;
+}
+
+// Banka bakiye raporu kayıtlı filtre şablonu (kaydet/yükle).
+export interface BankReportPreset {
+  id: string;
+  name: string;
+  asOf?: string;
+  costCenterId?: string;
+  companyId?: string | null;
   createdAt?: unknown;
 }
 

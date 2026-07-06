@@ -12,13 +12,15 @@
  * Dedup: aynı hesapta (date + amount + description) birebir eşleşen hareket
  * tekrar eklenmez (aynı ekstre iki kez yüklenirse kopya olmaz).
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import Papa from 'papaparse';
 import { X, Upload, Check, AlertCircle, Landmark } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, serverTimestamp } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+
+interface CostCenter { id: string; kod: string; ad: string }
 
 interface BankAccountLite { id: string; bankName: string; currency?: string }
 
@@ -93,8 +95,18 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
   const [mapping, setMapping] = useState<Record<FieldKey, string>>({ date: '', description: '', amount: '', balance: '', reference: '' });
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ added: number; skipped: number } | null>(null);
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [costCenterId, setCostCenterId] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getDocs(collection(db, 'maliyetMerkezleri'))
+      .then(s => setCostCenters(s.docs.map(d => ({ id: d.id, ...(d.data() as { kod: string; ad: string }) }))))
+      .catch(() => { /* maliyet merkezi opsiyonel */ });
+  }, [isOpen]);
 
   const selectedAccount = bankAccounts.find(a => a.id === accountId);
+  const selectedCostCenter = costCenters.find(c => c.id === costCenterId);
 
   const handleFile = (file: File | undefined) => {
     if (!file) return;
@@ -152,6 +164,8 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
           balance: mapping.balance ? parseTRNumber(r[mapping.balance] || '') : 0,
           currency: selectedAccount.currency || 'TRY',
           reference: mapping.reference ? (r[mapping.reference] || '').trim() : '',
+          costCenterId: costCenterId || '',
+          costCenterName: selectedCostCenter ? `${selectedCostCenter.kod} ${selectedCostCenter.ad}` : '',
           source: 'import',
           createdAt: serverTimestamp(),
         });
@@ -200,6 +214,17 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
             </select>
             {bankAccounts.length === 0 && <p className="text-[11px] text-amber-600 mt-1">{tr ? 'Önce Muhasebe → Banka Hesapları bölümünden hesap ekleyin.' : 'Add a bank account first under Accounting → Bank Accounts.'}</p>}
           </div>
+
+          {/* Maliyet merkezi (opsiyonel) — tüm import hareketlerine atanır */}
+          {costCenters.length > 0 && (
+            <div>
+              <label className="text-[11px] font-bold text-[#86868B] uppercase mb-1.5 block">{tr ? 'Maliyet Merkezi (opsiyonel)' : 'Cost Center (optional)'}</label>
+              <select value={costCenterId} onChange={e => setCostCenterId(e.target.value)} className="apple-input w-full">
+                <option value="">{tr ? 'Yok / genel' : 'None / general'}</option>
+                {costCenters.map(c => <option key={c.id} value={c.id}>{c.kod} — {c.ad}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* 2) CSV */}
           <div>
