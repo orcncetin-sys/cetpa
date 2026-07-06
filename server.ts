@@ -1130,20 +1130,38 @@ function parseTCMBRate(xml: string, currencyCode: string, tag: string): number |
   return parseFloat(tagMatch[1].replace(',', '.'));
 }
 
-// Günün kurunu exchangeRateHistory/<YYYY-MM-DD> dokümanına arşivler (tarihsel
-// kur değerlemesi için — banka bakiye raporu geçmiş tarihte doğru kur kullanır).
-// Global veri (firma-bağımsız), TENANT_COLLECTIONS dışında; erişim özel endpoint'ten.
-async function archiveExchangeRates(rates: Record<string, number>) {
-  if (!adminDb) return;
-  try {
-    const d = new Date();
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    await adminDb.collection('exchangeRateHistory').doc(dateStr).set({
-      date: dateStr, ...rates, updatedAt: pgServerTimestamp(),
-    });
-  } catch (e) {
-    console.warn('exchangeRateHistory arşivleme hatası:', e instanceof Error ? e.message : String(e));
+// Belirli bir tarih için kuru DOĞRUDAN TCMB'nin tarihsel arşivinden çeker
+// (kendi arşivimizi tutmak yerine — TCMB arşivi 1996'ya kadar geri gider, bizim
+// arşiv ise yalnız bugünden ileri birikebilirdi). Hafta sonu/tatilde o günün
+// XML'i yayınlanmadığından en yakın önceki iş gününe (7 güne kadar) kayar.
+// Sonuç bellekte cache'lenir — tarihsel kur asla değişmez, sonsuz cache güvenli.
+const tcmbHistoricalCache = new Map<string, { USD: number; EUR: number }>();
+async function fetchTCMBRateForDate(dateStr: string): Promise<{ USD: number; EUR: number; date: string } | null> {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  for (let i = 0; i < 7; i++) {
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const key = `${yyyy}-${mm}-${dd}`;
+    const cached = tcmbHistoricalCache.get(key);
+    if (cached) return { ...cached, date: key };
+    const url = `https://www.tcmb.gov.tr/kurlar/${yyyy}${mm}/${dd}${mm}${yyyy}.xml`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/xml, text/xml' }, signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const xml = await res.text();
+        const usd = parseTCMBRate(xml, 'USD', 'ForexSelling');
+        const eur = parseTCMBRate(xml, 'EUR', 'ForexSelling');
+        if (usd && eur) {
+          const rates = { USD: usd, EUR: eur };
+          tcmbHistoricalCache.set(key, rates);
+          return { ...rates, date: key };
+        }
+      }
+    } catch { /* sonraki (önceki) güne dene */ }
+    d.setUTCDate(d.getUTCDate() - 1);
   }
+  return null;
 }
 
 async function fetchAndCacheExchangeRates() {
@@ -1170,7 +1188,6 @@ async function fetchAndCacheExchangeRates() {
       source: 'exchangerate-api',
       updatedAt: new Date().toISOString()
     };
-    void archiveExchangeRates(rates);
     console.log(`Exchange rates updated from exchangerate-api: 1 USD = ${tryPerUsd} TRY`);
     return;
   } catch (error: unknown) {
@@ -1211,7 +1228,6 @@ async function fetchAndCacheExchangeRates() {
           source: 'TCMB',
           updatedAt: new Date().toISOString()
         };
-        void archiveExchangeRates(rates);
         console.log(`Exchange rates updated from TCMB: 1 USD = ${usdSelling} TRY, 1 EUR = ${eurSelling} TRY`);
         return;
       }
@@ -3213,23 +3229,22 @@ async function startServer() {
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
-  /** GET /api/exchange-rates/history — arşivlenmiş günlük TCMB kurları.
-   *  Banka bakiye raporu geçmiş tarihte doğru kur değerlemesi için kullanır.
-   *  Global veri (firma-bağımsız); son ~500 gün döner. Belirli tarihe eşit/küçük
-   *  en yakın kur client tarafında bulunur (hafta sonu/tatil boşluğu için). */
-  app.get('/api/exchange-rates/history', requireAuth, async (_req: Request, res: Response) => {
-    if (!adminDb) return res.json({ success: true, history: [] });
-    try {
-      const snap = await adminDb.collection('exchangeRateHistory').get();
-      const history = snap.docs
-        .map(d => d.data() as Record<string, unknown>)
-        .filter(r => r.date)
-        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-        .slice(0, 500);
-      res.json({ success: true, history });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+  /** GET /api/exchange-rates/at?date=YYYY-MM-DD — o tarihin TCMB kuru.
+   *  Doğrudan TCMB tarihsel arşivinden çeker (kendi arşivimizi tutmayız). Hafta
+   *  sonu/tatilde en yakın önceki iş gününe kayar. Bugün/gelecek tarih istenirse
+   *  bellekteki güncel kuru döner (TCMB o günü henüz yayınlamamış olabilir). */
+  app.get('/api/exchange-rates/at', requireAuth, async (req: Request, res: Response) => {
+    const date = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ success: false, error: 'date=YYYY-MM-DD gerekli.' });
+    const today = new Date().toISOString().slice(0, 10);
+    if (date >= today && cachedExchangeRates) {
+      return res.json({ success: true, date: today, rates: cachedExchangeRates.rates, source: 'current' });
     }
+    try {
+      const r = await fetchTCMBRateForDate(date);
+      if (r) return res.json({ success: true, date: r.date, rates: { USD: r.USD, EUR: r.EUR }, source: 'tcmb-historical' });
+    } catch { /* aşağıdaki fallback'e düş */ }
+    res.json({ success: true, date, rates: cachedExchangeRates?.rates || {}, source: 'fallback' });
   });
 
   /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).

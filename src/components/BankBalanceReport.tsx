@@ -18,7 +18,6 @@ import { authFetch } from '../services/authFetch';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import type { BankAccount, BankTransaction, BankReportPreset } from '../types';
 
-type RateHistory = Array<Record<string, number | string>>;
 interface CostCenter { id: string; kod: string; ad: string }
 
 interface Props {
@@ -36,7 +35,8 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [openingDraft, setOpeningDraft] = useState<Record<string, string>>({});
-  const [rateHistory, setRateHistory] = useState<RateHistory>([]);
+  const [asOfRates, setAsOfRates] = useState<Record<string, number> | null>(null);
+  const [rateSource, setRateSource] = useState<string>('');
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [costCenterFilter, setCostCenterFilter] = useState('');
   const [presets, setPresets] = useState<BankReportPreset[]>([]);
@@ -44,18 +44,16 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   const load = async () => {
     setLoading(true);
     try {
-      const [aSnap, tSnap, ccSnap, prSnap, histRes] = await Promise.all([
+      const [aSnap, tSnap, ccSnap, prSnap] = await Promise.all([
         getDocs(collection(db, 'bankAccounts')),
         getDocs(collection(db, 'bankTransactions')),
         getDocs(collection(db, 'maliyetMerkezleri')),
         getDocs(collection(db, 'bankReportPresets')),
-        authFetch('/api/exchange-rates/history').then(r => r.json()).catch(() => ({ history: [] })),
       ]);
       setAccounts(aSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankAccount)));
       setTxns(tSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankTransaction)));
       setCostCenters(ccSnap.docs.map(d => ({ id: d.id, ...(d.data() as { kod: string; ad: string }) })));
       setPresets(prSnap.docs.map(d => ({ id: d.id, ...d.data() } as BankReportPreset)));
-      setRateHistory(Array.isArray(histRes.history) ? histRes.history : []);
     } catch (e) {
       logFirestoreError(e as Error, OperationType.LIST, 'bankAccounts');
     } finally {
@@ -63,6 +61,18 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
     }
   };
   useEffect(() => { void load(); }, []);
+
+  // Seçilen tarihin (asOf) TCMB kurunu doğrudan sunucudan çek — kendi arşivimizi
+  // tutmuyoruz; sunucu TCMB tarihsel XML'inden (1996'ya kadar) çeker, hafta
+  // sonu/tatilde en yakın iş gününe kayar. asOf değişince yeniden çalışır.
+  useEffect(() => {
+    let cancelled = false;
+    authFetch(`/api/exchange-rates/at?date=${asOf}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) { setAsOfRates(d?.rates && typeof d.rates === 'object' ? d.rates : null); setRateSource(d?.source || ''); } })
+      .catch(() => { if (!cancelled) { setAsOfRates(null); setRateSource(''); } });
+    return () => { cancelled = true; };
+  }, [asOf]);
 
   // Kayıtlı filtre (preset): mevcut tarih + maliyet merkezi kombinasyonunu sakla/yükle.
   const savePreset = async () => {
@@ -83,16 +93,16 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
     catch { /* yok say */ }
   };
 
-  // Seçilen tarih (asOf) için o güne eşit/küçük en yakın arşiv kurunu bulur;
-  // yoksa güncel kura (exchangeRates) düşer. history tarih azalan sıralı gelir.
+  // Seçilen tarihin (asOf) sunucudan gelen TCMB kurunu kullanır; yoksa güncel
+  // kura (exchangeRates) düşer. asOfRates useEffect ile asOf değişince yenilenir.
   const rate = (cur: string): number => {
     if (cur === 'TRY') return 1;
-    const hit = rateHistory.find(h => String(h.date) <= asOf && typeof h[cur] === 'number');
-    if (hit && typeof hit[cur] === 'number') return hit[cur] as number;
+    if (asOfRates && typeof asOfRates[cur] === 'number') return asOfRates[cur];
     return exchangeRates?.[cur] ?? FX_FALLBACK[cur] ?? 1;
   };
-  // Seçilen tarihte tam arşiv kuru var mı? (yoksa güncel kur kullanıldı — nota basar)
-  const hasHistoricalRate = rateHistory.some(h => String(h.date) <= asOf);
+  // Seçilen tarih için gerçek TCMB tarihsel kuru bulundu mu? ('fallback' ise
+  // TCMB'den çekilemedi, güncel kur kullanıldı — nota basar)
+  const hasHistoricalRate = !!asOfRates && rateSource !== 'fallback' && rateSource !== '';
 
   // Her hesap için: açılış + (asOf tarihine/dahil kadar) hareket toplamı = bakiye.
   // Maliyet merkezi filtresi seçiliyse: açılış hariç (merkez-bağımsız), yalnız o
@@ -211,8 +221,8 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
           {rows.some(r => r.cur !== 'TRY') && (
             <p className="text-[11px] text-gray-400 mt-2">
               {hasHistoricalRate
-                ? (tr ? `Döviz hesaplar ${asOf} tarihinin arşiv TCMB kuruyla değerlendi.` : `FX accounts valued at archived CBRT rate for ${asOf}.`)
-                : (tr ? 'Bu tarih için arşiv kuru henüz yok — güncel TCMB kuru kullanıldı. Arşiv her gün otomatik büyür.' : 'No archived rate for this date yet — current CBRT rate used. Archive grows daily.')}
+                ? (tr ? `Döviz hesaplar ${asOf} tarihinin TCMB kuruyla değerlendi.` : `FX accounts valued at CBRT rate for ${asOf}.`)
+                : (tr ? 'Bu tarihin TCMB kuru çekilemedi — güncel kur kullanıldı.' : 'CBRT rate for this date unavailable — current rate used.')}
             </p>
           )}
         </div>
