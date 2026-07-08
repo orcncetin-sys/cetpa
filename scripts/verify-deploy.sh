@@ -84,7 +84,13 @@ else
     while read -r METHOD RPATH; do
       [ -z "$METHOD" ] && continue
       URL="$BASE_URL$(printf '%s' "$RPATH" | sed 's/:[A-Za-z_]*/test/g')"
-      CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X "$(printf '%s' "$METHOD" | tr '[:lower:]' '[:upper:]')" "$URL")
+      # -d '' : gövdesiz POST/PUT nginx'ten 411 Length Required yer; boş gövde
+      # Content-Length: 0 gönderir ve istek requireAuth'a ulaşır.
+      if [ "$METHOD" = get ]; then
+        CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$URL")
+      else
+        CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X "$(printf '%s' "$METHOD" | tr '[:lower:]' '[:upper:]')" -d '' "$URL")
+      fi
       case "$CODE" in
         401|403) pass "route $METHOD $RPATH -> $CODE (korumalı + yüklü)" ;;
         404)     fail "route $METHOD $RPATH -> 404 (deploy'da YOK)" ;;
