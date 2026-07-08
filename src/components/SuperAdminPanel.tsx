@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
+import OpsWatchdogCard from './OpsWatchdogCard';
 
 interface Tenant {
   companyId: string;
@@ -252,6 +253,9 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{tr ? 'Askıda' : 'Suspended'}</div><p className="text-2xl font-bold text-red-500">{suspended}</p></div>
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><CreditCard className="w-4 h-4" />{tr ? 'Aylık Gelir' : 'MRR'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{fmtMoney(mrr)}</p></div>
       </div>
+
+      {/* Operasyon Bekçisi — günlük altyapı sağlık kontrolleri */}
+      <OpsWatchdogCard currentLanguage={currentLanguage} toast={toast} />
 
       {/* Search */}
       <div className="relative">

@@ -477,6 +477,11 @@ const TENANT_COLLECTIONS = new Set([
   'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',
 ]);
 const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding', 'aiConsents']);
+// Yalnız sunucunun yazıp okuduğu operasyonel koleksiyonlar — /api/db'den ve SSE
+// stream'den TAMAMEN kapalı. Okuma dahi süper-admin'e özel dedicated endpoint'lerden
+// yapılır (örn. opsChecks → GET /api/ops/watchdog). TENANT dışı oldukları için
+// tenantWhere filtre eklemez; buraya konmazlarsa her kiracıya açılırlar.
+const SERVER_ONLY_COLLECTIONS = new Set(['opsChecks']);
 // Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
 // ERP/email/iyzico gibi deployment-seviyesi creds GLOBAL kalır (server cron/API okur).
 // docs tablosu PK (coll,id) olduğu için id companyId ile namespace'lenir: `${cid}__{key}`.
@@ -1327,6 +1332,126 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
     return null;
   }
 }
+
+// ═══ Operasyon Bekçisi: günlük cron — gece yedeği ve cron çıktılarını denetler ═══
+// Amaç: sessiz arızayı (yedek görevinin hiç koşmaması, Mikro sync'in stockLevel
+// yazmadan dönmesi gibi) restore/rapor gününde değil ertesi sabah yakalamak.
+// Sonuç opsChecks/<YYYY-MM-DD> dokümanına yazılır (global, tenant-dışı) ve
+// süper-admin panelindeki karttan + GET /api/ops/watchdog'dan okunur.
+const OPS_STORAGE_BUCKET = 'gen-lang-client-0628151245.firebasestorage.app';
+interface OpsCheckResult { key: string; ok: boolean; detail: string }
+
+function opsToMs(v: unknown): number {
+  if (!v) return 0;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') { const t = new Date(v).getTime(); return Number.isFinite(t) ? t : 0; }
+  if (typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return Number((v as Record<string, unknown>).seconds) * 1000;
+  return 0;
+}
+
+async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: OpsCheckResult[]; stockRatio: number | null }> {
+  const checks: OpsCheckResult[] = [];
+  const add = (key: string, ok: boolean, detail: string) => { checks.push({ key, ok, detail }); };
+  const hoursAgo = (t: number) => (Date.now() - t) / 3_600_000;
+
+  // 1) Offsite yedek tazeliği — dün geceki yedek Firebase Storage'a düşmüş mü?
+  for (const [key, prefix, minBytes] of [
+    ['backup_db', 'db-backups/', 10_000],
+    ['backup_uploads', 'uploads-backups/', 200],
+  ] as const) {
+    try {
+      const [files] = await admin.storage().bucket(OPS_STORAGE_BUCKET).getFiles({ prefix });
+      let newest: { name: string; updated: number; size: number } | null = null;
+      for (const f of files) {
+        const updated = opsToMs(f.metadata.updated || f.metadata.timeCreated);
+        if (!newest || updated > newest.updated) newest = { name: f.name, updated, size: Number(f.metadata.size) || 0 };
+      }
+      if (!newest) { add(key, false, `${prefix} altında hiç dosya yok — yedek görevi hiç koşmamış olabilir`); continue; }
+      const age = hoursAgo(newest.updated);
+      add(key, age < 26 && newest.size >= minBytes,
+        `${newest.name} — ${age.toFixed(1)} saat önce, ${(newest.size / 1024).toFixed(0)} KB`);
+    } catch (e) {
+      add(key, false, 'Storage listelenemedi: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  // 2) Mikro ayna tazeliği — saatlik sync mikro_stoklar.guncelleme'yi ilerletiyor mu?
+  //    (Yaşanan arıza sınıfı: cron haftalarca "başarıyla" koşup veri yazmamıştı.)
+  try {
+    const creds = await getMikroCreds();
+    if (!creds) add('mikro_sync', true, 'Mikro yapılandırılmamış, atlandı');
+    else if (!pgPool) add('mikro_sync', false, 'pgPool yok');
+    else {
+      const { rows } = await pgPool.query('SELECT max(guncelleme) AS g, count(*)::int AS n FROM mikro_stoklar');
+      const g = rows[0]?.g ? new Date(rows[0].g).getTime() : 0;
+      if (!g) add('mikro_sync', false, 'mikro_stoklar boş — sync hiç yazmamış');
+      else add('mikro_sync', hoursAgo(g) < 26, `${rows[0].n} kayıt, son güncelleme ${hoursAgo(g).toFixed(1)} saat önce`);
+    }
+  } catch (e) { add('mikro_sync', false, e instanceof Error ? e.message : String(e)); }
+
+  // 3) Stok oranı çöküşü — stoklu ürün oranı bir gecede >30 puan düşerse alarm
+  //    (2.347 ürünün "kritik stok" göründüğü stockLevel arızasının imzası).
+  let stockRatio: number | null = null;
+  try {
+    if (!adminDb) add('stock_ratio', false, 'adminDb yok');
+    else {
+      const snap = await adminDb.collection('inventory').get();
+      const total = snap.docs.length;
+      if (total === 0) add('stock_ratio', true, 'envanter boş, atlandı');
+      else {
+        const withStock = snap.docs.filter(d => Number((d.data() as Record<string, unknown>).stockLevel) > 0).length;
+        stockRatio = withStock / total;
+        const yd = new Date(Date.now() - 86_400_000);
+        const ydStr = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, '0')}-${String(yd.getDate()).padStart(2, '0')}`;
+        const prev = await adminDb.collection('opsChecks').doc(ydStr).get();
+        const prevRatio = prev.exists ? Number((prev.data() as Record<string, unknown>).stockRatio) : NaN;
+        const drop = Number.isFinite(prevRatio) ? prevRatio - stockRatio : 0;
+        add('stock_ratio', drop <= 0.3,
+          `stoklu ürün %${(stockRatio * 100).toFixed(0)} (${withStock}/${total})` +
+          (Number.isFinite(prevRatio) ? `, dün %${(prevRatio * 100).toFixed(0)}` : ', dünkü veri yok'));
+      }
+    }
+  } catch (e) { add('stock_ratio', false, e instanceof Error ? e.message : String(e)); }
+
+  // 4) Mikro retry kuyruğu — işlemci yalnız bir kullanıcı login'ken çalışır;
+  //    24 saatten eski queued iş = kuyruk tıkalı, ölü iş birikimi = temizlik gerek.
+  try {
+    if (!adminDb) add('retry_queue', false, 'adminDb yok');
+    else {
+      const snap = await adminDb.collection('syncJobs').get();
+      let queued = 0, dead = 0, stuck = 0;
+      for (const d of snap.docs) {
+        const j = d.data() as Record<string, unknown>;
+        if (j.status === 'dead') dead++;
+        else if (j.status === 'queued' || j.status === 'in-progress') {
+          queued++;
+          const created = opsToMs(j.createdAt);
+          if (created && hoursAgo(created) > 24) stuck++;
+        }
+      }
+      add('retry_queue', stuck === 0 && dead <= 10, `bekleyen ${queued} (24s+ takılı ${stuck}), ölü ${dead}`);
+    }
+  } catch (e) { add('retry_queue', false, e instanceof Error ? e.message : String(e)); }
+
+  // 5) Kur tazeliği — 30 dakikalık kur cron'u bellek önbelleğini ilerletiyor mu?
+  if (!cachedExchangeRates) add('exchange_rates', false, 'bellekte kur yok');
+  else {
+    const age = hoursAgo(opsToMs(cachedExchangeRates.updatedAt));
+    add('exchange_rates', age < 2, `USD ${cachedExchangeRates.rates.USD ?? '?'} (${cachedExchangeRates.source}, ${age.toFixed(1)} saat önce)`);
+  }
+
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const ok = checks.every(c => c.ok);
+  try {
+    if (adminDb) await adminDb.collection('opsChecks').doc(date).set({ date, ok, checks, stockRatio, ranAt: pgServerTimestamp() });
+  } catch (e) { console.warn('opsChecks yazılamadı:', e instanceof Error ? e.message : String(e)); }
+  console.log(`Ops watchdog: ${ok ? 'PASS' : 'FAIL'} — ${checks.map(c => `${c.ok ? '+' : '!'}${c.key}`).join(' ')}`);
+  return { date, ok, checks, stockRatio };
+}
+// Her sabah 08:30 (sunucu saati) — gece yedeği ve gece cron'ları bittikten sonra.
+cron.schedule('30 8 * * *', () => { void runOpsWatchdog(); });
 
 // In-memory token cache keyed by IDM email (invalidates if user changes creds)
 const mikroTokenCacheMap = new Map<string, { access_token: string; expiresAt: number }>();
@@ -2190,6 +2315,7 @@ async function startServer() {
       // Kiracı/kullanıcı görünürlüğü (lenient — etiketsiz legacy görünür).
       const streamCid = await getUserCompanyId(streamUid);
       const rowVisible = (coll: string, data: Record<string, unknown> | undefined): boolean => {
+        if (SERVER_ONLY_COLLECTIONS.has(coll)) return false; // sunucuya özel — stream'e asla çıkmaz
         if (!data) return true;
         if (TENANT_COLLECTIONS.has(coll)) { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; }
         if (USER_SCOPED_COLLECTIONS.has(coll)) { const du = data.userId as string | undefined; return !du || du === streamUid; }
@@ -2207,6 +2333,7 @@ async function startServer() {
       }
       const onChange = (ev: { coll: string; cid?: string; uid?: string }) => {
         if (!colls.includes(ev.coll)) return;
+        if (SERVER_ONLY_COLLECTIONS.has(ev.coll)) return; // sunucuya özel — yayınlanmaz
         // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
@@ -2228,6 +2355,13 @@ async function startServer() {
     const denied = async (
       req: Request, res: Response, coll: string, op: 'read' | 'write' | 'delete', docId?: string,
     ): Promise<boolean> => {
+      // Sunucuya özel koleksiyonlar hiçbir /api/db operasyonuna açık değil —
+      // rbac'ın "tanımsız koleksiyonu staff okur / kiracı Admin'i yazar"
+      // fallback'i bunlara uygulanmamalı (kiracılar-arası sızıntı olur).
+      if (SERVER_ONLY_COLLECTIONS.has(coll)) {
+        res.status(403).json({ error: 'Bu koleksiyon sunucuya özeldir.' });
+        return true;
+      }
       const uid = (req as Request & { uid?: string }).uid || '';
       // Kendi kullanıcı dokümanı istisnası (login profil senkronu) — 'role'
       // alanı guardRoleEscalation ile ayrıca korunur.
@@ -3245,6 +3379,30 @@ async function startServer() {
       if (r) return res.json({ success: true, date: r.date, rates: { USD: r.USD, EUR: r.EUR }, source: 'tcmb-historical' });
     } catch { /* aşağıdaki fallback'e düş */ }
     res.json({ success: true, date, rates: cachedExchangeRates?.rates || {}, source: 'fallback' });
+  });
+
+  /** Operasyon bekçisi: GET son 14 günün sonuçları, POST elle çalıştır.
+   *  Süper-admin panelindeki OpsWatchdogCard kullanır; cron her sabah 08:30. */
+  app.get('/api/ops/watchdog', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+    if (!adminDb) return res.json({ success: true, results: [] });
+    try {
+      const snap = await adminDb.collection('opsChecks').get();
+      const results = snap.docs
+        .map(d => d.data() as Record<string, unknown>)
+        .filter(r => r.date)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+        .slice(0, 14);
+      res.json({ success: true, results });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  app.post('/api/ops/watchdog/run', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json({ success: true, result: await runOpsWatchdog() });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).
@@ -7022,9 +7180,11 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
         4000, false
       );
     }
-    // ── PostgreSQL: doğrudan ping ───────────────────────────────────────────
+    // ── PostgreSQL: docs tablosundan GERÇEK okuma — 'SELECT 1' ping'i tablo
+    //    izni koptuğunda da (permission denied for table docs vakası) yeşil
+    //    kalıyordu; bu sorgu uygulamanın fiilen veri okuyabildiğini kanıtlar. ──
     const postgresOk = pgPool
-      ? await timeout(pgPool.query('SELECT 1').then(() => true).catch(() => false), 4000, false)
+      ? await timeout(pgPool.query('SELECT 1 FROM docs LIMIT 1').then(() => true).catch(() => false), 4000, false)
       : false;
 
     // ── Resend: env var OR Firestore settings/email (no extra DB read) ──────
