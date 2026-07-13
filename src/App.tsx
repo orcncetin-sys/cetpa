@@ -1979,12 +1979,14 @@ function AppContent() {
         // Sync user profile to Firestore
         const userRef = doc(db, 'users', u.uid);
         let userSnap;
+        let mfaPending = false;
         try {
           userSnap = await getDoc(userRef);
         } catch (error) {
           // If MFA is pending, GET /api/db/users/:id returns 403 and getDoc throws.
           // We provide a dummy snapshot so the app can boot and show the MFA challenge modal.
-          userSnap = { exists: () => false, data: () => ({}) };
+          mfaPending = true;
+          userSnap = { exists: () => false, data: () => ({}) } as unknown as DocumentSnapshot<DocumentData>;
         }
         // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
         resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
@@ -2010,25 +2012,27 @@ function AppContent() {
           location
         };
 
-        if (!userSnap.exists()) {
-          // New user, default to Sales role unless it's the first user or specific email
-          const role = u.email === 'orcncetin@gmail.com' || u.isAnonymous ? 'Admin' : 'Sales';
-          try {
-            await setDoc(userRef, { ...userData, role, createdAt: serverTimestamp() });
-          } catch (error) {
-            handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
+        if (!mfaPending) {
+          if (!userSnap.exists()) {
+            // New user, default to Sales role unless it's the first user or specific email
+            const role = u.email === 'orcncetin@gmail.com' || u.isAnonymous ? 'Admin' : 'Sales';
+            try {
+              await setDoc(userRef, { ...userData, role, createdAt: serverTimestamp() });
+            } catch (error) {
+              handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
+            }
+            setUserRole(role as UserRole);
+            storeSetRole(role as UserRole);
+          } else {
+            try {
+              await updateDoc(userRef, userData);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
+            }
+            const resolvedRole = (u.isAnonymous ? 'Admin' : (userSnap.data().role || 'Sales')) as UserRole;
+            setUserRole(resolvedRole);
+            storeSetRole(resolvedRole);
           }
-          setUserRole(role as UserRole);
-          storeSetRole(role as UserRole);
-        } else {
-          try {
-            await updateDoc(userRef, userData);
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
-          }
-          const resolvedRole = (u.isAnonymous ? 'Admin' : (userSnap.data().role || 'Sales')) as UserRole;
-          setUserRole(resolvedRole);
-          storeSetRole(resolvedRole);
         }
       }
       setUser(u);
