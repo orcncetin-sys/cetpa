@@ -1978,7 +1978,14 @@ function AppContent() {
         } catch { /* status alınamazsa engelleme */ }
         // Sync user profile to Firestore
         const userRef = doc(db, 'users', u.uid);
-        const userSnap = await getDoc(userRef);
+        let userSnap;
+        try {
+          userSnap = await getDoc(userRef);
+        } catch (error) {
+          // If MFA is pending, GET /api/db/users/:id returns 403 and getDoc throws.
+          // We provide a dummy snapshot so the app can boot and show the MFA challenge modal.
+          userSnap = { exists: () => false, data: () => ({}) };
+        }
         // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
         resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
 
