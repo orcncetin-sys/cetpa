@@ -552,6 +552,28 @@ async function userHasMfa(uid: string): Promise<boolean> {
   } catch { return false; }
 }
 
+/** Çerez başlığından ada göre değer okur (modül düzeyi — startServer dışındaki
+ *  middleware'ler de kullanabilsin). */
+function parseCookie(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return null;
+}
+
+/** MFA açık kullanıcı için doğrulanmış oturum çerezi ister; MFA kapalıysa geçer.
+ *  Modül düzeyinde — hem /api/db hem de bağımsız mutasyon rotaları kullanabilsin.
+ *  (Önceden yalnız /api/db bloğu içinde tanımlıydı; para/stok yazan Mikro/lojistik/
+ *  upload rotaları MFA'sız kalıyordu.) */
+async function requireMfaVerified(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const uid = (req as Request & { uid?: string }).uid || '';
+  if (!(await userHasMfa(uid))) { next(); return; }
+  if (verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), uid)) { next(); return; }
+  res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true });
+}
+
 /** Firestore-admin-compatible timestamp shape ({_seconds,_nanoseconds}). */
 function pgNowTimestamp(): { _seconds: number; _nanoseconds: number } {
   const ms = Date.now();
@@ -640,6 +662,8 @@ const TENANT_COLLECTIONS = new Set([
   'travelRequests', 'warehouseBins', 'webhookConfigs', 'wmsCycleCounts', 'wmsTasks', 'workCenters',
   // Entegrasyon senkron logları (firma-bazlı)
   'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',
+  // İstemci hata logu — append-only; firma-bazlı okuma izolasyonu (PII/stack sızıntısı)
+  'clientErrors',
 ]);
 const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding', 'aiConsents']);
 // Yalnız sunucunun yazıp okuduğu operasyonel koleksiyonlar — /api/db'den ve SSE
@@ -2329,15 +2353,7 @@ async function startServer() {
     // POST /api/db/session {idToken} → Firebase session cookie (httpOnly+Secure+
     // SameSite) set eder; SSE bunu okur, token query'de taşınmaz.
     const SESSION_COOKIE = '__cetpa_session';
-    const SESSION_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün
-    const parseCookie = (header: string | undefined, name: string): string | null => {
-      if (!header) return null;
-      for (const part of header.split(';')) {
-        const [k, ...v] = part.trim().split('=');
-        if (k === name) return decodeURIComponent(v.join('='));
-      }
-      return null;
-    };
+    const SESSION_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün — parseCookie modül düzeyinde
     app.post('/api/db/session', dbLimiter, requireAuth, dbJson, (req: Request, res: Response) => {
       // requireAuth uid'yi zaten lokal verifyIdToken ile doğruladı — Firebase'e
       // ek çağrı (createSessionCookie) YOK. Kendi imzalı token'ımızı veririz.
@@ -2451,13 +2467,7 @@ async function startServer() {
       } catch (e) { console.error('[mfa/disable]', (e as Error).message); res.status(500).json({ error: 'İşlem başarısız.' }); }
     });
 
-    // ── MFA gate: MFA açık kullanıcılar için veri rotaları doğrulanana dek 403 ──
-    const requireMfaVerified = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-      const uid = (req as Request & { uid?: string }).uid || '';
-      if (!(await userHasMfa(uid))) { next(); return; } // MFA kapalı → geç
-      if (verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), uid)) { next(); return; }
-      res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true });
-    };
+    // requireMfaVerified artık modül düzeyinde tanımlı (userHasMfa yanında).
 
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
@@ -2473,8 +2483,14 @@ async function startServer() {
       if (await userHasMfa(streamUid) && !verifyMfaToken(parseCookie(req.headers.cookie, MFA_COOKIE), streamUid)) {
         res.status(403).json({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true }); return;
       }
-      const colls = String(req.query.colls || '').split(',').filter(c => COLL_RE.test(c));
-      if (!colls.length) { res.status(400).json({ error: 'colls query param required.' }); return; }
+      const requestedColls = String(req.query.colls || '').split(',').filter(c => COLL_RE.test(c));
+      if (!requestedColls.length) { res.status(400).json({ error: 'colls query param required.' }); return; }
+      // Rol-RBAC: stream, REST /api/db/:coll ile aynı okuma yetkisine uymalı.
+      // Aksi halde düşük yetkili bir rol, rolü yasaklasa bile kendi firmasının
+      // payrolls/bankAccounts gibi hassas koleksiyonlarını canlı dinleyebilirdi.
+      const collChecks = await Promise.all(requestedColls.map(c => canAccessCollection(streamUid!, c, 'read')));
+      const colls = requestedColls.filter((_, i) => collChecks[i]);
+      if (!colls.length) { res.status(403).json({ error: 'Bu koleksiyonlar üzerinde okuma yetkiniz yok.' }); return; }
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -3539,7 +3555,7 @@ async function startServer() {
     },
   });
 
-  app.post('/api/upload/tahsilat', requireAuth, (req: Request, res: Response) => {
+  app.post('/api/upload/tahsilat', requireAuth, requireMfaVerified, (req: Request, res: Response) => {
     makbuzUpload.single('file')(req, res, (err) => {
       if (err) return res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
       const f = (req as Request & { file?: { filename: string } }).file;
@@ -3564,7 +3580,7 @@ async function startServer() {
     res.sendFile(filePath);
   });
 
-  app.post('/api/logistics/transfer', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/logistics/transfer', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!pgPool) return res.status(503).json({ success: false, error: 'Veritabanı yok.' });
     const uid = (req as Request & { uid: string }).uid;
     const companyId = await getUserCompanyId(uid);
@@ -3653,13 +3669,19 @@ async function startServer() {
     }
   });
 
-  app.post('/api/inventory/auto-reorder', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/inventory/auto-reorder', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
+      // Kiracı izolasyonu: yalnız çağıranın firmasının (veya etiketsiz legacy)
+      // envanterini tara ve SAS'ları o firmaya etiketle — aksi halde tüm
+      // kiracıların stoğu okunur ve başka firmaya taslak sipariş yazılırdı.
+      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
       const snap = await adminDb.collection('inventory').get();
       const lowStock: { id: string; name: string; sku: string; stockLevel: number; lowStockThreshold: number; supplier?: string }[] = [];
       snap.forEach(d => {
         const item = d.data() as Record<string, unknown>;
+        const dc = item.companyId as string | undefined;
+        if (dc && dc !== cid) return; // başka firmanın ürünü — atla
         const stock = Number(item.stockLevel ?? item.quantity ?? 0);
         const threshold = Number(item.lowStockThreshold ?? item.minStock ?? 5);
         if (stock < threshold) {
@@ -3688,6 +3710,7 @@ async function startServer() {
         batch.set(newRef, {
           status:      'Taslak',
           source:      'auto-reorder',
+          companyId:   cid, // sunucu-tarafı yazım /api/db injectTenant'ı atlar; elle etiketle
           inventoryId: item.id,
           productName: item.name,
           sku:         item.sku,
@@ -3757,7 +3780,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/stok/kaydet — push inventory item → Mikro StokKaydetV2 */
-  app.post('/api/mikro/stok/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/stok/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
@@ -3863,7 +3886,7 @@ async function startServer() {
    *  `collection` (varsayilan 'leads') hangi Firebase koleksiyonuna mikroCariKod
    *  yazilacagini belirler - 'suppliers' icin de kullanilabilir (Satinalma
    *  modulundeki tedarikci-Mikro eslestirme). */
-  app.post('/api/mikro/cari/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/cari/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { lead, firebaseId, collection: targetCollection = 'leads' } = req.body as { lead: Record<string, unknown>; firebaseId: string; collection?: 'leads' | 'suppliers' };
@@ -3996,7 +4019,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
-  app.post('/api/mikro/siparis/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/siparis/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
@@ -6319,12 +6342,17 @@ async function startServer() {
 
   // ── Reports Summary API ────────────────────────────────────────────────────
   // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
-  app.get('/api/reports/summary', requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/reports/summary', requireAuth, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     try {
       const now       = new Date();
       const d30       = new Date(now); d30.setDate(d30.getDate() - 30);
       const d60       = new Date(now); d60.setDate(d60.getDate() - 60);
+
+      // Kiracı izolasyonu: yalnız çağıranın firması (veya etiketsiz legacy).
+      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
+      const ownScope = <T extends Record<string, unknown>>(arr: T[]): T[] =>
+        arr.filter(x => { const dc = x.companyId as string | undefined; return !dc || dc === cid; });
 
       const [ordersSnap, leadsSnap, inventorySnap] = await Promise.all([
         adminDb.collection('orders').get(),
@@ -6332,9 +6360,9 @@ async function startServer() {
         adminDb.collection('inventory').get(),
       ]);
 
-      const orders    = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
-      const leads     = leadsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
-      const inventory = inventorySnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>));
+      const orders    = ownScope(ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
+      const leads     = ownScope(leadsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
+      const inventory = ownScope(inventorySnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
 
       function dateOf(o: Record<string, unknown>): Date {
         const raw = o.createdAt as { toDate?: () => Date } | string | null;
