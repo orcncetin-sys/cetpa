@@ -2259,6 +2259,21 @@ async function startServer() {
   // Trust the first proxy (nginx/Cloudflare/IIS ARR) so express-rate-limit reads real IP
   app.set('trust proxy', 1);
 
+  // ── HTTP metod tünelleme (IIS WebDAV geçici çözümü) ─────────────────────────
+  // Öndeki IIS reverse-proxy'nin WebDAV modülü PUT/PATCH/DELETE fiillerini
+  // uygulamaya ulaşmadan 403 ile kesiyor (POST/GET geçiyor). İstemci
+  // (src/lib/dbClient.ts) bu metotları POST + X-HTTP-Method-Override başlığıyla
+  // tünelliyor; burada gerçek metoda geri yazıyoruz (yönlendirmeden ÖNCE).
+  // Kalıcı çözüm: deploy/windows/web.config'de WebDAV modülünü kaldırmak.
+  app.use((req, _res, next) => {
+    const override = req.headers['x-http-method-override'];
+    if (req.method === 'POST' && typeof override === 'string') {
+      const m = override.toUpperCase();
+      if (m === 'PATCH' || m === 'PUT' || m === 'DELETE') req.method = m;
+    }
+    next();
+  });
+
   // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
   // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
   // boğmasını önler; saldırgan token başına da sınırlanır. Tüm rate limiter'lar

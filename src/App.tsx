@@ -1969,6 +1969,9 @@ function AppContent() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       let resolvedCompanyId: string | null = null;
+      // Profil senkronu ne olursa olsun açılışı KİLİTLEMESİN — aşağıdaki
+      // setIsAuthReady(true) her koşulda çalışmalı (yoksa spinner'da donar).
+      try {
       if (u) {
         // 2FA: kullanıcının 2FA'sı açık ama oturum doğrulanmamışsa challenge sür.
         // (Veri yükleyiciler /api/db'ye erişmeden önce doğrulama gerekir.)
@@ -2034,6 +2037,9 @@ function AppContent() {
             storeSetRole(resolvedRole);
           }
         }
+      }
+      } catch (bootErr) {
+        console.error('Auth boot profil senkron hatası (yok sayıldı, uygulama yine açılır):', bootErr);
       }
       setUser(u);
       storeSetUser(u);

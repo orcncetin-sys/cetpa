@@ -210,6 +210,17 @@ function makeQuerySnap(coll: string, docs: Array<{ id: string; data: Record<stri
 
 // ── HTTP helpers ────────────────────────────────────────────────────────────
 
+// IIS/WebDAV: öndeki reverse-proxy PUT/PATCH/DELETE fiillerini uygulamaya
+// ulaşmadan 403 ile kesiyor (POST/GET geçiyor). Bu metotları POST +
+// X-HTTP-Method-Override başlığıyla tünelliyoruz; sunucu (server.ts erken
+// middleware) gerçek metoda geri yazıyor. GET/POST olduğu gibi geçer.
+function methodTunnel(method: string): { method: string; header?: Record<string, string> } {
+  if (method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
+    return { method: 'POST', header: { 'X-HTTP-Method-Override': method } };
+  }
+  return { method };
+}
+
 async function getToken(): Promise<string> {
   let u = auth.currentUser;
   if (!u) {
@@ -241,8 +252,8 @@ export async function incrementField(
 ): Promise<void> {
   const token = await getToken();
   const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/increment`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
     body: JSON.stringify({ field, delta, ...(min !== undefined ? { min } : {}) }),
   });
   if (!res.ok) throw new Error(`incrementField ${coll}/${id} → ${res.status}`);
@@ -255,8 +266,8 @@ export async function compareAndSet(
 ): Promise<boolean> {
   const token = await getToken();
   const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/cas`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
     body: JSON.stringify({ field, expect, set }),
   });
   if (!res.ok) throw new Error(`compareAndSet ${coll}/${id} → ${res.status}`);
@@ -267,11 +278,13 @@ export async function compareAndSet(
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const isPublicWrite = method === 'POST' && PUBLIC_WRITE_COLLECTIONS.has(decodeURIComponent(path));
   const token = isPublicWrite ? '' : await getToken();
+  const t = methodTunnel(method);
   const res = await fetch(`/api/db/${path}`, {
-    method,
+    method: t.method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(t.header || {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
