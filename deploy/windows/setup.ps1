@@ -67,8 +67,14 @@ Ok 'Firewall 80/443 open.'
 $pgSvc = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue
 if (-not $pgSvc) {
     Info 'PostgreSQL not found - installing (choco postgresql15)...'
-    choco install postgresql15 -y --no-progress --params "/Password:postgres"
-    Ok 'PostgreSQL installed (superuser postgres / pw postgres). Create app db+user and migrate data: RUNBOOK step 4.'
+    $PgPassword = Read-Host -Prompt 'Enter a secure password for the PostgreSQL "postgres" superuser (or press Enter to auto-generate)'
+    if (-not $PgPassword) {
+        $PgPassword = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 16 | % {[char]$_})
+        Write-Host "Auto-generated password: $PgPassword" -ForegroundColor Yellow
+        Write-Host "PLEASE SAVE THIS PASSWORD SECURELY!" -ForegroundColor Red
+    }
+    choco install postgresql15 -y --no-progress --params "/Password:$PgPassword"
+    Ok 'PostgreSQL installed. Create app db+user and migrate data: RUNBOOK step 4.'
 } else {
     Ok ('PostgreSQL present: ' + $pgSvc.Name + ' [' + $pgSvc.Status + ']. Migrate data: RUNBOOK step 4.')
 }

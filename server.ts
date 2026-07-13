@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
+import { PgBoss } from "pg-boss";
 import compression from "compression";
 import helmet from "helmet";
 import {
@@ -15,7 +16,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
-import { createHmac, createHash, randomUUID } from "crypto";
+import { createHmac, createHash, randomUUID, timingSafeEqual } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
@@ -288,8 +289,157 @@ const pgPool: pg.Pool | null = process.env.DATABASE_URL
   ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 })
   : null;
 
+export let boss: PgBoss | null = null;
+
 const dbEvents = new EventEmitter();
 dbEvents.setMaxListeners(0);
+
+// ── Webhook Processors ───────────────────────────────────────────────────
+
+async function processShopifyWebhook(topic: string, body: any) {
+  if (!adminDb) return;
+  try {
+    if (topic === 'orders/create' || topic === 'orders/updated') {
+      const shopifyOrderId = `#${body.order_number || body.id}`;
+      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
+      const orderData = {
+        shopifyOrderId,
+        customerName: body.billing_address?.name || body.customer?.first_name + ' ' + body.customer?.last_name || 'Unknown',
+        totalPrice: parseFloat(body.total_price || '0'),
+        status: body.financial_status === 'paid' ? 'Processing' : 'Pending',
+        shippingAddress: body.shipping_address?.address1 || '',
+        updatedAt: pgServerTimestamp(),
+        shopifyRaw: {
+          fulfillmentStatus: body.fulfillment_status,
+          financialStatus: body.financial_status,
+          cancelReason: body.cancel_reason || null,
+        },
+      };
+
+      if (!snap.empty) {
+        await snap.docs[0].ref.update(orderData);
+        console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
+      } else if (topic === 'orders/create') {
+        await adminDb.collection('orders').add({
+          ...orderData,
+          lineItems: (body.line_items || []).map((li: any) => ({
+            title: li.title,
+            quantity: li.quantity,
+            price: parseFloat(String(li.price || '0')),
+            sku: li.sku || '',
+          })),
+          createdAt: pgServerTimestamp(),
+          source: 'shopify_webhook',
+        });
+        console.log(`Created Cetpa order from Shopify webhook ${shopifyOrderId}`);
+      }
+    }
+    if (topic === 'orders/cancelled') {
+      const shopifyOrderId = `#${body.order_number || body.id}`;
+      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
+      if (!snap.empty) {
+        await snap.docs[0].ref.update({ status: 'Cancelled', updatedAt: pgServerTimestamp() });
+        console.log(`Cancelled Cetpa order for Shopify ${shopifyOrderId}`);
+      }
+    }
+    if (topic === 'orders/fulfillments_create' || topic === 'fulfillments/create') {
+      const shopifyOrderId = `#${body.order_number || body.order_id}`;
+      const trackingNumber = body.tracking_number || body.tracking_numbers?.[0] || null;
+      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
+      if (!snap.empty) {
+        await snap.docs[0].ref.update({ status: 'Shipped', ...(trackingNumber && { trackingNumber }), updatedAt: pgServerTimestamp() });
+        console.log(`Fulfilled Cetpa order ${shopifyOrderId}, tracking: ${trackingNumber}`);
+      }
+    }
+  } catch (err) {
+    console.error('Webhook Firestore write error:', err);
+    throw err;
+  }
+}
+
+/** Price config mirroring src/types/subscription.ts — kept in sync manually */
+const STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name: string }> = {
+  starter:      { monthly: 99900,  yearly: 999000,  name: 'Cetpa Başlangıç' },
+  professional: { monthly: 249900, yearly: 2499000, name: 'Cetpa Profesyonel' },
+  business:     { monthly: 499900, yearly: 4999000, name: 'Cetpa Business' },
+};
+// Amounts above are in kuruş (TRY minor unit, ×100)
+
+async function processStripeWebhook(event: any) {
+  if (!adminDb) return;
+  try {
+    const evRef = adminDb.collection('stripeEvents').doc(event.id);
+    if ((await evRef.get()).exists) return;
+    await evRef.set({ type: event.type, processedAt: pgServerTimestamp() });
+  } catch (e) { console.warn('[Stripe webhook] idempotency check failed:', (e as Error).message); }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as any;
+      const { firebaseUid, plan, cycle } = session.metadata ?? {};
+      if (!firebaseUid || !plan || !cycle) return;
+
+      const now   = new Date();
+      const end   = new Date(now);
+      if (cycle === 'monthly') end.setMonth(end.getMonth() + 1);
+      else end.setFullYear(end.getFullYear() + 1);
+
+      const planPrices: any = STRIPE_PLAN_PRICES[plan];
+      const amount = planPrices ? (cycle === 'monthly' ? planPrices.monthly / 100 : planPrices.yearly / 100) : 0;
+
+      await adminDb.collection('subscriptions').doc(firebaseUid).set({
+        plan, cycle, status: 'active', startDate: now.toISOString(), endDate: end.toISOString(),
+        lastPayment: now.toISOString(), stripeCustomerId: session.customer as string ?? '',
+        stripeSubscriptionId: session.subscription as string ?? '',
+        maxUsers: plan === 'starter' ? 1 : plan === 'professional' ? 5 : plan === 'business' ? 20 : 999,
+        currentUsers: 1,
+      }, { merge: true });
+
+      await adminDb.collection('payments').add({
+        userId: firebaseUid, plan, cycle, amount, currency: 'TRY', status: 'paid',
+        stripeSessionId: session.id, stripeCustomerId: session.customer ?? '', date: now.toISOString(),
+        createdAt: pgServerTimestamp(),
+      });
+      console.log(`[Stripe] Subscription activated for uid=${firebaseUid} plan=${plan}/${cycle}`);
+    }
+
+    if (event.type === 'customer.subscription.updated') {
+      const sub = event.data.object as any;
+      const { firebaseUid } = sub.metadata ?? {};
+      if (!firebaseUid) return;
+
+      const statusMap: Record<string, string> = { active: 'active', past_due: 'past_due', canceled: 'cancelled', unpaid: 'past_due' };
+      await adminDb.collection('subscriptions').doc(firebaseUid).set({ status: statusMap[sub.status] ?? sub.status }, { merge: true });
+    }
+
+    if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object as any;
+      const { firebaseUid } = sub.metadata ?? {};
+      if (!firebaseUid) return;
+
+      await adminDb.collection('subscriptions').doc(firebaseUid).set({ status: 'cancelled', cancelledAt: new Date().toISOString() }, { merge: true });
+      console.log(`[Stripe] Subscription cancelled for uid=${firebaseUid}`);
+    }
+  } catch (e) {
+    console.error('[Stripe webhook] handler error:', e);
+    throw e;
+  }
+}
+
+async function processOutboundWebhook(data: any) {
+  const { url, secret, event, payload } = data;
+  try {
+    const bodyStr = JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() });
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (secret) headers['x-webhook-signature'] = createHmac('sha256', secret).update(bodyStr).digest('hex');
+    const r = await fetch(url, { method: 'POST', headers, body: bodyStr });
+    if (r.ok) console.log(`[webhook] ${event} → ${url} : ${r.status}`);
+    else console.warn(`[webhook] ${event} → ${url} FAILED:`, r.statusText);
+  } catch (e) {
+    console.warn(`[webhook] ${event} → ${url} FAILED:`, (e as Error).message);
+    throw e;
+  }
+}
 
 async function initDocsTable(): Promise<void> {
   if (!pgPool) { console.warn('DATABASE_URL not set — /api/db routes disabled.'); return; }
@@ -303,6 +453,21 @@ async function initDocsTable(): Promise<void> {
   console.log('PostgreSQL docs table ready ✓');
   await initMikroTables();
   await initMfaTable();
+  if (process.env.DATABASE_URL && !boss) {
+    boss = new PgBoss(process.env.DATABASE_URL);
+    boss.on('error', error => console.error('pg-boss error:', error));
+    await boss.start();
+    await boss.work('shopify-webhook', async (jobs: any) => {
+      for (const job of jobs) await processShopifyWebhook(job.data.topic, job.data.body);
+    });
+    await boss.work('stripe-webhook', async (jobs: any) => {
+      for (const job of jobs) await processStripeWebhook(job.data.event);
+    });
+    await boss.work('outbound-webhook', async (jobs: any) => {
+      for (const job of jobs) await processOutboundWebhook(job.data);
+    });
+    console.log('pg-boss ready ✓');
+  }
 }
 initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
 
@@ -366,7 +531,7 @@ function verifySessionTokenUid(token: string | null): string | null {
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
   const expected = createHmac('sha256', SESSION_TOKEN_SECRET).update(payload).digest('base64url');
-  if (sig !== expected) return null;
+  if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   try {
     const [tUid, tExp] = Buffer.from(payload, 'base64url').toString().split('|');
     return Number(tExp) > Date.now() ? tUid : null;
@@ -919,22 +1084,27 @@ async function mirrorMikroInsert(
   table: string,
   rows: Record<string, unknown>[],
   cols: Record<string, (r: Record<string, unknown>) => unknown>,
+  client?: import('pg').PoolClient
 ): Promise<void> {
   if (!pgPool || !rows?.length) return;
+  const dbClient = client || pgPool;
   try {
     for (const r of rows) {
       const veri = JSON.stringify(r);
       const hash = createHash('md5').update(table + veri).digest('hex');
       const names = Object.keys(cols);
       const vals = names.map(n => cols[n](r));
-      await pgPool.query(
+      await dbClient.query(
         `INSERT INTO ${table} (${names.join(', ')}, veri, veri_hash)
          VALUES (${names.map((_, i) => `$${i + 1}`).join(', ')}, $${names.length + 1}, $${names.length + 2})
          ON CONFLICT (veri_hash) DO NOTHING`,
         [...vals, veri, hash],
       );
     }
-  } catch (e) { console.warn(`[mikroMirror:${table}]`, (e as Error).message); }
+  } catch (e) {
+    console.warn(`[mikroMirror:${table}]`, (e as Error).message);
+    if (client) throw e; // Reraise in transactions
+  }
 }
 
 /** STOKLAR + STOK_SATIS_FIYAT_LISTELERI + DEPOLAR aynası (sto_kod upsert). */
@@ -2903,92 +3073,12 @@ async function startServer() {
     const topic = req.headers['x-shopify-topic'] as string;
     const body  = req.body;
 
-    // Acknowledge immediately so Shopify doesn't retry
     res.status(200).send("ok");
 
-    if (!adminDb) {
-      console.warn("Webhook: Firebase Admin not available, skipping Firestore update");
-      return;
-    }
-
-    try {
-      if (topic === 'orders/create' || topic === 'orders/updated') {
-        const shopifyOrderId = `#${body.order_number || body.id}`;
-        // Try to find existing Cetpa order by shopifyOrderId
-        const snap = await adminDb
-          .collection('orders')
-          .where('shopifyOrderId', '==', shopifyOrderId)
-          .limit(1)
-          .get();
-
-        const orderData = {
-          shopifyOrderId,
-          customerName: body.billing_address?.name || body.customer?.first_name + ' ' + body.customer?.last_name || 'Unknown',
-          totalPrice: parseFloat(body.total_price || '0'),
-          status: body.financial_status === 'paid' ? 'Processing' : 'Pending',
-          shippingAddress: body.shipping_address?.address1 || '',
-          updatedAt: pgServerTimestamp(),
-          shopifyRaw: {
-            fulfillmentStatus: body.fulfillment_status,
-            financialStatus: body.financial_status,
-            cancelReason: body.cancel_reason || null,
-          },
-        };
-
-        if (!snap.empty) {
-          await snap.docs[0].ref.update(orderData);
-          console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
-        } else if (topic === 'orders/create') {
-          await adminDb.collection('orders').add({
-            ...orderData,
-            lineItems: (body.line_items || []).map((li: Record<string, unknown>) => ({
-              title: li.title,
-              quantity: li.quantity,
-              price: parseFloat(String(li.price || '0')),
-              sku: li.sku || '',
-            })),
-            createdAt: pgServerTimestamp(),
-            source: 'shopify_webhook',
-          });
-          console.log(`Created Cetpa order from Shopify webhook ${shopifyOrderId}`);
-        }
-      }
-
-      if (topic === 'orders/cancelled') {
-        const shopifyOrderId = `#${body.order_number || body.id}`;
-        const snap = await adminDb
-          .collection('orders')
-          .where('shopifyOrderId', '==', shopifyOrderId)
-          .limit(1)
-          .get();
-        if (!snap.empty) {
-          await snap.docs[0].ref.update({
-            status: 'Cancelled',
-            updatedAt: pgServerTimestamp(),
-          });
-          console.log(`Cancelled Cetpa order for Shopify ${shopifyOrderId}`);
-        }
-      }
-
-      if (topic === 'orders/fulfillments_create' || topic === 'fulfillments/create') {
-        const shopifyOrderId = `#${body.order_number || body.order_id}`;
-        const trackingNumber = body.tracking_number || body.tracking_numbers?.[0] || null;
-        const snap = await adminDb
-          .collection('orders')
-          .where('shopifyOrderId', '==', shopifyOrderId)
-          .limit(1)
-          .get();
-        if (!snap.empty) {
-          await snap.docs[0].ref.update({
-            status: 'Shipped',
-            ...(trackingNumber && { trackingNumber }),
-            updatedAt: pgServerTimestamp(),
-          });
-          console.log(`Fulfilled Cetpa order ${shopifyOrderId}, tracking: ${trackingNumber}`);
-        }
-      }
-    } catch (err) {
-      console.error('Webhook Firestore write error:', err);
+    if (boss) {
+      await boss.send('shopify-webhook', { topic, body });
+    } else {
+      await processShopifyWebhook(topic, body).catch(() => {});
     }
   });
 
@@ -5041,20 +5131,34 @@ async function startServer() {
 
       await writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, reqActor(req));
       if (success) {
-        void mirrorMikroInsert('mikro_stok_hareketleri',
-          (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS);
-        void mirrorMikroInsert('mikro_cari_hesap_hareketleri',
-          [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS);
-      }
-      if (adminDb && firebaseId && success) {
-        await adminDb.collection('orders').doc(firebaseId).set({
-          mikroFaturaNo,
-          ettn,
-          hasInvoice:      true,
-          mikroFaturaDate: faturaDate,
-          mikroSynced:     true,
-          mikroSyncedAt:   pgServerTimestamp(),
-        }, { merge: true });
+        if (pgPool) {
+          const client = await pgPool.connect();
+          try {
+            await client.query('BEGIN');
+            await mirrorMikroInsert('mikro_stok_hareketleri',
+              (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS, client);
+            await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
+              [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS, client);
+            await client.query('COMMIT');
+          } catch (dbErr) {
+            await client.query('ROLLBACK');
+            console.error('[FaturaKaydetV2] local db transaction failed:', dbErr);
+            // Invoice is in Mikro, but local DB mirror failed. We can queue a retry if boss is available.
+            if (boss) await boss.send('outbound-webhook', { event: 'fatura_mirror_failed', payload: { mikroFaturaNo } });
+          } finally {
+            client.release();
+          }
+        }
+        if (adminDb && firebaseId) {
+          await adminDb.collection('orders').doc(firebaseId).set({
+            mikroFaturaNo,
+            ettn,
+            hasInvoice:      true,
+            mikroFaturaDate: faturaDate,
+            mikroSynced:     true,
+            mikroSyncedAt:   pgServerTimestamp(),
+          }, { merge: true });
+        }
       }
       res.json({ success, mikroFaturaNo, ettn, data, duration });
     } catch (err) {
@@ -6167,19 +6271,13 @@ async function startServer() {
     if (!adminDb) return;
     try {
       const snap = await adminDb.collection('webhookConfigs').where('enabled', '==', true).get();
-      const configs = snap.docs.map(d => ({ id: d.id, ...d.data() } as { id: string; url: string; events: string[]; enabled: boolean }));
+      const configs = snap.docs.map(d => ({ id: d.id, ...d.data() } as { id: string; url: string; events: string[]; enabled: boolean; secret?: string }));
       const targets = configs.filter(c => (c.events ?? []).includes(event));
       await Promise.allSettled(targets.map(async c => {
-        try {
-          const r = await fetch(c.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Cetpa-Event': event },
-            body: JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() }),
-            signal: AbortSignal.timeout(5000),
-          });
-          console.log(`[webhook] ${event} → ${c.url} : ${r.status}`);
-        } catch (e) {
-          console.warn(`[webhook] ${event} → ${c.url} FAILED:`, (e as Error).message);
+        if (boss) {
+          await boss.send('outbound-webhook', { url: c.url, secret: c.secret, event, payload });
+        } else {
+          await processOutboundWebhook({ url: c.url, secret: c.secret, event, payload }).catch(() => {});
         }
       }));
     } catch (e) {
@@ -6992,14 +7090,6 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-04-22.dahlia' })
     : null;
 
-  /** Price config mirroring src/types/subscription.ts — kept in sync manually */
-  const STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name: string }> = {
-    starter:      { monthly: 99900,  yearly: 999000,  name: 'Cetpa Başlangıç' },
-    professional: { monthly: 249900, yearly: 2499000, name: 'Cetpa Profesyonel' },
-    business:     { monthly: 499900, yearly: 4999000, name: 'Cetpa Business' },
-  };
-  // Amounts above are in kuruş (TRY minor unit, ×100)
-
   /**
    * POST /api/stripe/create-checkout
    * Body: { planId, cycle }
@@ -7075,94 +7165,12 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       return res.status(400).json({ error: 'Invalid signature.' });
     }
 
-    if (!adminDb) return res.status(503).json({ error: 'Firestore not available.' });
-
-    // Idempotency: Stripe aynı event'i birden çok kez teslim edebilir → bir kez işle.
-    try {
-      const evRef = adminDb.collection('stripeEvents').doc(event.id);
-      if ((await evRef.get()).exists) return res.sendStatus(200);
-      await evRef.set({ type: event.type, processedAt: pgServerTimestamp() });
-    } catch (e) { console.warn('[Stripe webhook] idempotency check failed:', (e as Error).message); }
-
-    try {
-      if (event.type === 'checkout.session.completed') {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const { firebaseUid, plan, cycle } = session.metadata ?? {};
-        if (!firebaseUid || !plan || !cycle) return res.sendStatus(200);
-
-        const now   = new Date();
-        const end   = new Date(now);
-        if (cycle === 'monthly') end.setMonth(end.getMonth() + 1);
-        else end.setFullYear(end.getFullYear() + 1);
-
-        const planPrices = STRIPE_PLAN_PRICES[plan];
-        const amount = planPrices ? (cycle === 'monthly' ? planPrices.monthly / 100 : planPrices.yearly / 100) : 0;
-
-        // Activate subscription
-        await adminDb.collection('subscriptions').doc(firebaseUid).set({
-          plan,
-          cycle,
-          status: 'active',
-          startDate: now.toISOString(),
-          endDate: end.toISOString(),
-          lastPayment: now.toISOString(),
-          stripeCustomerId: session.customer as string ?? '',
-          stripeSubscriptionId: session.subscription as string ?? '',
-          maxUsers: plan === 'starter' ? 1 : plan === 'professional' ? 5 : plan === 'business' ? 20 : 999,
-          currentUsers: 1,
-        }, { merge: true });
-
-        // Log payment record
-        await adminDb.collection('payments').add({
-          userId: firebaseUid,
-          plan,
-          cycle,
-          amount,
-          currency: 'TRY',
-          status: 'paid',
-          stripeSessionId: session.id,
-          stripeCustomerId: session.customer ?? '',
-          date: now.toISOString(),
-          createdAt: pgServerTimestamp(),
-        });
-
-        console.log(`[Stripe] Subscription activated for uid=${firebaseUid} plan=${plan}/${cycle}`);
-      }
-
-      if (event.type === 'customer.subscription.updated') {
-        const sub = event.data.object as Stripe.Subscription;
-        const { firebaseUid } = sub.metadata ?? {};
-        if (!firebaseUid) return res.sendStatus(200);
-
-        const statusMap: Record<string, string> = {
-          active:   'active',
-          past_due: 'past_due',
-          canceled: 'cancelled',
-          unpaid:   'past_due',
-        };
-        await adminDb.collection('subscriptions').doc(firebaseUid).set(
-          { status: statusMap[sub.status] ?? sub.status },
-          { merge: true }
-        );
-      }
-
-      if (event.type === 'customer.subscription.deleted') {
-        const sub = event.data.object as Stripe.Subscription;
-        const { firebaseUid } = sub.metadata ?? {};
-        if (!firebaseUid) return res.sendStatus(200);
-
-        await adminDb.collection('subscriptions').doc(firebaseUid).set(
-          { status: 'cancelled', cancelledAt: new Date().toISOString() },
-          { merge: true }
-        );
-        console.log(`[Stripe] Subscription cancelled for uid=${firebaseUid}`);
-      }
-    } catch (e) {
-      console.error('[Stripe webhook] handler error:', e);
-      return res.status(500).json({ error: 'Webhook handler failed.' });
+    res.sendStatus(200);
+    if (boss) {
+      await boss.send('stripe-webhook', { event });
+    } else {
+      await processStripeWebhook(event).catch(() => {});
     }
-
-    return res.sendStatus(200);
   });
 
   // ── Health & Stats endpoints (all modes) ──────────────────────────────────
