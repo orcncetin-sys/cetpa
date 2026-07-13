@@ -63,6 +63,62 @@ try {
     Write-Host "    Backup task kaydedilemedi (deploy etkilenmez): $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+# Reverse-proxy web.config self-heal: copy the repo web.config (which removes the
+# WebDAV module) into the app.cetpa.com.tr site root so IIS stops 403-ing
+# PUT/PATCH/DELETE. GUARDED with auto-rollback: this box once broke the whole
+# Plesk panel with an IIS config change, so after copying we verify the site still
+# serves through IIS (https) and restore the previous web.config if it does not.
+# Non-fatal (try/catch): the client X-Cetpa-Method tunnel already keeps writes
+# working, so a failure here must never fail the deploy.
+try {
+    $appCmd = "$env:windir\System32\inetsrv\appcmd.exe"
+    if (Test-Path $appCmd) {
+        # EXACT match only - "cetpa" alone would also match the live root site
+        # "cetpa.com.tr". Never loosen this (see setup-iis-proxy.ps1).
+        $siteMatch = (& $appCmd list sites) | Select-String -Pattern 'SITE "(app\.cetpa\.com\.tr)"'
+        if ($siteMatch) {
+            $siteName = $siteMatch.Matches[0].Groups[1].Value
+            $docRoot  = ((& $appCmd list vdir "$siteName/" /text:physicalPath) -join '').Trim()
+            $srcCfg   = Join-Path $AppDir 'deploy\windows\web.config'
+            if ($docRoot -and (Test-Path $docRoot) -and ($docRoot -match 'app\.cetpa\.com\.tr') -and (Test-Path $srcCfg)) {
+                $dstCfg = Join-Path $docRoot 'web.config'
+                $bakCfg = Join-Path $docRoot 'web.config.prev'
+                $same = (Test-Path $dstCfg) -and ((Get-FileHash $dstCfg).Hash -eq (Get-FileHash $srcCfg).Hash)
+                if ($same) {
+                    Info 'web.config already current (WebDAV fix applied).'
+                } else {
+                    if (Test-Path $dstCfg) { Copy-Item $dstCfg $bakCfg -Force }
+                    Copy-Item $srcCfg $dstCfg -Force
+                    Info 'web.config updated (WebDAV removed). Verifying site through IIS...'
+                    # Verify through IIS (public https, ignore cert on PS 5.1) with retries.
+                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                    $iisOk = $false
+                    foreach ($j in 1..6) {
+                        Start-Sleep 3
+                        try {
+                            $rr = Invoke-WebRequest -UseBasicParsing -TimeoutSec 6 'https://app.cetpa.com.tr/api/health'
+                            if ($rr.StatusCode -eq 200) { $iisOk = $true; break }
+                        } catch { }
+                    }
+                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+                    if ($iisOk) {
+                        Info 'IIS serves the site with new web.config (HTTP 200). WebDAV fix live.'
+                    } elseif (Test-Path $bakCfg) {
+                        Copy-Item $bakCfg $dstCfg -Force
+                        Write-Host '    IIS health FAILED after web.config change - reverted to previous web.config (tunnel still works).' -ForegroundColor Yellow
+                    } else {
+                        Write-Host '    IIS health FAILED and no backup to restore - leaving new web.config (tunnel still works).' -ForegroundColor Yellow
+                    }
+                }
+            } else {
+                Write-Host '    web.config self-heal skipped: site doc root not resolved or guard failed.' -ForegroundColor Yellow
+            }
+        }
+    }
+} catch {
+    Write-Host "    web.config self-heal skipped (deploy unaffected): $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # Local health check (no TLS - independent of the IIS/Plesk reverse proxy in front)
 $ok = $false
 foreach ($i in 1..10) {
