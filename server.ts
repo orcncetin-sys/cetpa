@@ -2834,6 +2834,10 @@ async function startServer() {
         return res.status(400).json({ error: 'field (alfasayısal) ve set (nesne) gerekli.' });
       }
       if (await denied(req, res, coll, 'write', id)) return;
+      // CAS `set` gövdesi PUT/PATCH gibi keyfi alan yazar — aynı yetki-yükseltme
+      // kapısından geçmeli, yoksa kullanıcı kendi users/{uid} dokümanına
+      // set:{role:'Admin'} yazıp Admin'e yükselebilir (self-doc yazma izinli).
+      if (await guardRoleEscalation(req, res, coll, id, set as Record<string, unknown>)) return;
       try {
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) return res.status(404).json({ error: 'Not found.' });
@@ -3945,9 +3949,12 @@ async function startServer() {
 
     const body = req.body || {};
     const nameSearch = typeof body.nameSearch === 'string' ? body.nameSearch.trim().slice(0, 100) : '';
+    // Mikro WhereStr serbest SQL parçası kabul eder; istemci whereStr'i ASLA
+    // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir,
+    // aksi halde sabit sunucu-tarafı filtre kullanılır.
     const whereStr = nameSearch
       ? `cari_unvan1 LIKE '%${nameSearch.replace(/'/g, "''")}%'`
-      : (body.whereStr || "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'");
+      : "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'";
     const { size = 200, index = 0 } = body;
     const t0 = Date.now();
 

@@ -1986,7 +1986,7 @@ function AppContent() {
           // If MFA is pending, GET /api/db/users/:id returns 403 and getDoc throws.
           // We provide a dummy snapshot so the app can boot and show the MFA challenge modal.
           mfaPending = true;
-          userSnap = { exists: () => false, data: () => ({}) } as unknown as DocumentSnapshot<DocumentData>;
+          userSnap = { exists: () => false, data: () => ({}) } as unknown as Awaited<ReturnType<typeof getDoc>>;
         }
         // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
         resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
