@@ -2265,8 +2265,12 @@ async function startServer() {
   // (src/lib/dbClient.ts) bu metotları POST + X-HTTP-Method-Override başlığıyla
   // tünelliyor; burada gerçek metoda geri yazıyoruz (yönlendirmeden ÖNCE).
   // Kalıcı çözüm: deploy/windows/web.config'de WebDAV modülünü kaldırmak.
+  // ÖZEL başlık adı (X-Cetpa-Method) kullanılıyor: IIS, bilinen
+  // "X-HTTP-Method-Override" başlığını KENDİSİ tanıyıp isteği o metoda göre
+  // WebDAV filtresiyle 403'lüyor. Özel/bilinmeyen başlığı IIS es geçer, POST
+  // olarak Node'a iletir; gerçek metoda yalnız burada geri yazılır.
   app.use((req, _res, next) => {
-    const override = req.headers['x-http-method-override'];
+    const override = req.headers['x-cetpa-method'];
     if (req.method === 'POST' && typeof override === 'string') {
       const m = override.toUpperCase();
       if (m === 'PATCH' || m === 'PUT' || m === 'DELETE') req.method = m;

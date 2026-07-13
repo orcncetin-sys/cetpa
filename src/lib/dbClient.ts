@@ -211,12 +211,13 @@ function makeQuerySnap(coll: string, docs: Array<{ id: string; data: Record<stri
 // ── HTTP helpers ────────────────────────────────────────────────────────────
 
 // IIS/WebDAV: öndeki reverse-proxy PUT/PATCH/DELETE fiillerini uygulamaya
-// ulaşmadan 403 ile kesiyor (POST/GET geçiyor). Bu metotları POST +
-// X-HTTP-Method-Override başlığıyla tünelliyoruz; sunucu (server.ts erken
-// middleware) gerçek metoda geri yazıyor. GET/POST olduğu gibi geçer.
+// ulaşmadan 403 ile kesiyor (POST/GET geçiyor). Bu metotları POST + ÖZEL
+// X-Cetpa-Method başlığıyla tünelliyoruz; sunucu (server.ts erken middleware)
+// gerçek metoda geri yazıyor. Standart X-HTTP-Method-Override KULLANILMAZ —
+// IIS onu kendisi tanıyıp isteği yine PATCH sayıp 403'ler. GET/POST olduğu gibi geçer.
 function methodTunnel(method: string): { method: string; header?: Record<string, string> } {
   if (method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
-    return { method: 'POST', header: { 'X-HTTP-Method-Override': method } };
+    return { method: 'POST', header: { 'X-Cetpa-Method': method } };
   }
   return { method };
 }
@@ -253,7 +254,7 @@ export async function incrementField(
   const token = await getToken();
   const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/increment`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Cetpa-Method': 'PATCH' },
     body: JSON.stringify({ field, delta, ...(min !== undefined ? { min } : {}) }),
   });
   if (!res.ok) throw new Error(`incrementField ${coll}/${id} → ${res.status}`);
@@ -267,7 +268,7 @@ export async function compareAndSet(
   const token = await getToken();
   const res = await fetch(`/api/db/${coll}/${encodeURIComponent(id)}/cas`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Cetpa-Method': 'PATCH' },
     body: JSON.stringify({ field, expect, set }),
   });
   if (!res.ok) throw new Error(`compareAndSet ${coll}/${id} → ${res.status}`);
