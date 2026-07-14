@@ -3155,7 +3155,10 @@ async function startServer() {
     res.status(200).send("ok");
 
     if (boss) {
-      await boss.send('shopify-webhook', { topic, body });
+      // P6: aynı sipariş+topic için tekilleştirme anahtarı — Shopify aynı webhook'u
+      // yeniden teslim ederse (retry) eşzamanlı iki iş oluşmaz, tek sipariş yazılır.
+      const orderKey = `${topic}:${body?.order_number || body?.id || 'x'}`.slice(0, 200);
+      await boss.send('shopify-webhook', { topic, body }, { singletonKey: orderKey });
     } else {
       await processShopifyWebhook(topic, body).catch(() => {});
     }

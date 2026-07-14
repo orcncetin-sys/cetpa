@@ -215,7 +215,7 @@ function makeQuerySnap(coll: string, docs: Array<{ id: string; data: Record<stri
 // X-Cetpa-Method başlığıyla tünelliyoruz; sunucu (server.ts erken middleware)
 // gerçek metoda geri yazıyor. Standart X-HTTP-Method-Override KULLANILMAZ —
 // IIS onu kendisi tanıyıp isteği yine PATCH sayıp 403'ler. GET/POST olduğu gibi geçer.
-function methodTunnel(method: string): { method: string; header?: Record<string, string> } {
+export function methodTunnel(method: string): { method: string; header?: Record<string, string> } {
   if (method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
     return { method: 'POST', header: { 'X-Cetpa-Method': method } };
   }
