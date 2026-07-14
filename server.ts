@@ -720,6 +720,25 @@ async function getUserCompanyId(uid: string): Promise<string> {
   return cid;
 }
 
+// Bir koleksiyonun YALNIZ çağıranın firmasına (veya etiketsiz legacy'ye) ait
+// dokümanlarını getirir — filtreyi PG'ye iter (P8/P9). Tüm koleksiyonu belleğe
+// çekip JS'te elemenin yerine geçer; "lenient" anlam (companyId eşleşir VEYA
+// companyId yok) korunur, rapor sayıları değişmez. pgPool yoksa shim'e düşer.
+async function loadCompanyDocs(coll: string, cid: string): Promise<Array<Record<string, unknown>>> {
+  if (pgPool) {
+    const { rows } = await pgPool.query(
+      "SELECT id, data FROM docs WHERE coll = $1 AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))",
+      [coll, cid],
+    );
+    return rows.map(r => ({ id: r.id, ...(r.data as Record<string, unknown>) }));
+  }
+  if (!adminDb) return [];
+  const snap = await adminDb.collection(coll).get();
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>))
+    .filter(x => { const dc = x.companyId as string | undefined; return !dc || dc === cid; });
+}
+
 // ── firebase-admin Firestore compatible shim over PostgreSQL ─────────────────
 // server.ts's 170+ adminDb call sites (Shopify/Mikro sync, audit log, crons)
 // keep their code shape; only the backing store changes. Writes broadcast over
@@ -3759,17 +3778,13 @@ async function startServer() {
       // envanterini tara ve SAS'ları o firmaya etiketle — aksi halde tüm
       // kiracıların stoğu okunur ve başka firmaya taslak sipariş yazılırdı.
       const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const snap = await adminDb.collection('inventory').get();
       const lowStock: { id: string; name: string; sku: string; stockLevel: number; lowStockThreshold: number; supplier?: string }[] = [];
-      snap.forEach(d => {
-        const item = d.data() as Record<string, unknown>;
-        const dc = item.companyId as string | undefined;
-        if (dc && dc !== cid) return; // başka firmanın ürünü — atla
+      for (const item of await loadCompanyDocs('inventory', cid)) { // P8/P9: filtre PG'de
         const stock = Number(item.stockLevel ?? item.quantity ?? 0);
         const threshold = Number(item.lowStockThreshold ?? item.minStock ?? 5);
         if (stock < threshold) {
           lowStock.push({
-            id: d.id,
+            id: String(item.id),
             name: String(item.name ?? ''),
             sku:  String(item.sku ?? ''),
             stockLevel: stock,
@@ -3777,7 +3792,7 @@ async function startServer() {
             supplier: item.supplier as string | undefined,
           });
         }
-      });
+      }
 
       if (lowStock.length === 0) {
         return res.json({ success: true, created: 0, message: 'Tüm ürünler stok limitinin üzerinde.' });
@@ -6432,20 +6447,13 @@ async function startServer() {
       const d30       = new Date(now); d30.setDate(d30.getDate() - 30);
       const d60       = new Date(now); d60.setDate(d60.getDate() - 60);
 
-      // Kiracı izolasyonu: yalnız çağıranın firması (veya etiketsiz legacy).
+      // Kiracı izolasyonu + P8/P9: filtre PG'de, tüm koleksiyon belleğe çekilmez.
       const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const ownScope = <T extends Record<string, unknown>>(arr: T[]): T[] =>
-        arr.filter(x => { const dc = x.companyId as string | undefined; return !dc || dc === cid; });
-
-      const [ordersSnap, leadsSnap, inventorySnap] = await Promise.all([
-        adminDb.collection('orders').get(),
-        adminDb.collection('leads').get(),
-        adminDb.collection('inventory').get(),
+      const [orders, leads, inventory] = await Promise.all([
+        loadCompanyDocs('orders', cid),
+        loadCompanyDocs('leads', cid),
+        loadCompanyDocs('inventory', cid),
       ]);
-
-      const orders    = ownScope(ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
-      const leads     = ownScope(leadsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
-      const inventory = ownScope(inventorySnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
 
       function dateOf(o: Record<string, unknown>): Date {
         const raw = o.createdAt as { toDate?: () => Date } | string | null;
