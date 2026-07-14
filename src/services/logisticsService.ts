@@ -16,6 +16,7 @@ export interface TransferPayload {
   from?: LocationRef | null;   // null → dışarıdan giriş (lokasyon atama / mal kabul)
   to?: LocationRef | null;     // null → dışarı çıkış (sevkiyat/fire)
   note?: string;
+  transferId?: string;         // P12: idempotency anahtarı (verilmezse otomatik üretilir)
 }
 
 export interface TransferResult {
@@ -28,10 +29,13 @@ export interface TransferResult {
 
 export async function transferStock(payload: TransferPayload): Promise<TransferResult> {
   try {
+    // P12: her transfer denemesine sabit bir idempotency anahtarı ver — ağ retry'ı
+    // / çift gönderim aynı anahtarı taşır, sunucu ikinci kez uygulamaz.
+    const body = { transferId: crypto.randomUUID(), ...payload };
     const res = await authFetch('/api/logistics/transfer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
     return data as TransferResult;

@@ -25,6 +25,34 @@ import { z, ZodError } from "zod";
 
 dotenv.config();
 
+// ── Global fetch varsayılan timeout (P11) ───────────────────────────────────
+// Node fetch varsayılanı SÜRESİZ bekler; asılı bir upstream (Mikro/Shopify/
+// Paraşüt/Luca/GIB/kargo...) o isteği/cron'u sonsuza kadar bloke edebilir.
+// Açık `signal` verilmemiş her çağrıya 30 sn'lik bir timeout ekliyoruz; kendi
+// signal'ını verenlere (ör. TCMB 8 sn) dokunmuyoruz.
+const _rawFetch = globalThis.fetch;
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  if (init && init.signal) return _rawFetch(input, init);
+  return _rawFetch(input, { ...init, signal: AbortSignal.timeout(30000) });
+}) as typeof fetch;
+
+// ── Zorunlu prod yapılandırması: hızlı-başarısız (P14) ──────────────────────
+// Eksik kritik config'le SESSİZCE bozuk çalışmak yerine açılışta dur. Sadece
+// gerçekten zorunlu olanları kontrol ederiz (sağlıklı prod bunları zaten taşır).
+if (process.env.NODE_ENV === 'production') {
+  const problems: string[] = [];
+  if (!process.env.DATABASE_URL) problems.push('DATABASE_URL (uygulama /api/db olmadan calisamaz)');
+  // Oturum/MFA HMAC secret'i her ikisi de yoksa SABİT kamuya-acik sabite duser
+  // (createHash(... 'cetpa-mfa-fallback')) -> token'lar forge edilebilir (P2).
+  if (!process.env.SESSION_TOKEN_SECRET && !process.env.FIREBASE_PRIVATE_KEY) {
+    problems.push('SESSION_TOKEN_SECRET veya FIREBASE_PRIVATE_KEY (yoksa oturum/MFA imzasi sabit sabite duser)');
+  }
+  if (problems.length) {
+    console.error('KRITIK: zorunlu prod yapilandirmasi eksik, cikiliyor:\n  - ' + problems.join('\n  - '));
+    process.exit(1);
+  }
+}
+
 // ── Zod validation schemas & helper ────────────────────────────────────────
 function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | null {
   const result = schema.safeParse(data);
@@ -2278,6 +2306,16 @@ async function startServer() {
     next();
   });
 
+  // ── İstek kimliği (P16: correlation ID) ─────────────────────────────────────
+  // Her isteğe kısa bir id ver; hata loglarında ve X-Request-Id yanıt başlığında
+  // taşınır, böylece bir hata canlıda log ↔ istemci ↔ upstream izi ile eşlenir.
+  app.use((req, res, next) => {
+    const rid = (req.headers['x-request-id'] as string | undefined)?.slice(0, 64) || randomUUID().slice(0, 8);
+    (req as Request & { rid?: string }).rid = rid;
+    res.setHeader('X-Request-Id', rid);
+    next();
+  });
+
   // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
   // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
   // boğmasını önler; saldırgan token başına da sınırlanır. Tüm rate limiter'lar
@@ -2551,9 +2589,11 @@ async function startServer() {
     });
 
     // Ham hata mesajlarını sunucu loglarında tut, istemciye generic döndür.
-    const dbErr = (e: unknown, res: Response, op: string, coll: string) => {
-      console.error(`[/api/db ${op} ${coll}]`, (e as Error).message);
-      res.status(500).json({ error: 'Veritabanı işlemi başarısız.' });
+    // Request id ile logla (P16) + istemciye de ver ki destek talebinde eşlensin.
+    const dbErr = (e: unknown, res: Response, op: string, coll: string, req?: Request) => {
+      const rid = req ? (req as Request & { rid?: string }).rid : undefined;
+      console.error(`[/api/db ${op} ${coll}]${rid ? ` rid=${rid}` : ''}`, (e as Error).message);
+      res.status(500).json({ error: 'Veritabanı işlemi başarısız.', ...(rid ? { requestId: rid } : {}) });
     };
     // Yetki kapısı — yetkisizse 403 döner ve true verir (çağıran return etmeli).
     // docId verilirse 'kendi kaydı' istisnası uygulanır (users/{uid}).
@@ -3605,6 +3645,7 @@ async function startServer() {
     const companyId = await getUserCompanyId(uid);
     const b = (req.body ?? {}) as {
       productId?: string; sku?: string; productName?: string; quantity?: number; note?: string;
+      transferId?: string;
       from?: { type: 'warehouse' | 'vehicle'; id: string; name?: string } | null;
       to?:   { type: 'warehouse' | 'vehicle'; id: string; name?: string } | null;
     };
@@ -3616,10 +3657,28 @@ async function startServer() {
       return res.status(400).json({ success: false, error: 'En az bir taraf (from veya to) gerekli.' });
     }
     const locId = (loc: { type: string; id: string }) => `${loc.type}__${loc.id}__${b.productId}`;
+    // P12: istemci transferId gönderirse aynı transfer iki kez uygulanmaz (retry/çift-tık/replay).
+    const idemKey = (typeof b.transferId === 'string' && b.transferId) ? `${companyId}:${b.transferId}`.slice(0, 200) : null;
+    // P13: SSE yayınları COMMIT başarılı olmadan ateşlenmez — yoksa ROLLBACK'te
+    // istemciler geri alınan stok değişimini görür.
+    const pending: Array<() => void> = [];
 
     const client = await pgPool.connect();
     try {
       await client.query('BEGIN');
+
+      // P12: aynı anahtarlı eşzamanlı istekleri serialize et + zaten uygulanmışsa dön.
+      if (idemKey) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [idemKey]);
+        const dup = await client.query(
+          "SELECT id FROM docs WHERE coll = 'inventoryMovements' AND data->>'idempotencyKey' = $1 LIMIT 1",
+          [idemKey],
+        );
+        if (dup.rows.length) {
+          await client.query('COMMIT'); // yalnız advisory lock'u bırak; veri değişmedi
+          return res.json({ success: true, movementId: dup.rows[0].id, idempotent: true });
+        }
+      }
 
       // Kaynak: yeterli stok kontrolü + azalt (locationStock yoksa 0 kabul → hata)
       if (b.from) {
@@ -3640,7 +3699,7 @@ async function startServer() {
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           ['locationStocks', fromDocId, JSON.stringify(fromData)],
         );
-        broadcastDocChange('locationStocks', 'set', fromDocId, fromData);
+        pending.push(() => broadcastDocChange('locationStocks', 'set', fromDocId, fromData));
       }
 
       // Hedef: artır (yoksa oluştur)
@@ -3658,7 +3717,7 @@ async function startServer() {
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           ['locationStocks', toDocId, JSON.stringify(toData)],
         );
-        broadcastDocChange('locationStocks', 'set', toDocId, toData);
+        pending.push(() => broadcastDocChange('locationStocks', 'set', toDocId, toData));
       }
 
       // Hareket kaydı (kategori: her iki taraf da lokasyonsa transfer; biri araçsa arac_transfer)
@@ -3673,11 +3732,13 @@ async function startServer() {
         reason: `Transfer: ${fromLabel} → ${toLabel}`, note: b.note ?? '',
         fromLocation: b.from ?? null, toLocation: b.to ?? null,
         companyId, timestamp: new Date().toISOString(),
+        ...(idemKey ? { idempotencyKey: idemKey } : {}),
       };
       await client.query('INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)', ['inventoryMovements', movId, JSON.stringify(movData)]);
-      broadcastDocChange('inventoryMovements', 'set', movId, movData);
+      pending.push(() => broadcastDocChange('inventoryMovements', 'set', movId, movData));
 
       await client.query('COMMIT');
+      pending.forEach(fn => fn()); // P13: yalnız COMMIT başarıldıysa yayınla
       res.json({ success: true, movementId: movId, category });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
