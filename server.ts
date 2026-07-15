@@ -395,11 +395,15 @@ const STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name
 
 async function processStripeWebhook(event: any) {
   if (!adminDb) return;
+  // P5-1: "islendi" isareti handler'dan SONRA yazilir. Onceden ONCE yaziliyordu:
+  // handler patlayinca throw -> pg-boss retry -> retry dedup'a takilip sessizce
+  // donuyordu, yani odemesi alinan abonelik HIC aktiflesmiyordu ve hicbir yeniden
+  // deneme bunu kurtaramiyordu. Eszamanli cift teslimat send() singletonKey'i ile
+  // serialize edilir (asagida), bu yuzden isareti sona almak yaris acmaz.
+  const evRef = adminDb.collection('stripeEvents').doc(event.id);
   try {
-    const evRef = adminDb.collection('stripeEvents').doc(event.id);
-    if ((await evRef.get()).exists) return;
-    await evRef.set({ type: event.type, processedAt: pgServerTimestamp() });
-  } catch (e) { console.warn('[Stripe webhook] idempotency check failed:', (e as Error).message); }
+    if ((await evRef.get()).exists) return; // zaten BASARIYLA islenmis
+  } catch (e) { console.warn('[Stripe webhook] idempotency okuma hatasi:', (e as Error).message); }
 
   try {
     if (event.type === 'checkout.session.completed') {
@@ -450,8 +454,11 @@ async function processStripeWebhook(event: any) {
     }
   } catch (e) {
     console.error('[Stripe webhook] handler error:', e);
-    throw e;
+    throw e; // isaret YAZILMADI -> pg-boss retry'i gercekten yeniden calisir
   }
+  // Buraya yalnizca handler BASARIYLA bittiyse gelinir -> simdi isaretle.
+  try { await evRef.set({ type: event.type, processedAt: pgServerTimestamp() }); }
+  catch (e) { console.warn('[Stripe webhook] islendi isareti yazilamadi:', (e as Error).message); }
 }
 
 async function processOutboundWebhook(data: any) {
@@ -2440,9 +2447,17 @@ async function startServer() {
       });
       res.json({ ok: true });
     });
-    app.post('/api/db/session/logout', dbLimiter, (_req: Request, res: Response) => {
+    app.post('/api/db/session/logout', dbLimiter, async (req: Request, res: Response) => {
       res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
       res.clearCookie(MFA_COOKIE, { path: '/' });
+      // P2-2: çerezi silmek yetmiyordu — elde kalan Firebase ID token'ı süresi
+      // (≤1sa) dolana dek geçerli kalıyordu. Refresh token'ları iptal et ki
+      // çalınan/eski oturum YENİ token üretemesin. Best-effort: uid yalnız
+      // geçerli bir oturum token'ı varsa okunur; çıkışı asla başarısız yapma.
+      try {
+        const uid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
+        if (uid) await admin.auth().revokeRefreshTokens(uid);
+      } catch (e) { console.warn('[logout] revokeRefreshTokens başarısız:', (e as Error).message); }
       res.json({ ok: true });
     });
 
@@ -2644,6 +2659,32 @@ async function startServer() {
       return true;
     };
 
+    // ── settings gizli alan maskeleme (P4-2) ────────────────────────────────
+    // settings/{mikro,luca,iyzico,email,trendyol...} entegrasyon parolalarını/
+    // apiKey'lerini DÜZ METİN tutuyor. RBAC settings okumasını Admin+Manager'a
+    // açtığından, Manager canlı ERP kimlik bilgilerini okuyabiliyordu.
+    // Admin gerçek değeri görür (config ekranları çalışmaya devam eder);
+    // Admin olmayan maskeli görür. Yazarken maske ASLA geri yazılmaz — aksi
+    // halde maskeli formu kaydeden biri gerçek secret'i '***' ile ezerdi.
+    const SECRET_FIELD_RE = /(password|sifre|secret|apikey|api_key|accesstoken|access_token|token|privatekey|private_key)/i;
+    const REDACTED = '***REDACTED***';
+    const redactSettings = async (req: Request, coll: string, data: Record<string, unknown> | undefined) => {
+      if (coll !== 'settings' || !data) return data;
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (await getUserRole(uid) === 'Admin') return data;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(data)) {
+        out[k] = (SECRET_FIELD_RE.test(k) && typeof v === 'string' && v !== '') ? REDACTED : v;
+      }
+      return out;
+    };
+    const stripRedacted = (coll: string, data: Record<string, unknown>): Record<string, unknown> => {
+      if (coll !== 'settings' || !data) return data;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(data)) if (v !== REDACTED) out[k] = v;
+      return out;
+    };
+
     // Kiracı/kullanıcı kapsam WHERE eki — lenient (etiketsiz legacy docs sahibe görünür).
     // Dönen params $2'den başlar.
     const tenantWhere = async (req: Request, coll: string): Promise<{ sql: string; params: unknown[] }> => {
@@ -2699,6 +2740,10 @@ async function startServer() {
       try {
         const t = await tenantWhere(req, coll);
         const { rows } = await docsDb.query(`SELECT id, data FROM docs WHERE coll = $1${t.sql}`, [coll, ...t.params]);
+        // P4-2: settings gizli alanları Admin olmayana maskeli döner.
+        if (coll === 'settings') {
+          for (const r of rows) r.data = await redactSettings(req, coll, r.data as Record<string, unknown>);
+        }
         res.json({ docs: rows });
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
@@ -2716,7 +2761,7 @@ async function startServer() {
           ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]));
         }
         if (!rows.length || !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(404).json({ error: 'Not found.' }); return; }
-        res.json({ data: rows[0].data });
+        res.json({ data: await redactSettings(req, coll, rows[0].data as Record<string, unknown>) }); // P4-2
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
 
@@ -2790,7 +2835,9 @@ async function startServer() {
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
-        const incoming = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
+        // P4-2: maskeli (***REDACTED***) gelen gizli alanları YOK SAY — maskeli
+        // formu kaydeden biri gerçek secret'i ezmesin.
+        const incoming = stripRedacted(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
         let data = incoming;
         let before: Record<string, unknown> = {};
         const audited = AUDITED_COLLECTIONS.has(coll);
@@ -2833,7 +2880,8 @@ async function startServer() {
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
-        const patch = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
+        // P4-2: maskeli gelen gizli alanlar gerçek secret'i ezmesin.
+        const patch = stripRedacted(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
         let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
@@ -3164,8 +3212,11 @@ async function startServer() {
     if (!webhookSecret) { res.status(503).send('Webhook not configured'); return; }
     if (!shopifyHmac || !req.rawBody) { res.status(401).send('Missing signature'); return; }
     {
+      // P1-2: imza karşılaştırması sabit-zamanlı olmalı (timing yan-kanalı).
       const computed = createHmac('sha256', webhookSecret).update(req.rawBody).digest('base64');
-      if (computed !== shopifyHmac) { res.status(401).send('Invalid signature'); return; }
+      const a = Buffer.from(computed, 'utf8');
+      const b = Buffer.from(shopifyHmac, 'utf8');
+      if (a.length !== b.length || !timingSafeEqual(a, b)) { res.status(401).send('Invalid signature'); return; }
     }
 
     const topic = req.headers['x-shopify-topic'] as string;
@@ -3664,6 +3715,11 @@ async function startServer() {
   app.post('/api/logistics/transfer', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!pgPool) return res.status(503).json({ success: false, error: 'Veritabanı yok.' });
     const uid = (req as Request & { uid: string }).uid;
+    // P3-6: rol kontrolü — bu rota requireAuth+MFA dışında RBAC uygulamıyordu,
+    // yani B2B/Dealer dahil HERHANGİ bir oturum stok hareketi yazabiliyordu.
+    if (!(await canAccessCollection(uid, 'inventory', 'write'))) {
+      return res.status(403).json({ success: false, error: 'Stok hareketi için yetkiniz yok.' });
+    }
     const companyId = await getUserCompanyId(uid);
     const b = (req.body ?? {}) as {
       productId?: string; sku?: string; productName?: string; quantity?: number; note?: string;
@@ -5106,12 +5162,14 @@ async function startServer() {
     const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
     try {
-      // 1. Envanterdeki Mikro SKU'ları
-      const invSnap = await adminDb.collection('inventory').get();
+      // 1. Envanterdeki Mikro SKU'ları — P3-5: yalnız çağıranın firması.
+      //    Önceden TÜM kiracıların envanteri okunup skuMappings ETİKETSİZ
+      //    yazılıyordu (başka firmanın SKU'ları eşleştirilip görünür oluyordu).
+      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
       const invItems: { sku: string; name: string }[] = [];
-      for (const d of invSnap.docs) {
-        const sku = ((d.data().sku as string) || '').trim();
-        if (sku) invItems.push({ sku, name: (d.data().name as string) || sku });
+      for (const item of await loadCompanyDocs('inventory', cid)) {
+        const sku = ((item.sku as string) || '').trim();
+        if (sku) invItems.push({ sku, name: (item.name as string) || sku });
       }
 
       // 2. Shopify ürün varyantları (varsa)
@@ -5150,6 +5208,7 @@ async function startServer() {
         batch.set(ref, {
           mikroSku:    item.sku,
           productName: item.name,
+          companyId:   cid, // P3-5: sunucu-taraflı batch write companyId enjekte ETMEZ, elle etiketle
           ...(hit ? {
             shopifySku:       hit.sku,
             shopifyProductId: hit.productId,
@@ -5181,6 +5240,9 @@ async function startServer() {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = validate(FaturaKaydetSchema, req.body, res);
     if (!parsed) return;
+    // P5-3: fatura Mikro'da olustuktan SONRAKI yerel guncelleme hatasi istegi
+    // basarisiz yapmaz (yoksa kullanici tekrar dener -> cift e-Fatura).
+    let localUpdateFailed = false;
     const { order, firebaseId } = parsed;
     const t0 = Date.now();
     try {
@@ -5278,17 +5340,32 @@ async function startServer() {
           }
         }
         if (adminDb && firebaseId) {
-          await adminDb.collection('orders').doc(firebaseId).set({
-            mikroFaturaNo,
-            ettn,
-            hasInvoice:      true,
-            mikroFaturaDate: faturaDate,
-            mikroSynced:     true,
-            mikroSyncedAt:   pgServerTimestamp(),
-          }, { merge: true });
+          try {
+            await adminDb.collection('orders').doc(firebaseId).set({
+              mikroFaturaNo,
+              ettn,
+              hasInvoice:      true,
+              mikroFaturaDate: faturaDate,
+              mikroSynced:     true,
+              mikroSyncedAt:   pgServerTimestamp(),
+            }, { merge: true });
+          } catch (updErr) {
+            // P5-3 KRITIK: fatura Mikro'da ARTIK VAR. Burada hatayi yukari birakip
+            // 500 donersek kullanici "başarısız" gorup tekrar dener ve AYNI siparis
+            // icin IKINCI bir yasal e-Fatura kesilir. Bu yuzden yerel guncelleme
+            // hatasi istegi basarisiz YAPMAZ: loglanir, telafi kuyruguna alinir ve
+            // yanitta localUpdateFailed ile bildirilir.
+            localUpdateFailed = true;
+            console.error('[FaturaKaydetV2] yerel siparis guncellemesi basarisiz (FATURA MIKRO\'DA OLUSTU):', updErr);
+            if (boss) {
+              await boss.send('outbound-webhook',
+                { event: 'fatura_order_update_failed', payload: { firebaseId, mikroFaturaNo, ettn } },
+              ).catch(() => {});
+            }
+          }
         }
       }
-      res.json({ success, mikroFaturaNo, ettn, data, duration });
+      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -7293,7 +7370,10 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
     res.sendStatus(200);
     if (boss) {
-      await boss.send('stripe-webhook', { event });
+      // P5-1: event.id başına tekilleştir — aynı olayın eşzamanlı iki teslimatı
+      // handler'ı paralel çalıştırıp çift ödeme satırı yazamaz (işaret artık
+      // handler'dan SONRA yazıldığı için bu serileştirme gerekli).
+      await boss.send('stripe-webhook', { event }, { singletonKey: String(event.id).slice(0, 200) });
     } else {
       await processStripeWebhook(event).catch(() => {});
     }
