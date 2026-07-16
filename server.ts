@@ -348,8 +348,10 @@ async function processShopifyWebhook(topic: string, body: any) {
         await snap.docs[0].ref.update(orderData);
         console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
       } else if (topic === 'orders/create') {
+        const cid = await serverTenantId(); // webhook: kullanıcı yok → sunucu-tarafı çözümleyici
         await adminDb.collection('orders').add({
           ...orderData,
+          ...(cid ? { companyId: cid } : {}), // çok-kiracıda belirsizse etiketsiz bırak
           lineItems: (body.line_items || []).map((li: any) => ({
             title: li.title,
             quantity: li.quantity,
@@ -725,6 +727,27 @@ async function getUserCompanyId(uid: string): Promise<string> {
   }
   companyIdCache.set(uid, { cid, exp: Date.now() + 60_000 });
   return cid;
+}
+
+// İstek bağlamında çağıranın firması (sunucu-tarafı doğrudan yazımlara companyId
+// enjekte etmek için — /api/db dışı adminDb.collection().add/set çağrıları
+// injectTenant'ı atlar; bunlar bu helper ile etiketlenir). getUserCompanyId 60sn
+// cache'li, döngü içinde çağrılsa da ucuz.
+const reqCompanyId = (req: Request): Promise<string> =>
+  getUserCompanyId((req as Request & { uid?: string }).uid || '');
+
+// Kullanıcı oturumu OLMAYAN sunucu bağlamı (webhook) için kiracı çözümleyici:
+// açık env → tek tenant → '' (çok-kiracıda belirsiz; etiketsiz bırakılır, uyarılır).
+async function serverTenantId(): Promise<string> {
+  const env = process.env.SERVER_TENANT_COMPANY_ID || process.env.MIKRO_CRON_COMPANY_ID;
+  if (env) return env;
+  if (!adminDb) return '';
+  try {
+    const snap = await adminDb.collection('users').get();
+    const cids = new Set(snap.docs.map(d => (d.data().companyId as string) || d.id));
+    if (cids.size === 1) return [...cids][0];
+  } catch { /* düş */ }
+  return '';
 }
 
 // Bir koleksiyonun YALNIZ çağıranın firmasına (veya etiketsiz legacy'ye) ait
@@ -4416,6 +4439,7 @@ async function startServer() {
           updatedAt: pgServerTimestamp(),
         }, { merge: true });
         await adminDb.collection('wmsLocations').doc(`mikro-depo-${kod}`).set({
+          companyId: await reqCompanyId(req),
           code:      `DEPO-${kod}`,
           aisle:     kod, rack: '00', level: '00',
           zone:      'storage',
@@ -4820,6 +4844,7 @@ async function startServer() {
             ops++;
             // Depo sekmesindeki kayıt da güncellensin
             batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
+              companyId: await reqCompanyId(req),
               quantity: r.qty, updatedAt: pgServerTimestamp(),
             }, { merge: true });
             ops++;
@@ -5342,6 +5367,7 @@ async function startServer() {
         if (adminDb && firebaseId) {
           try {
             await adminDb.collection('orders').doc(firebaseId).set({
+              companyId: await reqCompanyId(req),
               mikroFaturaNo,
               ettn,
               hasInvoice:      true,
@@ -5447,6 +5473,7 @@ async function startServer() {
         (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'irsaliye_push' })), STH_COLS);
       if (adminDb && firebaseId && success) {
         await adminDb.collection('shipments').doc(firebaseId).set({
+          companyId: await reqCompanyId(req),
           irsaliyeNo,
           irsaliyeEttn,
           mikroSynced:     true,
@@ -5492,6 +5519,7 @@ async function startServer() {
           const vadeliBorc  = Number(md?.vadeliBorc ?? md?.VadeliBorc ?? 0);
           // Mirror to cariBalances collection AND update lead doc
           await adminDb.collection('cariBalances').doc(cariKod).set({
+            companyId: await reqCompanyId(req),
             cariKod, bakiye, vadeliBorc,
             updatedAt: pgServerTimestamp(),
           }, { merge: true });
@@ -5535,6 +5563,7 @@ async function startServer() {
       const docId  = period;
 
       await adminDb.collection('accountingPeriods').doc(docId).set({
+        companyId: await reqCompanyId(req),
         period, yil, ay, rows,
         toplam: { borc: rows.reduce((s, r) => s + Number(r.borc ?? 0), 0), alacak: rows.reduce((s, r) => s + Number(r.alacak ?? 0), 0) },
         syncedAt: pgServerTimestamp(),
@@ -5627,6 +5656,7 @@ async function startServer() {
       if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
       const md = mikroData(data);
       await adminDb.collection('taxSummary').doc(period).set({
+        companyId: await reqCompanyId(req),
         period, yil, ay,
         kdvHesaplanan: Number(md?.kdvHesaplanan ?? md?.KdvHesaplanan ?? md?.hesaplananKdv ?? 0),
         kdvIndirilecek: Number(md?.kdvIndirilecek ?? md?.KdvIndirilecek ?? md?.indirilecekKdv ?? 0),
@@ -5664,6 +5694,7 @@ async function startServer() {
 
       if (adminDb && firebaseId && isOk) {
         await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
+          companyId: await reqCompanyId(req),
           gibDurumu: 'kabul',
           gibKabulAt: pgServerTimestamp(),
         }, { merge: true });
@@ -5695,6 +5726,7 @@ async function startServer() {
 
       if (adminDb && firebaseId && isOk) {
         await adminDb.collection('mikroFaturalar').doc(firebaseId).set({
+          companyId: await reqCompanyId(req),
           gibDurumu: 'ret',
           gibRetAciklama: aciklama || null,
           gibRetAt: pgServerTimestamp(),
@@ -5995,7 +6027,7 @@ async function startServer() {
             updatedAt:       pgServerTimestamp(),
           };
           if (existing.empty) {
-            await adminDb.collection('orders').add({ ...payload, createdAt: pgServerTimestamp() });
+            await adminDb.collection('orders').add({ companyId: await reqCompanyId(req), ...payload, createdAt: pgServerTimestamp() });
             created++;
           } else {
             await existing.docs[0].ref.set(payload, { merge: true });
@@ -6082,7 +6114,7 @@ async function startServer() {
             updatedAt:          pgServerTimestamp(),
           };
           if (existing.empty) {
-            await adminDb.collection('orders').add({ ...payload, createdAt: pgServerTimestamp() });
+            await adminDb.collection('orders').add({ companyId: await reqCompanyId(req), ...payload, createdAt: pgServerTimestamp() });
             created++;
           } else {
             await existing.docs[0].ref.set(payload, { merge: true });
@@ -6135,6 +6167,7 @@ async function startServer() {
         // Log to Firebase
         if (adminDb) {
           await adminDb.collection('whatsappMessages').add({
+            companyId: await reqCompanyId(req),
             to: phone, message: message ?? templateName ?? '', status: 'sent',
             provider: '360dialog', messageId: (data as Record<string, unknown>).messages,
             createdAt: pgServerTimestamp(),
@@ -6162,6 +6195,7 @@ async function startServer() {
         if (!r.ok) return res.status(r.status).json({ success: false, error: (data as Record<string,unknown>).message });
         if (adminDb) {
           await adminDb.collection('whatsappMessages').add({
+            companyId: await reqCompanyId(req),
             to: phone, message: message ?? '', status: 'sent',
             provider: 'twilio', messageId: (data as Record<string, unknown>).sid,
             createdAt: pgServerTimestamp(),
@@ -6334,6 +6368,7 @@ async function startServer() {
     // Log to Firestore
     if (adminDb) {
       await adminDb.collection('emailLog').add({
+        companyId: await reqCompanyId(req),
         orderId, to: customerEmail, subject: subjectText, status, sentAt: pgServerTimestamp(),
       });
     }
@@ -6357,6 +6392,7 @@ async function startServer() {
     if (adminDb) {
       try {
         await adminDb.collection('invites').doc(token).set({
+          companyId: await reqCompanyId(req),
           email, role, token, expiresAt,
           createdAt: pgServerTimestamp(),
           used: false,
@@ -6742,6 +6778,7 @@ async function startServer() {
 
       if (success) {
         await adminDb.collection('orders').doc(orderId).set({
+          companyId: await reqCompanyId(req),
           lucaFaturaNo,
           lucaSynced:   true,
           lucaSyncedAt: pgServerTimestamp(),
@@ -6968,6 +7005,7 @@ async function startServer() {
       const success = d.status === 'success' && !!d.paymentPageUrl;
       if (success && adminDb) {
         await adminDb.collection('orders').doc(orderId).set({
+          companyId: await reqCompanyId(req),
           iyzicoPaymentUrl:   d.paymentPageUrl,
           iyzicoToken:        d.token,
           iyzicoCreatedAt:    pgServerTimestamp(),
@@ -7099,6 +7137,7 @@ async function startServer() {
       const result = await sendWhatsApp(creds, phone, components);
       if (adminDb) {
         await adminDb.collection('waMessageLog').add({
+          companyId: await reqCompanyId(req),
           to: phone, orderId: orderId ?? null, orderNo: no, status,
           messageId:  result.messageId ?? null,
           error:      result.error ?? null,
