@@ -3127,7 +3127,7 @@ async function startServer() {
   });
 
   // Create Draft Order
-  app.post('/api/shopify/draft-order', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/shopify/draft-order', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     const storeDomain = (() => {
       const raw = process.env.SHOPIFY_STORE_DOMAIN || 'cetpa.myshopify.com';
@@ -3457,7 +3457,7 @@ async function startServer() {
   });
 
   // FedEx Tracking — https://developer.fedex.com/api/en-us/catalog/tracking
-  app.post('/api/tracking/fedex', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/tracking/fedex', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const clientId = process.env.FEDEX_CLIENT_ID;
     const clientSecret = process.env.FEDEX_CLIENT_SECRET;
     const { trackingNumber } = req.body;
@@ -3639,7 +3639,7 @@ async function startServer() {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
   });
-  app.post('/api/ops/watchdog/run', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+  app.post('/api/ops/watchdog/run', requireAuth, requireMfaVerified, requireSuperAdmin, async (_req: Request, res: Response) => {
     try {
       res.json({ success: true, result: await runOpsWatchdog() });
     } catch (e) {
@@ -3989,7 +3989,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/stok/listesi — pull Mikro StokListesiV2 → Firebase */
-  app.post('/api/mikro/stok/listesi', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/stok/listesi', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { stokKod = '', ilkTarih = '2020-01-01', size = 100, index = 0 } = req.body || {};
@@ -4121,7 +4121,7 @@ async function startServer() {
    *  WhereStr'i serbest SQL parcasi kabul ettigi icin (SqlVeriOkuV2/ListesiV2
    *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
-  app.post('/api/mikro/cari/listesi', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/cari/listesi', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const body = req.body || {};
@@ -4242,7 +4242,7 @@ async function startServer() {
   // update existing ones. Paginates automatically until all records are fetched.
 
   /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
-  app.post('/api/mikro/import/stok', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/import/stok', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -4463,7 +4463,7 @@ async function startServer() {
   });
 
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
-  app.post('/api/mikro/import/cari', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/import/cari', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -4759,7 +4759,7 @@ async function startServer() {
    *  jobs/stokMiktarImport dokümanına canlı yazılır (panel onSnapshot ile izler).
    */
   let stokMiktarJobRunning = false;
-  app.post('/api/mikro/import/stok-miktar', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/import/stok-miktar', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     if (MIKRO_JUMP_SURUM < 17) {
@@ -4852,7 +4852,7 @@ async function startServer() {
    *  Body: { hareket: Record<string, unknown>, firebaseId?: string }
    *  Alan adları Mikro dökümantasyonuna göre çağıran tarafça verilir.
    */
-  app.post('/api/mikro/cari-hareket/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/cari-hareket/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { hareket } = req.body as { hareket: Record<string, unknown> };
     if (!hareket) return res.status(400).json({ success: false, error: 'hareket alanı zorunlu.' });
@@ -4889,7 +4889,7 @@ async function startServer() {
     'DekontKaydetV2',
   ]);
 
-  app.post('/api/mikro/evrak/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/evrak/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { method, payload, entityType, entityId } = req.body as {
       method: string; payload: Record<string, unknown>; entityType?: string; entityId?: string;
@@ -4920,7 +4920,7 @@ async function startServer() {
    *  Her kayıt çift taraflı 2 satır olur: borç satırı (+meblag) ve alacak satırı (-meblag).
    *  Yalnızca Mikro'nun kabul ettiği fişlerin id'leri syncedIds olarak döner.
    */
-  app.post('/api/mikro/yevmiye/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/yevmiye/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { entries } = req.body as { entries: Record<string, unknown>[] };
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -4974,7 +4974,7 @@ async function startServer() {
    *  Body: { tahsilat: { cariKod, tutar, tarih(YYYY-MM-DD), aciklama?, tip: 'tahsilat'|'tediye' } }
    *  Alan eşlemesi V17 örneğinden — DENEYSEL: ilk gerçek kayıtla doğrulanmalı.
    */
-  app.post('/api/mikro/tahsilat/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/tahsilat/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { tahsilat } = req.body as { tahsilat: Record<string, unknown> };
     if (!tahsilat?.cariKod || !tahsilat?.tutar) {
@@ -5022,7 +5022,7 @@ async function startServer() {
    *  NOT: Mikro test ortamında 'MikroApiLoginForSelect' SQL kullanıcısı eksikse
    *  401 döner — Mikro destek tenant DB'de tanımlayınca çalışır.
    */
-  app.post('/api/mikro/import/faturalar', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/import/faturalar', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const companyId = (req as Request & { uid: string }).uid;
@@ -5097,7 +5097,7 @@ async function startServer() {
   /** POST /api/mikro/token — IDM token al/yenile (env veya Firestore creds ile).
    *  Token client'a DÖNDÜRÜLMEZ — yalnızca alınabildiği bilgisi + süre döner.
    */
-  app.post('/api/mikro/token', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/token', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getMikroCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     try {
@@ -5115,7 +5115,7 @@ async function startServer() {
    *  source alanı OLAN her şey korunur: mikro_import, csv, manual, shopify vb.
    *  Body: { dryRun?: boolean } — dryRun=true yalnızca sayım döner, silmez.
    */
-  app.post('/api/admin/cleanup-dummy-inventory', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  app.post('/api/admin/cleanup-dummy-inventory', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const dryRun = !!(req.body as { dryRun?: boolean })?.dryRun;
     try {
@@ -5156,7 +5156,7 @@ async function startServer() {
   /** POST /api/sku-mapping/auto-match — envanter SKU'larını Shopify ürünleriyle
    *  normalize ederek eşleştirir, skuMappings koleksiyonuna yazar.
    */
-  app.post('/api/sku-mapping/auto-match', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/sku-mapping/auto-match', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
     const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -5236,7 +5236,7 @@ async function startServer() {
   // Body: { order: Record<string, unknown>, firebaseId: string }
   //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
   // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
-  app.post('/api/mikro/fatura/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/fatura/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = validate(FaturaKaydetSchema, req.body, res);
     if (!parsed) return;
@@ -5379,7 +5379,7 @@ async function startServer() {
   // Body: { shipment: Record<string, unknown>, firebaseId: string }
   //   shipment must have: mikroCariKod, customerName, destination, trackingNo, items[]
   // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
-  app.post('/api/mikro/irsaliye/kaydet', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/irsaliye/kaydet', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = validate(IrsaliyeKaydetSchema, req.body, res);
     if (!parsed) return;
@@ -5465,7 +5465,7 @@ async function startServer() {
   // ── Mikro Pull: Cari Bakiye ──────────────────────────────────────────────────
   // POST /api/mikro/pull/bakiye — pull AR/AP balances from Mikro → Firebase cariBalances
   // Runs full CariHareketListesiV2 per lead that has mikroCariKod; updates their bakiye
-  app.post('/api/mikro/pull/bakiye', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5509,7 +5509,7 @@ async function startServer() {
   // ── Mikro Pull: Mizan (Trial Balance) ───────────────────────────────────────
   // POST /api/mikro/pull/mizan  — pull monthly trial balance → Firebase accountingPeriods
   // Body: { period?: 'YYYY-MM', yil?: number, ay?: number }
-  app.post('/api/mikro/pull/mizan', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/mizan', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5609,7 +5609,7 @@ async function startServer() {
 
   // ── KDV Özet Pull ─────────────────────────────────────────────────────────────
   // POST /api/mikro/pull/kdv  — pull monthly KDV summary → Firebase taxSummary
-  app.post('/api/mikro/pull/kdv', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/pull/kdv', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5647,7 +5647,7 @@ async function startServer() {
   // Body: { faturaGuid: string, firebaseId?: string }   (ret için: aciklama?: string)
   // Endpoint'ler Mikro destek tarafından 2026-06-11'de onaylandı.
 
-  app.post('/api/mikro/gelen-fatura/kabul', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/gelen-fatura/kabul', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
@@ -5675,7 +5675,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/mikro/gelen-fatura/ret', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/mikro/gelen-fatura/ret', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
@@ -5783,7 +5783,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/parasut/import/cari', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  app.post('/api/parasut/import/cari', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const creds = await getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
@@ -5847,7 +5847,7 @@ async function startServer() {
     } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
   });
 
-  app.post('/api/parasut/import/stok', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  app.post('/api/parasut/import/stok', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const creds = await getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
@@ -5889,7 +5889,7 @@ async function startServer() {
     } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
   });
 
-  app.post('/api/parasut/fatura', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/parasut/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const { order } = req.body as { order: Record<string, unknown> };
@@ -5960,7 +5960,7 @@ async function startServer() {
   });
 
   /** POST /api/trendyol/sync — pull recent orders → Firebase */
-  app.post('/api/trendyol/sync', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/trendyol/sync', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getTrendyolCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();
@@ -6049,7 +6049,7 @@ async function startServer() {
   });
 
   /** POST /api/hepsiburada/sync — pull recent orders → Firebase */
-  app.post('/api/hepsiburada/sync', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/hepsiburada/sync', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getHepsiburadaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();
@@ -6101,7 +6101,7 @@ async function startServer() {
   // Credentials: WHATSAPP_API_KEY (360dialog) or TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWATSAPP_FROM
 
   /** POST /api/whatsapp/send — send a text or template message */
-  app.post('/api/whatsapp/send', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/send', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { to, message, templateName, templateParams } = req.body as {
       to: string; message?: string; templateName?: string; templateParams?: string[];
     };
@@ -6257,7 +6257,7 @@ async function startServer() {
 
   // POST /api/email/send — generic send (used by UI, requires auth)
   // Body: { to, subject, html }
-  app.post('/api/email/send', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/email/send', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const body = validate(EmailSendSchema, req.body, res);
     if (!body) return;
     const result = await sendEmail(body.to, body.subject, body.html, body.from, body.replyTo);
@@ -6268,7 +6268,7 @@ async function startServer() {
 
   // POST /api/email/order-notification
   // Body: { orderId, status, customerEmail } — sends branded status email
-  app.post('/api/email/order-notification', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/email/order-notification', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId, status, customerEmail, customerName, orderNo, lang = 'tr' } =
       req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
     if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });
@@ -6343,7 +6343,7 @@ async function startServer() {
   // ── Admin: User Invite ────────────────────────────────────────────────────
   // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
   // Body: { email, role }
-  app.post('/api/admin/invite', authLimiter, requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  app.post('/api/admin/invite', authLimiter, requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
     const ALLOWED_INVITE_ROLES = ['Admin', 'Manager', 'Sales', 'Accountant', 'Warehouse', 'Dealer', 'B2B', 'Viewer'];
@@ -6424,7 +6424,7 @@ async function startServer() {
    * Rate-limited to 3 req/s to stay inside Resend free tier.
    * Returns: { sent, failed, notConfigured? }
    */
-  app.post('/api/email/bulk-campaign', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/email/bulk-campaign', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { subject, body, recipients, campaignId } =
       req.body as { subject: string; body: string; recipients: { name: string; email: string }[]; campaignId?: string };
 
@@ -6495,7 +6495,7 @@ async function startServer() {
    * Body: { url }
    * Sends a test ping to the given URL and returns { ok, status }.
    */
-  app.post('/api/webhooks/test', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/webhooks/test', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { url } = req.body as { url: string };
     if (!url || !isSafePublicUrl(url)) return res.status(400).json({ error: 'Geçerli bir public http(s) URL gerekli (iç ağ adresleri engellidir).' });
     try {
@@ -6629,7 +6629,7 @@ async function startServer() {
    *  Yalnızca Luca'nın kabul ettiği kayıtların id'leri synced olarak döner —
    *  client isSynced işaretini SADECE gerçek başarıda atar.
    */
-  app.post('/api/luca/sync/yevmiye', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/yevmiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const { entries } = req.body as { entries: Record<string, unknown>[] };
@@ -6692,7 +6692,7 @@ async function startServer() {
 
   // POST /api/luca/sync/fatura
   // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
-  app.post('/api/luca/sync/fatura', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -6756,7 +6756,7 @@ async function startServer() {
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
-  app.post('/api/luca/sync/stok', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/stok', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -6873,7 +6873,7 @@ async function startServer() {
   // Body: { orderId, amount, currency?, customerName, customerEmail, customerPhone?,
   //         shippingAddress?, taxId?, lineItems?, callbackUrl? }
   // On success: stores paymentPageUrl + iyzicoToken on orders/{orderId}
-  app.post('/api/iyzico/payment-link', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/iyzico/payment-link', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getIyzicoCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
 
@@ -7067,7 +7067,7 @@ async function startServer() {
   // POST /api/whatsapp/order-notification
   // Body: { orderId, status, phone, customerName, orderNo, lang }
   // Fire-and-forget safe — always 200 even if WA not configured
-  app.post('/api/whatsapp/order-notification', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/order-notification', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.json({ success: false, notConfigured: true });
 
@@ -7166,7 +7166,7 @@ async function startServer() {
    * Returns: { text: string }
    * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
    */
-  app.post('/api/ai/generate', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/ai/generate', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const { prompt, model = 'gemini-2.0-flash', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
@@ -7197,7 +7197,7 @@ async function startServer() {
    * Returns: { text: string }
    * Used by: AIChat.tsx
    */
-  app.post('/api/ai/chat', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/ai/chat', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const chatValidated = validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
@@ -7233,7 +7233,7 @@ async function startServer() {
    * Calls Gemini server-side with structured JSON schema and returns ForecastData.
    * Protected by Firebase Auth (requireAuth).
    */
-  app.post('/api/ai/demand-forecast', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/ai/demand-forecast', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const {
@@ -7299,7 +7299,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
    * Returns: { url: string } — Stripe Checkout hosted URL
    * Protected by Firebase Auth (requireAuth).
    */
-  app.post('/api/stripe/create-checkout', paymentLimiter, requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/stripe/create-checkout', paymentLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
     const uid = (req as Request & { uid: string }).uid;
     const { planId, cycle } = req.body as { planId: string; cycle: 'monthly' | 'yearly' };
@@ -7544,7 +7544,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   /** Bir kiracı firmanın durumunu değiştirir (active/suspended) + plan/not. */
-  app.post('/api/superadmin/tenants/:companyId/status', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  app.post('/api/superadmin/tenants/:companyId/status', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const cid = String(req.params.companyId);
     const { status, note } = (req.body ?? {}) as { status?: string; note?: string };
@@ -7565,7 +7565,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   /** Bir kiracı firmayı düzenler — plan, durum ve not birlikte güncellenir. */
   const SA_PLANS = new Set(['starter', 'professional', 'business', 'enterprise', 'free']);
-  app.post('/api/superadmin/tenants/:companyId/update', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  app.post('/api/superadmin/tenants/:companyId/update', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const cid = String(req.params.companyId);
     const { plan, status, note, cycle, nextPaymentDate } = (req.body ?? {}) as
@@ -7665,7 +7665,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   /** Kiracı firmaya abonelik ödeme linki oluşturur (iyzico) ve isteğe bağlı e-posta gönderir. */
-  app.post('/api/superadmin/tenants/:companyId/payment-link', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  app.post('/api/superadmin/tenants/:companyId/payment-link', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const creds = await getIyzicoCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true, error: 'İyzico yapılandırılmamış (IYZICO_API_KEY).' });
@@ -7810,7 +7810,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   }
 
   // POST /api/marketplace/search { query?, barcode?, sku? } → rakip fiyatları
-  app.post('/api/marketplace/search', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/marketplace/search', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { query, barcode, sku } = (req.body ?? {}) as { query?: string; barcode?: string; sku?: string };
     const term = (barcode || sku || query || '').toString().trim();
     if (!term) return res.status(400).json({ error: 'query, barcode veya sku gerekli.' });
@@ -7904,17 +7904,17 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
-  app.post('/api/logo/import/stok', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/logo/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo stok import not yet implemented.' });
   });
 
-  app.post('/api/logo/import/cari', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/logo/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo cari import not yet implemented.' });
   });
 
-  app.post('/api/logo/export/siparis', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/logo/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
     if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true });
@@ -8003,21 +8003,21 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
-  app.post('/api/dynamics/import/stok', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/dynamics/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /items, upsert to Firebase inventory
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics items import not yet implemented.' });
   });
 
-  app.post('/api/dynamics/import/cari', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/dynamics/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /customers, upsert to Firebase leads
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics customer import not yet implemented.' });
   });
 
-  app.post('/api/dynamics/export/siparis', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/dynamics/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
     const token = await getDynamicsToken();
@@ -8026,7 +8026,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return res.json({ success: false, notImplemented: true, error: 'Dynamics order export not yet implemented.' });
   });
 
-  app.post('/api/dynamics/export/fatura', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/dynamics/export/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
     const token = await getDynamicsToken();
@@ -8114,21 +8114,21 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
-  app.post('/api/sap/import/stok', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/sap/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     const session = await getSAPSession();
     if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /Items?$select=ItemCode,ItemName,OnHand,Price, upsert to Firebase
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP items import not yet implemented.' });
   });
 
-  app.post('/api/sap/import/cari', requireAuth, async (_req: Request, res: Response) => {
+  app.post('/api/sap/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     const session = await getSAPSession();
     if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /BusinessPartners?$filter=CardType eq 'cCustomer', upsert to Firebase leads
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP business partner import not yet implemented.' });
   });
 
-  app.post('/api/sap/export/siparis', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/sap/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
     const session = await getSAPSession();
@@ -8137,7 +8137,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return res.json({ success: false, notImplemented: true, error: 'SAP order export not yet implemented.' });
   });
 
-  app.post('/api/sap/export/fatura', requireAuth, async (req: Request, res: Response) => {
+  app.post('/api/sap/export/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { orderId } = req.body as { orderId?: string };
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
     const session = await getSAPSession();

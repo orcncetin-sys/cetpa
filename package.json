@@ -92,5 +92,8 @@
     "typescript-eslint": "^8.57.2",
     "vite": "^8.0.1",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "websocket-driver": "^0.7.5"
   }
 }
