@@ -7952,11 +7952,15 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
 
   app.post('/api/logo/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: Logo REST'ten stok çek, inventory'ye upsert.
+    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo stok import not yet implemented.' });
   });
 
   app.post('/api/logo/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
     if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
+    // TODO: Logo REST'ten cari çek, leads'e upsert.
+    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo cari import not yet implemented.' });
   });
 
@@ -8053,6 +8057,8 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /items, upsert to Firebase inventory
+    // ⚠️ TENANT: her yazıma companyId ekle (const cid = await reqCompanyId(req);
+    //   create VE update objesine → self-heal). Bkz Mikro/Paraşüt import deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics items import not yet implemented.' });
   });
 
@@ -8060,6 +8066,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /customers, upsert to Firebase leads
+    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics customer import not yet implemented.' });
   });
 
@@ -8164,6 +8171,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const session = await getSAPSession();
     if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /Items?$select=ItemCode,ItemName,OnHand,Price, upsert to Firebase
+    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP items import not yet implemented.' });
   });
 
@@ -8171,6 +8179,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const session = await getSAPSession();
     if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     // TODO: paginate GET /BusinessPartners?$filter=CardType eq 'cCustomer', upsert to Firebase leads
+    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
     return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP business partner import not yet implemented.' });
   });
 
