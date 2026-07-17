@@ -5860,6 +5860,7 @@ async function startServer() {
           type: a.account_type === 'supplier' ? 'Supplier' : 'Customer',
           parasutId: pid, source: 'parasut', mikroSynced: false,
           updatedAt: pgServerTimestamp(),
+          companyId, // güncellemede de etiketle (self-heal, Mikro ile aynı desen)
         };
         // Oncelik: parasutId -> VKN -> case-insensitive isim (ayni mikro/import/cari
         // fix'i - manuel olusturulmus leads'in parasutId'si olmaz).
@@ -5871,7 +5872,7 @@ async function startServer() {
         if (ref) { batch.update(ref, fields); updated++; }
         else {
           const newRef = adminDb.collection('leads').doc();
-          batch.set(newRef, { ...fields, companyId, status: 'Active', createdAt: pgServerTimestamp() });
+          batch.set(newRef, { ...fields, status: 'Active', createdAt: pgServerTimestamp() });
           byParasutId.set(pid, newRef);
           created++;
         }
@@ -5913,10 +5914,11 @@ async function startServer() {
           prices: { 'Retail': listPrice, 'B2B Standard': listPrice, 'B2B Premium': listPrice, 'Dealer': listPrice },
           parasutId: String(p.id), source: 'parasut',
           updatedAt: pgServerTimestamp(),
+          companyId, // güncellemede de etiketle (self-heal)
         };
         const ref = bySku.get(sku);
         if (ref) { batch.update(ref, fields); updated++; }
-        else { batch.set(adminDb.collection('inventory').doc(), { ...fields, companyId, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() }); created++; }
+        else { batch.set(adminDb.collection('inventory').doc(), { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() }); created++; }
         if (++ops >= 400) await flush();
       }
       await flush();
