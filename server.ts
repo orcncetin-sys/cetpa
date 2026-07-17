@@ -2047,6 +2047,9 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           stockLevel: mikroQty,
           mikroStoKod: sku, mikroSynced: true,
           mikroSyncedAt: pgServerTimestamp(),
+          // companyId GÜNCELLEMEDE de yazilir: eski etiketsiz kayitlar her senkronda
+          // kendiliginden etiketlenir (self-heal) — ayri backfill'e gerek kalmaz.
+          companyId,
         };
         const existing = invBySku.get(sku);
         if (existing) {
@@ -2066,7 +2069,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         }
         else {
           batch.set(adminDb.collection('inventory').doc(), {
-            ...fields, companyId, sku, category: 'Genel',
+            ...fields, sku, category: 'Genel',
             lowStockThreshold: 5, prices: {}, price: 0,
             source: 'mikro_cron', createdAt: pgServerTimestamp(),
           });
@@ -2112,6 +2115,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
           type: leadType, mikroCariKod: kod,
           mikroSynced: true, mikroSyncedAt: pgServerTimestamp(),
+          companyId, // güncellemede de etiketle (self-heal)
         };
         // Oncelik: mikroCariKod -> VKN -> case-insensitive isim (bkz.
         // /api/mikro/import/cari'deki ayni fix - manuel olusturulmus leads'in
@@ -2126,7 +2130,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         else {
           const newRef = adminDb.collection('leads').doc();
           batch.set(newRef, {
-            ...fields, companyId, status: 'Active', source: 'mikro_cron',
+            ...fields, status: 'Active', source: 'mikro_cron',
             createdAt: pgServerTimestamp(),
           });
           leadByKod.set(kod, newRef);
@@ -4577,10 +4581,10 @@ async function startServer() {
 
             const targetRef = existingRef ?? adminDb.collection('leads').doc();
             if (existingRef) {
-              batch.update(targetRef, lead);
+              batch.update(targetRef, { ...lead, companyId }); // güncellemede de etiketle (self-heal)
               updated++;
             } else {
-              batch.set(targetRef, { ...lead, createdAt: pgServerTimestamp() });
+              batch.set(targetRef, { ...lead, companyId, createdAt: pgServerTimestamp() });
               created++;
             }
             existingByKod.set(cariKod, targetRef);
@@ -6823,6 +6827,7 @@ async function startServer() {
           source:     'luca',
           lucaSynced: true,
           updatedAt:  pgServerTimestamp(),
+          companyId:  await reqCompanyId(req), // tenant etiketi (create+update, self-heal)
         };
         if (snap.exists) { batch.update(ref, data2); updated++; }
         else             { batch.set(ref, { ...data2, createdAt: pgServerTimestamp() }); created++; }
