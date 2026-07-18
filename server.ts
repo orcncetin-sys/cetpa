@@ -8028,6 +8028,29 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return `https://api.businesscentral.dynamics.com/v2.0/${process.env.DYNAMICS_TENANT_ID}/${env}/api/v2.0/companies(${process.env.DYNAMICS_COMPANY_ID})`;
   }
 
+  // BC OData: sayfa sayfa çek (@odata.nextLink izle). 30sn timeout global fetch
+  // sarmalayıcıda var; sayfa döngüsü 200 ile sınırlı (güvenlik freni).
+  async function dynamicsGetAll(token: string, entity: string): Promise<Record<string, unknown>[]> {
+    const out: Record<string, unknown>[] = [];
+    let url: string | null = `${getDynamicsBase()}/${entity}?$top=1000`;
+    let pages = 0;
+    while (url && pages < 200) {
+      const r: globalThis.Response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      if (!r.ok) throw new Error(`Dynamics ${entity} HTTP ${r.status}`);
+      const pd = await r.json() as { value?: Record<string, unknown>[]; '@odata.nextLink'?: string };
+      if (Array.isArray(pd.value)) out.push(...pd.value);
+      const next = pd['@odata.nextLink'] ?? null;
+      // Bearer token'ı yalnız Microsoft BC host'una gönder — yanıttan gelen
+      // nextLink başka bir host'a işaret ederse token sızmasın (SSRF savunması).
+      if (next && !next.startsWith('https://api.businesscentral.dynamics.com/')) {
+        throw new Error('Dynamics nextLink beklenmeyen host — sayfalama durduruldu');
+      }
+      url = next;
+      pages++;
+    }
+    return out;
+  }
+
   app.get('/api/dynamics/status', async (_req: Request, res: Response) => {
     const hasEnvCreds = !!(process.env.DYNAMICS_TENANT_ID && process.env.DYNAMICS_CLIENT_ID && process.env.DYNAMICS_CLIENT_SECRET && process.env.DYNAMICS_COMPANY_ID);
     const fsCreds = hasEnvCreds ? null : await getDynamicsCredsFromFirestore();
@@ -8036,16 +8059,17 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     try {
       const token = await getDynamicsToken();
       if (!token) return res.json({ configured: true, connected: false, error: 'OAuth2 token request failed — check DYNAMICS_CLIENT_ID / DYNAMICS_CLIENT_SECRET / DYNAMICS_TENANT_ID' });
-      const r = await fetch(`${getDynamicsBase()}/companies`, {
+      // Bağlantı probu: getDynamicsBase() ZATEN companies(ID) içerir; hafif bir
+      // alt-entity sorgusu (items?$top=1) hem OAuth hem şirket erişimini doğrular.
+      // (Önceki `${base}/companies` = .../companies(ID)/companies → daima 404'tü.)
+      const r = await fetch(`${getDynamicsBase()}/items?$top=1`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       });
       if (!r.ok) return res.json({ configured: true, connected: false, error: `BC API returned HTTP ${r.status}` });
-      const data = await r.json() as { value?: { displayName?: string; name?: string }[] };
-      const company = data?.value?.[0];
       return res.json({
         configured: true,
         connected:  true,
-        companyName: company?.displayName ?? company?.name ?? 'Business Central',
+        companyName: 'Business Central',
         environmentName: process.env.DYNAMICS_ENVIRONMENT ?? 'production',
       });
     } catch (err) {
@@ -8053,21 +8077,124 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
-  app.post('/api/dynamics/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
+  // BC item → inventory upsert (Mikro/Paraşüt deseni; sku=item.number, dedup sku ile).
+  // NOT: canlı BC'ye karşı test EDİLMEDİ — ilk gerçek sync doğrulayacak.
+  app.post('/api/dynamics/import/stok', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /items, upsert to Firebase inventory
-    // ⚠️ TENANT: her yazıma companyId ekle (const cid = await reqCompanyId(req);
-    //   create VE update objesine → self-heal). Bkz Mikro/Paraşüt import deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics items import not yet implemented.' });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
+    const companyId = (req as Request & { uid: string }).uid;
+    const t0 = Date.now();
+    try {
+      const items = await dynamicsGetAll(token, 'items');
+      const invSnap = await adminDb.collection('inventory').get();
+      const bySku = new Map<string, PgDocRef>();
+      for (const d of invSnap.docs) {
+        const sku = ((d.data().sku as string) || '').trim();
+        if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
+      }
+      let created = 0, updated = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (const it of items) {
+        const sku = ((it.number as string) || '').trim();
+        if (!sku) continue;
+        if ((it.blocked as boolean) === true) continue; // bloke kalemleri atla
+        const price = Number(it.unitPrice) || 0;
+        const fields = {
+          name: (it.displayName as string) || sku,
+          unit: (it.baseUnitOfMeasureCode as string) || 'ADET',
+          stockLevel: Number(it.inventory) || 0,
+          price,
+          prices: { 'Retail': price, 'B2B Standard': price, 'B2B Premium': price, 'Dealer': price },
+          barcode: (it.gtin as string) || '',
+          dynamicsId: String(it.id ?? ''), source: 'dynamics',
+          updatedAt: pgServerTimestamp(),
+          companyId, // create+update etiketle (self-heal)
+        };
+        const ref = bySku.get(sku);
+        if (ref) { batch.update(ref, fields); updated++; }
+        else {
+          const newRef = adminDb.collection('inventory').doc();
+          batch.set(newRef, { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() });
+          bySku.set(sku, newRef);
+          created++;
+        }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
+      await writeAuditLog(reqActor(req), 'Dynamics Stok İçe Aktarma', `${created} yeni / ${updated} güncel`);
+      res.json({ success: true, created, updated, errors: 0, total: items.length, duration: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ success: false, created: 0, updated: 0, errors: 1, error: (e as Error).message });
+    }
   });
 
-  app.post('/api/dynamics/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
+  // BC customer → leads upsert (dedup: dynamicsId → VKN → isim; Paraşüt/Mikro deseni).
+  // NOT: canlı BC'ye karşı test EDİLMEDİ — ilk gerçek sync doğrulayacak.
+  app.post('/api/dynamics/import/cari', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /customers, upsert to Firebase leads
-    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Dynamics customer import not yet implemented.' });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
+    const companyId = (req as Request & { uid: string }).uid;
+    const t0 = Date.now();
+    try {
+      const customers = await dynamicsGetAll(token, 'customers');
+      const leadSnap = await adminDb.collection('leads').get();
+      const byDynId = new Map<string, PgDocRef>();
+      const byVkn = new Map<string, PgDocRef>();
+      const byName = new Map<string, PgDocRef>();
+      const normVkn = (v?: string) => (v || '').replace(/\D/g, '');
+      for (const d of leadSnap.docs) {
+        const data = d.data();
+        const did = (data.dynamicsId as string) || '';
+        if (did) byDynId.set(did, d.ref);
+        const vkn = normVkn((data.taxId as string) || (data.taxNo as string));
+        if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
+        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
+      }
+      let created = 0, updated = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (const c of customers) {
+        const did = String(c.id ?? '');
+        const name = (c.displayName as string) || (c.number as string) || did;
+        const addr = [c.addressLine1, c.addressLine2].filter(Boolean).join(' ');
+        const fields = {
+          name,
+          company: name,
+          email: (c.email as string) || '',
+          phone: (c.phoneNumber as string) || '',
+          taxId: (c.taxRegistrationNumber as string) || '',
+          address: addr,
+          city: (c.city as string) || '',
+          balance: Number(c.balanceDue ?? 0),
+          type: 'Customer', // BC customer entity = müşteri (tedarikçi ayrı 'vendors' entity'si)
+          dynamicsId: did, source: 'dynamics', mikroSynced: false,
+          updatedAt: pgServerTimestamp(),
+          companyId, // create+update etiketle (self-heal)
+        };
+        const vkn = normVkn(fields.taxId);
+        const nameKey = name.trim().toLowerCase();
+        const ref = byDynId.get(did)
+          || (vkn ? byVkn.get(vkn) : undefined)
+          || (nameKey ? byName.get(nameKey) : undefined);
+        if (ref) { batch.update(ref, fields); updated++; }
+        else {
+          const newRef = adminDb.collection('leads').doc();
+          batch.set(newRef, { ...fields, status: 'Active', createdAt: pgServerTimestamp() });
+          if (did) byDynId.set(did, newRef);
+          created++;
+        }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
+      await writeAuditLog(reqActor(req), 'Dynamics Cari İçe Aktarma', `${created} yeni / ${updated} güncel`);
+      res.json({ success: true, created, updated, errors: 0, total: customers.length, duration: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ success: false, created: 0, updated: 0, errors: 1, error: (e as Error).message });
+    }
   });
 
   app.post('/api/dynamics/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
