@@ -55,8 +55,18 @@ console.log(`pg_dump baslatiliyor -> ${dbLocalPath}`);
 await execFileAsync(PG_DUMP, [DATABASE_URL, '-Fc', '-f', dbLocalPath]);
 console.log('pg_dump tamamlandi, boyut:', (statSync(dbLocalPath).size / 1024 / 1024).toFixed(2), 'MB');
 console.log(`Firebase Storage'a yukleniyor -> ${DB_PREFIX}${dbFileName}`);
-await bucket.upload(dbLocalPath, { destination: `${DB_PREFIX}${dbFileName}` });
-console.log('DB yedegi yuklendi.');
+// Off-site upload basarisiz olsa bile (or. Storage etkin degil / bucket yok)
+// SCRIPT COKMEZ: yerel pg_dump zaten alindi ve asagidaki yerel-retention
+// calismali (yoksa yerel yedekler birikip diski doldurur). Uploads bolumu
+// zaten try/catch'liydi; DB upload'i ve uzak-retention'i da sardik.
+let offsiteOk = true;
+try {
+  await bucket.upload(dbLocalPath, { destination: `${DB_PREFIX}${dbFileName}` });
+  console.log('DB yedegi yuklendi.');
+} catch (e) {
+  offsiteOk = false;
+  console.error('DB OFF-SITE upload BASARISIZ (yerel yedek guvende):', e?.message || e);
+}
 
 // ── 2) uploads/ klasoru (tahsilat makbuzlari vb.) → tar.gz ───────────────────
 // Windows Server 2022'de bsdtar (System32\tar.exe) built-in gelir.
@@ -90,16 +100,29 @@ for (const f of readdirSync(LOCAL_DIR)) {
 }
 
 // ── 4) Uzak retention (30 gun) — her iki prefix icin ─────────────────────────
-const remoteCutoff = Date.now() - REMOTE_RETENTION_DAYS * 86400_000;
-for (const prefix of [DB_PREFIX, UPLOADS_PREFIX]) {
-  const [files] = await bucket.getFiles({ prefix });
-  for (const file of files) {
-    const [meta] = await file.getMetadata();
-    if (new Date(meta.timeCreated).getTime() < remoteCutoff) {
-      await file.delete();
-      console.log('Uzak eski yedek silindi:', file.name);
+// Off-site erisilmiyorsa (Storage etkin degil) atla — script cokmesin.
+if (offsiteOk) {
+  try {
+    const remoteCutoff = Date.now() - REMOTE_RETENTION_DAYS * 86400_000;
+    for (const prefix of [DB_PREFIX, UPLOADS_PREFIX]) {
+      const [files] = await bucket.getFiles({ prefix });
+      for (const file of files) {
+        const [meta] = await file.getMetadata();
+        if (new Date(meta.timeCreated).getTime() < remoteCutoff) {
+          await file.delete();
+          console.log('Uzak eski yedek silindi:', file.name);
+        }
+      }
     }
+  } catch (e) {
+    console.error('Uzak retention atlandi (off-site erisilemiyor):', e?.message || e);
   }
 }
 
-console.log('Yedekleme tamamlandi (DB + uploads).');
+// Off-site basarisizsa exit 1 ile bitir ki Task Scheduler/log fark etsin;
+// ama yerel yedek + retention ZATEN yapildi (veri korundu).
+if (!offsiteOk) {
+  console.error('UYARI: off-site yedek alinamadi (yerel yedek tamam). Firebase Storage etkin mi?');
+  process.exitCode = 1;
+}
+console.log('Yedekleme tamamlandi (yerel kesin; off-site: ' + (offsiteOk ? 'OK' : 'BASARISIZ') + ').');
