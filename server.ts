@@ -131,8 +131,11 @@ let adminFirestoreFallback: admin.firestore.Firestore | null = null;
 // hem çözümleyici (resolveGeminiClient) hem de /api/db settings yazma yolu
 // erişebilsin. UI'dan yeni anahtar kaydedilince invalidateGeminiKeyCache()
 // çağrılır → 5 dk TTL beklenmeden anında etkir.
-let geminiKeyCache: { key: string; ts: number } | null = null;
+let geminiKeyCache: { key: string; model: string; ts: number } | null = null;
 const invalidateGeminiKeyCache = () => { geminiKeyCache = null; };
+// Watchdog'un günlük AI sağlık kontrolü — startServer içindeki resolver'lara
+// erişim gerektirdiği için orada kurulur, modül-düzeyi watchdog buradan çağırır.
+let aiHealthProbe: (() => Promise<{ ok: boolean; detail: string }>) | null = null;
 const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
 const PROJECT_ID = "gen-lang-client-0628151245";
 
@@ -1752,6 +1755,15 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
       `indirme ${fmt(dlKBs)}, ` + (upKBs === -1 ? 'yükleme ölçülemedi (uç hatası)' : `yükleme ${fmt(upKBs)}`) +
       ' — eşik ↓512/↑256 KB/sn; düşükse sağlayıcı (ODEA) hat sorunu olabilir');
   } catch (e) { add('bandwidth', false, e instanceof Error ? e.message : String(e)); }
+
+  // 7) Gemini AI sağlığı — 2026-07-20 arızası: Google eski modellerin free-tier
+  //    kotasını sıfırladı, her AI çağrısı 429 dönüyordu ama kimse fark etmedi
+  //    ("Üzgünüm, şu an yanıt veremiyorum"). Günde 1 mini çağrıyla anahtar +
+  //    model + kota üçünü birden doğrula. (Probe startServer'da kurulur.)
+  try {
+    if (!aiHealthProbe) add('ai_gemini', true, 'AI probe hazır değil, atlandı');
+    else { const r = await aiHealthProbe(); add('ai_gemini', r.ok, r.detail); }
+  } catch (e) { add('ai_gemini', false, e instanceof Error ? e.message : String(e)); }
 
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -7202,48 +7214,66 @@ async function startServer() {
   });
 
   // ── Gemini AI Proxy — key never leaves the server ────────────────────────
-  // Priority: GEMINI_API_KEY env → Firestore settings/aiConfig → Vertex AI
+  // Öncelik (2026-07-20'de TERS ÇEVRİLDİ): Firestore settings/aiConfig (UI) →
+  // GEMINI_API_KEY env → Vertex AI. Neden: env anahtarının projesi bayatlayınca
+  // (free-tier kotası 0'a çekildi) kullanıcı UI'dan yeni anahtar girip RDP'siz
+  // düzeltemiyordu — env, UI anahtarını gölgeliyordu. Artık UI kazanır.
   const PLACEHOLDERS_GEMINI = ['your_gemini_api_key_here', ''];
   const geminiApiKeyEnv = process.env.GEMINI_API_KEY ?? '';
   let geminiClient: GoogleGenAI | null = null;
 
-  // geminiKeyCache modül düzeyinde (settings yazma yolu invalidate edebilsin diye).
-  // Sunucunun anahtarı hangi kaynaktan aldığını (env/vertex/firestore) raporlar.
+  // Varsayılan model: 'latest' alias'ı — Google eski modelleri emekliye ayırınca
+  // (2026-07: gemini-2.0-flash free-tier kotası 0'a çekildi → tüm AI çağrıları
+  // 429) alias otomatik güncel modele kayar. Override: env GEMINI_MODEL veya
+  // settings/aiConfig.geminiModel.
+  const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  // Emekli model adları (1.x, 2.0): eski istemci bundle'ından gelirse varsayılana çevir.
+  const LEGACY_GEMINI_MODEL_RE = /^gemini-(1\.|2\.0)/;
+  const resolveGeminiModel = (requested?: string): string => {
+    if (requested && !LEGACY_GEMINI_MODEL_RE.test(requested)) return requested;
+    return geminiKeyCache?.model || DEFAULT_GEMINI_MODEL;
+  };
+
+  // Sunucunun anahtarı hangi kaynaktan aldığını (firestore/env/vertex) raporlar.
   const geminiKeySource = (): 'env' | 'vertex' | 'firestore' | 'none' => {
+    if (geminiKeyCache?.key) return 'firestore';
     if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) return 'env';
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return 'vertex';
-    if (geminiKeyCache?.key) return 'firestore';
     return 'none';
   };
 
   async function resolveGeminiClient(): Promise<GoogleGenAI | null> {
-    // 1. Env var wins
-    if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) {
-      return geminiClient ?? (geminiClient = new GoogleGenAI({ apiKey: geminiApiKeyEnv }));
-    }
-    // 2. Vertex AI
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      return geminiClient ?? (geminiClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: 'us-central1' }));
-    }
-    // 3. Firestore settings/aiConfig.geminiApiKey (set from UI)
+    // 1. UI'dan kaydedilen anahtar ÖNCELİKLİ (settings/aiConfig; 5 dk cache,
+    //    kayıt anında invalidateGeminiKeyCache ile tazelenir).
     if (adminDb) {
       const now = Date.now();
       if (!geminiKeyCache || now - geminiKeyCache.ts > 5 * 60 * 1000) {
         try {
           const snap = await adminDb.collection('settings').doc('aiConfig').get();
-          const key = (snap.data()?.geminiApiKey as string) ?? '';
-          geminiKeyCache = { key, ts: now };
-          if (key) console.log('Gemini client: Firestore key mode ✓');
-        } catch { geminiKeyCache = { key: '', ts: now }; }
+          geminiKeyCache = {
+            key: (snap.data()?.geminiApiKey as string) ?? '',
+            model: (snap.data()?.geminiModel as string) ?? '',
+            ts: now,
+          };
+          if (geminiKeyCache.key) console.log('Gemini client: Firestore key mode ✓');
+        } catch { geminiKeyCache = { key: '', model: '', ts: now }; }
       }
       if (geminiKeyCache?.key) return new GoogleGenAI({ apiKey: geminiKeyCache.key });
+    }
+    // 2. Env
+    if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) {
+      return geminiClient ?? (geminiClient = new GoogleGenAI({ apiKey: geminiApiKeyEnv }));
+    }
+    // 3. Vertex AI
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      return geminiClient ?? (geminiClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: 'us-central1' }));
     }
     return null;
   }
 
   if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) {
     geminiClient = new GoogleGenAI({ apiKey: geminiApiKeyEnv });
-    console.log('Gemini client: API key mode ✓');
+    console.log('Gemini client: env anahtarı mevcut (yedek — UI/settings anahtarı önceliklidir) ✓');
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     try {
       geminiClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: 'us-central1' });
@@ -7282,13 +7312,27 @@ async function startServer() {
     const client = await resolveGeminiClient();
     if (!client) return res.status(200).json({ ok: false, source: 'none', error: 'AI yapılandırılmamış — Ayarlar → AI bölümünden Gemini API anahtarını girin.' });
     const source = geminiKeySource();
+    const model = resolveGeminiModel();
     try {
-      const r = await client.models.generateContent({ model: 'gemini-2.0-flash', contents: 'ping' });
-      return res.json({ ok: true, source, sample: (r.text ?? '').slice(0, 40) });
+      const r = await client.models.generateContent({ model, contents: 'ping' });
+      return res.json({ ok: true, source, model, sample: (r.text ?? '').slice(0, 40) });
     } catch (e) {
-      return res.status(200).json({ ok: false, source, error: safeAiError(e instanceof Error ? e.message : String(e)) });
+      return res.status(200).json({ ok: false, source, model, error: safeAiError(e instanceof Error ? e.message : String(e)) });
     }
   });
+
+  // Watchdog'un günlük AI sağlık kontrolü (runOpsWatchdog check 7 buradan çağırır).
+  aiHealthProbe = async () => {
+    const client = await resolveGeminiClient();
+    if (!client) return { ok: true, detail: 'AI yapılandırılmamış, atlandı' };
+    const model = resolveGeminiModel();
+    try {
+      await client.models.generateContent({ model, contents: 'ping' });
+      return { ok: true, detail: `${model} yanıt veriyor (kaynak: ${geminiKeySource()})` };
+    } catch (e) {
+      return { ok: false, detail: `${model}: ` + safeAiError(e instanceof Error ? e.message : String(e)) };
+    }
+  };
 
   /**
    * POST /api/ai/generate
@@ -7299,14 +7343,14 @@ async function startServer() {
   app.post('/api/ai/generate', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const client = await resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const { prompt, model = 'gemini-2.0-flash', systemInstruction, thinkingLevel, jsonSchema } = req.body as {
+    const { prompt, model, systemInstruction, thinkingLevel, jsonSchema } = req.body as {
       prompt: string; model?: string; systemInstruction?: string;
       thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
     };
     if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
     try {
       const response = await client.models.generateContent({
-        model,
+        model: resolveGeminiModel(model),
         contents: prompt,
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
@@ -7332,7 +7376,7 @@ async function startServer() {
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const chatValidated = validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
     if (!chatValidated) return;
-    const { message, history = [], systemInstruction, model = 'gemini-2.0-flash', highThinking = false } = req.body as {
+    const { message, history = [], systemInstruction, model, highThinking = false } = req.body as {
       message: string;
       history?: { role: string; parts: { text: string }[] }[];
       systemInstruction?: string;
@@ -7342,7 +7386,7 @@ async function startServer() {
     if (!message) return res.status(400).json({ error: 'message is required.' });
     try {
       const chat = client.chats.create({
-        model,
+        model: resolveGeminiModel(model),
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
           ...(highThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } } : {}),
@@ -7394,7 +7438,7 @@ Based on these trends, respond in ${language} as valid JSON (no markdown fences)
 Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
     try {
       const result = await client.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: resolveGeminiModel(),
         contents: prompt,
         config: {
           responseMimeType: 'application/json',

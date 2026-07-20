@@ -75,7 +75,8 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
           message: userMessage,
           history,
           systemInstruction: buildSystemInstruction(),
-          model: isHighThinking ? 'gemini-2.0-flash' : 'gemini-2.0-flash',
+          // model bilerek gönderilmiyor — sunucu güncel varsayılanı seçer
+          // (emekli modele sabitlenen eski bundle'lar 2026-07'de tüm AI'ı düşürmüştü)
           highThinking: isHighThinking,
         }),
       });

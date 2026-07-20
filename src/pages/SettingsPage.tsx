@@ -473,10 +473,11 @@ export default function SettingsPage({
                   none: currentLanguage === 'tr' ? 'yok' : 'none',
                 };
                 const src = srcLabel[j.source as string] ?? String(j.source ?? '');
+                const mdl = j.model ? `, model: ${j.model}` : '';
                 if (j.ok) {
-                  toast((currentLanguage === 'tr' ? `AI çalışıyor ✓ (kaynak: ${src})` : `AI works ✓ (source: ${src})`), 'success');
+                  toast((currentLanguage === 'tr' ? `AI çalışıyor ✓ (kaynak: ${src}${mdl})` : `AI works ✓ (source: ${src}${mdl})`), 'success');
                 } else {
-                  toast((currentLanguage === 'tr' ? `AI başarısız (kaynak: ${src}): ` : `AI failed (source: ${src}): `) + (j.error || `HTTP ${r.status}`), 'error');
+                  toast((currentLanguage === 'tr' ? `AI başarısız (kaynak: ${src}${mdl}): ` : `AI failed (source: ${src}${mdl}): `) + (j.error || `HTTP ${r.status}`), 'error');
                 }
               } catch (e) {
                 toast((currentLanguage === 'tr' ? 'Test edilemedi: ' : 'Test failed: ') + (e instanceof Error ? e.message : String(e)), 'error');
@@ -497,8 +498,8 @@ export default function SettingsPage({
         </div>
         <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 leading-relaxed">
           {currentLanguage === 'tr'
-            ? 'Not: Sunucuda GEMINI_API_KEY ortam değişkeni veya Vertex AI kimliği tanımlıysa, buraya girdiğiniz anahtar KULLANILMAZ (öncelik onlardadır). "Test Et" hangi anahtarın geçerli olduğunu gösterir.'
-            : 'Note: If the server has a GEMINI_API_KEY env var or Vertex AI credentials, the key you enter here is NOT used (they take priority). "Test" shows which key is active.'}
+            ? 'Buraya kaydettiğiniz anahtar ÖNCELİKLİDİR; boşsa sunucu ortam değişkeni (GEMINI_API_KEY) veya Vertex AI kullanılır. "Test Et" hangi anahtarın ve modelin geçerli olduğunu canlı çağrıyla doğrular.'
+            : 'The key you save here takes PRIORITY; if empty, the server env var (GEMINI_API_KEY) or Vertex AI is used. "Test" verifies the active key and model with a live call.'}
         </p>
       </div>
 
