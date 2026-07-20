@@ -127,6 +127,12 @@ const AiChatSchema = z.object({
 // shim when DATABASE_URL is set, real Firestore otherwise (local-dev fallback).
 let adminDb: PgFirestore | null = null;
 let adminFirestoreFallback: admin.firestore.Firestore | null = null;
+// Gemini anahtar önbelleği (settings/aiConfig kaynaklı) — modül düzeyinde ki
+// hem çözümleyici (resolveGeminiClient) hem de /api/db settings yazma yolu
+// erişebilsin. UI'dan yeni anahtar kaydedilince invalidateGeminiKeyCache()
+// çağrılır → 5 dk TTL beklenmeden anında etkir.
+let geminiKeyCache: { key: string; ts: number } | null = null;
+const invalidateGeminiKeyCache = () => { geminiKeyCache = null; };
 const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
 const PROJECT_ID = "gen-lang-client-0628151245";
 
@@ -2885,6 +2891,7 @@ async function startServer() {
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           [coll, realId, JSON.stringify(data)],
         );
+        if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla (client settings/{id} dinler)
         // before yalnızca audited/scoped/merge'de çekildiği için logu bununla sınırla
         // (aksi halde diff tüm alanları "yeni" gösterir = gürültü).
@@ -2922,6 +2929,7 @@ async function startServer() {
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           [coll, realId, JSON.stringify(data)],
         );
+        if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla
         // 'kim neyi değiştirdi' diff'i kaydet (bloklamadan); before her zaman çekildi.
         if (shouldAudit(coll)) {
@@ -7164,8 +7172,14 @@ async function startServer() {
   const geminiApiKeyEnv = process.env.GEMINI_API_KEY ?? '';
   let geminiClient: GoogleGenAI | null = null;
 
-  // Cache for Firestore-sourced key (5-min TTL)
-  let geminiKeyCache: { key: string; ts: number } | null = null;
+  // geminiKeyCache modül düzeyinde (settings yazma yolu invalidate edebilsin diye).
+  // Sunucunun anahtarı hangi kaynaktan aldığını (env/vertex/firestore) raporlar.
+  const geminiKeySource = (): 'env' | 'vertex' | 'firestore' | 'none' => {
+    if (geminiApiKeyEnv && !PLACEHOLDERS_GEMINI.includes(geminiApiKeyEnv)) return 'env';
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return 'vertex';
+    if (geminiKeyCache?.key) return 'firestore';
+    return 'none';
+  };
 
   async function resolveGeminiClient(): Promise<GoogleGenAI | null> {
     // 1. Env var wins
@@ -7205,6 +7219,41 @@ async function startServer() {
   } else {
     console.log('Gemini: no env key — will read from Firestore settings/aiConfig on first request');
   }
+
+  /**
+   * GET /api/ai/status — hangi kaynaktan anahtar kullanılıyor (env/vertex/firestore/none).
+   * Canlı API çağrısı YOK (bedelsiz). UI'da "hangi anahtar geçerli" göstermek için.
+   * Önemli: env veya vertex varsa, UI'dan (settings/aiConfig) kaydedilen anahtar
+   * GÖLGELENİR (kullanılmaz) — bu uç bunu açığa çıkarır.
+   */
+  // Hata mesajından anahtar-benzeri materyali temizle (Google GenAI hataları bazen
+  // ?key=AIza... içerir). requireAdmin ile birlikte savunma-derinliği.
+  const safeAiError = (msg: string) => msg
+    .replace(/AIza[0-9A-Za-z_\-]{10,}/g, 'AIza***')
+    .replace(/key=[^&\s"']+/gi, 'key=***');
+
+  app.get('/api/ai/status', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    const client = await resolveGeminiClient(); // firestore önbelleğini doldurur
+    res.json({ configured: !!client, source: client ? geminiKeySource() : 'none' });
+  });
+
+  /**
+   * POST /api/ai/test — kaydedilen anahtarı UÇTAN UCA doğrular: gerçek (küçük) bir
+   * generateContent çağrısı yapar, başarı/hata + kullanılan kaynağı döner.
+   * Hata durumunda da 200 döner (ok:false) ki istemci gerçek hata mesajını görsün.
+   * requireAdmin: hata mesajı env anahtarını sızdırabilir → yalnız yöneticiye.
+   */
+  app.post('/api/ai/test', requireAuth, requireMfaVerified, requireAdmin, async (_req: Request, res: Response) => {
+    const client = await resolveGeminiClient();
+    if (!client) return res.status(200).json({ ok: false, source: 'none', error: 'AI yapılandırılmamış — Ayarlar → AI bölümünden Gemini API anahtarını girin.' });
+    const source = geminiKeySource();
+    try {
+      const r = await client.models.generateContent({ model: 'gemini-2.0-flash', contents: 'ping' });
+      return res.json({ ok: true, source, sample: (r.text ?? '').slice(0, 40) });
+    } catch (e) {
+      return res.status(200).json({ ok: false, source, error: safeAiError(e instanceof Error ? e.message : String(e)) });
+    }
+  });
 
   /**
    * POST /api/ai/generate

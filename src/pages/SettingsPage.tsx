@@ -65,6 +65,7 @@ export default function SettingsPage({
   handleSelectPlan, handleCancelSubscription, setShowPricingPage,
 }: Props) {
   const [savingGeminiKey, setSavingGeminiKey] = useState(false);
+  const [testingGeminiKey, setTestingGeminiKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [p641Entity, setP641Entity] = useState<'all' | 'orders' | 'inventory' | 'leads' | 'muhasebe'>('all');
@@ -441,7 +442,12 @@ export default function SettingsPage({
                 await setDoc(doc(db, 'settings', 'aiConfig'), { geminiApiKey: geminiApiKeySetting.trim() }, { merge: true });
                 toast(currentLanguage === 'tr' ? 'Gemini API anahtarı kaydedildi ✓' : 'Gemini API key saved ✓', 'success');
               } catch (e) {
+                // Sessiz kalma: kaydetme başarısızsa (403 yetki/MFA, 500 vb.) kullanıcıya GÖSTER.
+                // (dbClient önce yerel iyimser günceller → hata yutulursa "kaydolmuş gibi"
+                //  görünür ama yenilemede eski değere döner = "kaydetmiyor sanırım".)
                 handleFirestoreError(e, OperationType.WRITE, 'settings/aiConfig');
+                const msg = e instanceof Error ? e.message : String(e);
+                toast((currentLanguage === 'tr' ? 'Kaydedilemedi: ' : 'Save failed: ') + msg, 'error');
               } finally {
                 setSavingGeminiKey(false);
               }
@@ -452,11 +458,48 @@ export default function SettingsPage({
             {savingGeminiKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
             {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
           </button>
+          <button
+            onClick={async () => {
+              setTestingGeminiKey(true);
+              try {
+                // Uçtan uca doğrula: sunucu gerçekten çalışan bir anahtara sahip mi?
+                // Kaydedilen anahtar env/Vertex tarafından GÖLGELENİYORSA burada ortaya çıkar.
+                const r = await authFetch('/api/ai/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const j = await r.json().catch(() => ({}));
+                const srcLabel: Record<string, string> = {
+                  env: currentLanguage === 'tr' ? 'sunucu ortam değişkeni (GEMINI_API_KEY)' : 'server env (GEMINI_API_KEY)',
+                  vertex: 'Vertex AI',
+                  firestore: currentLanguage === 'tr' ? 'bu ekranda kaydedilen anahtar' : 'key saved on this screen',
+                  none: currentLanguage === 'tr' ? 'yok' : 'none',
+                };
+                const src = srcLabel[j.source as string] ?? String(j.source ?? '');
+                if (j.ok) {
+                  toast((currentLanguage === 'tr' ? `AI çalışıyor ✓ (kaynak: ${src})` : `AI works ✓ (source: ${src})`), 'success');
+                } else {
+                  toast((currentLanguage === 'tr' ? `AI başarısız (kaynak: ${src}): ` : `AI failed (source: ${src}): `) + (j.error || `HTTP ${r.status}`), 'error');
+                }
+              } catch (e) {
+                toast((currentLanguage === 'tr' ? 'Test edilemedi: ' : 'Test failed: ') + (e instanceof Error ? e.message : String(e)), 'error');
+              } finally {
+                setTestingGeminiKey(false);
+              }
+            }}
+            disabled={testingGeminiKey}
+            className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold px-4 py-2 rounded-full transition-colors disabled:opacity-50"
+          >
+            {testingGeminiKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+            {currentLanguage === 'tr' ? 'Test Et' : 'Test'}
+          </button>
           <p className="text-[10px] text-gray-400">
             {currentLanguage === 'tr' ? '* Ücretsiz anahtar: ' : '* Free key at '}
             <span className="font-mono">aistudio.google.com/apikey</span>
           </p>
         </div>
+        <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 leading-relaxed">
+          {currentLanguage === 'tr'
+            ? 'Not: Sunucuda GEMINI_API_KEY ortam değişkeni veya Vertex AI kimliği tanımlıysa, buraya girdiğiniz anahtar KULLANILMAZ (öncelik onlardadır). "Test Et" hangi anahtarın geçerli olduğunu gösterir.'
+            : 'Note: If the server has a GEMINI_API_KEY env var or Vertex AI credentials, the key you enter here is NOT used (they take priority). "Test" shows which key is active.'}
+        </p>
       </div>
 
       {/* Ayarları kaydet */}
