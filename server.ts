@@ -11,6 +11,7 @@ import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
 import fs from "fs";
+import tls from "tls";
 import multer from "multer";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -1765,11 +1766,79 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
     else { const r = await aiHealthProbe(); add('ai_gemini', r.ok, r.detail); }
   } catch (e) { add('ai_gemini', false, e instanceof Error ? e.message : String(e)); }
 
+  // 8) SSL sertifika — kamuya SUNULAN sertifikanın kalan ömrü + host eşleşmesi.
+  //    (Geçmiş arıza: Plesk default *.plesk.page sertifikası sunarken yeşil CI
+  //    bunu haftalarca maskeledi.) rejectUnauthorized:false bilinçli — bozuk/
+  //    uymayan sertifikayı hata yerine BULGU olarak raporlamak istiyoruz.
+  try {
+    const host = 'app.cetpa.com.tr';
+    const cert = await new Promise<{ valid_to?: string; subject?: { CN?: string }; subjectaltname?: string }>((resolve, reject) => {
+      const sock = tls.connect({ host, port: 443, servername: host, rejectUnauthorized: false, timeout: 8000 }, () => {
+        const c = sock.getPeerCertificate();
+        sock.end();
+        resolve(c as never);
+      });
+      sock.on('error', reject);
+      sock.on('timeout', () => { sock.destroy(); reject(new Error('TLS bağlantı zaman aşımı')); });
+    });
+    const days = cert.valid_to ? (new Date(cert.valid_to).getTime() - Date.now()) / 86_400_000 : 0;
+    const cn = cert.subject?.CN ?? '';
+    const san = cert.subjectaltname ?? '';
+    const hostMatch = san.includes(host) || cn === host || san.includes('*.cetpa.com.tr') || cn === '*.cetpa.com.tr';
+    add('ssl_cert', days > 14 && hostMatch,
+      `${cn || 'CN?'} — ${days.toFixed(0)} gün kaldı` +
+      (hostMatch ? '' : ` — SERTİFİKA ${host} İLE UYUŞMUYOR (Plesk default cert olabilir)`));
+  } catch (e) { add('ssl_cert', false, 'TLS bağlantısı kurulamadı: ' + (e instanceof Error ? e.message : String(e))); }
+
+  // 9) Disk doluluğu — yedekler (C:\cetpa\backups) + WAL + loglar birikirse
+  //    PG yazamaz hale gelir; %8 veya 10 GB altı = müdahale zamanı.
+  try {
+    const st = await fs.promises.statfs(process.cwd());
+    const totalGB = (Number(st.blocks) * Number(st.bsize)) / 1024 ** 3;
+    const freeGB = (Number(st.bavail) * Number(st.bsize)) / 1024 ** 3;
+    const freePct = totalGB > 0 ? (freeGB / totalGB) * 100 : 0;
+    add('disk_space', freeGB > 10 && freePct > 8,
+      `boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(0)}) — eşik: >10 GB ve >%8`);
+  } catch (e) { add('disk_space', false, 'statfs başarısız: ' + (e instanceof Error ? e.message : String(e))); }
+
+  // 10) Client hata birikimi — son 24 saatte anormal frontend hatası =
+  //     kullanıcıların yaşadığı ama bildirmediği kırıklık sinyali.
+  try {
+    if (!pgPool) add('client_errors', true, 'pgPool yok, atlandı');
+    else {
+      const { rows } = await pgPool.query(
+        "SELECT count(*)::int AS n FROM docs WHERE coll = 'clientErrors' AND updated_at > now() - interval '24 hours'");
+      const n = rows[0]?.n ?? 0;
+      add('client_errors', n <= 50, `son 24 saatte ${n} client hatası (eşik ≤50)`);
+    }
+  } catch (e) { add('client_errors', false, e instanceof Error ? e.message : String(e)); }
+
+  // 11) Veritabanı büyüme anomalisi — docs satır sayısı bir günde 2×+ VE
+  //     10k+ artarsa kaçak yazan döngü/sync var demektir (dünkü değer
+  //     opsChecks'ten; stock_ratio ile aynı desen).
+  let docsCount: number | null = null;
+  try {
+    if (!pgPool) add('pg_growth', true, 'pgPool yok, atlandı');
+    else {
+      const { rows } = await pgPool.query("SELECT count(*)::int AS n, pg_total_relation_size('docs') AS b FROM docs");
+      docsCount = rows[0]?.n ?? 0;
+      const mb = Number(rows[0]?.b ?? 0) / 1024 ** 2;
+      const yd2 = new Date(Date.now() - 86_400_000);
+      const yd2Str = `${yd2.getFullYear()}-${String(yd2.getMonth() + 1).padStart(2, '0')}-${String(yd2.getDate()).padStart(2, '0')}`;
+      const prev = adminDb ? await adminDb.collection('opsChecks').doc(yd2Str).get() : null;
+      const prevCount = prev?.exists ? Number((prev.data() as Record<string, unknown>).docsCount) : NaN;
+      const anomaly = Number.isFinite(prevCount) && prevCount > 0 && (docsCount ?? 0) > prevCount * 2 && (docsCount ?? 0) - prevCount > 10_000;
+      add('pg_growth', !anomaly,
+        `${docsCount} satır, ${mb.toFixed(0)} MB` +
+        (Number.isFinite(prevCount) ? `, dün ${prevCount} satır` : ', dünkü veri yok (yarından itibaren kıyaslanır)'));
+    }
+  } catch (e) { add('pg_growth', false, e instanceof Error ? e.message : String(e)); }
+
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const ok = checks.every(c => c.ok);
   try {
-    if (adminDb) await adminDb.collection('opsChecks').doc(date).set({ date, ok, checks, stockRatio, ranAt: pgServerTimestamp() });
+    if (adminDb) await adminDb.collection('opsChecks').doc(date).set({ date, ok, checks, stockRatio, docsCount, ranAt: pgServerTimestamp() });
   } catch (e) { console.warn('opsChecks yazılamadı:', e instanceof Error ? e.message : String(e)); }
   console.log(`Ops watchdog: ${ok ? 'PASS' : 'FAIL'} — ${checks.map(c => `${c.ok ? '+' : '!'}${c.key}`).join(' ')}`);
   return { date, ok, checks, stockRatio };
