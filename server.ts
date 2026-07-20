@@ -1718,6 +1718,41 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
     add('exchange_rates', age < 2, `USD ${cachedExchangeRates.rates.USD ?? '?'} (${cachedExchangeRates.source}, ${age.toFixed(1)} saat önce)`);
   }
 
+  // 6) Bant genişliği self-testi — 2026-07-20 arızası: sunucunun TÜM ağ hattı
+  //    ~40 KB/sn'ye düştü (sağlayıcı tarafı), uygulama bundle indiremediği için
+  //    boot edemedi; küçük /api/health yanıtları ise "sağlıklı" göründü. Bu test
+  //    gerçek veri akıtarak ölçer: Cloudflare'den 5 MB indir (8 sn bütçe) +
+  //    1 MB yükle. Kendi signal'ımızı verdiğimiz için 30 sn'lik global fetch
+  //    timeout'una takılmayız.
+  try {
+    const dlKBs = await (async () => {
+      const ctrl = new AbortController();
+      const t0 = Date.now();
+      let bytes = 0;
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const res = await fetch('https://speed.cloudflare.com/__down?bytes=5000000', { signal: ctrl.signal });
+        const reader = res.body?.getReader();
+        if (reader) for (;;) { const { done, value } = await reader.read(); if (done) break; bytes += value?.length ?? 0; }
+      } catch { /* abort = 8 sn'lik ölçüm penceresi doldu; sayılan bayt yeterli */ }
+      clearTimeout(timer);
+      return bytes / Math.max(0.3, (Date.now() - t0) / 1000) / 1024;
+    })();
+    const upKBs = await (async () => {
+      const t0 = Date.now();
+      try {
+        const res = await fetch('https://speed.cloudflare.com/__up', { method: 'POST', body: new Uint8Array(1_000_000), signal: AbortSignal.timeout(15000) });
+        if (!res.ok) return -1; // uç arızası (4xx/5xx) — ağ sinyali değil, ölçümü atla
+        void res.arrayBuffer().catch(() => {});
+        return 1_000_000 / Math.max(0.2, (Date.now() - t0) / 1000) / 1024;
+      } catch { return 0; } // timeout/bağlantı hatası = gerçek yavaşlık sinyali
+    })();
+    const fmt = (k: number) => k >= 1024 ? `${(k / 1024).toFixed(1)} MB/sn` : `${k.toFixed(0)} KB/sn`;
+    add('bandwidth', dlKBs >= 512 && (upKBs === -1 || upKBs >= 256),
+      `indirme ${fmt(dlKBs)}, ` + (upKBs === -1 ? 'yükleme ölçülemedi (uç hatası)' : `yükleme ${fmt(upKBs)}`) +
+      ' — eşik ↓512/↑256 KB/sn; düşükse sağlayıcı (ODEA) hat sorunu olabilir');
+  } catch (e) { add('bandwidth', false, e instanceof Error ? e.message : String(e)); }
+
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const ok = checks.every(c => c.ok);

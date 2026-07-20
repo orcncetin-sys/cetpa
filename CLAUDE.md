@@ -14,4 +14,4 @@
 - `npm run build` server.ts'i derlemez; server değişikliğinin tek lokal kanıtı boot testidir.
 
 ## Operasyon Bekçisi
-Sunucuda her sabah 08:30'da `runOpsWatchdog()` (server.ts) koşar: offsite yedek tazeliği (db-backups/ + uploads-backups/), Mikro sync tazeliği, stok oranı çöküşü, retry kuyruğu (`syncJobs`), kur tazeliği. Sonuçlar: `opsChecks` koleksiyonu (global, TENANT dışı), Admin → süper-admin panelindeki kart, `GET /api/ops/watchdog`. FAIL görürsen önce `detail` alanını oku, kök nedeni düzelt — eşik ayarıyla susturma.
+Sunucuda her sabah 08:30'da `runOpsWatchdog()` (server.ts) koşar: offsite yedek tazeliği (db-backups/ + uploads-backups/), Mikro sync tazeliği, stok oranı çöküşü, retry kuyruğu (`syncJobs`), kur tazeliği, bant genişliği self-testi (Cloudflare'den 5MB indir + 1MB yükle; eşik ↓512/↑256 KB/sn — 2026-07-20 sağlayıcı hat çöküşü arıza sınıfı). Sonuçlar: `opsChecks` koleksiyonu (global, TENANT dışı), Admin → süper-admin panelindeki kart, `GET /api/ops/watchdog`. FAIL görürsen önce `detail` alanını oku, kök nedeni düzelt — eşik ayarıyla susturma.
