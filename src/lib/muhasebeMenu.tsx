@@ -93,6 +93,14 @@ export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   { id: 'tekrar-fatura',    tr: 'Tekrarlayan Fatura',  en: 'Recurring',       icon: Repeat,        target: M('tekrar-fatura') },
   { id: 'sirket-arasi',     tr: 'Şirketlerarası',      en: 'Intercompany',    icon: GitCompare,    target: M('sirket-arasi') },
 
+  // ── Analiz/rapor ekranları — ERP kayıt ekranından FARKLI (2026-07-21 geri
+  //    getirildi). Aynı isimliler değil: bunlar rapor, ERP tarafı kayıt.
+  //    (kasa/sabit-kıymet/maliyet GERİ GETİRİLMEDİ — onlar ERP ile AYNI component.)
+  { id: 'banka-mutabakat',  tr: 'Banka Mutabakatı',    en: 'Bank Reconciliation', icon: Landmark,  target: M('banka') },
+  { id: 'tahsilat-takip',   tr: 'Tahsilat Takibi',     en: 'Collection Tracking', icon: Wallet,    target: M('tahsilat') },
+  { id: 'kdv-analiz',       tr: 'KDV Analizi',         en: 'VAT Analysis',    icon: Calculator,    target: M('kdv') },
+  { id: 'butce-plan',       tr: 'Bütçe Planı',         en: 'Budget Plan',     icon: BarChart3,     target: M('butce') },
+
   // ── Ayrı sayfalar (üst seviye activeTab) ────────────────────────────────────
   { id: 'dunning',          tr: 'Otomatik Hatırlatıcı',en: 'Dunning',         icon: Bell,          target: P('dunning') },
   { id: 'holding',          tr: 'Holding Yönetimi',    en: 'Holding',         icon: Network,       target: P('holding') },

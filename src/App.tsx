@@ -4009,6 +4009,7 @@ function AppContent() {
               children: MUHASEBE_MENU.map(m => ({
                 label: tr ? m.tr : m.en,
                 subId: m.id,
+                target: m.target,
                 action: () => {
                   if (m.target.kind === 'accounting') { setActiveTab('muhasebe'); setMuhasebeTab('genel'); setMuhasebeAccountingTab(m.target.tab); }
                   else if (m.target.kind === 'muhasebe') { setActiveTab('muhasebe'); setMuhasebeTab(m.target.tab as typeof muhasebeTab); }
@@ -4085,13 +4086,22 @@ function AppContent() {
                 {sidebarGroups.map(group => {
                   const Icon = group.icon;
                   const isGroupActive = activeTab === group.id || (group.childIds ?? []).includes(activeTab);
-                  const isChildActive = (subId: string) => {
+                  const isChildActive = (subId: string, target?: MuhasebeTarget) => {
                     // check if this sub-item corresponds to current state
                     if (subId === activeTab) return true;
                     if (subId === 'ik-main' && activeTab === 'ik') return true; // IK main
                     if (subId === 'tedarikci-portal' && activeTab === 'satin-alma' && purchasingSubTab === 'tedarikci-portal') return true; // Phase 551
                     if (activeTab === 'crm') return subId === crmTab;
-                    if (activeTab === 'muhasebe') return muhasebeTab === 'genel' ? subId === muhasebeAccountingTab : subId === muhasebeTab;
+                    if (activeTab === 'muhasebe') {
+                      // Birleşik menü: hedefe göre eşle (aynı isimli rapor/ERP öğeleri
+                      // çakışmasın — ERP sekmesi yalnız 'genel'de, rapor kendi tab'ında aktif).
+                      if (target) {
+                        if (target.kind === 'accounting') return muhasebeTab === 'genel' && muhasebeAccountingTab === target.tab;
+                        if (target.kind === 'muhasebe') return muhasebeTab === target.tab;
+                        return false; // app hedefleri yukarıda subId===activeTab ile yakalanır
+                      }
+                      return muhasebeTab === 'genel' ? subId === muhasebeAccountingTab : subId === muhasebeTab;
+                    }
                     if (activeTab === 'lojistik') return subId === lojistikTab;
                     if (activeTab === 'satin-alma') return subId === purchasingSubTab;
                     if (activeTab === 'admin') return subId === `a-${adminTab}`;
@@ -4133,7 +4143,7 @@ function AppContent() {
                       {hasChildren && isGroupActive && (
                         <div className="mt-0.5 ml-3 pl-2.5 border-l space-y-0.5 pb-1" style={{ borderColor: darkMode ? 'rgba(255,255,255,0.08)' : '#e5e7eb' }}>
                           {group.children!.map(child => {
-                            const active = isChildActive(child.subId);
+                            const active = isChildActive(child.subId, (child as { target?: MuhasebeTarget }).target);
                             return (
                               <button
                                 key={child.subId}

@@ -26,6 +26,16 @@ const MaliyetMerkeziModule = React.lazy(() => import('../components/MaliyetMerke
 const KasaModule           = React.lazy(() => import('../components/KasaModule'));
 const CariEkstrePanel      = React.lazy(() => import('../components/CariEkstrePanel'));
 
+// Lazy alt-modüller (kasa/sabit-kıymet/maliyet/cari) YEREL Suspense ile sarılır.
+// Aksi halde bu sekmeye geçince chunk inene kadar App seviyesindeki Suspense
+// devreye girip TÜM Muhasebe sayfası boşalıyor ("yüklemede kalıyor" — özellikle
+// yavaş bağlantıda). Yerel fallback yalnız o paneli spinner gösterir, başlık+bar durur.
+const LAZY_FALLBACK = (
+  <div className="apple-card p-10 flex items-center justify-center">
+    <div className="animate-spin w-6 h-6 border-4 border-brand border-t-transparent rounded-full" />
+  </div>
+);
+
 const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v: number) => void; w?: string }) => (
   <input type="number" step="0.01" value={value || ''} onChange={e => onChange(Number(e.target.value) || 0)}
     placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
@@ -980,21 +990,25 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Sabit Kıymetler ── */}
                   {muhasebeTab === 'sabit-kiymet' && (
                     <motion.div key="muhasebe-sabit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-                      <SabitKiymetModule
-                        currentLanguage={currentLanguage}
-                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
-                        exchangeRates={exchangeRates}
-                      />
+                      <React.Suspense fallback={LAZY_FALLBACK}>
+                        <SabitKiymetModule
+                          currentLanguage={currentLanguage}
+                          isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                          exchangeRates={exchangeRates}
+                        />
+                      </React.Suspense>
                     </motion.div>
                   )}
 
                   {/* ── Maliyet Merkezleri ── */}
                   {muhasebeTab === 'maliyet' && (
                     <motion.div key="muhasebe-maliyet" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-                      <MaliyetMerkeziModule
-                        currentLanguage={currentLanguage as 'tr' | 'en'}
-                        isAuthenticated={!!user && hasFullAccess('muhasebe')}
-                      />
+                      <React.Suspense fallback={LAZY_FALLBACK}>
+                        <MaliyetMerkeziModule
+                          currentLanguage={currentLanguage as 'tr' | 'en'}
+                          isAuthenticated={!!user && hasFullAccess('muhasebe')}
+                        />
+                      </React.Suspense>
                     </motion.div>
                   )}
 
@@ -1549,7 +1563,7 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'kasa' && (
                     <motion.div key="muhasebe-kasa" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                       <ModuleHeader title={currentLanguage === 'tr' ? 'Kasa' : 'Cash Register'} subtitle={currentLanguage === 'tr' ? 'Nakit giriş/çıkış hareketleri ve kasa bakiyeleri' : 'Cash in/out movements and register balances'} icon={Wallet} />
-                      <KasaModule currentLanguage={currentLanguage as 'tr' | 'en'} isAuthenticated={!!user && hasFullAccess('muhasebe')} />
+                      <React.Suspense fallback={LAZY_FALLBACK}><KasaModule currentLanguage={currentLanguage as 'tr' | 'en'} isAuthenticated={!!user && hasFullAccess('muhasebe')} /></React.Suspense>
                     </motion.div>
                   )}
 
@@ -2183,7 +2197,7 @@ export default function MuhasebePage(props: Props) {
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
                         <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
                       </h4>
-                      <CariEkstrePanel currentLanguage={currentLanguage} />
+                      <React.Suspense fallback={LAZY_FALLBACK}><CariEkstrePanel currentLanguage={currentLanguage} /></React.Suspense>
                     </div>
                   )}
 
