@@ -1528,8 +1528,11 @@ function AppContent() {
   // ── Phase 613: Müşteri Portföy Analizi ────────────────────────────────────
   // ── Phase 614: Nakit Pozisyon Özeti ──────────────────────────────────────
   // ── Phase 615: Üretim Kalite Metrikleri ──────────────────────────────────
+  // Phase 615 üretim kalite metrikleri — KALICI (productionMetrics koleksiyonu,
+  // 2026-07-21). onSnapshot ile yüklenir; add/edit/delete DB'ye yazar.
   const [p615Metrics, setP615Metrics] = useState<Array<{id:string;date:string;line:string;total:number;defects:number;rework:number}>>([]);
   const [p615ShowForm, setP615ShowForm] = useState(false);
+  const [p615EditId, setP615EditId] = useState<string|null>(null);
   const [p615Draft, setP615Draft] = useState({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});
   // Kalite modülünün aktif sekmesi — Üretim Kalite Metrikleri yalnız KPI sekmesinde
   // gösterilsin diye (aksi halde her sekmenin altında sabit kalıyordu).
@@ -2319,6 +2322,11 @@ function AppContent() {
       setConsignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Consignment)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'consignments', auth.currentUser?.uid));
 
+    // Phase 615 üretim kalite metrikleri — KALICI (2026-07-21)
+    const unsubProductionMetrics = onSnapshot(query(collection(db, 'productionMetrics'), where('companyId', '==', companyId)), (snapshot) => {
+      setP615Metrics(snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) } as {id:string;date:string;line:string;total:number;defects:number;rework:number})));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'productionMetrics', auth.currentUser?.uid));
+
     const unsubDiscrepancies = onSnapshot(query(collection(db, 'stockDiscrepancies'), where('companyId', '==', companyId), where('resolved', '==', false), limit(100)), (snapshot) => {
       setStockDiscrepancies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockDiscrepancy)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'stockDiscrepancies', auth.currentUser?.uid));
@@ -2409,6 +2417,7 @@ function AppContent() {
       unsubWarehouses();
       unsubMovements();
       unsubConsignments();
+      unsubProductionMetrics();
       unsubDiscrepancies();
       unsubEmployees();
       unsubPayrolls();
@@ -5203,7 +5212,7 @@ function AppContent() {
                       <div className="apple-card p-5 space-y-4">
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <h3 className="font-bold text-gray-900 text-sm">📊 {tr615?'Üretim Kalite Metrikleri':'Production Quality Metrics'}</h3>
-                          <button onClick={()=>setP615ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
+                          <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
                         </div>
                         {p615ShowForm && (
                           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
@@ -5214,12 +5223,16 @@ function AppContent() {
                               <input type="number" className="apple-input" placeholder={tr615?'Hatalı':'Defects'} value={p615Draft.defects} onChange={e=>setP615Draft(d=>({...d,defects:e.target.value}))}/>
                               <input type="number" className="apple-input" placeholder={tr615?'Yeniden İşlem':'Rework'} value={p615Draft.rework} onChange={e=>setP615Draft(d=>({...d,rework:e.target.value}))}/>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p615Draft.line||!p615Draft.total) return;
-                              setP615Metrics(prev=>[...prev,{id:Date.now().toString(),date:p615Draft.date,line:p615Draft.line,total:Number(p615Draft.total),defects:Number(p615Draft.defects)||0,rework:Number(p615Draft.rework)||0}]);
-                              setP615Draft(d=>({...d,line:'',total:'',defects:'',rework:''}));
-                              setP615ShowForm(false);
-                              toast(tr615?'Kayıt eklendi.':'Record added.','success');
+                              const payload={date:p615Draft.date,line:p615Draft.line,total:Number(p615Draft.total),defects:Number(p615Draft.defects)||0,rework:Number(p615Draft.rework)||0};
+                              try {
+                                if(p615EditId){ await updateDoc(doc(db,'productionMetrics',p615EditId),payload); }
+                                else { await addDoc(collection(db,'productionMetrics'),payload); }
+                                setP615Draft(d=>({...d,line:'',total:'',defects:'',rework:''}));
+                                setP615ShowForm(false); setP615EditId(null);
+                                toast(tr615?(p615EditId?'Kayıt güncellendi.':'Kayıt eklendi.'):(p615EditId?'Record updated.':'Record added.'),'success');
+                              } catch(e){ toast((tr615?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                             }} className="apple-button-primary text-xs px-6">{tr615?'Kaydet':'Save'}</button>
                           </div>
                         )}
@@ -5249,7 +5262,10 @@ function AppContent() {
                                         <td className="px-3 py-2 tabular-nums text-red-600 font-bold">{m.defects}</td>
                                         <td className="px-3 py-2 tabular-nums text-amber-600">{m.rework}</td>
                                         <td className={`px-3 py-2 font-bold ${dr>5?'text-red-600':dr>2?'text-amber-600':'text-emerald-600'}`}>%{dr.toFixed(2)}</td>
-                                        <td className="px-3 py-2 text-right"><button type="button" onClick={()=>setP615Metrics(prev=>prev.filter(x=>x.id!==m.id))} title={tr615?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
+                                        <td className="px-3 py-2 text-right"><div className="flex items-center justify-end gap-2">
+                                          <button type="button" onClick={()=>{setP615Draft({date:m.date,line:m.line,total:String(m.total),defects:String(m.defects),rework:String(m.rework)});setP615EditId(m.id);setP615ShowForm(true);}} title={tr615?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'productionMetrics',m.id));}catch(e){toast((tr615?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr615?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                        </div></td>
                                       </tr>
                                     );
                                   })}

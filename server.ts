@@ -690,6 +690,7 @@ const TENANT_COLLECTIONS = new Set([
   'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
   'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
+  'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
   'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',
