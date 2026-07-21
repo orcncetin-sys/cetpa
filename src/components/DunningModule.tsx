@@ -18,7 +18,7 @@ import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Bell, Plus, X, AlertTriangle, CheckCircle2,
-  MessageSquare, Mail, Phone, Gavel, ChevronDown
+  MessageSquare, Mail, Phone, Gavel, ChevronDown, Trash2
 } from 'lucide-react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
@@ -310,7 +310,17 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
               placeholder={tr ? 'Politika adı' : 'Policy name'} className="apple-input px-3 py-2 text-sm w-full md:w-1/2" />
             <div className="space-y-3">
               {policyDraft.levels.map((level, i) => (
-                <div key={i} className="bg-gray-50 rounded-xl p-3 grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
+                <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">{tr ? `Seviye ${i + 1}` : `Level ${i + 1}`}</p>
+                    <button type="button"
+                      onClick={() => setPolicyDraft(d => ({ ...d, levels: d.levels.filter((_, j) => j !== i) }))}
+                      className="text-gray-400 hover:text-red-600 transition-colors p-1 -m-1 rounded-lg hover:bg-red-50"
+                      title={tr ? 'Seviyeyi sil' : 'Delete level'} aria-label={tr ? 'Seviyeyi sil' : 'Delete level'}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
                   <div>
                     <p className="text-xs text-gray-500 mb-1">{tr ? 'Gün Gecikme' : 'Days Overdue'}</p>
                     <input type="number" value={level.daysOverdue}
@@ -340,8 +350,12 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                       onChange={e => setPolicyDraft(d => ({ ...d, levels: d.levels.map((l, j) => j === i ? { ...l, messageTemplate: e.target.value } : l) }))}
                       className="apple-input px-2 py-1.5 text-xs w-full resize-none" rows={2} />
                   </div>
+                  </div>
                 </div>
               ))}
+              {policyDraft.levels.length === 0 && (
+                <p className="text-xs text-gray-400 italic px-1">{tr ? 'Henüz seviye yok — "Seviye Ekle" ile ekleyin.' : 'No levels yet — add one with "Add Level".'}</p>
+              )}
               <button onClick={() => setPolicyDraft(d => ({ ...d, levels: [...d.levels, { daysOverdue: 0, label: '', contactMethod: 'email', messageTemplate: '' }] }))}
                 className="text-xs text-brand font-semibold flex items-center gap-1">
                 <Plus className="w-3 h-3" />{tr ? 'Seviye Ekle' : 'Add Level'}
