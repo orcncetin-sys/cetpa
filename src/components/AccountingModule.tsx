@@ -108,6 +108,9 @@ interface AccountingModuleProps {
   onNavigate?: (target: MuhasebeTarget) => void;
   controlledTab?: string;
   onControlledTabChange?: (tab: string) => void;
+  // Sekme barını gizle — MuhasebePage kalıcı birleşik barı kendisi render eder
+  // (bar AccountingModule içinde kalırsa rapor sekmesine geçince kayboluyordu).
+  hideTabBar?: boolean;
 }
 
 const HESAP_PLANI = [
@@ -286,7 +289,7 @@ const AT = {
   },
 } as const;
 
-export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange }: AccountingModuleProps) {
+export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange, hideTabBar }: AccountingModuleProps) {
   const t = AT[currentLanguage];
   const MONTHS = currentLanguage === 'en' ? MONTHS_EN : MONTHS_TR;
   const resolvedInitialTab = (() => {
@@ -1859,7 +1862,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   return (
     <div className="space-y-4 overflow-x-hidden">
-      {/* Sub-tab Nav — navMenu verilirse birleşik menü (sidebar ile aynı), yoksa klasik */}
+      {/* Sub-tab Nav — hideTabBar ise MuhasebePage barı yönetir; navMenu verilirse birleşik menü */}
+      {!hideTabBar && (
       <div className="overflow-x-auto scrollbar-none -mx-3 px-3 sm:-mx-4 sm:px-4">
         <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
           {navMenu ? navMenu.map(m => {
@@ -1894,6 +1898,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           })}
         </div>
       </div>
+      )}
 
       {/* FATURALAR */}
       {accountingTab === 'faturalar' && (

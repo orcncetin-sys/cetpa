@@ -14,7 +14,7 @@ import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
-import { MUHASEBE_MENU, type MuhasebeTarget } from '../lib/muhasebeMenu';
+import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
@@ -239,28 +239,31 @@ export default function MuhasebePage(props: Props) {
                     icon={Calculator}
                   />
 
-                  {/* ── Sub-tab navigation (mobil; masaüstünde sidebar yönetir) — birleşik menü ── */}
-                  <div className="lg:hidden flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
-                    {MUHASEBE_MENU.map(m => {
-                      const Icon = m.icon;
-                      const isActive = m.target.kind === 'accounting'
-                        ? (muhasebeTab === 'genel' && muhasebeAccountingTab === m.target.tab)
-                        : m.target.kind === 'muhasebe' ? muhasebeTab === m.target.tab : false;
-                      return (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            if (m.target.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(m.target.tab); }
-                            else if (m.target.kind === 'muhasebe') setMuhasebeTab(m.target.tab as MuhasebeTab);
-                            else setActiveTab(m.target.tab);
-                          }}
-                          className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
-                        >
-                          <Icon className="w-3.5 h-3.5" />
-                          {currentLanguage === 'tr' ? m.tr : m.en}
-                        </button>
-                      );
-                    })}
+                  {/* ── Birleşik yatay menü — HER sekmede sabit kalır (rapora geçince kaybolmaz),
+                       sidebar ile birebir aynı liste. AccountingModule kendi barını gizler (hideTabBar). ── */}
+                  <div className="overflow-x-auto scrollbar-none -mx-1 px-1">
+                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
+                      {MUHASEBE_MENU.map(m => {
+                        const Icon = m.icon;
+                        const isActive = m.target.kind === 'accounting'
+                          ? (muhasebeTab === 'genel' && muhasebeAccountingTab === m.target.tab)
+                          : m.target.kind === 'muhasebe' ? muhasebeTab === m.target.tab : false;
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => {
+                              if (m.target.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(m.target.tab); }
+                              else if (m.target.kind === 'muhasebe') setMuhasebeTab(m.target.tab as MuhasebeTab);
+                              else setActiveTab(m.target.tab);
+                            }}
+                            className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-[#ff4000] text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                            {currentLanguage === 'tr' ? m.tr : m.en}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* ── Genel Muhasebe ── */}
@@ -275,14 +278,9 @@ export default function MuhasebePage(props: Props) {
                         createNotification={createNotification}
                         warehouses={warehouses}
                         employees={employees}
-                        navMenu={MUHASEBE_MENU}
+                        hideTabBar
                         controlledTab={muhasebeAccountingTab}
                         onControlledTabChange={setMuhasebeAccountingTab}
-                        onNavigate={(target: MuhasebeTarget) => {
-                          // Bar'daki muhasebe-dışı hedefler: bu görünümden çık, ilgili ekrana git.
-                          if (target.kind === 'muhasebe') setMuhasebeTab(target.tab as MuhasebeTab);
-                          else if (target.kind === 'app') setActiveTab(target.tab);
-                        }}
                       />
                     </motion.div>
                   )}
