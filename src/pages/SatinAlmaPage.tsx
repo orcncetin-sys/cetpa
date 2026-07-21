@@ -1007,9 +1007,12 @@ export default function SatinAlmaPage(props: Props) {
                                   <div key={b.id} className="apple-card p-4">
                                     <div className="flex items-center justify-between mb-2">
                                       <div><p className="font-semibold text-gray-800 text-sm">{b.category}</p><p className="text-[10px] text-gray-400">{b.period}</p></div>
+                                      <div className="flex items-center gap-3">
                                       <div className="text-right">
                                         <p className={`text-sm font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{Math.round(b.spent).toLocaleString('tr-TR')} / ₺{Math.round(b.allocated).toLocaleString('tr-TR')}</p>
                                         <p className={`text-xs ${isOver?'text-red-500':'text-gray-400'}`}>%{pct.toFixed(1)}{isOver?' ⚠️':''}</p>
+                                      </div>
+                                      <button type="button" onClick={()=>setP612Budgets(prev=>prev.filter(x=>x.id!==b.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                       </div>
                                     </div>
                                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -1086,6 +1089,7 @@ export default function SatinAlmaPage(props: Props) {
                                       {['Aktif','Azaltıldı','Kabul Edildi'].map(s=><option key={s}>{s}</option>)}
                                     </select>
                                   </div>
+                                  <button type="button" onClick={()=>setP627Risks(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div>
                               );
                             })}

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, RefreshCw, Package, DollarSign, ChevronDown,
-  Calculator, BookOpen, AlertCircle,
+  Calculator, BookOpen, AlertCircle, Trash2,
 } from 'lucide-react';
 import { Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { db } from '../firebase';
@@ -855,11 +855,14 @@ export default function InventoryPage(props: Props) {
                                   <td className="px-3 py-2.5 font-bold text-gray-700">{b.qty}</td>
                                   <td className="px-3 py-2.5 text-gray-400">{b.location||'—'}</td>
                                   <td className="px-3 py-2.5">
+                                    <div className="flex items-center gap-2">
                                     <select value={b.status} onChange={e=>setP579Batches(prev=>prev.map(x=>x.id===b.id?{...x,status:e.target.value as typeof b.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors579[b.status]}`}>
                                       <option value="Aktif">{tr579?'Aktif':'Active'}</option>
                                       <option value="Karantina">{tr579?'Karantina':'Quarantine'}</option>
                                       <option value="Kullanıldı">{tr579?'Kullanıldı':'Used'}</option>
                                     </select>
+                                    <button type="button" onClick={()=>setP579Batches(prev=>prev.filter(x=>x.id!==b.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -996,9 +999,12 @@ export default function InventoryPage(props: Props) {
                                 <td className="px-3 py-2.5 font-bold text-gray-700">{c.qty}</td>
                                 <td className="px-3 py-2.5 font-bold font-mono text-blue-700">₺{(c.qty*c.agreedPrice).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
                                 <td className="px-3 py-2.5">
+                                  <div className="flex items-center gap-2">
                                   <select value={c.status} onChange={e=>setP588Consign(prev=>prev.map(x=>x.id===c.id?{...x,status:e.target.value as typeof c.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
                                     <option>Depoda</option><option>Satıldı</option><option>İade Edildi</option>
                                   </select>
+                                  <button type="button" onClick={()=>setP588Consign(prev=>prev.filter(x=>x.id!==c.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}

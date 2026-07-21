@@ -1317,11 +1317,14 @@ export default function OrdersPage({
                             <td className="px-3 py-2.5 text-gray-600 max-w-[200px] truncate">{r.reason}</td>
                             <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?`₺${r.amount.toLocaleString('tr-TR')}`:'—'}</td>
                             <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-2">
                               <select value={r.status} onChange={e=>setP575Returns(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
                                 {(['Bekliyor','Onaylandı','Reddedildi','Tamamlandı'] as const).map(s=>(
                                   <option key={s} value={s}>{s}</option>
                                 ))}
                               </select>
+                              <button type="button" onClick={()=>setP575Returns(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1388,9 +1391,12 @@ export default function OrdersPage({
                           <p className="text-xs text-gray-500 mt-0.5">{r.productName} {r.serialNo?`• S/N: ${r.serialNo}`:''} • {r.issueDate}</p>
                           <p className="text-xs text-gray-600 mt-1 line-clamp-1">{r.description}</p>
                         </div>
-                        <select value={r.status} onChange={e=>setP583Requests(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="ml-3 text-[10px] font-bold bg-transparent border-0 cursor-pointer shrink-0">
+                        <div className="ml-3 flex items-center gap-2 shrink-0">
+                        <select value={r.status} onChange={e=>setP583Requests(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="text-[10px] font-bold bg-transparent border-0 cursor-pointer">
                           <option>Açık</option><option>İşlemde</option><option>Kapatıldı</option>
                         </select>
+                        <button type="button" onClick={()=>setP583Requests(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1463,6 +1469,7 @@ export default function OrdersPage({
                           <select value={t.status} onChange={e=>setP609Tickets(prev=>prev.map(x=>x.id===t.id?{...x,status:e.target.value as typeof t.status,resolvedAt:['Çözüldü','Kapatıldı'].includes(e.target.value)?new Date().toISOString():x.resolvedAt}:x))} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
                             {['Açık','İşlemde','Çözüldü','Kapatıldı'].map(s=><option key={s}>{s}</option>)}
                           </select>
+                          <button type="button" onClick={()=>setP609Tickets(prev=>prev.filter(x=>x.id!==t.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       );
                     })}
@@ -2614,6 +2621,7 @@ export default function OrdersPage({
                             {[tr622?'Ref':'Ref',tr622?'Destinasyon':'Destination','Incoterm',tr622?'Değer':'Value',tr622?'Durum':'Status',tr622?'Tarih':'Date'].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
+                            <th className="px-3 py-2 w-8"></th>
                           </tr></thead>
                           <tbody className="divide-y divide-gray-50">
                             {[...p622Shipments].sort((a,b)=>b.exportDate.localeCompare(a.exportDate)).map(sh=>(
@@ -2624,6 +2632,7 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5 font-bold text-gray-700">{sh.currency} {sh.value.toLocaleString('tr-TR')}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
                                 <td className="px-3 py-2.5 text-gray-500">{new Date(sh.exportDate).toLocaleDateString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-right"><button type="button" onClick={()=>setP622Shipments(prev=>prev.filter(x=>x.id!==sh.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
                               </tr>
                             ))}
                           </tbody>

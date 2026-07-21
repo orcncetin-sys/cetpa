@@ -5236,6 +5236,7 @@ function AppContent() {
                                   {[tr615?'Tarih':'Date',tr615?'Hat':'Line',tr615?'Toplam':'Total',tr615?'Hatalı':'Defects',tr615?'Yeniden İşlem':'Rework',tr615?'Hata %':'Defect %'].map(h=>(
                                     <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                   ))}
+                                  <th className="px-3 py-2 w-8"></th>
                                 </tr></thead>
                                 <tbody className="divide-y divide-gray-50">
                                   {[...p615Metrics].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
@@ -5248,6 +5249,7 @@ function AppContent() {
                                         <td className="px-3 py-2 tabular-nums text-red-600 font-bold">{m.defects}</td>
                                         <td className="px-3 py-2 tabular-nums text-amber-600">{m.rework}</td>
                                         <td className={`px-3 py-2 font-bold ${dr>5?'text-red-600':dr>2?'text-amber-600':'text-emerald-600'}`}>%{dr.toFixed(2)}</td>
+                                        <td className="px-3 py-2 text-right"><button type="button" onClick={()=>setP615Metrics(prev=>prev.filter(x=>x.id!==m.id))} title={tr615?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
                                       </tr>
                                     );
                                   })}

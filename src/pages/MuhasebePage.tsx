@@ -3000,9 +3000,10 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-4 py-2.5"><span className={isDue?'text-amber-600 font-bold':'text-gray-600'}>{s.nextDate}</span></td>
                                       <td className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{s.description||'—'}</td>
                                       <td className="px-4 py-2.5">
-                                        <div className="flex gap-1.5">
+                                        <div className="flex items-center gap-1.5">
                                           <button onClick={()=>setP591Schedules(prev=>prev.map(x=>x.id===s.id?{...x,active:!x.active}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(tr591?'Aktif':'Active'):(tr591?'Pasif':'Off')}</button>
                                           {isDue&&s.active&&(<button onClick={()=>setP591Schedules(prev=>prev.map(x=>x.id===s.id?{...x,nextDate:getNextDate(s.frequency,s.nextDate)}:x))} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
+                                          <button type="button" onClick={()=>setP591Schedules(prev=>prev.filter(x=>x.id!==s.id))} title={tr591?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                         </div>
                                       </td>
                                     </tr>

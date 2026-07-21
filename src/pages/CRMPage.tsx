@@ -939,6 +939,7 @@ export default function CRMPage({
                               {[tr606?'Kampanya':'Campaign',tr606?'Tarih':'Date',tr606?'Alıcı':'Recip.',tr606?'Açma %':'Open %',tr606?'Tıklama %':'Click %',tr606?'Dönüşüm':'Conv.'].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
+                              <th className="px-3 py-2 w-8"></th>
                             </tr></thead>
                             <tbody className="divide-y divide-gray-50">
                               {[...p606Campaigns].sort((a,b)=>b.sentDate.localeCompare(a.sentDate)).map(c=>{
@@ -952,6 +953,7 @@ export default function CRMPage({
                                     <td className="px-3 py-2.5 font-bold text-emerald-600">%{or}</td>
                                     <td className="px-3 py-2.5 font-bold text-amber-600">%{cr}</td>
                                     <td className="px-3 py-2.5 font-bold text-purple-600">{c.conversions}</td>
+                                    <td className="px-3 py-2.5 text-right"><button type="button" onClick={()=>setP606Campaigns(prev=>prev.filter(x=>x.id!==c.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
                                   </tr>
                                 );
                               })}
