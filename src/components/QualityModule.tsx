@@ -102,10 +102,14 @@ type QualityData = QCRecord | Complaint | AuditItem | FMEARecord | PFMEARecord |
 interface QualityModuleProps {
   currentLanguage: 'tr' | 'en';
   isAuthenticated: boolean;
+  /** Aktif sekme dışarıya bildirilir — App.tsx'teki Üretim Kalite Metrikleri
+   *  bloğu yalnız ilgili sekmede (KPI) gösterilsin diye (hep altta kalmasın). */
+  onTabChange?: (tab: string) => void;
 }
 
-const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthenticated }) => {
+const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthenticated, onTabChange }) => {
   const [activeTab, setActiveTab] = useState<'qc' | 'complaints' | 'audit' | 'kpi' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d'>('qc');
+  useEffect(() => { onTabChange?.(activeTab); }, [activeTab, onTabChange]);
   const [qcRecords, setQcRecords] = useState<QCRecord[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [isAiLoading, setIsAiLoading] = useState(false);

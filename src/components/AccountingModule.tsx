@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
 import MikroPushButton from './MikroPushButton';
 import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
@@ -97,6 +98,16 @@ interface AccountingModuleProps {
   createNotification?: (title: string, message: string, type?: 'info' | 'warning' | 'success') => Promise<void>;
   warehouses?: Warehouse[];
   employees?: Employee[];
+  // ── Birleşik Muhasebe menüsü (2026-07-21) ──────────────────────────────────
+  // navMenu verilirse sekme barı bu birleşik listeden render edilir (sidebar ile
+  // aynı). Muhasebe-dışı hedefler onNavigate ile üst seviyeye bildirilir.
+  // controlledTab+onControlledTabChange verilirse sekme kontrollü olur (sidebar'dan
+  // AccountingModule sekmesi açılabilsin diye). Yalnız MuhasebePage bunları geçer;
+  // CRM/Orders gömüleri eskisi gibi allowedTabs ile tek-sekme çalışır.
+  navMenu?: MuhasebeMenuItem[];
+  onNavigate?: (target: MuhasebeTarget) => void;
+  controlledTab?: string;
+  onControlledTabChange?: (tab: string) => void;
 }
 
 const HESAP_PLANI = [
@@ -275,7 +286,7 @@ const AT = {
   },
 } as const;
 
-export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp }: AccountingModuleProps) {
+export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange }: AccountingModuleProps) {
   const t = AT[currentLanguage];
   const MONTHS = currentLanguage === 'en' ? MONTHS_EN : MONTHS_TR;
   const resolvedInitialTab = (() => {
@@ -283,7 +294,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (allowedTabs && allowedTabs.length > 0 && !allowedTabs.includes(tab)) return allowedTabs[0];
     return tab;
   })();
-  const [accountingTab, setAccountingTab] = useState<string>(resolvedInitialTab);
+  // Kontrollü mod: controlledTab verilirse aktif sekme dışarıdan gelir (sidebar
+  // ile senkron). setAccountingTab çağrıları değişmeden çalışır — sadece kaynak/
+  // hedef değişir. accountingTab okumaları (31 yer) aynen geçerli kalır.
+  const [internalTab, setInternalTab] = useState<string>(resolvedInitialTab);
+  const accountingTab = controlledTab ?? internalTab;
+  const setAccountingTab = (k: string) => {
+    if (onControlledTabChange) onControlledTabChange(k);
+    else setInternalTab(k);
+  };
 
   useEffect(() => {
     if (warehousesProp) setWarehouses(warehousesProp);
@@ -1840,10 +1859,26 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   return (
     <div className="space-y-4 overflow-x-hidden">
-      {/* Sub-tab Nav */}
+      {/* Sub-tab Nav — navMenu verilirse birleşik menü (sidebar ile aynı), yoksa klasik */}
       <div className="overflow-x-auto scrollbar-none -mx-3 px-3 sm:-mx-4 sm:px-4">
         <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
-          {visibleTabs.map(t => {
+          {navMenu ? navMenu.map(m => {
+            const Icon = m.icon;
+            // AccountingModule sekmesiyse burada aktif olur; değilse (rapor/ayrı sayfa)
+            // tıklayınca üst seviyeye bildirir (bu görünümden çıkar).
+            const isAccountingHere = m.target.kind === 'accounting';
+            const isActive = isAccountingHere && accountingTab === m.target.tab;
+            return (
+              <button
+                key={m.id}
+                onClick={() => { if (isAccountingHere) setAccountingTab(m.target.tab); else onNavigate?.(m.target); }}
+                className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-[#ff4000] text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
+              >
+                <Icon size={13} />
+                {m.tr && currentLanguage === 'tr' ? m.tr : m.en}
+              </button>
+            );
+          }) : visibleTabs.map(t => {
             const Icon = t.icon;
             const isActive = accountingTab === t.key;
             return (

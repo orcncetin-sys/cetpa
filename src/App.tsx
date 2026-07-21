@@ -161,6 +161,7 @@ const PricingPage = React.lazy(() => import('./components/PricingPage'));
 import ConfirmModal from './components/ConfirmModal';
 import GlobalConfirm from './components/GlobalConfirm';
 import { confirmDelete } from './lib/confirm';
+import { MUHASEBE_MENU, type MuhasebeTarget } from './lib/muhasebeMenu';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import DataImportWizard from './components/DataImportWizard';
 import GlobalSearch from './components/GlobalSearch';
@@ -611,6 +612,9 @@ function AppContent() {
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'|'tenants'>('overview');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'>('genel');
+  // Birleşik Muhasebe menüsü (2026-07-21): AccountingModule'ün hangi iç sekmesinde
+  // olduğu App seviyesinde tutulur ki sidebar'dan doğrudan bir ERP sekmesi açılabilsin.
+  const [muhasebeAccountingTab, setMuhasebeAccountingTab] = useState<string>('faturalar');
   // Lifted from ReportsDashboard so sidebar can control it
   const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
 
@@ -1527,6 +1531,9 @@ function AppContent() {
   const [p615Metrics, setP615Metrics] = useState<Array<{id:string;date:string;line:string;total:number;defects:number;rework:number}>>([]);
   const [p615ShowForm, setP615ShowForm] = useState(false);
   const [p615Draft, setP615Draft] = useState({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});
+  // Kalite modülünün aktif sekmesi — Üretim Kalite Metrikleri yalnız KPI sekmesinde
+  // gösterilsin diye (aksi halde her sekmenin altında sabit kalıyordu).
+  const [qualityActiveTab, setQualityActiveTab] = useState<string>('qc');
   // ── Phase 616: Çalışan Devir Analizi ─────────────────────────────────────
   const [p616Period, setP616Period] = useState<'3m'|'6m'|'12m'>('12m');
   // ── Phase 617: KDV Mutabakat ──────────────────────────────────────────────
@@ -3997,43 +4004,17 @@ function AppContent() {
             {
               id: 'muhasebe', label: tr ? 'Muhasebe & Finans' : 'Accounting', icon: BookOpen,
               childIds: ['ebelge', 'vergi', 'finance', 'holding', 'gelirtanima', 'dunning'],
-              children: [
-                { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'genel',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); } },
-                { label: tr ? 'Bilanço' : 'Balance Sheet',         subId: 'bilanco',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('bilanco'); } }, // Phase 547
-                { label: 'P & L',                                   subId: 'pnl',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('pnl'); } },
-                { label: tr ? 'Nakit Akışı' : 'Cash Flow',         subId: 'nakit-akis',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('nakit-akis'); } },
-                { label: tr ? 'Kasa' : 'Cash Desk',                subId: 'kasa',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kasa'); } },
-                { label: tr ? 'Banka' : 'Banking',                 subId: 'banka',          action: () => { setActiveTab('muhasebe'); setMuhasebeTab('banka'); } },
-                { label: tr ? 'Tahsilat' : 'Collections',          subId: 'tahsilat',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tahsilat'); } },
-                { label: tr ? 'Otomatik Hatırlatıcı' : 'Dunning', subId: 'dunning',        action: () => setActiveTab('dunning') },
-                { label: tr ? 'Borç Yönetimi' : 'Payables',        subId: 'ap',             action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ap'); } },
-                { label: tr ? 'Mutabakat' : 'Reconciliation',      subId: 'mutabakat',      action: () => { setActiveTab('muhasebe'); setMuhasebeTab('mutabakat'); } }, // Phase 550
-                { label: tr ? 'Masraf Yönetimi' : 'Expenses',      subId: 'masraf',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('masraf'); } }, // Phase 548
-                { label: tr ? 'AR Yaşlandırma' : 'AR Aging',       subId: 'ar-aging',       action: () => { setActiveTab('muhasebe'); setMuhasebeTab('ar-aging'); } },
-                { label: tr ? 'Bütçe & Senaryo' : 'Budget & Scenarios', subId: 'butce',     action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce'); } },
-                { label: tr ? 'Ba/Bs Formu' : 'Ba/Bs Tax Form',      subId: 'babs',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('babs'); } }, // Phase 555
-                { label: tr ? 'KDV Analiz' : 'VAT Analysis',       subId: 'kdv',            action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv'); } }, // Phase 558
-                { label: tr ? 'Cari Hesap' : 'Account Statement',  subId: 'cari',           action: () => { setActiveTab('muhasebe'); setMuhasebeTab('cari'); } }, // Phase 559
-                { label: tr ? 'e-Fatura Takip' : 'e-Invoice Tracker', subId: 'fatura-takip', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('fatura-takip'); } }, // Phase 564
-                { label: tr ? 'Maliyet' : 'Cost Analysis',         subId: 'maliyet',        action: () => { setActiveTab('muhasebe'); setMuhasebeTab('maliyet'); } },
-                { label: tr ? 'Sabit Kıymet' : 'Fixed Assets',     subId: 'sabit-kiymet',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sabit-kiymet'); } },
-                { label: tr ? 'Finansal Oranlar' : 'Fin. Ratios',  subId: 'finansal-oranlar', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('finansal-oranlar'); } },
-                { label: tr ? 'Fiyat Kuralları' : 'Pricing Rules', subId: 'fiyat-kural',    action: () => { setActiveTab('muhasebe'); setMuhasebeTab('fiyat-kural'); } }, // Phase 573
-                { label: tr ? 'Bütçe vs Gerçekleşen' : 'Budget vs Actual', subId: 'butce-gercek', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('butce-gercek'); } }, // Phase 580
-                { label: tr ? 'Oto. Fatura' : 'Auto-Invoice', subId: 'oto-fatura',         action: () => { setActiveTab('muhasebe'); setMuhasebeTab('oto-fatura'); } }, // Phase 591
-                { label: tr ? 'Gelir Tanıma' : 'Rev. Recognition', subId: 'gelir-tanima',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-tanima'); } }, // Phase 597
-                { label: tr ? 'KDV Mutabakat' : 'VAT Reconciliation', subId: 'kdv-mutabakat', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kdv-mutabakat'); } }, // Phase 617
-                { label: tr ? 'Gelir/Gider Bütçe' : 'Rev/Exp Budget', subId: 'gelir-gider-butce', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('gelir-gider-butce'); } }, // Phase 625
-                { label: tr ? 'Varyans Analizi' : 'Variance Analysis', subId: 'varyans-analiz',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('varyans-analiz'); } }, // Phase 634
-                { label: tr ? 'Kur Değerleme' : 'FX Revaluation',       subId: 'kur-degerleme',   action: () => { setActiveTab('muhasebe'); setMuhasebeTab('kur-degerleme'); } }, // Phase 635
-                { label: tr ? 'Tekrarlayan Fatura' : 'Recurring Billing', subId: 'tekrar-fatura', action: () => { setActiveTab('muhasebe'); setMuhasebeTab('tekrar-fatura'); } }, // Phase 640
-                { label: tr ? 'Şirketlerarası' : 'Intercompany',          subId: 'sirket-arasi',  action: () => { setActiveTab('muhasebe'); setMuhasebeTab('sirket-arasi'); } }, // Phase 643
-                { label: tr ? 'Holding Yönetimi' : 'Holding',           subId: 'holding',       action: () => setActiveTab('holding') },
-                { label: tr ? 'IFRS 15 Gelir Tanıma' : 'IFRS 15 Rev. Rec.', subId: 'gelirtanima', action: () => setActiveTab('gelirtanima') },
-                { label: tr ? 'Finans Paneli' : 'Finance Panel',   subId: 'finance',        action: () => setActiveTab('finance') },
-                { label: tr ? 'E-Belge Merkezi' : 'E-Documents',   subId: 'ebelge',         action: () => setActiveTab('ebelge') },
-                { label: tr ? 'Vergi Takvimi' : 'Tax Calendar',    subId: 'vergi',          action: () => setActiveTab('vergi') },
-              ],
+              // Birleşik menü (2026-07-21): sidebar + AccountingModule yatay barı TEK
+              // kaynaktan (MUHASEBE_MENU) render edilir → aynı liste, tekrar yok.
+              children: MUHASEBE_MENU.map(m => ({
+                label: tr ? m.tr : m.en,
+                subId: m.id,
+                action: () => {
+                  if (m.target.kind === 'accounting') { setActiveTab('muhasebe'); setMuhasebeTab('genel'); setMuhasebeAccountingTab(m.target.tab); }
+                  else if (m.target.kind === 'muhasebe') { setActiveTab('muhasebe'); setMuhasebeTab(m.target.tab as typeof muhasebeTab); }
+                  else setActiveTab(m.target.tab);
+                },
+              })),
             },
             {
               id: 'satin-alma', label: tr ? 'Satın Alma' : 'Purchasing', icon: ShoppingCart,
@@ -4110,7 +4091,7 @@ function AppContent() {
                     if (subId === 'ik-main' && activeTab === 'ik') return true; // IK main
                     if (subId === 'tedarikci-portal' && activeTab === 'satin-alma' && purchasingSubTab === 'tedarikci-portal') return true; // Phase 551
                     if (activeTab === 'crm') return subId === crmTab;
-                    if (activeTab === 'muhasebe') return subId === muhasebeTab;
+                    if (activeTab === 'muhasebe') return muhasebeTab === 'genel' ? subId === muhasebeAccountingTab : subId === muhasebeTab;
                     if (activeTab === 'lojistik') return subId === lojistikTab;
                     if (activeTab === 'satin-alma') return subId === purchasingSubTab;
                     if (activeTab === 'admin') return subId === `a-${adminTab}`;
@@ -4507,6 +4488,8 @@ function AppContent() {
                 fxRefreshing={fxRefreshing}
                 muhasebeTab={muhasebeTab}
                 setMuhasebeTab={setMuhasebeTab}
+                muhasebeAccountingTab={muhasebeAccountingTab}
+                setMuhasebeAccountingTab={setMuhasebeAccountingTab}
                 budgets={budgets}
                 setBudgets={setBudgets}
                 allBudgetsFirestore={allBudgetsFirestore}
@@ -5196,10 +5179,10 @@ function AppContent() {
                       </div>
                     );
                   })()}
-                  <QualityModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kalite')} />
+                  <QualityModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kalite')} onTabChange={setQualityActiveTab} />
 
-                  {/* ── Phase 615: Üretim Kalite Metrikleri ─────────────────────── */}
-                  {hasFullAccess('kalite') && (() => {
+                  {/* ── Phase 615: Üretim Kalite Metrikleri (yalnız KPI sekmesinde) ── */}
+                  {hasFullAccess('kalite') && qualityActiveTab === 'kpi' && (() => {
                     const tr615 = currentLanguage === 'tr';
                     const totalProduced = p615Metrics.reduce((s,m)=>s+m.total,0);
                     const totalDefects  = p615Metrics.reduce((s,m)=>s+m.defects,0);

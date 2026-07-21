@@ -14,6 +14,7 @@ import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
+import { MUHASEBE_MENU, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
@@ -61,6 +62,10 @@ interface Props {
 
   muhasebeTab: MuhasebeTab;
   setMuhasebeTab: React.Dispatch<React.SetStateAction<MuhasebeTab>>;
+  // Birleşik menü (2026-07-21): AccountingModule iç sekmesini App seviyesinde
+  // kontrol et — sidebar'dan doğrudan bir ERP sekmesi açılabilsin diye.
+  muhasebeAccountingTab: string;
+  setMuhasebeAccountingTab: (tab: string) => void;
 
   budgets: BudgetEntry[];
   setBudgets: React.Dispatch<React.SetStateAction<BudgetEntry[]>>;
@@ -196,7 +201,7 @@ export default function MuhasebePage(props: Props) {
     orders, employees, warehouses, suppliers, inventory, leads, exchangeRates, fmtKpi, createNotification, toast,
     setActiveTab, kpiCurrency, setKpiCurrency,
     fxPos, updateFx, refreshFxRates, fxRefreshing,
-    muhasebeTab, setMuhasebeTab,
+    muhasebeTab, setMuhasebeTab, muhasebeAccountingTab, setMuhasebeAccountingTab,
     budgets, setBudgets, allBudgetsFirestore, setAllBudgetsFirestore, budgetDraft, setBudgetDraft, budgetMonth, setBudgetMonth, butceCurrency, setButceCurrency,
     apPurchaseOrders, setApPurchaseOrders, apCurrency, setApCurrency,
     p607ReminderDays, setP607ReminderDays,
@@ -234,44 +239,28 @@ export default function MuhasebePage(props: Props) {
                     icon={Calculator}
                   />
 
-                  {/* ── Sub-tab navigation (hidden on desktop — sidebar handles nav) ── */}
+                  {/* ── Sub-tab navigation (mobil; masaüstünde sidebar yönetir) — birleşik menü ── */}
                   <div className="lg:hidden flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
-                    {([
-                      { id: 'genel',        label: currentLanguage === 'tr' ? 'Genel Muhasebe'   : 'General Ledger',    icon: Calculator },
-                      { id: 'tahsilat',     label: currentLanguage === 'tr' ? 'Tahsilat Takibi'  : 'Collections',       icon: DollarSign },
-                      { id: 'ap',           label: currentLanguage === 'tr' ? 'Ödenecekler (AP)' : 'Payables (AP)',     icon: Building2  },
-                      { id: 'butce',        label: currentLanguage === 'tr' ? 'Bütçe Planı'      : 'Budget Plan',       icon: BarChart3  },
-                      { id: 'banka',        label: currentLanguage === 'tr' ? 'Banka Mutabakatı'  : 'Bank Recon',        icon: CreditCard },
-                      { id: 'sabit-kiymet',      label: currentLanguage === 'tr' ? 'Sabit Kıymetler'  : 'Fixed Assets',      icon: Package },
-                      { id: 'maliyet',           label: currentLanguage === 'tr' ? 'Maliyet Merkezleri': 'Cost Centers',     icon: BarChart3 },
-                      { id: 'ar-aging',          label: currentLanguage === 'tr' ? 'Müşteri Yaşlandırma': 'AR Aging',         icon: Users },
-                      { id: 'finansal-oranlar',  label: currentLanguage === 'tr' ? 'Finansal Oranlar' : 'Financial Ratios',  icon: Activity },
-                      { id: 'pnl',               label: currentLanguage === 'tr' ? 'Gelir Tablosu'    : 'P&L Statement',      icon: TrendingUp },
-                      { id: 'nakit-akis',        label: currentLanguage === 'tr' ? 'Nakit Akışı'      : 'Cash Flow',          icon: Wallet },
-                      { id: 'kasa',              label: currentLanguage === 'tr' ? 'Kasa Yönetimi'    : 'Cash Register',      icon: DollarSign },
-                    ] as { id: typeof muhasebeTab; label: string; icon: React.ElementType }[]).map(tab => {
-                      const Icon = tab.icon;
-                      const isActive = muhasebeTab === tab.id;
+                    {MUHASEBE_MENU.map(m => {
+                      const Icon = m.icon;
+                      const isActive = m.target.kind === 'accounting'
+                        ? (muhasebeTab === 'genel' && muhasebeAccountingTab === m.target.tab)
+                        : m.target.kind === 'muhasebe' ? muhasebeTab === m.target.tab : false;
                       return (
                         <button
-                          key={tab.id}
-                          onClick={() => setMuhasebeTab(tab.id)}
+                          key={m.id}
+                          onClick={() => {
+                            if (m.target.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(m.target.tab); }
+                            else if (m.target.kind === 'muhasebe') setMuhasebeTab(m.target.tab as MuhasebeTab);
+                            else setActiveTab(m.target.tab);
+                          }}
                           className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${isActive ? 'bg-brand text-white shadow-sm' : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100'}`}
                         >
                           <Icon className="w-3.5 h-3.5" />
-                          {tab.label}
+                          {currentLanguage === 'tr' ? m.tr : m.en}
                         </button>
                       );
                     })}
-                    <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
-                    <button onClick={() => setActiveTab('ebelge')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                      <FileText className="w-3.5 h-3.5" />
-                      {currentLanguage === 'tr' ? 'E-Belge' : 'E-Document'}
-                    </button>
-                    <button onClick={() => setActiveTab('vergi')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                      <Receipt className="w-3.5 h-3.5" />
-                      {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
-                    </button>
                   </div>
 
                   {/* ── Genel Muhasebe ── */}
@@ -286,13 +275,14 @@ export default function MuhasebePage(props: Props) {
                         createNotification={createNotification}
                         warehouses={warehouses}
                         employees={employees}
-                        allowedTabs={[
-                          'faturalar','e-fatura','evrak_tasarimi','banka','yevmiye','mizan',
-                          'gelir','kdv','banka_hareketleri','satislar',
-                          'musteriler','tedarikciler','urunler','depo','warehouses',
-                          'transfer','cekler','calisanlar','giden_irsaliye','gelen_irsaliye',
-                          'isletme_sermayesi','kasa'
-                        ]}
+                        navMenu={MUHASEBE_MENU}
+                        controlledTab={muhasebeAccountingTab}
+                        onControlledTabChange={setMuhasebeAccountingTab}
+                        onNavigate={(target: MuhasebeTarget) => {
+                          // Bar'daki muhasebe-dışı hedefler: bu görünümden çık, ilgili ekrana git.
+                          if (target.kind === 'muhasebe') setMuhasebeTab(target.tab as MuhasebeTab);
+                          else if (target.kind === 'app') setActiveTab(target.tab);
+                        }}
                       />
                     </motion.div>
                   )}

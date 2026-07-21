@@ -1931,6 +1931,25 @@ function mikroData(raw: unknown): Record<string, unknown> {
   return (r?.Data ?? r?.data ?? {}) as Record<string, unknown>;
 }
 
+/** Mikro API yanıtı JSON değil de HTML (Cloudflare/WAF/gateway hata sayfası) ise
+ *  bunu tanı ve kullanıcıya anlaşılır, EYLEME DÖNÜK bir mesaj üret. v17 göçünden
+ *  sonra sunucu IP'si Mikro gateway'inin Cloudflare'inde engellenirse StokListesiV2
+ *  gibi çağrılar 403 + HTML döner ve API anahtarı HİÇ denetlenmez. */
+function detectMikroGatewayBlock(data: unknown, status?: number): string | null {
+  if (typeof data !== 'string') return null;
+  const s = data.slice(0, 2000);
+  if (!/<html|<!doctype/i.test(s)) return null; // HTML değilse gateway-block değil
+  const isCloudflare = /cloudflare|attention required|cf-ray|__cf/i.test(s);
+  const ip = process.env.MIKRO_WHITELIST_IP || process.env.SERVER_PUBLIC_IP || 'sunucu IP\'niz';
+  if (isCloudflare) {
+    return `Mikro gateway (Cloudflare) sunucu isteğini ${status ?? 403} ile ENGELLEDİ — API anahtarı denetlenmedi. ` +
+      `Muhtemel neden: v17 göçünde sunucu IP'si (${ip}) whitelist'ten düştü. ` +
+      `Mikro destekten bu IP'yi Jump v17 API gateway'ine (jumpbulutapigw.mikro.com.tr) yeniden ekletin.`;
+  }
+  return `Mikro gateway JSON yerine HTML hata sayfası döndü (HTTP ${status ?? '?'}) — API'ye ulaşılamıyor. ` +
+    `Endpoint/gateway adresi v17'de değişmiş veya sunucu IP'si engellenmiş olabilir. Mikro destekle doğrulayın.`;
+}
+
 /** Call a Mikro Jump API endpoint — resolves creds, injects token + context. */
 async function mikroPost(
   endpoint: string,
@@ -1952,6 +1971,10 @@ async function mikroPost(
       headers: {
         'Content-Type':  'application/json',
         'Authorization': `Bearer ${token}`,
+        // Cloudflare bot-yönetimi bazı istekleri UA yokluğu/şüpheli UA ile
+        // engelliyor. Sıradan bir tarayıcı UA'sı gönder (v17 gateway CF arkasında).
+        'User-Agent':     'Cetpa-ERP/1.0 (+https://app.cetpa.com.tr)',
+        'Accept':         'application/json',
       },
       body: JSON.stringify(body),
     });
@@ -4074,10 +4097,13 @@ async function startServer() {
       if (ok && r0 && !r0.IsError) {
         return res.json({ configured: true, connected: true });
       }
-      console.warn('Mikro status probe failed:', JSON.stringify(data)?.slice(0, 300));
+      // Cloudflare/WAF/gateway HTML hata sayfasını anlaşılır mesaja çevir (v17 IP-block)
+      const gatewayBlock = detectMikroGatewayBlock(data);
+      console.warn('Mikro status probe failed:', gatewayBlock || JSON.stringify(data)?.slice(0, 300));
       res.json({
         configured: true, connected: false,
-        error: (r0?.ErrorMessage as string) || `Mikro API bağlantı hatası (HTTP ${ok ? 200 : 'err'}: ${JSON.stringify(data)?.slice(0, 120)})`,
+        gatewayBlocked: !!gatewayBlock,
+        error: gatewayBlock || (r0?.ErrorMessage as string) || `Mikro API bağlantı hatası (HTTP ${ok ? 200 : 'err'}: ${JSON.stringify(data)?.slice(0, 120)})`,
       });
     } catch (err) {
       res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
