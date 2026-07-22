@@ -1823,6 +1823,15 @@ function AppContent() {
     return () => unsub();
   }, [activeTab, purchasingSubTab]);
 
+  // ── Phase 608: RFQ teklif karşılaştırma — KALICI (rfqQuotes, 2026-07-21) ──
+  useEffect(() => {
+    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'suppliers') return;
+    const unsub = onSnapshot(query(collection(db, 'rfqQuotes')), snap => {
+      setP608Quotes(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p608Quotes[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, purchasingSubTab]);
+
   // ── Phase 627: Tedarikçi riskleri — KALICI (supplierRisks, 2026-07-21) ────
   useEffect(() => {
     if (activeTab !== 'satin-alma' || purchasingSubTab !== 'tedarik-risk') return;
@@ -1832,14 +1841,35 @@ function AppContent() {
     return () => unsub();
   }, [activeTab, purchasingSubTab]);
 
-  // ── Phase 588: Konsinye (tedarikçi malı) — KALICI (supplierConsignments) ──
+  // ── Phase 588+579: Konsinye + Lot/Parti — KALICI (2026-07-21) ─────────────
   useEffect(() => {
     if (activeTab !== 'inventory') return;
     const unsub = onSnapshot(query(collection(db, 'supplierConsignments')), snap => {
       setP588Consign(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p588Consign[number])));
     }, () => {});
+    const unsub2 = onSnapshot(query(collection(db, 'stockBatches')), snap => {
+      setP579Batches(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p579Batches[number])));
+    }, () => {});
+    return () => { unsub(); unsub2(); };
+  }, [activeTab]);
+
+  // ── Phase 587: Kalite kontrol çeklisti — KALICI (qualityChecklist) ────────
+  useEffect(() => {
+    if (activeTab !== 'kalite') return;
+    const unsub = onSnapshot(query(collection(db, 'qualityChecklist')), snap => {
+      setP587Checks(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p587Checks[number])));
+    }, () => {});
     return () => unsub();
   }, [activeTab]);
+
+  // ── Phase 573: Fiyat kuralları — KALICI (pricingRules, 2026-07-21) ────────
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'fiyat-kural') return;
+    const unsub = onSnapshot(query(collection(db, 'pricingRules')), snap => {
+      setP573Rules(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p573Rules[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, muhasebeTab]);
 
   // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
   useEffect(() => {
@@ -5205,12 +5235,12 @@ function AppContent() {
                         <div className="space-y-2 mb-4">
                           {p587Checks.map(c=>(
                             <div key={c.id} className={`flex items-center gap-3 p-3 rounded-xl ${c.checked?'bg-green-50/50':'bg-gray-50'}`}>
-                              <button onClick={()=>setP587Checks(prev=>prev.map(x=>x.id===c.id?{...x,checked:!x.checked}:x))} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
+                              <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>{});}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
                                 {c.checked&&<svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
                               </button>
                               <span className={`flex-1 text-sm ${c.checked?'line-through text-gray-400':'text-gray-700'}`}>{c.item}</span>
                               <span className={`text-[10px] font-bold shrink-0 ${sevColors[c.severity]}`}>{c.severity}</span>
-                              <button onClick={()=>setP587Checks(prev=>prev.filter(x=>x.id!==c.id))} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                              <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>{});}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                             </div>
                           ))}
                         </div>
@@ -5218,17 +5248,17 @@ function AppContent() {
                           <div className="flex gap-2">
                             <input className="flex-1 apple-input px-3 py-2 text-sm" placeholder={tr587?'Yeni kontrol maddesi...':'New check item...'} value={p587NewItem} onChange={e=>setP587NewItem(e.target.value)} onKeyDown={e=>{
                               if(e.key==='Enter'&&p587NewItem.trim()){
-                                setP587Checks(prev=>[...prev,{id:Date.now().toString(),item:p587NewItem.trim(),checked:false,severity:'Bilgi'}]);
+                                void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>{});
                                 setP587NewItem('');
                               }
                             }} />
                             <button onClick={()=>{
                               if(!p587NewItem.trim()) return;
-                              setP587Checks(prev=>[...prev,{id:Date.now().toString(),item:p587NewItem.trim(),checked:false,severity:'Bilgi'}]);
+                              void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>{});
                               setP587NewItem('');
                             }} className="apple-button-primary px-3 py-2 text-sm">{tr587?'Ekle':'Add'}</button>
                             {p587Checks.length>0&&(
-                              <button onClick={()=>setP587Checks(prev=>prev.map(c=>({...c,checked:true})))} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
+                              <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>{});});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
                             )}
                           </div>
                         )}

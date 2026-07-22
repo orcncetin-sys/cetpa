@@ -698,6 +698,7 @@ const TENANT_COLLECTIONS = new Set([
   // Batch 3 (2026-07-21): Siparişler yerel tabloları — mevcut gerçek akışlardan
   // (rmaRequests/orderReturns, supportTickets, ihracatlar) BİLEREK ayrı şemalar
   'salesReturns', 'serviceRequests', 'helpdeskTickets', 'exportShipments',
+  'rfqQuotes', 'stockBatches', 'pricingRules', 'qualityChecklist',
   'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',

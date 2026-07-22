@@ -107,8 +107,9 @@ export default function InventoryPage(props: Props) {
     p642Warranties, setP642Warranties, p642ShowForm, setP642ShowForm, p642Draft, setP642Draft,
     p644Horizon, setP644Horizon,
   } = props;
-  // Kalıcılaştırma (2026-07-21): düzenleme modu kimliği
+  // Kalıcılaştırma (2026-07-21): düzenleme modu kimlikleri
   const [p588EditId, setP588EditId] = React.useState<string | null>(null);
+  const [p579EditId, setP579EditId] = React.useState<string | null>(null);
 
   return (
             <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -817,13 +818,17 @@ export default function InventoryPage(props: Props) {
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr579?'Lokasyon':'Location'} value={p579Draft.location} onChange={e=>setP579Draft(d=>({...d,location:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={()=>{
+                          <button onClick={async ()=>{
                             if(!p579Draft.batchNo||!p579Draft.sku) return;
-                            setP579Batches(prev=>[...prev,{id:Date.now().toString(),sku:p579Draft.sku,productName:p579Draft.productName,batchNo:p579Draft.batchNo,expiryDate:p579Draft.expiryDate||undefined,qty:Number(p579Draft.qty)||0,location:p579Draft.location||undefined,status:'Aktif'}]);
-                            setP579Draft({sku:'',productName:'',batchNo:'',expiryDate:'',qty:'',location:''});
-                            setP579ShowForm(false);
+                            const payload={sku:p579Draft.sku,productName:p579Draft.productName,batchNo:p579Draft.batchNo,expiryDate:p579Draft.expiryDate||'',qty:Number(p579Draft.qty)||0,location:p579Draft.location||''};
+                            try {
+                              if(p579EditId){ await updateDoc(doc(db,'stockBatches',p579EditId),payload); }
+                              else { await addDoc(collection(db,'stockBatches'),{...payload,status:'Aktif',createdAt:serverTimestamp()}); }
+                              setP579Draft({sku:'',productName:'',batchNo:'',expiryDate:'',qty:'',location:''});
+                              setP579ShowForm(false); setP579EditId(null);
+                            } catch(e){ toast((tr579?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{tr579?'Kaydet':'Save'}</button>
-                          <button onClick={()=>setP579ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr579?'İptal':'Cancel'}</button>
+                          <button onClick={()=>{setP579ShowForm(false);setP579EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr579?'İptal':'Cancel'}</button>
                         </div>
                       </div>
                     )}
@@ -858,12 +863,13 @@ export default function InventoryPage(props: Props) {
                                   <td className="px-3 py-2.5 text-gray-400">{b.location||'—'}</td>
                                   <td className="px-3 py-2.5">
                                     <div className="flex items-center gap-2">
-                                    <select value={b.status} onChange={e=>setP579Batches(prev=>prev.map(x=>x.id===b.id?{...x,status:e.target.value as typeof b.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors579[b.status]}`}>
+                                    <select value={b.status} onChange={async e=>{try{await updateDoc(doc(db,'stockBatches',b.id),{status:e.target.value});}catch(err){toast((tr579?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors579[b.status]}`}>
                                       <option value="Aktif">{tr579?'Aktif':'Active'}</option>
                                       <option value="Karantina">{tr579?'Karantina':'Quarantine'}</option>
                                       <option value="Kullanıldı">{tr579?'Kullanıldı':'Used'}</option>
                                     </select>
-                                    <button type="button" onClick={()=>setP579Batches(prev=>prev.filter(x=>x.id!==b.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                    <button type="button" onClick={()=>{setP579Draft({sku:b.sku,productName:b.productName,batchNo:b.batchNo,expiryDate:b.expiryDate||'',qty:String(b.qty),location:b.location||''});setP579EditId(b.id);setP579ShowForm(true);}} title={tr579?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                    <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'stockBatches',b.id));}catch(e){toast((tr579?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div>
                                   </td>
                                 </tr>

@@ -110,6 +110,7 @@ export default function SatinAlmaPage(props: Props) {
   // Kalıcılaştırma (2026-07-21): düzenleme modu kimlikleri
   const [p612EditId, setP612EditId] = React.useState<string | null>(null);
   const [p627EditId, setP627EditId] = React.useState<string | null>(null);
+  const [p608EditId, setP608EditId] = React.useState<string | null>(null);
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -918,9 +919,14 @@ export default function SatinAlmaPage(props: Props) {
                               <input type="number" className="apple-input" placeholder={tr608?'Min. Adet':'Min Qty'} value={p608Draft.minQty} onChange={e=>setP608Draft(d=>({...d,minQty:e.target.value}))}/>
                               <input type="date" className="apple-input" value={p608Draft.validUntil} onChange={e=>setP608Draft(d=>({...d,validUntil:e.target.value}))}/>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p608Draft.supplier||!p608Draft.price) return;
-                              setP608Quotes(prev=>[...prev,{id:Date.now().toString(),supplier:p608Draft.supplier,price:Number(p608Draft.price),leadDays:Number(p608Draft.leadDays)||0,minQty:Number(p608Draft.minQty)||1,validUntil:p608Draft.validUntil||undefined}]);
+                              const payload={supplier:p608Draft.supplier,price:Number(p608Draft.price),leadDays:Number(p608Draft.leadDays)||0,minQty:Number(p608Draft.minQty)||1,validUntil:p608Draft.validUntil||''};
+                              try {
+                                if(p608EditId){ await updateDoc(doc(db,'rfqQuotes',p608EditId),payload); }
+                                else { await addDoc(collection(db,'rfqQuotes'),{...payload,createdAt:serverTimestamp()}); }
+                              } catch(e){ toast((tr608?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); return; }
+                              setP608EditId(null);
                               setP608Draft({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
                               setP608ShowForm(false);
                               toast(tr608?'Teklif eklendi.':'Quote added.','success');
@@ -953,7 +959,10 @@ export default function SatinAlmaPage(props: Props) {
                                     <td className="px-3 py-2.5 text-gray-500">{q.minQty}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.validUntil?new Date(q.validUntil).toLocaleDateString('tr-TR'):'—'}</td>
                                     <td className="px-3 py-2.5">
-                                      <button onClick={()=>setP608Quotes(prev=>prev.filter(x=>x.id!==q.id))} className="text-red-400 hover:text-red-600 text-[10px]">✕</button>
+                                      <div className="flex items-center gap-2">
+                                      <button onClick={()=>{setP608Draft({supplier:q.supplier,price:String(q.price),leadDays:String(q.leadDays),minQty:String(q.minQty),validUntil:q.validUntil||''});setP608EditId(q.id);setP608ShowForm(true);}} title={tr608?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'rfqQuotes',q.id));}catch(e){toast((tr608?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-[10px]">✕</button>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}

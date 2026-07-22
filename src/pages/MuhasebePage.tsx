@@ -236,6 +236,7 @@ export default function MuhasebePage(props: Props) {
   } = props;
   // Kalıcılaştırma (2026-07-21): düzenleme modu kimlikleri — hangi kayıt formda
   const [p591EditId, setP591EditId] = useState<string | null>(null);
+  const [p573EditId, setP573EditId] = useState<string | null>(null);
 
   // Banka ekstresi CSV içe aktarma modalı
   const [showBankImport, setShowBankImport] = useState(false);
@@ -2746,18 +2747,19 @@ export default function MuhasebePage(props: Props) {
                     };
                     const addRule573 = async () => {
                       if (!p573Draft.name || !p573Draft.discountPct) return;
-                      const newRule = {
-                        id: Date.now().toString(),
+                      const payload = {
                         name: p573Draft.name,
                         type: p573Draft.type,
-                        minQty: p573Draft.minQty ? Number(p573Draft.minQty) : undefined,
-                        tierName: p573Draft.tierName || undefined,
+                        minQty: p573Draft.minQty ? Number(p573Draft.minQty) : 0,
+                        tierName: p573Draft.tierName || '',
                         discountPct: Number(p573Draft.discountPct),
-                        active: true,
                       };
-                      setP573Rules(prev => [...prev, newRule]);
-                      setP573Draft({ name: '', type: 'bulk', minQty: '', tierName: '', discountPct: '', active: true });
-                      setP573ShowForm(false);
+                      try {
+                        if (p573EditId) { await updateDoc(doc(db,'pricingRules',p573EditId), payload); }
+                        else { await addDoc(collection(db,'pricingRules'), { ...payload, active: true, createdAt: serverTimestamp() }); }
+                        setP573Draft({ name: '', type: 'bulk', minQty: '', tierName: '', discountPct: '', active: true });
+                        setP573ShowForm(false); setP573EditId(null);
+                      } catch(e){ toast((currentLanguage==='tr'?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                     };
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -2813,13 +2815,14 @@ export default function MuhasebePage(props: Props) {
                                     <td className="px-4 py-3 text-emerald-700 font-bold">%{r.discountPct}</td>
                                     <td className="px-4 py-3 text-gray-500 text-xs">{r.type==='bulk'&&r.minQty?`Min ${r.minQty} ${tr573?'adet':'units'}`:r.type==='customer-tier'&&r.tierName?r.tierName:tr573?'Genel':'General'}</td>
                                     <td className="px-4 py-3">
-                                      <button onClick={()=>setP573Rules(prev=>prev.map(x=>x.id===r.id?{...x,active:!x.active}:x))}
+                                      <button onClick={async ()=>{try{await updateDoc(doc(db,'pricingRules',r.id),{active:!r.active});}catch(e){toast((tr573?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}}
                                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${r.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}`}>
                                         {r.active?(tr573?'Aktif':'Active'):(tr573?'Pasif':'Inactive')}
                                       </button>
                                     </td>
                                     <td className="px-4 py-3">
-                                      <button onClick={()=>setP573Rules(prev=>prev.filter(x=>x.id!==r.id))} className="text-red-400 hover:text-red-600 text-xs">{tr573?'Sil':'Delete'}</button>
+                                      <button onClick={()=>{setP573Draft({name:r.name,type:r.type,minQty:r.minQty?String(r.minQty):'',tierName:r.tierName||'',discountPct:String(r.discountPct),active:r.active});setP573EditId(r.id);setP573ShowForm(true);}} className="text-blue-400 hover:text-blue-600 text-xs mr-2">{tr573?'Düzenle':'Edit'}</button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'pricingRules',r.id));}catch(e){toast((tr573?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-xs">{tr573?'Sil':'Delete'}</button>
                                     </td>
                                   </tr>
                                 ))}
