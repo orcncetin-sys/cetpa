@@ -1804,10 +1804,11 @@ function AppContent() {
    
   }, [activeTab, muhasebeTab]);
 
-  // ── Phase 591: Oto. Fatura planları — KALICI (recurringBilling, 2026-07-21) ──
+  // ── Phase 591: Oto. Fatura planları — KALICI (autoInvoiceSchedules; p640
+  //    Tekrarlayan Fatura'nın recurringBilling'inden BİLEREK ayrı, şema farklı) ──
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'oto-fatura') return;
-    const unsub = onSnapshot(query(collection(db, 'recurringBilling')), snap => {
+    const unsub = onSnapshot(query(collection(db, 'autoInvoiceSchedules')), snap => {
       setP591Schedules(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p591Schedules[number])));
     }, () => {});
     return () => unsub();

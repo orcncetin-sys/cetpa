@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -14,7 +14,7 @@ import {
 import { db, auth } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp, incrementField,
+  collection, serverTimestamp, incrementField, onSnapshot, query,
 } from '../lib/dbClient';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { clsx, type ClassValue } from 'clsx';
@@ -226,6 +226,23 @@ export default function OrdersPage({
   const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
   const [p622ShowForm, setP622ShowForm] = useState(false);
   const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
+
+  // ── Kalıcılaştırma (2026-07-21): iade/talep/ticket/sevkiyat artık DB'de ────
+  // Sayfa yalnız kendi sekmesinde mount olduğu için abonelikler doğal-tembel.
+  const [p575EditId, setP575EditId] = useState<string | null>(null);
+  const [p583EditId, setP583EditId] = useState<string | null>(null);
+  const [p609EditId, setP609EditId] = useState<string | null>(null);
+  const [p622EditId, setP622EditId] = useState<string | null>(null);
+  useEffect(() => {
+    const u: (() => void)[] = [];
+    const sub = (col: string, setter: (d: unknown[]) => void) =>
+      u.push(onSnapshot(query(collection(db, col)), s => setter(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => {}));
+    sub('salesReturns',    (d) => setP575Returns(d as typeof p575Returns));
+    sub('serviceRequests', (d) => setP583Requests(d as typeof p583Requests));
+    sub('helpdeskTickets', (d) => setP609Tickets(d as typeof p609Tickets));
+    sub('exportShipments', (d) => setP622Shipments(d as typeof p622Shipments));
+    return () => u.forEach(fn => fn());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sortData = <T,>(arr: T[], key: string, dir: 'asc' | 'desc'): T[] =>
     [...arr].sort((a: T, b: T) => {
@@ -1288,14 +1305,18 @@ export default function OrdersPage({
                       <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr575?'Tutar (₺)':'Amount (₺)'} value={p575Draft.amount} onChange={e=>setP575Draft(d=>({...d,amount:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         if(!p575Draft.customerName||!p575Draft.reason) return;
-                        setP575Returns(prev=>[...prev,{id:Date.now().toString(),orderId:p575Draft.orderId,customerName:p575Draft.customerName,reason:p575Draft.reason,status:'Bekliyor',amount:Number(p575Draft.amount)||0}]);
-                        setP575Draft({orderId:'',customerName:'',reason:'',amount:''});
-                        setP575ShowForm(false);
-                        toast(tr575?'İade talebi oluşturuldu.':'Return request created.','success');
+                        const payload={orderId:p575Draft.orderId,customerName:p575Draft.customerName,reason:p575Draft.reason,amount:Number(p575Draft.amount)||0};
+                        try {
+                          if(p575EditId){ await updateDoc(doc(db,'salesReturns',p575EditId),payload); }
+                          else { await addDoc(collection(db,'salesReturns'),{...payload,status:'Bekliyor',createdAt:serverTimestamp()}); }
+                          setP575Draft({orderId:'',customerName:'',reason:'',amount:''});
+                          setP575ShowForm(false); setP575EditId(null);
+                          toast(tr575?(p575EditId?'İade güncellendi.':'İade talebi oluşturuldu.'):(p575EditId?'Return updated.':'Return request created.'),'success');
+                        } catch(e){ toast((tr575?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                       }} className="apple-button-primary text-sm px-4 py-1.5">{tr575?'Kaydet':'Save'}</button>
-                      <button onClick={()=>setP575ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr575?'İptal':'Cancel'}</button>
+                      <button onClick={()=>{setP575ShowForm(false);setP575EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr575?'İptal':'Cancel'}</button>
                     </div>
                   </div>
                 )}
@@ -1318,12 +1339,13 @@ export default function OrdersPage({
                             <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?`₺${r.amount.toLocaleString('tr-TR')}`:'—'}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
-                              <select value={r.status} onChange={e=>setP575Returns(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
+                              <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'salesReturns',r.id),{status:e.target.value});}catch(err){toast((tr575?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
                                 {(['Bekliyor','Onaylandı','Reddedildi','Tamamlandı'] as const).map(s=>(
                                   <option key={s} value={s}>{s}</option>
                                 ))}
                               </select>
-                              <button type="button" onClick={()=>setP575Returns(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                              <button type="button" onClick={()=>{setP575Draft({orderId:r.orderId,customerName:r.customerName,reason:r.reason,amount:String(r.amount)});setP575EditId(r.id);setP575ShowForm(true);}} title={tr575?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                              <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'salesReturns',r.id));}catch(e){toast((tr575?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                               </div>
                             </td>
                           </tr>
@@ -1366,14 +1388,18 @@ export default function OrdersPage({
                       <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={tr583?'Sorun Açıklaması':'Issue Description'} value={p583Draft.description} onChange={e=>setP583Draft(d=>({...d,description:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         if(!p583Draft.customerName||!p583Draft.description) return;
-                        setP583Requests(prev=>[...prev,{id:Date.now().toString(),customerName:p583Draft.customerName,productName:p583Draft.productName,serialNo:p583Draft.serialNo||undefined,issueDate:new Date().toISOString().slice(0,10),warrantyEnd:p583Draft.warrantyEnd||undefined,description:p583Draft.description,status:'Açık',priority:p583Draft.priority}]);
-                        setP583Draft({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta'});
-                        setP583ShowForm(false);
-                        toast(tr583?'Servis talebi oluşturuldu.':'Service request created.','success');
+                        const payload={customerName:p583Draft.customerName,productName:p583Draft.productName,serialNo:p583Draft.serialNo||'',warrantyEnd:p583Draft.warrantyEnd||'',description:p583Draft.description,priority:p583Draft.priority};
+                        try {
+                          if(p583EditId){ await updateDoc(doc(db,'serviceRequests',p583EditId),payload); }
+                          else { await addDoc(collection(db,'serviceRequests'),{...payload,issueDate:new Date().toISOString().slice(0,10),status:'Açık',createdAt:serverTimestamp()}); }
+                          setP583Draft({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta'});
+                          setP583ShowForm(false); setP583EditId(null);
+                          toast(tr583?(p583EditId?'Talep güncellendi.':'Servis talebi oluşturuldu.'):(p583EditId?'Request updated.':'Service request created.'),'success');
+                        } catch(e){ toast((tr583?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                       }} className="apple-button-primary text-sm px-4 py-1.5">{tr583?'Kaydet':'Save'}</button>
-                      <button onClick={()=>setP583ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr583?'İptal':'Cancel'}</button>
+                      <button onClick={()=>{setP583ShowForm(false);setP583EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr583?'İptal':'Cancel'}</button>
                     </div>
                   </div>
                 )}
@@ -1392,10 +1418,11 @@ export default function OrdersPage({
                           <p className="text-xs text-gray-600 mt-1 line-clamp-1">{r.description}</p>
                         </div>
                         <div className="ml-3 flex items-center gap-2 shrink-0">
-                        <select value={r.status} onChange={e=>setP583Requests(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="text-[10px] font-bold bg-transparent border-0 cursor-pointer">
+                        <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'serviceRequests',r.id),{status:e.target.value});}catch(err){toast((tr583?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-[10px] font-bold bg-transparent border-0 cursor-pointer">
                           <option>Açık</option><option>İşlemde</option><option>Kapatıldı</option>
                         </select>
-                        <button type="button" onClick={()=>setP583Requests(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                        <button type="button" onClick={()=>{setP583Draft({customerName:r.customerName,productName:r.productName,serialNo:r.serialNo||'',warrantyEnd:r.warrantyEnd||'',description:r.description,priority:r.priority});setP583EditId(r.id);setP583ShowForm(true);}} title={tr583?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                        <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'serviceRequests',r.id));}catch(e){toast((tr583?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       </div>
                     ))}
@@ -1435,12 +1462,16 @@ export default function OrdersPage({
                       </select>
                       <input type="number" className="apple-input" placeholder="SLA (h)" value={p609Draft.slaHours} onChange={e=>setP609Draft(d=>({...d,slaHours:e.target.value}))}/>
                     </div>
-                    <button onClick={()=>{
+                    <button onClick={async ()=>{
                       if(!p609Draft.customer||!p609Draft.subject) return;
-                      setP609Tickets(prev=>[...prev,{id:Date.now().toString(),customer:p609Draft.customer,subject:p609Draft.subject,priority:p609Draft.priority,status:'Açık',createdAt:new Date().toISOString(),slaHours:Number(p609Draft.slaHours)||24}]);
-                      setP609Draft({customer:'',subject:'',priority:'Orta',slaHours:'24'});
-                      setP609ShowForm(false);
-                      toast(tr609?'Bilet açıldı.':'Ticket created.','success');
+                      const payload={customer:p609Draft.customer,subject:p609Draft.subject,priority:p609Draft.priority,slaHours:Number(p609Draft.slaHours)||24};
+                      try {
+                        if(p609EditId){ await updateDoc(doc(db,'helpdeskTickets',p609EditId),payload); }
+                        else { await addDoc(collection(db,'helpdeskTickets'),{...payload,status:'Açık',createdAt:new Date().toISOString()}); }
+                        setP609Draft({customer:'',subject:'',priority:'Orta',slaHours:'24'});
+                        setP609ShowForm(false); setP609EditId(null);
+                        toast(tr609?(p609EditId?'Bilet güncellendi.':'Bilet açıldı.'):(p609EditId?'Ticket updated.':'Ticket created.'),'success');
+                      } catch(e){ toast((tr609?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                     }} className="apple-button-primary text-xs px-6">{tr609?'Aç':'Create'}</button>
                   </div>
                 )}
@@ -1466,10 +1497,11 @@ export default function OrdersPage({
                             <p className="text-xs font-semibold text-gray-800 truncate">{t.customer} — {t.subject}</p>
                             <p className="text-[10px] text-gray-400">{Math.round(hoursOpen)}h {tr609?'açık':'open'} · SLA: {t.slaHours}h{!slaOk?' ⚠️':''}</p>
                           </div>
-                          <select value={t.status} onChange={e=>setP609Tickets(prev=>prev.map(x=>x.id===t.id?{...x,status:e.target.value as typeof t.status,resolvedAt:['Çözüldü','Kapatıldı'].includes(e.target.value)?new Date().toISOString():x.resolvedAt}:x))} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
+                          <select value={t.status} onChange={async e=>{try{await updateDoc(doc(db,'helpdeskTickets',t.id),{status:e.target.value,...(['Çözüldü','Kapatıldı'].includes(e.target.value)?{resolvedAt:new Date().toISOString()}:{})});}catch(err){toast((tr609?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
                             {['Açık','İşlemde','Çözüldü','Kapatıldı'].map(s=><option key={s}>{s}</option>)}
                           </select>
-                          <button type="button" onClick={()=>setP609Tickets(prev=>prev.filter(x=>x.id!==t.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+                          <button type="button" onClick={()=>{setP609Draft({customer:t.customer,subject:t.subject,priority:t.priority,slaHours:String(t.slaHours)});setP609EditId(t.id);setP609ShowForm(true);}} title={tr609?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
+                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'helpdeskTickets',t.id));}catch(e){toast((tr609?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       );
                     })}
@@ -2605,12 +2637,16 @@ export default function OrdersPage({
                           <input type="date" className="apple-input" value={p622Draft.exportDate} onChange={e=>setP622Draft(d=>({...d,exportDate:e.target.value}))}/>
                           <input className="apple-input" placeholder={tr622?'Gümrük Ref':'Customs Ref'} value={p622Draft.customsRef} onChange={e=>setP622Draft(d=>({...d,customsRef:e.target.value}))}/>
                         </div>
-                        <button onClick={()=>{
+                        <button onClick={async ()=>{
                           if(!p622Draft.orderRef||!p622Draft.destination) return;
-                          setP622Shipments(prev=>[...prev,{id:Date.now().toString(),orderRef:p622Draft.orderRef,destination:p622Draft.destination,incoterm:p622Draft.incoterm,currency:p622Draft.currency,value:Number(p622Draft.value)||0,status:p622Draft.status,exportDate:p622Draft.exportDate,customsRef:p622Draft.customsRef||undefined}]);
-                          setP622Draft(d=>({...d,orderRef:'',destination:'',value:'',customsRef:''}));
-                          setP622ShowForm(false);
-                          toast(tr622?'Sevkiyat eklendi.':'Shipment added.','success');
+                          const payload={orderRef:p622Draft.orderRef,destination:p622Draft.destination,incoterm:p622Draft.incoterm,currency:p622Draft.currency,value:Number(p622Draft.value)||0,status:p622Draft.status,exportDate:p622Draft.exportDate,customsRef:p622Draft.customsRef||''};
+                          try {
+                            if(p622EditId){ await updateDoc(doc(db,'exportShipments',p622EditId),payload); }
+                            else { await addDoc(collection(db,'exportShipments'),{...payload,createdAt:serverTimestamp()}); }
+                            setP622Draft(d=>({...d,orderRef:'',destination:'',value:'',customsRef:''}));
+                            setP622ShowForm(false); setP622EditId(null);
+                            toast(tr622?(p622EditId?'Sevkiyat güncellendi.':'Sevkiyat eklendi.'):(p622EditId?'Shipment updated.':'Shipment added.'),'success');
+                          } catch(e){ toast((tr622?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                         }} className="apple-button-primary text-xs px-6">{tr622?'Kaydet':'Save'}</button>
                       </div>
                     )}
@@ -2632,7 +2668,10 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5 font-bold text-gray-700">{sh.currency} {sh.value.toLocaleString('tr-TR')}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
                                 <td className="px-3 py-2.5 text-gray-500">{new Date(sh.exportDate).toLocaleDateString('tr-TR')}</td>
-                                <td className="px-3 py-2.5 text-right"><button type="button" onClick={()=>setP622Shipments(prev=>prev.filter(x=>x.id!==sh.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
+                                <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
+                                  <button type="button" onClick={()=>{setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:String(sh.value),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={tr622?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'exportShipments',sh.id));}catch(e){toast((tr622?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                </div></td>
                               </tr>
                             ))}
                           </tbody>

@@ -2975,8 +2975,8 @@ export default function MuhasebePage(props: Props) {
                                 if(!p591Draft.customerName||!p591Draft.amount) return;
                                 const payload={customerName:p591Draft.customerName,amount:Number(p591Draft.amount),frequency:p591Draft.frequency,nextDate:p591Draft.nextDate||today591,description:p591Draft.description};
                                 try {
-                                  if(p591EditId){ await updateDoc(doc(db,'recurringBilling',p591EditId),payload); }
-                                  else { await addDoc(collection(db,'recurringBilling'),{...payload,active:true,createdAt:serverTimestamp()}); }
+                                  if(p591EditId){ await updateDoc(doc(db,'autoInvoiceSchedules',p591EditId),payload); }
+                                  else { await addDoc(collection(db,'autoInvoiceSchedules'),{...payload,active:true,createdAt:serverTimestamp()}); }
                                   setP591Draft({customerName:'',amount:'',frequency:'monthly',nextDate:'',description:''});
                                   setP591ShowForm(false); setP591EditId(null);
                                 } catch(e){ toast((tr591?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
@@ -3007,10 +3007,10 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{s.description||'—'}</td>
                                       <td className="px-4 py-2.5">
                                         <div className="flex items-center gap-1.5">
-                                          <button onClick={async ()=>{try{await updateDoc(doc(db,'recurringBilling',s.id),{active:!s.active});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(tr591?'Aktif':'Active'):(tr591?'Pasif':'Off')}</button>
-                                          {isDue&&s.active&&(<button onClick={async ()=>{try{await updateDoc(doc(db,'recurringBilling',s.id),{nextDate:getNextDate(s.frequency,s.nextDate)});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
+                                          <button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{active:!s.active});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(tr591?'Aktif':'Active'):(tr591?'Pasif':'Off')}</button>
+                                          {isDue&&s.active&&(<button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{nextDate:getNextDate(s.frequency,s.nextDate)});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
                                           <button type="button" onClick={()=>{setP591Draft({customerName:s.customerName,amount:String(s.amount),frequency:s.frequency,nextDate:s.nextDate,description:s.description});setP591EditId(s.id);setP591ShowForm(true);}} title={tr591?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){toast((tr591?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr591?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'autoInvoiceSchedules',s.id));}catch(e){toast((tr591?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr591?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                         </div>
                                       </td>
                                     </tr>
