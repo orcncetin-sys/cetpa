@@ -1424,6 +1424,7 @@ function AppContent() {
   const [p582Projects, setP582Projects] = useState<Array<{id:string;name:string;budget:number;spent:number;status:'Aktif'|'Tamamlandı'|'Beklemede'}>>([]);
   const [p582ShowForm, setP582ShowForm] = useState(false);
   const [p582Draft, setP582Draft] = useState({name:'',budget:'',spent:'',status:'Aktif' as 'Aktif'|'Tamamlandı'|'Beklemede'});
+  const [p582EditId, setP582EditId] = useState<string|null>(null);
   // ── Phase 583: Warranty & Service Requests ────────────────────────────────
   // ── Phase 584: Physical Inventory / Cycle Count ───────────────────────────
   const [p584CountItems, setP584CountItems] = useState<Array<{id:string;sku:string;name:string;systemQty:number;countedQty?:number;variance?:number}>>([]);
@@ -1510,7 +1511,8 @@ function AppContent() {
   // ── Phase 602: Çoklu Döviz Sipariş Yönetimi ──────────────────────────────
   // ── Phase 604: Satıcı Komisyon Takibi ─────────────────────────────────────
   // ── Phase 605: Üretim Kapasitesi Planlama ─────────────────────────────────
-  const [p605Capacity, setP605Capacity] = useState<Array<{line:string;maxCap:number;planned:number;actual:number}>>([]);
+  const [p605Capacity, setP605Capacity] = useState<Array<{id?:string;line:string;maxCap:number;planned:number;actual:number}>>([]);
+  const [p605EditId, setP605EditId] = useState<string|null>(null);
   const [p605ShowForm, setP605ShowForm] = useState(false);
   const [p605Draft, setP605Draft] = useState({line:'',maxCap:'',planned:'',actual:''});
   // ── Phase 606: E-posta Kampanya Takibi ────────────────────────────────────
@@ -1550,6 +1552,7 @@ function AppContent() {
   const [p618Projects, setP618Projects] = useState<Array<{id:string;name:string;start:string;end:string;progress:number;status:'Aktif'|'Tamamlandı'|'Gecikmiş'|'Beklemede';owner:string}>>([]);
   const [p618ShowForm, setP618ShowForm] = useState(false);
   const [p618Draft, setP618Draft] = useState({name:'',start:'',end:'',progress:'0',status:'Aktif' as 'Aktif'|'Tamamlandı'|'Gecikmiş'|'Beklemede',owner:''});
+  const [p618EditId, setP618EditId] = useState<string|null>(null);
   // ── Phase 621: Talep Yönetimi (Demand Management) ─────────────────────────
   const [p621Demands, setP621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
   // ── Phase 622: İhracat & Gümrük Takibi ───────────────────────────────────
@@ -5137,7 +5140,7 @@ function AppContent() {
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
                                 if(!p582Draft.name) return;
-                                try { await addDoc(collection(db,'projectCosts'),{name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Proje maliyeti eklendi ✓' : 'Project cost added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Maliyet eklenemedi.' : 'Failed to add cost.', 'error');}
+                                try { const payload582={name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}; if(p582EditId){ await updateDoc(doc(db,'projectCosts',p582EditId),payload582); setP582EditId(null); } else { await addDoc(collection(db,'projectCosts'),{...payload582,createdAt:serverTimestamp()}); } toast(currentLanguage === 'tr' ? 'Proje maliyeti eklendi ✓' : 'Project cost added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Maliyet eklenemedi.' : 'Failed to add cost.', 'error');}
                                 setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
                                 setP582ShowForm(false);
                               }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
@@ -5161,6 +5164,7 @@ function AppContent() {
                                     </div>
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
+                                      <button onClick={()=>{setP582Draft({name:p.name,budget:String(p.budget),spent:String(p.spent),status:p.status});setP582EditId(p.id);setP582ShowForm(true);}} title={tr582?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 ml-2"><Edit2 className="w-3.5 h-3.5"/></button>
                                       <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                                     </div>
                                   </div>
@@ -5208,7 +5212,7 @@ function AppContent() {
                             </div>
                             <button onClick={async ()=>{
                               if(!p618Draft.name||!p618Draft.start||!p618Draft.end) return;
-                              try { await addDoc(collection(db,'projectTimelines'),{name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklendi ✓' : 'Timeline added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklenemedi.' : 'Failed to add timeline.', 'error');}
+                              try { const payload618={name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}; if(p618EditId){ await updateDoc(doc(db,'projectTimelines',p618EditId),payload618); setP618EditId(null); } else { await addDoc(collection(db,'projectTimelines'),{...payload618,createdAt:serverTimestamp()}); } toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklendi ✓' : 'Timeline added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklenemedi.' : 'Failed to add timeline.', 'error');}
                               setP618Draft({name:'',start:'',end:'',progress:'0',status:'Aktif',owner:''});
                               setP618ShowForm(false);
                               toast(tr618?'Proje eklendi.':'Project added.','success');
@@ -5232,6 +5236,8 @@ function AppContent() {
                                       <span>{p.owner}</span>
                                       <input type="range" min="0" max="100" value={p.progress} onChange={async e=>{try{await updateDoc(doc(db,'projectTimelines',p.id),{progress:Number(e.target.value)});}catch(err){console.error(err);}}} className="w-20"/>
                                       <span className="font-bold text-gray-700 w-8 text-right">%{p.progress}</span>
+                                      <button onClick={()=>{setP618Draft({name:p.name,start:p.start,end:p.end,progress:String(p.progress),status:p.status,owner:p.owner});setP618EditId(p.id);setP618ShowForm(true);}} title={tr618?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectTimelines',p.id));}catch(e){console.error("[firestore]", e);}}} title={tr618?'Sil':'Delete'} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2 text-[10px] text-gray-400 mb-2">
@@ -5445,7 +5451,7 @@ function AppContent() {
                               <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Gerçekleşen':'Actual'} value={p605Draft.actual} onChange={e=>setP605Draft(d=>({...d,actual:e.target.value}))} />
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={async ()=>{if(!p605Draft.line) return; try{await addDoc(collection(db,'capacityLines'),{line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0,createdAt:serverTimestamp()});}catch(e){console.error("[firestore]", e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
+                              <button onClick={async ()=>{if(!p605Draft.line) return; try{const payload605={line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0}; if(p605EditId){ await updateDoc(doc(db,'capacityLines',p605EditId),payload605); setP605EditId(null); } else { await addDoc(collection(db,'capacityLines'),{...payload605,createdAt:serverTimestamp()}); }}catch(e){console.error("[firestore]", e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP605ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr605?'İptal':'Cancel'}</button>
                             </div>
                           </div>
@@ -5461,7 +5467,11 @@ function AppContent() {
                                 <div key={i} className="space-y-1.5">
                                   <div className="flex items-center justify-between text-xs">
                                     <span className="font-semibold text-gray-800">{l.line}</span>
+                                    <div className="flex items-center gap-2">
                                     <span className="text-gray-500">{l.actual}/{l.maxCap} {tr605?'birim':'units'} ({actPct.toFixed(0)}%)</span>
+                                    {l.id&&<button onClick={()=>{setP605Draft({line:l.line,maxCap:String(l.maxCap),planned:String(l.planned),actual:String(l.actual)});setP605EditId(l.id!);setP605ShowForm(true);}} title={tr605?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>}
+                                    {l.id&&<button onClick={async ()=>{try{await deleteDoc(doc(db,'capacityLines',l.id!));}catch(e){console.error("[firestore]", e);}}} title={tr605?'Sil':'Delete'} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>}
+                                    </div>
                                   </div>
                                   <div className="relative w-full bg-gray-100 rounded-full h-3 overflow-hidden">
                                     <div className="absolute h-full bg-blue-200 rounded-full" style={{width:`${planPct}%`}}/>
