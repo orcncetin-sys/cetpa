@@ -172,7 +172,7 @@ interface Props {
 
   p625BudgetYear: number;
   setP625BudgetYear: React.Dispatch<React.SetStateAction<number>>;
-  p625BudgetData: Array<{ month: number; budgetRevenue: number; budgetExpense: number }>;
+  p625BudgetData: Array<{ id?: string; month: number; budgetRevenue: number; budgetExpense: number }>;
   setP625BudgetData: React.Dispatch<React.SetStateAction<Array<{ month: number; budgetRevenue: number; budgetExpense: number }>>>;
   p625EditMonth: number | null;
   setP625EditMonth: React.Dispatch<React.SetStateAction<number | null>>;
@@ -940,6 +940,8 @@ export default function MuhasebePage(props: Props) {
                           });
                           setP638MatchResults(results);
                           setP638Running(false);
+                          // KALICI (2026-07-21): eşleştirme koşusu tarihli saklanır; son koşu reload'da yüklenir.
+                          void addDoc(collection(db,'bankMatchRuns'),{results,ranAt:serverTimestamp()}).catch(()=>{});
                         };
                         const statusCls:{[k:string]:string}={Tam:'bg-emerald-100 text-emerald-700',Kısmi:'bg-amber-100 text-amber-700',Eşleşmedi:'bg-red-100 text-red-700'};
                         const totalMatched = p638MatchResults.filter(r=>r.status==='Tam').length;
@@ -3214,14 +3216,20 @@ export default function MuhasebePage(props: Props) {
                                     <td className="px-3 py-2.5 font-medium text-gray-700">{monthNames[i]}</td>
                                     <td className="px-3 py-2.5" onClick={()=>setP625EditMonth(i)}>
                                       {isEditing?(
-                                        <input type="number" autoFocus defaultValue={bud} onBlur={e=>{
+                                        <input type="number" autoFocus defaultValue={bud} onBlur={async e=>{
                                           const val=Number(e.target.value);
+                                          const existing=p625BudgetData.find(b=>b.month===i);
                                           setP625BudgetData(prev=>{
                                             const idx=prev.findIndex(b=>b.month===i);
                                             if(idx>=0) return prev.map((b,j)=>j===idx?{...b,budgetRevenue:val}:b);
                                             return [...prev,{month:i,budgetRevenue:val,budgetExpense:0}];
                                           });
                                           setP625EditMonth(null);
+                                          // KALICI (2026-07-21): ay bazında revExpBudgets dokümanı
+                                          try {
+                                            if(existing?.id){ await updateDoc(doc(db,'revExpBudgets',existing.id),{budgetRevenue:val}); }
+                                            else { await addDoc(collection(db,'revExpBudgets'),{year:p625BudgetYear,month:i,budgetRevenue:val,budgetExpense:0,createdAt:serverTimestamp()}); }
+                                          } catch(err){ toast((currentLanguage==='tr'?'Kaydedilemedi: ':'Save failed: ')+(err instanceof Error?err.message:String(err)),'error'); }
                                         }} className="apple-input px-2 py-0.5 text-xs w-28"/>
                                       ):(
                                         <span className="tabular-nums cursor-pointer text-blue-600 hover:underline">{bud>0?`₺${Math.round(bud).toLocaleString('tr-TR')}`:'—'}</span>

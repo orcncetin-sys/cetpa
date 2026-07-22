@@ -699,6 +699,8 @@ const TENANT_COLLECTIONS = new Set([
   // (rmaRequests/orderReturns, supportTickets, ihracatlar) BİLEREK ayrı şemalar
   'salesReturns', 'serviceRequests', 'helpdeskTickets', 'exportShipments',
   'rfqQuotes', 'stockBatches', 'pricingRules', 'qualityChecklist',
+  // Batch 4 (2026-07-21): koşu-anlık-görüntüsü + oturum kalıcılığı
+  'payrollRuns', 'bankMatchRuns', 'revExpBudgets', 'stockCountSessions',
   'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',

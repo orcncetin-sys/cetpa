@@ -1429,6 +1429,9 @@ function AppContent() {
   const [p584CountItems, setP584CountItems] = useState<Array<{id:string;sku:string;name:string;systemQty:number;countedQty?:number;variance?:number}>>([]);
   const [p584Active, setP584Active] = useState(false);
   const [p584Finalizing, setP584Finalizing] = useState(false);
+  // KALICI sayım oturumu (2026-07-21): devam eden sayım stockCountSessions'ta
+  // saklanır — reload'da kaldığı yerden devam eder; kapatınca doc silinir.
+  const [p584SessionId, setP584SessionId] = useState<string | null>(null);
   // Sayimi kapatirken: sayilan (countedQty dolu) ve fark olan her urun icin
   // stockLevel'i sayilan degere getirir + inventoryMovements'a sayim_duzeltme
   // kategorisiyle loglar + tum oturumu 'stockCounts'a arsivler. Onceden bu
@@ -1467,6 +1470,8 @@ function AppContent() {
       setP584Finalizing(false);
       setP584Active(false);
       setP584CountItems([]);
+      // Kalıcı oturumu kapat (sonuç zaten stockCounts'a yazıldı)
+      if (p584SessionId) { void deleteDoc(doc(db, 'stockCountSessions', p584SessionId)).catch(() => {}); setP584SessionId(null); }
     }
   };
   // ── Phase 585: Customer Loyalty Score ─────────────────────────────────────
@@ -1558,7 +1563,7 @@ function AppContent() {
   const [p624Draft, setP624Draft] = useState({productName:'',qty:'',plannedStart:'',plannedEnd:'',status:'Planlandı' as 'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal',priority:'Normal' as 'Normal'|'Acil',workCenter:''});
   // ── Phase 625: Gelir Gider Bütçe Karşılaştırması ─────────────────────────
   const [p625BudgetYear, setP625BudgetYear] = useState(()=>new Date().getFullYear());
-  const [p625BudgetData, setP625BudgetData] = useState<Array<{month:number;budgetRevenue:number;budgetExpense:number}>>([]);
+  const [p625BudgetData, setP625BudgetData] = useState<Array<{id?:string;month:number;budgetRevenue:number;budgetExpense:number}>>([]);
   const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
   // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
   // ── Phase 627: Tedarik Zinciri Riski ─────────────────────────────────────
@@ -1852,6 +1857,51 @@ function AppContent() {
     }, () => {});
     return () => { unsub(); unsub2(); };
   }, [activeTab]);
+
+  // ── Phase 584: Devam eden sayım oturumu — reload'da kaldığı yerden (tek-seferlik) ──
+  useEffect(() => {
+    if (activeTab !== 'inventory' || p584Active) return;
+    void (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'stockCountSessions'));
+        const s = snap.docs[0];
+        if (s) {
+          const data = s.data() as { items?: typeof p584CountItems };
+          if (data.items?.length) { setP584CountItems(data.items); setP584SessionId(s.id); setP584Active(true); }
+        }
+      } catch { /* çevrimdışı vb. — sessiz geç */ }
+    })();
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Phase 625: Gelir/Gider bütçe — KALICI (revExpBudgets, ay-bazlı doc) ───
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'gelir-gider-butce') return;
+    const unsub = onSnapshot(query(collection(db, 'revExpBudgets')), snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as {id:string;year:number;month:number;budgetRevenue:number;budgetExpense:number}));
+      setP625BudgetData(rows.filter(r => r.year === p625BudgetYear));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, muhasebeTab, p625BudgetYear]);
+
+  // ── Phase 636: Bordro hesabı — son koşu geri yüklenir (payrollRuns) ───────
+  useEffect(() => {
+    if (activeTab !== 'ik') return;
+    const unsub = onSnapshot(query(collection(db, 'payrollRuns'), orderBy('calculatedAt', 'desc'), limit(1)), snap => {
+      const latest = snap.docs[0]?.data() as { rows?: typeof p636Payrolls } | undefined;
+      if (latest?.rows?.length) { setP636Payrolls(latest.rows); setP636Calculated(true); }
+    }, () => {});
+    return () => unsub();
+  }, [activeTab]);
+
+  // ── Phase 638: Banka eşleştirme — son koşu geri yüklenir (bankMatchRuns) ──
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'banka') return;
+    const unsub = onSnapshot(query(collection(db, 'bankMatchRuns'), orderBy('ranAt', 'desc'), limit(1)), snap => {
+      const latest = snap.docs[0]?.data() as { results?: typeof p638MatchResults } | undefined;
+      if (latest?.results?.length) setP638MatchResults(latest.results);
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, muhasebeTab]);
 
   // ── Phase 587: Kalite kontrol çeklisti — KALICI (qualityChecklist) ────────
   useEffect(() => {
@@ -6106,6 +6156,8 @@ function AppContent() {
                 p579Search={p579Search}
                 setP579Search={setP579Search}
                 p584CountItems={p584CountItems}
+                p584SessionId={p584SessionId}
+                setP584SessionId={setP584SessionId}
                 setP584CountItems={setP584CountItems}
                 p584Active={p584Active}
                 setP584Active={setP584Active}

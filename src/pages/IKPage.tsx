@@ -917,6 +917,9 @@ export default function IKPage(props: Props) {
                       });
                       setP636Payrolls(rows);
                       setP636Calculated(true);
+                      // KALICI (2026-07-21): her hesaplama koşusu tarihli kayıt olarak saklanır;
+                      // reload'da son koşu geri yüklenir (App aboneliği).
+                      void addDoc(collection(db,'payrollRuns'),{rows,calculatedAt:serverTimestamp()}).catch(()=>{});
                     };
                     const totalGross = p636Payrolls.reduce((s,r)=>s+r.gross,0);
                     const totalNet = p636Payrolls.reduce((s,r)=>s+r.net,0);

@@ -73,6 +73,8 @@ interface Props {
   p584Active: boolean;
   setP584Active: React.Dispatch<React.SetStateAction<boolean>>;
   p584Finalizing: boolean;
+  p584SessionId: string | null;
+  setP584SessionId: React.Dispatch<React.SetStateAction<string | null>>;
   p588Consign: Consign588[];
   setP588Consign: React.Dispatch<React.SetStateAction<Consign588[]>>;
   p588ShowForm: boolean;
@@ -101,7 +103,7 @@ export default function InventoryPage(props: Props) {
     p561ShowAll, setP561ShowAll, p562ShowReservations, setP562ShowReservations,
     p568Overhead, setP568Overhead, p568SortBy, setP568SortBy, p574ValMethod, setP574ValMethod,
     p579Batches, setP579Batches, p579ShowForm, setP579ShowForm, p579Draft, setP579Draft, p579Search, setP579Search,
-    p584CountItems, setP584CountItems, p584Active, setP584Active, p584Finalizing,
+    p584CountItems, setP584CountItems, p584Active, setP584Active, p584Finalizing, p584SessionId, setP584SessionId,
     p588Consign, setP588Consign, p588ShowForm, setP588ShowForm, p588Draft, setP588Draft,
     p611Period, setP611Period,
     p642Warranties, setP642Warranties, p642ShowForm, setP642ShowForm, p642Draft, setP642Draft,
@@ -894,9 +896,12 @@ export default function InventoryPage(props: Props) {
                         <p className="text-xs text-gray-400 mt-1">{tr584?'Sistem stoğunu gerçek sayımla karşılaştırın.':'Compare system quantities to physical count.'}</p>
                       </div>
                       {hasFullAccess('inventory') && (
-                        <button onClick={()=>{
-                          setP584CountItems(inventory.slice(0,50).map(i=>({id:i.id,sku:i.sku,name:i.name,systemQty:i.stockLevel||0,countedQty:undefined,variance:undefined})));
+                        <button onClick={async ()=>{
+                          const items=inventory.slice(0,50).map(i=>({id:i.id,sku:i.sku,name:i.name,systemQty:i.stockLevel||0}));
+                          setP584CountItems(items.map(i=>({...i,countedQty:undefined,variance:undefined})));
                           setP584Active(true);
+                          // KALICI oturum: reload'da devam edebilmek için (2026-07-21)
+                          try { const ref=await addDoc(collection(db,'stockCountSessions'),{items,startedAt:serverTimestamp()}); setP584SessionId(ref.id); } catch { /* çevrimdışı — oturum yerel sürer */ }
                         }} className="apple-button-primary text-sm flex items-center gap-2">
                           <RefreshCw className="w-4 h-4"/>{tr584?'Sayım Başlat':'Start Count'}
                         </button>
@@ -934,6 +939,9 @@ export default function InventoryPage(props: Props) {
                                   <input type="number" className="w-16 apple-input px-2 py-0.5 text-xs" placeholder="—" value={item.countedQty??''} onChange={e=>{
                                     const val = e.target.value===''?undefined:Number(e.target.value);
                                     setP584CountItems(prev=>prev.map(x=>x.id===item.id?{...x,countedQty:val,variance:val!==undefined?val-x.systemQty:undefined}:x));
+                                  }} onBlur={()=>{
+                                    // Oturum kalıcılığı: alan terkinde tüm listeyi kaydet (undefined'lar 0 yazılmasın diye ayıkla)
+                                    if(p584SessionId){ void updateDoc(doc(db,'stockCountSessions',p584SessionId),{items:p584CountItems.map(x=>({id:x.id,sku:x.sku,name:x.name,systemQty:x.systemQty,...(x.countedQty!==undefined?{countedQty:x.countedQty,variance:x.variance??0}:{})}))}).catch(()=>{}); }
                                   }} />
                                 </td>
                                 <td className="px-3 py-2">
