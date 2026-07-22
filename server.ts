@@ -691,6 +691,9 @@ const TENANT_COLLECTIONS = new Set([
   'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
   'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
+  // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi
+  // konsinyesi (giden 'consignments'tan FARKLI — gelen mal), kampanya metrikleri
+  'purchaseBudgets', 'supplierRisks', 'supplierConsignments', 'campaignMetrics',
   'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',

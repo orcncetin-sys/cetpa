@@ -5,7 +5,7 @@ import {
   X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, updateDoc } from '../lib/dbClient';
+import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
@@ -107,6 +107,9 @@ export default function SatinAlmaPage(props: Props) {
     p612Budgets, setP612Budgets, p612ShowForm, setP612ShowForm, p612Draft, setP612Draft,
     p627Risks, setP627Risks, p627ShowForm, setP627ShowForm, p627Draft, setP627Draft,
   } = props;
+  // Kalıcılaştırma (2026-07-21): düzenleme modu kimlikleri
+  const [p612EditId, setP612EditId] = React.useState<string | null>(null);
+  const [p627EditId, setP627EditId] = React.useState<string | null>(null);
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -983,12 +986,16 @@ export default function SatinAlmaPage(props: Props) {
                               <input type="number" className="apple-input" placeholder={tr612?'Harcanan (₺)':'Spent (₺)'} value={p612Draft.spent} onChange={e=>setP612Draft(d=>({...d,spent:e.target.value}))}/>
                               <input type="month" className="apple-input" value={p612Draft.period} onChange={e=>setP612Draft(d=>({...d,period:e.target.value}))}/>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p612Draft.category||!p612Draft.allocated) return;
-                              setP612Budgets(prev=>[...prev,{id:Date.now().toString(),category:p612Draft.category,allocated:Number(p612Draft.allocated),spent:Number(p612Draft.spent)||0,period:p612Draft.period}]);
-                              setP612Draft(d=>({...d,category:'',allocated:'',spent:''}));
-                              setP612ShowForm(false);
-                              toast(tr612?'Bütçe eklendi.':'Budget added.','success');
+                              const payload={category:p612Draft.category,allocated:Number(p612Draft.allocated),spent:Number(p612Draft.spent)||0,period:p612Draft.period};
+                              try {
+                                if(p612EditId){ await updateDoc(doc(db,'purchaseBudgets',p612EditId),payload); }
+                                else { await addDoc(collection(db,'purchaseBudgets'),{...payload,createdAt:serverTimestamp()}); }
+                                setP612Draft(d=>({...d,category:'',allocated:'',spent:''}));
+                                setP612ShowForm(false); setP612EditId(null);
+                                toast(tr612?(p612EditId?'Bütçe güncellendi.':'Bütçe eklendi.'):(p612EditId?'Budget updated.':'Budget added.'),'success');
+                              } catch(e){ toast((tr612?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                             }} className="apple-button-primary text-xs px-6">{tr612?'Kaydet':'Save'}</button>
                           </div>
                         )}
@@ -1012,7 +1019,8 @@ export default function SatinAlmaPage(props: Props) {
                                         <p className={`text-sm font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{Math.round(b.spent).toLocaleString('tr-TR')} / ₺{Math.round(b.allocated).toLocaleString('tr-TR')}</p>
                                         <p className={`text-xs ${isOver?'text-red-500':'text-gray-400'}`}>%{pct.toFixed(1)}{isOver?' ⚠️':''}</p>
                                       </div>
-                                      <button type="button" onClick={()=>setP612Budgets(prev=>prev.filter(x=>x.id!==b.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={()=>{setP612Draft({category:b.category,allocated:String(b.allocated),spent:String(b.spent),period:b.period});setP612EditId(b.id);setP612ShowForm(true);}} title={tr612?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'purchaseBudgets',b.id));}catch(e){toast((tr612?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                       </div>
                                     </div>
                                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -1060,12 +1068,16 @@ export default function SatinAlmaPage(props: Props) {
                               <input type="number" min="0" max="100" className="apple-input" placeholder={tr627?'Olasılık %':'Probability %'} value={p627Draft.probability} onChange={e=>setP627Draft(d=>({...d,probability:e.target.value}))}/>
                               <input className="apple-input col-span-2" placeholder={tr627?'Azaltma Planı':'Mitigation Plan'} value={p627Draft.mitigationPlan} onChange={e=>setP627Draft(d=>({...d,mitigationPlan:e.target.value}))}/>
                             </div>
-                            <button onClick={()=>{
+                            <button onClick={async ()=>{
                               if(!p627Draft.supplier) return;
-                              setP627Risks(prev=>[...prev,{id:Date.now().toString(),supplier:p627Draft.supplier,riskType:p627Draft.riskType,severity:p627Draft.severity,probability:Number(p627Draft.probability)||0,mitigationPlan:p627Draft.mitigationPlan||undefined,status:'Aktif'}]);
-                              setP627Draft(d=>({...d,supplier:'',probability:'50',mitigationPlan:''}));
-                              setP627ShowForm(false);
-                              toast(tr627?'Risk eklendi.':'Risk added.','success');
+                              const payload={supplier:p627Draft.supplier,riskType:p627Draft.riskType,severity:p627Draft.severity,probability:Number(p627Draft.probability)||0,mitigationPlan:p627Draft.mitigationPlan||''};
+                              try {
+                                if(p627EditId){ await updateDoc(doc(db,'supplierRisks',p627EditId),payload); }
+                                else { await addDoc(collection(db,'supplierRisks'),{...payload,status:'Aktif',createdAt:serverTimestamp()}); }
+                                setP627Draft(d=>({...d,supplier:'',probability:'50',mitigationPlan:''}));
+                                setP627ShowForm(false); setP627EditId(null);
+                                toast(tr627?(p627EditId?'Risk güncellendi.':'Risk eklendi.'):(p627EditId?'Risk updated.':'Risk added.'),'success');
+                              } catch(e){ toast((tr627?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                             }} className="apple-button-primary text-xs px-6">{tr627?'Kaydet':'Save'}</button>
                           </div>
                         )}
@@ -1085,11 +1097,12 @@ export default function SatinAlmaPage(props: Props) {
                                   </div>
                                   <div className="text-right shrink-0">
                                     <p className="text-xs font-bold text-gray-700">{tr627?'Risk Skoru:':'Score:'} {score.toFixed(2)}</p>
-                                    <select value={r.status} onChange={e=>setP627Risks(prev=>prev.map(x=>x.id===r.id?{...x,status:e.target.value as typeof r.status}:x))} className="text-xs border border-gray-200 rounded-lg px-1 py-0.5 mt-1 bg-white">
+                                    <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierRisks',r.id),{status:e.target.value});}catch(err){toast((tr627?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-1 py-0.5 mt-1 bg-white">
                                       {['Aktif','Azaltıldı','Kabul Edildi'].map(s=><option key={s}>{s}</option>)}
                                     </select>
                                   </div>
-                                  <button type="button" onClick={()=>setP627Risks(prev=>prev.filter(x=>x.id!==r.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP627Draft({supplier:r.supplier,riskType:r.riskType,severity:r.severity,probability:String(r.probability),mitigationPlan:r.mitigationPlan||''});setP627EditId(r.id);setP627ShowForm(true);}} title={tr627?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierRisks',r.id));}catch(e){toast((tr627?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div>
                               );
                             })}

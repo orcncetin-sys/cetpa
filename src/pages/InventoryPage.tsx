@@ -2,11 +2,11 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, RefreshCw, Package, DollarSign, ChevronDown,
-  Calculator, BookOpen, AlertCircle, Trash2,
+  Calculator, BookOpen, AlertCircle, Trash2, Edit2,
 } from 'lucide-react';
 import { Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { db } from '../firebase';
-import { doc, collection, addDoc, updateDoc, serverTimestamp } from '../lib/dbClient';
+import { doc, collection, addDoc, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
 import AIInlineNudge from '../components/AIInlineNudge';
@@ -107,6 +107,8 @@ export default function InventoryPage(props: Props) {
     p642Warranties, setP642Warranties, p642ShowForm, setP642ShowForm, p642Draft, setP642Draft,
     p644Horizon, setP644Horizon,
   } = props;
+  // Kalıcılaştırma (2026-07-21): düzenleme modu kimliği
+  const [p588EditId, setP588EditId] = React.useState<string | null>(null);
 
   return (
             <motion.div key="inventory" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -970,13 +972,17 @@ export default function InventoryPage(props: Props) {
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Lokasyon Kodu':'Location Code'} value={p588Draft.locationCode} onChange={e=>setP588Draft(d=>({...d,locationCode:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={()=>{
+                          <button onClick={async ()=>{
                             if(!p588Draft.supplierName||!p588Draft.productName) return;
-                            setP588Consign(prev=>[...prev,{id:Date.now().toString(),supplierName:p588Draft.supplierName,productName:p588Draft.productName,sku:p588Draft.sku,qty:Number(p588Draft.qty)||0,agreedPrice:Number(p588Draft.agreedPrice)||0,locationCode:p588Draft.locationCode||undefined,startDate:p588Draft.startDate,status:'Depoda'}]);
-                            setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
-                            setP588ShowForm(false);
+                            const payload={supplierName:p588Draft.supplierName,productName:p588Draft.productName,sku:p588Draft.sku,qty:Number(p588Draft.qty)||0,agreedPrice:Number(p588Draft.agreedPrice)||0,locationCode:p588Draft.locationCode||'',startDate:p588Draft.startDate};
+                            try {
+                              if(p588EditId){ await updateDoc(doc(db,'supplierConsignments',p588EditId),payload); }
+                              else { await addDoc(collection(db,'supplierConsignments'),{...payload,status:'Depoda',createdAt:serverTimestamp()}); }
+                              setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
+                              setP588ShowForm(false); setP588EditId(null);
+                            } catch(e){ toast((tr588?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{tr588?'Kaydet':'Save'}</button>
-                          <button onClick={()=>setP588ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr588?'İptal':'Cancel'}</button>
+                          <button onClick={()=>{setP588ShowForm(false);setP588EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr588?'İptal':'Cancel'}</button>
                         </div>
                       </div>
                     )}
@@ -1000,10 +1006,11 @@ export default function InventoryPage(props: Props) {
                                 <td className="px-3 py-2.5 font-bold font-mono text-blue-700">₺{(c.qty*c.agreedPrice).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
                                 <td className="px-3 py-2.5">
                                   <div className="flex items-center gap-2">
-                                  <select value={c.status} onChange={e=>setP588Consign(prev=>prev.map(x=>x.id===c.id?{...x,status:e.target.value as typeof c.status}:x))} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
+                                  <select value={c.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierConsignments',c.id),{status:e.target.value});}catch(err){toast((tr588?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
                                     <option>Depoda</option><option>Satıldı</option><option>İade Edildi</option>
                                   </select>
-                                  <button type="button" onClick={()=>setP588Consign(prev=>prev.filter(x=>x.id!==c.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP588Draft({supplierName:c.supplierName,productName:c.productName,sku:c.sku,qty:String(c.qty),agreedPrice:String(c.agreedPrice),locationCode:c.locationCode||'',startDate:c.startDate});setP588EditId(c.id);setP588ShowForm(true);}} title={tr588?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierConsignments',c.id));}catch(e){toast((tr588?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                   </div>
                                 </td>
                               </tr>

@@ -1804,6 +1804,42 @@ function AppContent() {
    
   }, [activeTab, muhasebeTab]);
 
+  // ── Phase 591: Oto. Fatura planları — KALICI (recurringBilling, 2026-07-21) ──
+  useEffect(() => {
+    if (activeTab !== 'muhasebe' || muhasebeTab !== 'oto-fatura') return;
+    const unsub = onSnapshot(query(collection(db, 'recurringBilling')), snap => {
+      setP591Schedules(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p591Schedules[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, muhasebeTab]);
+
+  // ── Phase 612: Satın alma bütçesi — KALICI (purchaseBudgets, 2026-07-21) ──
+  useEffect(() => {
+    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'satin-butce') return;
+    const unsub = onSnapshot(query(collection(db, 'purchaseBudgets')), snap => {
+      setP612Budgets(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p612Budgets[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, purchasingSubTab]);
+
+  // ── Phase 627: Tedarikçi riskleri — KALICI (supplierRisks, 2026-07-21) ────
+  useEffect(() => {
+    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'tedarik-risk') return;
+    const unsub = onSnapshot(query(collection(db, 'supplierRisks')), snap => {
+      setP627Risks(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p627Risks[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab, purchasingSubTab]);
+
+  // ── Phase 588: Konsinye (tedarikçi malı) — KALICI (supplierConsignments) ──
+  useEffect(() => {
+    if (activeTab !== 'inventory') return;
+    const unsub = onSnapshot(query(collection(db, 'supplierConsignments')), snap => {
+      setP588Consign(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p588Consign[number])));
+    }, () => {});
+    return () => unsub();
+  }, [activeTab]);
+
   // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
   useEffect(() => {
     if (activeTab !== 'ik') return;

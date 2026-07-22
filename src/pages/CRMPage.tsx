@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -12,7 +12,7 @@ import {
 import { db, auth, storage } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp, Timestamp,
+  collection, serverTimestamp, Timestamp, onSnapshot, query,
 } from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { clsx, type ClassValue } from 'clsx';
@@ -99,6 +99,8 @@ export default function CRMPage({
 }: Props) {
   // ── Local state ──────────────────────────────────────────────────────────────
   const [crmSearch, setCrmSearch] = useState('');
+  // Kalıcılaştırma (2026-07-21): kampanya metrik düzenleme modu
+  const [p606EditId, setP606EditId] = useState<string | null>(null);
   const [crmSort, setCrmSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
   const [crmLeadSort, setCrmLeadSort] = useState<'default'|'score'|'activity'|'name'>('default');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
@@ -128,6 +130,14 @@ export default function CRMPage({
   const [p601Segment, setP601Segment] = useState<'rfm'|'revenue'|'type'>('rfm');
   const [p604CommRate, setP604CommRate] = useState(5);
   const [p606Campaigns, setP606Campaigns] = useState<Array<{id:string;name:string;sentDate:string;recipients:number;opens:number;clicks:number;conversions:number}>>([]);
+  // Kampanya metrikleri — KALICI (campaignMetrics koleksiyonu, 2026-07-21)
+  useEffect(() => {
+    if (crmTab !== 'kampanya') return;
+    const unsub = onSnapshot(query(collection(db, 'campaignMetrics')), snap => {
+      setP606Campaigns(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p606Campaigns[number])));
+    }, () => {});
+    return () => unsub();
+  }, [crmTab]);
   const [p606ShowForm, setP606ShowForm] = useState(false);
   const [p606Draft, setP606Draft] = useState({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
   const [p613Metric, setP613Metric] = useState<'revenue'|'orders'|'risk'>('revenue');
@@ -909,12 +919,16 @@ export default function CRMPage({
                           <input type="number" className="apple-input" placeholder={tr606?'Tıklama':'Clicks'} value={p606Draft.clicks} onChange={e=>setP606Draft(d=>({...d,clicks:e.target.value}))}/>
                           <input type="number" className="apple-input" placeholder={tr606?'Dönüşüm':'Conversions'} value={p606Draft.conversions} onChange={e=>setP606Draft(d=>({...d,conversions:e.target.value}))}/>
                         </div>
-                        <button onClick={()=>{
+                        <button onClick={async ()=>{
                           if(!p606Draft.name||!p606Draft.sentDate) return;
-                          setP606Campaigns(prev=>[...prev,{id:Date.now().toString(),name:p606Draft.name,sentDate:p606Draft.sentDate,recipients:Number(p606Draft.recipients)||0,opens:Number(p606Draft.opens)||0,clicks:Number(p606Draft.clicks)||0,conversions:Number(p606Draft.conversions)||0}]);
-                          setP606Draft({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
-                          setP606ShowForm(false);
-                          toast(tr606?'Kampanya eklendi.':'Campaign added.','success');
+                          const payload={name:p606Draft.name,sentDate:p606Draft.sentDate,recipients:Number(p606Draft.recipients)||0,opens:Number(p606Draft.opens)||0,clicks:Number(p606Draft.clicks)||0,conversions:Number(p606Draft.conversions)||0};
+                          try {
+                            if(p606EditId){ await updateDoc(doc(db,'campaignMetrics',p606EditId),payload); }
+                            else { await addDoc(collection(db,'campaignMetrics'),{...payload,createdAt:serverTimestamp()}); }
+                            setP606Draft({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
+                            setP606ShowForm(false); setP606EditId(null);
+                            toast(tr606?(p606EditId?'Kampanya güncellendi.':'Kampanya eklendi.'):(p606EditId?'Campaign updated.':'Campaign added.'),'success');
+                          } catch(e){ toast((tr606?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                         }} className="apple-button-primary text-xs px-6">{tr606?'Kaydet':'Save'}</button>
                       </div>
                     )}
@@ -953,7 +967,10 @@ export default function CRMPage({
                                     <td className="px-3 py-2.5 font-bold text-emerald-600">%{or}</td>
                                     <td className="px-3 py-2.5 font-bold text-amber-600">%{cr}</td>
                                     <td className="px-3 py-2.5 font-bold text-purple-600">{c.conversions}</td>
-                                    <td className="px-3 py-2.5 text-right"><button type="button" onClick={()=>setP606Campaigns(prev=>prev.filter(x=>x.id!==c.id))} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button></td>
+                                    <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
+                                      <button type="button" onClick={()=>{setP606Draft({name:c.name,sentDate:c.sentDate,recipients:String(c.recipients),opens:String(c.opens),clicks:String(c.clicks),conversions:String(c.conversions)});setP606EditId(c.id);setP606ShowForm(true);}} title={tr606?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'campaignMetrics',c.id));}catch(e){toast((tr606?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                    </div></td>
                                   </tr>
                                 );
                               })}
