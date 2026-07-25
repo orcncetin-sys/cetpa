@@ -1542,9 +1542,18 @@ fetchAndCacheExchangeRates(); // Initial fetch
 // All Mikro calls MUST originate from this server (whitelisted IP requirement).
 // Token: OpenID Connect via onlinekullanici.mikro.com.tr (~6h validity)
 // API:   jumpbulutapigw.mikro.com.tr — bearer token + Mikro context in body
-
+//
+// ⚠️ PORT (2026-07-21): Gerçek Jump API standart-DIŞI portta yayınlanır —
+//    V16 = 8084, V17 = 8094. Bu portlar Cloudflare tarafından PROXY'LENMEZ,
+//    doğrudan origin'e (IP-whitelist'li) gider. PORTSUZ (443) adres Cloudflare
+//    önyüzüne düşer ve "Attention Required" 403 döner (bkz. detectMikroGatewayBlock).
+//    Bu yüzden MIKRO_API_URL MUTLAKA doğru portu içermeli. Varsayılan V17 (8094);
+//    farklı sürüm/port için env MIKRO_API_URL ile ez.
 const MIKRO_AUTH_URL = 'https://onlinekullanici.mikro.com.tr/auth/realms/Mikro/protocol/openid-connect/token';
-const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods';
+const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'https://jumpbulutapigw.mikro.com.tr:8094/ApiJB/ApiMethods';
+if (!/:\d+/.test(MIKRO_API_BASE)) {
+  console.warn('⚠️  MIKRO_API_URL PORTSUZ (443) → Cloudflare önyüzü 403 döndürür. V17 için :8094, V16 için :8084 portunu ekleyin.');
+}
 
 interface MikroCreds {
   idmEmail: string;
@@ -1953,9 +1962,12 @@ function detectMikroGatewayBlock(data: unknown, status?: number): string | null 
   const isCloudflare = /cloudflare|attention required|cf-ray|__cf/i.test(s);
   const ip = process.env.MIKRO_WHITELIST_IP || process.env.SERVER_PUBLIC_IP || 'sunucu IP\'niz';
   if (isCloudflare) {
+    const portsuz = !/:\d+/.test(MIKRO_API_BASE);
     return `Mikro gateway (Cloudflare) sunucu isteğini ${status ?? 403} ile ENGELLEDİ — API anahtarı denetlenmedi. ` +
-      `Muhtemel neden: v17 göçünde sunucu IP'si (${ip}) whitelist'ten düştü. ` +
-      `Mikro destekten bu IP'yi Jump v17 API gateway'ine (jumpbulutapigw.mikro.com.tr) yeniden ekletin.`;
+      (portsuz
+        ? `KÖK NEDEN: MIKRO_API_URL PORTSUZ (443) → Cloudflare önyüzüne düşüyor. Gerçek Jump API portludur (V17=8094, V16=8084). ` +
+          `MIKRO_API_URL'i "https://jumpbulutapigw.mikro.com.tr:8094/ApiJB/ApiMethods" yapıp uygulamayı yeniden başlatın.`
+        : `Muhtemel neden: sunucu IP'si (${ip}) Mikro tarafında ${MIKRO_API_BASE.match(/:\d+/)?.[0]} portu için whitelist'te değil — Mikro destekten ekletin.`);
   }
   return `Mikro gateway JSON yerine HTML hata sayfası döndü (HTTP ${status ?? '?'}) — API'ye ulaşılamıyor. ` +
     `Endpoint/gateway adresi v17'de değişmiş veya sunucu IP'si engellenmiş olabilir. Mikro destekle doğrulayın.`;
