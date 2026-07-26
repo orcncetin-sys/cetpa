@@ -4129,7 +4129,22 @@ async function startServer() {
         error: gatewayBlock || (r0?.ErrorMessage as string) || `Mikro API bağlantı hatası (HTTP ${ok ? 200 : 'err'}: ${JSON.stringify(data)?.slice(0, 120)})`,
       });
     } catch (err) {
-      res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
+      // Ağ seviyesi hata (fetch failed / ECONNREFUSED / timeout): kullanıcıya
+      // ham mesaj yerine ne yapacağını söyle. Port kullanılıyorsa TCP hiç
+      // açılmıyor demektir (Cloudflare bu portları proxy'lemez / IP whitelist).
+      const raw = err instanceof Error ? err.message : String(err);
+      const portMatch = MIKRO_API_BASE.match(/:(\d+)/)?.[1];
+      const netFail = /fetch failed|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|socket hang up|network/i.test(raw);
+      const hint = netFail
+        ? (portMatch
+            ? `Mikro API'ye TCP bağlantısı kurulamadı (port ${portMatch}). ` +
+              `Bu host Cloudflare arkasında ve Cloudflare ${portMatch} portunu YAYINLAMAZ — ya Mikro'nun verdiği ` +
+              `port için DOĞRU HOST adresini (ör. firma-özel origin adresi) kullanın, ya da sunucu IP'nizin ` +
+              `o port için whitelist'e eklendiğini Mikro destekten teyit edin. Ham hata: ${raw}`
+            : `Mikro API'ye ulaşılamadı. MIKRO_API_URL portsuz görünüyor; Mikro'nun verdiği portu (V17=8094, V16=8084) ekleyin. Ham hata: ${raw}`)
+        : raw;
+      console.warn('Mikro status probe error:', raw, '| base:', MIKRO_API_BASE);
+      res.json({ configured: true, connected: false, networkError: netFail, error: hint });
     }
   });
 
