@@ -1597,8 +1597,9 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
   //    LOKAL modda IDM e-posta/şifre, ApiKey ve Alias GEREKMEZ (API bunları
   //    kullanmıyor) — yalnız KullaniciKodu + Sifre yeterli. Bulut modunda
   //    eski (tam) koşul aynen geçerli.
+  //    (KullaniciKodu varsayılanı 'SRV' olduğu için lokalde tek zorunlu alan Sifre.)
   const envReady = MIKRO_LOCAL_MODE
-    ? !!(process.env.MIKRO_KULLANICI_KODU && process.env.MIKRO_SIFRE)
+    ? !!process.env.MIKRO_SIFRE
     : !!(process.env.MIKRO_IDM_EMAIL && process.env.MIKRO_IDM_PASSWORD &&
          process.env.MIKRO_API_KEY && process.env.MIKRO_ALIAS);
   if (envReady) {
@@ -1628,7 +1629,9 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
     const alias       = d.alias        as string | undefined;
     const apiKey      = d.apiKey       as string | undefined;
 
-    if (!idmPassword || !alias) return null; // minimum required
+    // Minimum zorunlu alanlar moda göre: lokalde Sifre yeterli (Alias/IDM
+    // kullanılmıyor), bulutta idmPassword + alias şart.
+    if (MIKRO_LOCAL_MODE ? !d.sifre : (!idmPassword || !alias)) return null;
 
     return {
       idmEmail:      idmEmail      || '',
@@ -4127,7 +4130,19 @@ async function startServer() {
   app.get('/api/mikro/status', async (_req: Request, res: Response) => {
     const statusCreds = await getMikroCreds();
     if (!statusCreds) {
-      return res.json({ configured: false, connected: false, message: 'Mikro kimlik bilgileri yapılandırılmamış. Ayarlar > Mikro ERP bölümünden girin.' });
+      // Hangi alanın eksik olduğunu MODA göre söyle (secret DEĞERİ asla yazma).
+      const missing = MIKRO_LOCAL_MODE
+        ? ['MIKRO_SIFRE'].filter(k => !process.env[k])
+        : ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'].filter(k => !process.env[k]);
+      return res.json({
+        configured: false, connected: false,
+        mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud',
+        message: `Mikro kimlik bilgileri yapılandırılmamış (${MIKRO_LOCAL_MODE ? 'LOKAL' : 'BULUT'} mod). ` +
+          (missing.length
+            ? `Sunucu .env'inde eksik: ${missing.join(', ')}. `
+            : 'Ayarlar > Mikro ERP bölümünden girin veya sunucu .env değerlerini kontrol edin. ') +
+          (MIKRO_LOCAL_MODE ? 'Lokal modda Alias/ApiKey/IDM gerekmez; KullaniciKodu boşsa SRV varsayılır.' : ''),
+      });
     }
     try {
       // NOT: Size 5'in altında Mikro 'result' anahtarı olmayan bozuk yanıt dönüyor
