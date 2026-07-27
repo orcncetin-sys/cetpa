@@ -376,8 +376,8 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             {!status.configured && (
               <p className="text-[11px] text-gray-400 w-full mt-1">
                 {status.message || (status.mode === 'local'
-                  ? (t ? 'Lokal Jump modu: sunucu .env\'inde MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI ayarlayın (IDM/Alias/ApiKey gerekmez).'
-                       : 'Local Jump mode: set MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI in server .env (no IDM/Alias/ApiKey needed).')
+                  ? (t ? 'Lokal Jump modu: sunucu .env\'inde MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI + MIKRO_API_KEY ayarlayın (IDM/Alias gerekmez).'
+                       : 'Local Jump mode: set MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI + MIKRO_API_KEY in server .env (no IDM/Alias needed).')
                   : (t ? 'Mikro env değişkenlerini sunucuda ayarlayın (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'
                        : 'Set Mikro env vars on the server (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'))}
               </p>
