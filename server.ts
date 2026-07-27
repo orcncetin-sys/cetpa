@@ -1597,9 +1597,13 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
   //    LOKAL modda IDM e-posta/şifre, ApiKey ve Alias GEREKMEZ (API bunları
   //    kullanmıyor) — yalnız KullaniciKodu + Sifre yeterli. Bulut modunda
   //    eski (tam) koşul aynen geçerli.
-  //    (KullaniciKodu varsayılanı 'SRV' olduğu için lokalde tek zorunlu alan Sifre.)
+  //    LOKAL modda ZORUNLU ALAN YOK: KullaniciKodu 'SRV', FirmaKodu '01',
+  //    CalismaYili içinde bulunulan yıl varsayılır ve **Mikro API kullanıcısının
+  //    şifresi BOŞ olabilir** (SRV'de şifre tanımsız — sadece giriş). Boş şifre
+  //    geçerli bir günlük hash üretir: MD5("YYYY-AA-GG " + ""). Bu yüzden lokal
+  //    modda MIKRO_API_URL'in lokali göstermesi "yapılandırılmış" saymak için yeterli.
   const envReady = MIKRO_LOCAL_MODE
-    ? !!process.env.MIKRO_SIFRE
+    ? true
     : !!(process.env.MIKRO_IDM_EMAIL && process.env.MIKRO_IDM_PASSWORD &&
          process.env.MIKRO_API_KEY && process.env.MIKRO_ALIAS);
   if (envReady) {
