@@ -59,7 +59,7 @@ export interface ErpInfo {
 export const SUPPORTED_ERPS: ErpInfo[] = [
   {
     id:            'mikro',
-    displayName:   'Mikro ERP (JumpBulut)',
+    displayName:   'Mikro ERP (Jump)',
     shortName:     'Mikro',
     vendor:        'Mikro Yazılımevi',
     website:       'https://www.mikro.com.tr',

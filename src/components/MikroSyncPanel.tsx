@@ -347,7 +347,11 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
               <h3 className="font-bold text-sm text-gray-900">
                 {t ? 'Mikro Jump Bağlantı Durumu' : 'Mikro Jump Connection Status'}
               </h3>
-              <p className="text-[11px] text-gray-400">jumpbulutapigw.mikro.com.tr</p>
+              <p className="text-[11px] text-gray-400">
+                {status?.mode === 'local'
+                  ? (t ? 'localhost:8094 — sunucuda kurulu Jump (lokal)' : 'localhost:8094 — on-server Jump (local)')
+                  : status?.mode === 'cloud' ? 'jumpbulutapigw.mikro.com.tr' : (status?.apiBase ?? '…')}
+              </p>
             </div>
           </div>
           <button
@@ -371,9 +375,11 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             )}
             {!status.configured && (
               <p className="text-[11px] text-gray-400 w-full mt-1">
-                {t
-                  ? 'Mikro env değişkenlerini sunucuda ayarlayın (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'
-                  : 'Set Mikro env vars on the server (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'}
+                {status.message || (status.mode === 'local'
+                  ? (t ? 'Lokal Jump modu: sunucu .env\'inde MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI ayarlayın (IDM/Alias/ApiKey gerekmez).'
+                       : 'Local Jump mode: set MIKRO_FIRMA_KODU + MIKRO_CALISMA_YILI in server .env (no IDM/Alias/ApiKey needed).')
+                  : (t ? 'Mikro env değişkenlerini sunucuda ayarlayın (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'
+                       : 'Set Mikro env vars on the server (MIKRO_IDM_EMAIL, MIKRO_IDM_PASSWORD, MIKRO_API_KEY, MIKRO_ALIAS)'))}
               </p>
             )}
           </div>

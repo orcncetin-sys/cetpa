@@ -4157,13 +4157,14 @@ async function startServer() {
       });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (ok && r0 && !r0.IsError) {
-        return res.json({ configured: true, connected: true });
+        return res.json({ configured: true, connected: true, mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud', apiBase: MIKRO_API_BASE });
       }
       // Cloudflare/WAF/gateway HTML hata sayfasını anlaşılır mesaja çevir (v17 IP-block)
       const gatewayBlock = detectMikroGatewayBlock(data);
       console.warn('Mikro status probe failed:', gatewayBlock || JSON.stringify(data)?.slice(0, 300));
       res.json({
         configured: true, connected: false,
+        mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud', apiBase: MIKRO_API_BASE,
         gatewayBlocked: !!gatewayBlock,
         error: gatewayBlock || (r0?.ErrorMessage as string) || `Mikro API bağlantı hatası (HTTP ${ok ? 200 : 'err'}: ${JSON.stringify(data)?.slice(0, 120)})`,
       });
@@ -4183,7 +4184,7 @@ async function startServer() {
             : `Mikro API'ye ulaşılamadı. MIKRO_API_URL portsuz görünüyor; Mikro'nun verdiği portu (V17=8094, V16=8084) ekleyin. Ham hata: ${raw}`)
         : raw;
       console.warn('Mikro status probe error:', raw, '| base:', MIKRO_API_BASE);
-      res.json({ configured: true, connected: false, networkError: netFail, error: hint });
+      res.json({ configured: true, connected: false, mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud', apiBase: MIKRO_API_BASE, networkError: netFail, error: hint });
     }
   });
 

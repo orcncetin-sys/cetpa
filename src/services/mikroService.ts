@@ -46,6 +46,9 @@ export interface MikroStatus {
   connected: boolean;
   message?: string;
   error?: string;
+  /** 'local' = sunucuda kurulu Jump (localhost:8094), 'cloud' = JumpBulut gateway */
+  mode?: 'local' | 'cloud';
+  apiBase?: string;
 }
 
 export interface MikroStokItem {
