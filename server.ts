@@ -1543,16 +1543,28 @@ fetchAndCacheExchangeRates(); // Initial fetch
 // Token: OpenID Connect via onlinekullanici.mikro.com.tr (~6h validity)
 // API:   jumpbulutapigw.mikro.com.tr — bearer token + Mikro context in body
 //
-// ⚠️ PORT (2026-07-21): Gerçek Jump API standart-DIŞI portta yayınlanır —
-//    V16 = 8084, V17 = 8094. Bu portlar Cloudflare tarafından PROXY'LENMEZ,
-//    doğrudan origin'e (IP-whitelist'li) gider. PORTSUZ (443) adres Cloudflare
-//    önyüzüne düşer ve "Attention Required" 403 döner (bkz. detectMikroGatewayBlock).
-//    Bu yüzden MIKRO_API_URL MUTLAKA doğru portu içermeli. Varsayılan V17 (8094);
-//    farklı sürüm/port için env MIKRO_API_URL ile ez.
+// ⚠️ İKİ FARKLI DAĞITIM MODELİ (2026-07-27, resmi Postman koleksiyonundan doğrulandı):
+//
+//  1) LOKAL Jump (V16/V17 sunucuya kurulu — BİZİM DURUMUMUZ):
+//     Base: http://localhost:8094/Api/APIMethods   (V16 => 8084)
+//     Kimlik: Authorization header YOK (215/215 istekte yok). Kimlik yalnız
+//     gövdedeki {Mikro:{FirmaKodu,CalismaYili,KullaniciKodu,Sifre}} ile taşınır.
+//     Alias/ApiKey bu modda kullanılmaz (APILogin dışında).
+//
+//  2) JumpBulut (bulut gateway): https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods
+//     Kimlik: onlinekullanici.mikro.com.tr'den OIDC bearer token + Alias.
+//     NOT: bu host Cloudflare arkasında; 8084/8094 portlarını PROXY'LEMEZ.
+//
+// Mod, MIKRO_API_URL'in host'undan otomatik seçilir (localhost/127.0.0.1/özel IP
+// => lokal mod: token alma adımı ATLANIR). Gerekirse MIKRO_LOCAL=0/1 ile ezilir.
 const MIKRO_AUTH_URL = 'https://onlinekullanici.mikro.com.tr/auth/realms/Mikro/protocol/openid-connect/token';
-const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'https://jumpbulutapigw.mikro.com.tr:8094/ApiJB/ApiMethods';
-if (!/:\d+/.test(MIKRO_API_BASE)) {
-  console.warn('⚠️  MIKRO_API_URL PORTSUZ (443) → Cloudflare önyüzü 403 döndürür. V17 için :8094, V16 için :8084 portunu ekleyin.');
+const MIKRO_API_BASE = process.env.MIKRO_API_URL || 'http://localhost:8094/Api/APIMethods';
+const MIKRO_LOCAL_MODE = process.env.MIKRO_LOCAL != null
+  ? process.env.MIKRO_LOCAL === '1'
+  : /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(MIKRO_API_BASE);
+console.log(`Mikro API: ${MIKRO_API_BASE} (${MIKRO_LOCAL_MODE ? 'LOKAL mod — token yok' : 'BULUT mod — OIDC token'})`);
+if (!MIKRO_LOCAL_MODE && !/:\d+/.test(MIKRO_API_BASE)) {
+  console.warn('⚠️  MIKRO_API_URL portsuz ve bulut host — Cloudflare önyüzü 403 döndürebilir.');
 }
 
 interface MikroCreds {
@@ -1582,19 +1594,21 @@ function toMd5IfPlain(value: string): string {
  */
 async function getMikroCreds(): Promise<MikroCreds | null> {
   // 1. Try env vars first (server deployment)
-  if (
-    process.env.MIKRO_IDM_EMAIL &&
-    process.env.MIKRO_IDM_PASSWORD &&
-    process.env.MIKRO_API_KEY &&
-    process.env.MIKRO_ALIAS
-  ) {
+  //    LOKAL modda IDM e-posta/şifre, ApiKey ve Alias GEREKMEZ (API bunları
+  //    kullanmıyor) — yalnız KullaniciKodu + Sifre yeterli. Bulut modunda
+  //    eski (tam) koşul aynen geçerli.
+  const envReady = MIKRO_LOCAL_MODE
+    ? !!(process.env.MIKRO_KULLANICI_KODU && process.env.MIKRO_SIFRE)
+    : !!(process.env.MIKRO_IDM_EMAIL && process.env.MIKRO_IDM_PASSWORD &&
+         process.env.MIKRO_API_KEY && process.env.MIKRO_ALIAS);
+  if (envReady) {
     return {
-      idmEmail:      process.env.MIKRO_IDM_EMAIL,
-      idmPassword:   process.env.MIKRO_IDM_PASSWORD,
-      alias:         process.env.MIKRO_ALIAS,
+      idmEmail:      process.env.MIKRO_IDM_EMAIL      || '',
+      idmPassword:   process.env.MIKRO_IDM_PASSWORD   || '',
+      alias:         process.env.MIKRO_ALIAS          || '',
       firmaKodu:     process.env.MIKRO_FIRMA_KODU     || '01',
       calismaYili:   process.env.MIKRO_CALISMA_YILI   || String(new Date().getFullYear()),
-      apiKey:        process.env.MIKRO_API_KEY,
+      apiKey:        process.env.MIKRO_API_KEY       || '',
       kullaniciKodu: process.env.MIKRO_KULLANICI_KODU || 'SRV',
       sifre:         process.env.MIKRO_SIFRE          || '',
       firmaNo:       parseInt(process.env.MIKRO_FIRMA_NO || '0', 10),
@@ -1931,11 +1945,14 @@ function buildMikroDailySifre(plainPassword: string): string {
 }
 
 function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
+  // Lokal Jump API'sinde bağlam yalnız FirmaKodu/CalismaYili/KullaniciKodu/Sifre
+  // (+FirmaNo/SubeNo) içerir; Alias & ApiKey yalnız bulut/APILogin tarafında var.
+  // Boş değer GÖNDERME — bazı sürümler boş alanı geçersiz sayabiliyor.
   return {
-    Alias:         creds.alias,
+    ...(creds.alias  ? { Alias:  creds.alias }  : {}),
     FirmaKodu:     creds.firmaKodu,
     CalismaYili:   creds.calismaYili,
-    ApiKey:        creds.apiKey,
+    ...(creds.apiKey ? { ApiKey: creds.apiKey } : {}),
     KullaniciKodu: creds.kullaniciKodu,
     Sifre:         buildMikroDailySifre(creds.sifre),
     FirmaNo:       creds.firmaNo,
@@ -1985,7 +2002,9 @@ async function mikroPost(
   const url = `${MIKRO_API_BASE}/${endpoint}`;
 
   const doCall = async (): Promise<{ ok: boolean; status: number; data: unknown }> => {
-    const token = await getMikroToken(creds);
+    // LOKAL modda OIDC token YOK — kimlik yalnız gövdedeki Mikro bağlamıyla taşınır.
+    // (Token adımı burada zorunlu tutulursa, IDM erişilemezse API'ye hiç gidilemez.)
+    const token = MIKRO_LOCAL_MODE ? null : await getMikroToken(creds);
     const body = inMikro
       ? { Mikro: { ...buildMikroContext(creds), ...extraBody } }
       : { Mikro: buildMikroContext(creds), ...extraBody };
@@ -1993,9 +2012,9 @@ async function mikroPost(
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
-        'Authorization': `Bearer ${token}`,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         // Cloudflare bot-yönetimi bazı istekleri UA yokluğu/şüpheli UA ile
-        // engelliyor. Sıradan bir tarayıcı UA'sı gönder (v17 gateway CF arkasında).
+        // engelliyor. Sıradan bir tarayıcı UA'sı gönder (bulut gateway CF arkasında).
         'User-Agent':     'Cetpa-ERP/1.0 (+https://app.cetpa.com.tr)',
         'Accept':         'application/json',
       },
@@ -2019,7 +2038,8 @@ async function mikroPost(
   // 5 dk boyunca tekrar token üretme ki kendi kendimize kilidi uzatmayalım.
   const isStub = (d: unknown) =>
     !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
-  if (result.ok && isStub(result.data)) {
+  // Lokal modda token yok → yenilemenin anlamı yok (stub başka sebepten gelir).
+  if (result.ok && isStub(result.data) && !MIKRO_LOCAL_MODE) {
     const cacheKey = `${creds.idmEmail}|${creds.alias}`;
     const lastRefresh = mikroStubRefreshAt.get(cacheKey) ?? 0;
     if (Date.now() - lastRefresh > 5 * 60 * 1000) {
