@@ -1885,7 +1885,58 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
   return { date, ok, checks, stockRatio };
 }
 // Her sabah 08:30 (sunucu saati) — gece yedeği ve gece cron'ları bittikten sonra.
-cron.schedule('30 8 * * *', () => { void runOpsWatchdog(); });
+cron.schedule('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
+
+/** Bekçiyi koştur, BOZUK kontrol varsa e-posta at (2026-07-28).
+ *  Tamamen kod — AI/token maliyeti YOK. Sessizlik = iyi haber:
+ *  her şey yolundaysa posta GÖNDERİLMEZ (gürültü olmasın).
+ *  Gerekli env: RESEND_API_KEY + OPS_ALERT_EMAIL (yoksa REPORT_RECIPIENT_EMAIL).
+ *  OPS_ALERT_ALWAYS=true dersen her gün özet gelir (bozuk olmasa da). */
+async function runOpsWatchdogAndAlert(): Promise<void> {
+  let result: Awaited<ReturnType<typeof runOpsWatchdog>>;
+  try { result = await runOpsWatchdog(); } catch (e) { console.error('Ops watchdog hatası:', e); return; }
+
+  const failing = result.checks.filter(c => !c.ok);
+  const always = process.env.OPS_ALERT_ALWAYS === 'true';
+  if (!failing.length && !always) return; // sessizlik = iyi haber
+
+  const resendKey = process.env.RESEND_API_KEY;
+  const recipient = process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL;
+  if (!resendKey || !recipient) {
+    console.warn(`Ops uyarısı gönderilemedi (RESEND_API_KEY/OPS_ALERT_EMAIL eksik). Bozuk: ${failing.map(c => c.key).join(', ') || 'yok'}`);
+    return;
+  }
+  const esc = (s: string) => String(s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch] as string));
+  const row = (c: { key: string; ok: boolean; detail: string }) =>
+    `<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;">${c.ok ? '✅' : '❌'} <b>${esc(c.key)}</b></td>` +
+    `<td style="padding:6px 10px;border-bottom:1px solid #eee;color:#555;">${esc(c.detail)}</td></tr>`;
+  const html = `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:640px">
+    <h2 style="margin:0 0 4px">CETPA Operasyon Bekçisi — ${esc(result.date)}</h2>
+    <p style="color:#666;margin:0 0 14px">${failing.length ? `<b style="color:#c00">${failing.length} kontrol başarısız</b>` : 'Tüm kontroller başarılı'}</p>
+    <table style="border-collapse:collapse;width:100%;font-size:13px">
+      ${failing.map(row).join('')}${failing.length && always ? '<tr><td colspan="2" style="height:10px"></td></tr>' : ''}
+      ${always ? result.checks.filter(c => c.ok).map(row).join('') : ''}
+    </table>
+    <p style="font-size:11px;color:#888;margin-top:14px">Detay: Yönetim → süper-admin panelindeki Operasyon Bekçisi kartı. Bu e-posta sunucudan otomatik gönderildi (AI kullanılmaz).</p>
+  </div>`;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+        to: [recipient],
+        subject: failing.length
+          ? `⚠️ CETPA: ${failing.length} kontrol başarısız (${failing.map(c => c.key).join(', ')})`
+          : `✅ CETPA: tüm kontroller başarılı — ${result.date}`,
+        html,
+      }),
+    });
+    console.log(`Ops uyarısı gönderildi → ${recipient} (bozuk: ${failing.length})`);
+  } catch (err) {
+    console.error('Ops uyarı e-postası gönderilemedi:', err);
+  }
+}
 
 // In-memory token cache keyed by IDM email (invalidates if user changes creds)
 const mikroTokenCacheMap = new Map<string, { access_token: string; expiresAt: number }>();
