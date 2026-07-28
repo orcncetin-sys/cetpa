@@ -1945,8 +1945,14 @@ async function getMikroToken(creds: MikroCreds): Promise<string> {
  *  arasında bir önceki günün hash'i üretilir ve tüm çağrılar reddedilir.
  */
 function buildMikroDailySifre(plainPassword: string): string {
+  // LOKAL modda MikroAPI AYNI makinede çalışır ve hash'i MAKİNENİN yerel
+  // tarihine göre doğrular — Istanbul'a sabitlemek, sunucu saat dilimi farklıysa
+  // gece yarısı bandında "Şifre Hatalı" üretir (2026-07-28'de canlıda yaşandı:
+  // PowerShell'in yerel-tarih hash'i geçti, bizim Istanbul hash'imiz reddedildi).
+  // BULUT modunda eski davranış (TR saati) korunur.
   const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit',
+    ...(MIKRO_LOCAL_MODE ? {} : { timeZone: 'Europe/Istanbul' }),
+    year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date()); // "YYYY-MM-DD"
   return createHash('md5').update(`${today} ${plainPassword}`).digest('hex');
 }
