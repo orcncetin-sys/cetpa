@@ -3869,6 +3869,49 @@ async function startServer() {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
   });
+  /** GET /api/ops/summary — SALT-OKUNUR ops özeti, token korumalı (2026-07-28).
+   *  Amacı: günlük bulut rutini (Claude routine) tarayıcı/oturum olmadan sistemin
+   *  durumunu okuyabilsin. Sadece operasyonel metrik döner — kişisel/iş verisi YOK.
+   *  OPS_SUMMARY_TOKEN env'i tanımlı değilse uç KAPALIDIR (503).
+   *  Token: `X-Ops-Token` başlığı veya ?token= ile; karşılaştırma sabit-zamanlı. */
+  app.get('/api/ops/summary', async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'ops summary kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    try {
+      let latest: Record<string, unknown> | null = null;
+      let previous: Record<string, unknown> | null = null;
+      if (adminDb) {
+        const snap = await adminDb.collection('opsChecks').get();
+        const rows = snap.docs.map(d => d.data() as Record<string, unknown>)
+          .filter(r => r.date)
+          .sort((x, y) => String(y.date).localeCompare(String(x.date)));
+        latest = rows[0] ?? null;
+        previous = rows[1] ?? null;
+      }
+      const failing = ((latest?.checks as Array<{ key: string; ok: boolean; detail: string }>) || []).filter(c => !c.ok);
+      res.json({
+        generatedAt: new Date().toISOString(),
+        uptimeSeconds: Math.round(process.uptime()),
+        env: process.env.NODE_ENV || 'development',
+        watchdog: {
+          date: latest?.date ?? null,
+          ok: latest?.ok ?? null,
+          failingCount: failing.length,
+          failing,                       // yalnız BOZUK olanların detayı
+          checks: latest?.checks ?? [],  // tam liste (11 kontrol)
+          previousDate: previous?.date ?? null,
+          previousOk: previous?.ok ?? null,
+        },
+        mikro: { apiBase: MIKRO_API_BASE, localMode: MIKRO_LOCAL_MODE, surum: MIKRO_JUMP_SURUM },
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.post('/api/ops/watchdog/run', requireAuth, requireMfaVerified, requireSuperAdmin, async (_req: Request, res: Response) => {
     try {
       res.json({ success: true, result: await runOpsWatchdog() });
