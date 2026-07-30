@@ -18,7 +18,13 @@
  * Idempotent: yalnız companyId alanı OLMAYAN satırları günceller.
  */
 import pg from 'pg';
+import dotenv from 'dotenv';
 import { TENANT_COLLECTIONS } from '../src/lib/collections.js';
+
+// .env'i cwd'den yükle — server.ts ile aynı davranış. Eski .mjs sürümü
+// `docker exec` ile çalıştığı için ortamı hazır buluyordu; doğrudan sunucuda
+// koşturunca DATABASE_URL boş kalıyordu (2026-07-30).
+dotenv.config();
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) { console.error('DATABASE_URL eksik.'); process.exit(1); }
