@@ -797,6 +797,27 @@ type PgDocData = Record<string, any>;
  *  geçtiğinde .env.production'a MIKRO_JUMP_SURUM=17 eklemek yeterli. */
 const MIKRO_JUMP_SURUM = Number(process.env.MIKRO_JUMP_SURUM || 16);
 
+/** Kodun çağırdığı ama Mikro Jump V17'de BULUNMAYAN metotlar.
+ *
+ *  Kaynak: apidocs.mikro.com.tr/MikroAPI.postman_collection_V17.json — 215 istek,
+ *  161 tekil metot. Kodda çağrılan metotlar bu listeyle karşılaştırıldı (2026-07-30).
+ *  V17'nin liste yüzeyi çok dar: yalnız Stok/Cari listesi + SqlVeriOkuV2. Kalan
+ *  veriler (fatura, sipariş, stok hareketi, mizan, KDV) SqlVeriOkuV2 ile ilgili
+ *  tablodan SELECT edilerek çekilmeli.
+ *
+ *  Bunlar sessizce başarısız olduğunda ne oluyordu: yanıt gelmiyor, çağıran kod
+ *  `Number(md?.alan ?? 0)` ile devam ediyor ve SIFIR yazıyor. Cari bakiyeleri ve
+ *  taxSummary/accountingPeriods tam olarak böyle sıfırlanıyordu.
+ *
+ *  BU LİSTEYE EKLENMEDİ (Mikro desteği 2026-06-11'de VAR olduklarını teyit etti,
+ *  koleksiyonda görünmüyorlar): GelenFaturalarKabulV2, GelenFaturalarRedV2.
+ */
+const MIKRO_V17_YOK = new Set([
+  'BankaListesiV2', 'BarkodListesiV2', 'CariHareketKaydetV2', 'FaturaListesiV2',
+  'KasaListesiV2', 'KdvOzetV2', 'MizanV2', 'OdemePlanListesiV2',
+  'SiparisListesiV2', 'StokHareketListesiV2',
+]);
+
 /** Drop-in for admin.firestore.FieldValue.serverTimestamp() — resolved by resolveSentinels. */
 function pgServerTimestamp(): any {
   return pgPool ? { __op: 'serverTimestamp' } : admin.firestore.FieldValue.serverTimestamp();
@@ -2008,6 +2029,26 @@ function buildMikroDailySifre(plainPassword: string): string {
  *  SonTarih=2027-12-31 -> 0 ; SonTarih=bugün -> 1044 birim, aynı SKU).
  *  Tarih, günlük şifre hash'iyle aynı takvimden okunur (lokalde makine saati).
  */
+/** StokListesiV2 satırından mevcut miktar — alan YOKSA `null` (0 DEĞİL).
+ *
+ *  Neden kritik: bu fonksiyondan önce kod `Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0)`
+ *  yazıyordu. Mikro'nun liste uçları ham tablo kolonlarını döndürüyor
+ *  (CariListesiV2'nin `cari_*` dökümünde görüldüğü gibi) ve STOKLAR tablosunda
+ *  anlık miktar kolonu yok — miktar hareketlerden türetilir. Yani alan hiç
+ *  gelmiyorsa `?? 0` her senkronda TÜM ürünlerin stoğunu sıfırlar ve üstüne
+ *  her ürün için sahte bir sayım farkı üretir. `null` dönüp çağıranın
+ *  stockLevel'a hiç dokunmamasını sağlıyoruz.
+ *
+ *  Miktarın güvenilir kaynağı GenelAmacliMaliyetListesiV2'dir
+ *  (/api/mikro/import/stok-miktar) — liste uçları yalnız kart verisi taşır.
+ */
+function mikroStokMiktari(s: Record<string, unknown>): number | null {
+  const raw = s.sto_mevcut_mik ?? s.toplam_miktar;
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function mikroBugun(): string {
   return new Intl.DateTimeFormat('en-CA', {
     ...(MIKRO_LOCAL_MODE ? {} : { timeZone: 'Europe/Istanbul' }),
@@ -2039,6 +2080,13 @@ function mikroData(raw: unknown): Record<string, unknown> {
   return (r?.Data ?? r?.data ?? {}) as Record<string, unknown>;
 }
 
+/** Mikro yanıt zarfındaki hata metni. `Mikro API 501` gibi anlamsız durum
+ *  kodları yerine gerçek sebebi (ör. "metot V17'de bulunmuyor") gösterir. */
+function mikroHata(raw: unknown, fallback = 'Mikro API yanıt vermedi.'): string {
+  const r = ((raw as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+  return (r?.ErrorMessage as string) || (typeof raw === 'string' ? raw.slice(0, 200) : '') || fallback;
+}
+
 /** Mikro API yanıtı JSON değil de HTML (Cloudflare/WAF/gateway hata sayfası) ise
  *  bunu tanı ve kullanıcıya anlaşılır, EYLEME DÖNÜK bir mesaj üret. v17 göçünden
  *  sonra sunucu IP'si Mikro gateway'inin Cloudflare'inde engellenirse StokListesiV2
@@ -2067,6 +2115,15 @@ async function mikroPost(
   extraBody: Record<string, unknown>,
   inMikro = false // true → ekstra alanlar Mikro objesi İÇİNE konur (V17 evrak kalıbı)
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
+  // V17'de OLMAYAN metotları ağa hiç çıkarmadan, anlaşılır hatayla kes.
+  // Çağıran kodun "yanıt geldi ama alan yok" durumuna düşüp `?? 0` ile sıfır
+  // yazmasını engeller — cari bakiyeleri ve KDV özetini tam olarak bu kırıyordu.
+  if (MIKRO_JUMP_SURUM >= 17 && MIKRO_V17_YOK.has(endpoint)) {
+    const msg = `${endpoint} Mikro Jump V17'de bulunmuyor. Bu veri için farklı bir yol gerekir (çoğu liste için SqlVeriOkuV2).`;
+    console.warn('[mikroPost] atlandı:', msg);
+    return { ok: false, status: 501, data: { result: [{ IsError: true, ErrorMessage: msg }] } };
+  }
+
   const creds = await getMikroCreds();
   if (!creds) throw new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.');
 
@@ -2298,15 +2355,16 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         const sku = (s.sto_kod as string)?.trim();
         if (!sku || seenSku.has(sku)) continue;
         seenSku.add(sku);
-        const mikroQty = Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0);
+        const mikroQty = mikroStokMiktari(s);
         const fields = {
           name: (s.sto_isim as string) || sku,
           unit: (s.sto_birim1_ad as string) || 'ADET',
           vatRate: Number(s.sto_perakende_vergi) || 20,
-          // sto_mevcut_mik: StokListesiV2'nin gercek mevcut miktar alani (bkz.
-          // POST /api/mikro/stok/listesi ile ayni eslesme) - onceden burada hic
-          // yazilmiyordu, tum urunler otomatik senkronda stockLevel=0 kaliyordu.
-          stockLevel: mikroQty,
+          // Miktar alanı YOKSA stockLevel'a DOKUNMA. Eskiden `?? 0` vardı: alan
+          // gelmediğinde her senkron tüm ürünlerin stoğunu sıfırlıyor ve üstelik
+          // her ürün için sahte bir sayım farkı üretiyordu. Miktarın güvenilir
+          // kaynağı GenelAmacliMaliyetListesiV2 (/api/mikro/import/stok-miktar).
+          ...(mikroQty !== null ? { stockLevel: mikroQty } : {}),
           mikroStoKod: sku, mikroSynced: true,
           mikroSyncedAt: pgServerTimestamp(),
           // companyId GÜNCELLEMEDE de yazilir: eski etiketsiz kayitlar her senkronda
@@ -2319,7 +2377,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           // ile Mikro'nun gonderdigi miktar farkliysa kaydet - ozellikle numune/fire/
           // konsinye gibi yalniz bizim tarafta bilinen dususleri Mikro'nun (bunlardan
           // habersiz) eski sayisiyla sessizce ezmesine karsi gorunurluk saglar.
-          if (existing.stockLevel !== mikroQty) {
+          if (mikroQty !== null && existing.stockLevel !== mikroQty) {
             batch.set(adminDb.collection('stockDiscrepancies').doc(), {
               productId: existing.ref.id, sku, productName: existing.name,
               ourQty: existing.stockLevel, mikroQty, diff: mikroQty - existing.stockLevel,
@@ -4418,10 +4476,12 @@ async function startServer() {
           if (!sku) continue;
           const snap = await adminDb.collection('inventory').where('sku', '==', sku).limit(1).get();
           if (!snap.empty) {
+            const qty = mikroStokMiktari(s);
             await snap.docs[0].ref.update({
               mikroStoKod:   sku,
               mikroSynced:   true,
-              stockLevel:    Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
+              // Miktar alanı yoksa mevcut stockLevel'i EZME (bkz. mikroStokMiktari).
+              ...(qty !== null ? { stockLevel: qty } : {}),
               mikroSyncedAt: pgServerTimestamp(),
             });
           }
@@ -4743,6 +4803,10 @@ async function startServer() {
             if (!prices['B2B Premium'] && s.sto_satis_fiyat3)   prices['B2B Premium']  = Number(s.sto_satis_fiyat3);
             if (!prices['Dealer'] && s.sto_satis_fiyat4)        prices['Dealer']       = Number(s.sto_satis_fiyat4);
 
+            // Miktar alanı yoksa null — mevcut kaydın stockLevel'i EZİLMEZ
+            // (bkz. mikroStokMiktari). Yeni kayıtta 0 ile açılır, miktar
+            // /api/mikro/import/stok-miktar koşusunda dolar.
+            const qty = mikroStokMiktari(s);
             const item = {
               companyId,
               sku,
@@ -4750,7 +4814,7 @@ async function startServer() {
               category:         (s.sto_grup_isim as string) || (s.sto_grup_kodu as string) || 'Genel',
               unit:             (s.sto_birim1_ad as string) || 'ADET',
               vatRate:          Number(s.sto_perakende_vergi) || 20,
-              stockLevel:       Number(s.sto_mevcut_mik ?? s.toplam_miktar ?? 0),
+              ...(qty !== null ? { stockLevel: qty } : {}),
               lowStockThreshold: 5,
               prices,
               price:            prices['Retail'] || 0,
@@ -4767,7 +4831,7 @@ async function startServer() {
               updated++;
             } else {
               const newRef = adminDb.collection('inventory').doc();
-              batch.set(newRef, { ...item, createdAt: pgServerTimestamp() });
+              batch.set(newRef, { stockLevel: 0, ...item, createdAt: pgServerTimestamp() });
               existingBySku.set(sku, newRef); // guard against duplicate SKUs across pages
               created++;
             }
@@ -4784,7 +4848,8 @@ async function startServer() {
               companyId,
               productName: item.name,
               sku,
-              quantity:    item.stockLevel,
+              // Miktar bilinmiyorsa depo kaydının quantity'sini de EZME.
+              ...(qty !== null ? { quantity: qty } : {}),
               warehouseId: `mikro-depo-${yerKod}`,
               location:    `Depo ${yerKod}`,
               category:    item.category,
@@ -5871,47 +5936,91 @@ async function startServer() {
   });
 
   // ── Mikro Pull: Cari Bakiye ──────────────────────────────────────────────────
-  // POST /api/mikro/pull/bakiye — pull AR/AP balances from Mikro → Firebase cariBalances
-  // Runs full CariHareketListesiV2 per lead that has mikroCariKod; updates their bakiye
+  // POST /api/mikro/pull/bakiye — cari bakiyelerini Mikro'dan çek → cariBalances
+  //
+  // 2026-07-30'da BAŞTAN YAZILDI. Eski hali `CariHareketListesiV2`yi cari başına
+  // bir kez çağırıyordu; o metot Mikro Jump V17'de HİÇ YOK (resmi Postman
+  // koleksiyonunda 161 endpoint arasında bulunmuyor — liste yüzeyi yalnız
+  // Stok/Cari listesi + SqlVeriOkuV2). Yani her çağrı boşa gidiyor, ardından
+  // `Number(md?.bakiye ?? 0)` devreye girip TÜM carilerin bakiyesini 0 yazıyordu.
+  // Aynı sessiz-sıfır deseni stok tarafında da vardı (bkz. mikroStokMiktari).
+  //
+  // Yeni yol: SqlVeriOkuV2 (SELECT-only SQL kapısı) ile TEK sorguda tüm cari
+  // bakiyeleri. cha_tip 0 = borç (satış), 1 = alacak — bakiye = borç - alacak.
+  // N çağrı yerine 1 çağrı; ayrıca 100'lük limit gereksiz kalıyor.
   app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
     try {
-      // 1. Fetch all leads that have a mikroCariKod
-      const leadsSnap = await adminDb.collection('leads')
-        .where('mikroCariKod', '!=', '')
-        .limit(Number(req.body?.limit ?? 100))
-        .get();
-
-      let updated = 0, errors = 0;
-      for (const leadDoc of leadsSnap.docs) {
-        const cariKod = (leadDoc.data() as Record<string, unknown>).mikroCariKod as string;
-        try {
-          const { ok, data } = await mikroPost('CariHareketListesiV2', {
-            CariKod: cariKod,
-            Size: '5',    // Mikro returns a malformed response (no 'result' key) for Size < 5
-            Index: 0,
-          });
-          if (!ok) { errors++; continue; }
-          const md = mikroData(data);
-          // Mikro returns bakiye in various field names depending on version
-          const bakiye      = Number(md?.bakiye ?? md?.Bakiye ?? md?.cariBakiye ?? 0);
-          const vadeliBorc  = Number(md?.vadeliBorc ?? md?.VadeliBorc ?? 0);
-          // Mirror to cariBalances collection AND update lead doc
-          await adminDb.collection('cariBalances').doc(cariKod).set({
-            companyId: await reqCompanyId(req),
-            cariKod, bakiye, vadeliBorc,
-            updatedAt: pgServerTimestamp(),
-          }, { merge: true });
-          await leadDoc.ref.set({ bakiye, vadeliBorc }, { merge: true });
-          updated++;
-        } catch { errors++; }
+      const { ok, data } = await mikroPost('SqlVeriOkuV2', {
+        SQLSorgu:
+          'SELECT cha_kod, ' +
+          'SUM(CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) AS bakiye ' +
+          'FROM CARI_HESAP_HAREKETLERI GROUP BY cha_kod',
+      });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      if (!ok || !r0 || r0.IsError) {
+        // HİÇBİR ŞEY YAZMA. Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi
+        // vermemekten çok daha kötü — tahsilat kararları bu rakama bakıyor.
+        const msg = (r0?.ErrorMessage as string) || 'Mikro SqlVeriOkuV2 yanıt vermedi.';
+        console.warn('[pull/bakiye] SqlVeriOkuV2 başarısız:', msg);
+        return res.status(502).json({
+          success: false,
+          error: `Bakiye sorgusu çalıştırılamadı: ${msg}. Hiçbir bakiye değiştirilmedi.`,
+        });
       }
-      await writeAuditLog(reqActor(req), 'Mikro Bakiye Çekme', `${updated} cari bakiyesi güncellendi, ${errors} hata`);
-      res.json({ success: true, total: leadsSnap.size, updated, errors, duration: Date.now() - t0 });
+
+      // Yanıt zarfı: Data içindeki tek dizi anahtarı satırları taşır.
+      const md = mikroData(data);
+      const rows = (Object.values(md).find(Array.isArray) ?? []) as Record<string, unknown>[];
+      if (!rows.length) {
+        return res.json({ success: true, total: 0, updated: 0, skipped: 0, duration: Date.now() - t0,
+                          note: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' });
+      }
+
+      const bakiyeByKod = new Map<string, number>();
+      let unreadable = 0;
+      for (const row of rows) {
+        const kod = String(row.cha_kod ?? '').trim();
+        const raw = row.bakiye;
+        if (!kod) continue;
+        // Alan okunamıyorsa 0 yazma — atla ve say.
+        if (raw == null || !Number.isFinite(Number(raw))) { unreadable++; continue; }
+        bakiyeByKod.set(kod, Number(raw));
+      }
+
+      const companyId = await reqCompanyId(req);
+      const leadsSnap = await adminDb.collection('leads').where('mikroCariKod', '!=', '').get();
+      let updated = 0, skipped = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+
+      for (const leadDoc of leadsSnap.docs) {
+        const cariKod = String((leadDoc.data() as Record<string, unknown>).mikroCariKod ?? '').trim();
+        if (!cariKod) { skipped++; continue; }
+        // Mikro'da hiç hareketi olmayan cari: SQL'de satırı yok. Bu GERÇEKTEN
+        // sıfır bakiyedir (hareket yok = borç yok), tespit edilememiş değil —
+        // sorgu başarılı döndüğü için bunu yazmak doğru.
+        const bakiye = bakiyeByKod.has(cariKod) ? bakiyeByKod.get(cariKod)! : 0;
+        batch.set(adminDb.collection('cariBalances').doc(cariKod), {
+          companyId, cariKod, bakiye, updatedAt: pgServerTimestamp(),
+        }, { merge: true });
+        ops++;
+        batch.set(leadDoc.ref, { bakiye }, { merge: true });
+        ops++;
+        updated++;
+        if (ops >= 400) await flush();
+      }
+      await flush();
+
+      await writeAuditLog(reqActor(req), 'Mikro Bakiye Çekme',
+        `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`);
+      res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable,
+                 mikroRows: rows.length, duration: Date.now() - t0 });
     } catch (err) {
-      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      console.error('[pull/bakiye]', err);
+      res.status(500).json({ success: false, error: 'Bakiye çekimi başarısız. Hiçbir bakiye değiştirilmedi.' });
     }
   });
 
@@ -5938,7 +6047,9 @@ async function startServer() {
         Index: 0,
       });
 
-      if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
+      // Başarısızsa HİÇBİR ŞEY YAZMA — accountingPeriods'a sıfırlanmış bir mizan
+      // yazmak, mizanı hiç güncellememekten çok daha kötü.
+      if (!ok) return res.status(status).json({ success: false, error: mikroHata(data) });
       const md     = mikroData(data);
       const rows   = (md?.MizanListesi ?? md?.Hesaplar ?? md?.hesaplar ?? md?.mizan ?? []) as Record<string, unknown>[];
       const docId  = period;
@@ -6034,7 +6145,9 @@ async function startServer() {
       const { ok, data, status } = await mikroPost('KdvOzetV2', {
         IlkTarih: ilkTarih, SonTarih: sonTarih,
       });
-      if (!ok) return res.status(status).json({ success: false, error: `Mikro API ${status}` });
+      // Başarısızsa taxSummary'ye DOKUNMA. Eski kod buraya düşmüyordu ve
+      // `Number(md?.kdvHesaplanan ?? 0)` ile dönemin KDV'sini sıfırlıyordu.
+      if (!ok) return res.status(status).json({ success: false, error: mikroHata(data) });
       const md = mikroData(data);
       await adminDb.collection('taxSummary').doc(period).set({
         companyId: await reqCompanyId(req),
