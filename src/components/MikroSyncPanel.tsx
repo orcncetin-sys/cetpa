@@ -296,6 +296,52 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     }
   }
 
+  // ── Tümünü Çek ─────────────────────────────────────────────────────────────
+  // Tek tek basmak zahmetli. Adımlar SIRAYLA koşar, paralel DEĞİL: Mikro API'si
+  // aynı makinede tek servis olarak çalışıyor ve eşzamanlı yükte çökebiliyor
+  // (Mikro desteğinin 2026-06-11'de kabul ettiği davranış). Sıralı koşum hem
+  // güvenli hem de hangi adımın patladığını net gösteriyor.
+  //
+  // Bir adım başarısız olursa DURMAZ — kalanlar koşar, sonuçta özet verilir.
+  // Bu kurulumda Mizan/KDV/Siparişler/Ödeme Planları yapısal olarak boş
+  // (Mikro'da o modüller kullanılmıyor); yine de koşulurlar ki durum değişirse
+  // kendiliğinden dolsunlar.
+  const [tumuRunning, setTumuRunning] = useState(false);
+  const [tumuAdim, setTumuAdim] = useState<string | null>(null);
+  const [tumuOzet, setTumuOzet] = useState<{ ok: number; hata: number; bitti: boolean } | null>(null);
+
+  async function handleTumunuCek() {
+    if (tumuRunning) return;
+    setTumuRunning(true);
+    setTumuOzet(null);
+    let ok = 0, hata = 0;
+
+    // Sıra bilinçli: önce kart/tanım verisi, sonra hareket verisi, en son
+    // arka planda koşan uzun iş (stok miktarı) — o bittiğinde diğerleri hazır olur.
+    const adimlar: { ad: string; calistir: () => Promise<void> }[] = [
+      { ad: t ? 'Stok kartları' : 'Stock cards',   calistir: handleImportStok },
+      { ad: t ? 'Cariler' : 'Customers',           calistir: handleImportCari },
+      ...extraPullDefs
+        .filter(d => d.key !== 'stok-miktar')
+        .map(d => ({ ad: d.title, calistir: () => handleExtraPull(d.key, d.route) })),
+      { ad: t ? 'Cari bakiyeler' : 'Balances',     calistir: handlePullBakiye },
+      { ad: t ? 'Mizan' : 'Trial balance',         calistir: handlePullMizan },
+      { ad: t ? 'KDV özeti' : 'VAT summary',       calistir: handlePullKdv },
+      // En son: ürün başına bir Mikro çağrısı yapar, arka planda sürer.
+      { ad: t ? 'Stok miktarları' : 'Stock qty',   calistir: handleStartMiktar },
+    ];
+
+    for (const adim of adimlar) {
+      setTumuAdim(adim.ad);
+      try { await adim.calistir(); ok++; }
+      catch { hata++; }   // adım kendi hatasını zaten kartında gösteriyor
+    }
+
+    setTumuAdim(null);
+    setTumuRunning(false);
+    setTumuOzet({ ok, hata, bitti: true });
+  }
+
   const extraPullDefs: { key: string; route: string; title: string; desc: string }[] = [
     { key: 'stok-miktar',  route: '/api/mikro/import/stok-miktar',    title: t ? 'Stok Miktarları (Depo)' : 'Stock Quantities (Depot)', desc: t ? 'Depo bazlı anlık miktarları çek; envanter ve depo kayıtlarını güncelle.' : 'Pull per-depot quantities; update inventory and warehouse records.' },
     { key: 'siparis',      route: '/api/mikro/import/siparis',        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
@@ -664,12 +710,35 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             <Activity className="w-4 h-4 text-[#1a3a5c]" />
             {t ? 'Muhasebe Verisi Çek' : 'Pull Accounting Data'}
           </h4>
-          <label className="flex items-center gap-2 text-[11px] text-gray-500">
-            {t ? 'Dönem (Mizan/KDV):' : 'Period (Trial/VAT):'}
-            <input type="month" value={pullPeriod} onChange={e => setPullPeriod(e.target.value)}
-              className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#1a3a5c]" />
-          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-[11px] text-gray-500">
+              {t ? 'Dönem (Mizan/KDV):' : 'Period (Trial/VAT):'}
+              <input type="month" value={pullPeriod} onChange={e => setPullPeriod(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#1a3a5c]" />
+            </label>
+            {/* Tümünü Çek — adımlar sırayla koşar (Mikro tek servis, eşzamanlı
+                yükte çökebiliyor). Bir adım patlarsa kalanlar devam eder. */}
+            <button
+              onClick={handleTumunuCek}
+              disabled={tumuRunning}
+              title={t ? 'Tüm Mikro verilerini sırayla çeker' : 'Pulls all Mikro data sequentially'}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a3a5c] text-white text-xs font-semibold hover:bg-[#16324f] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${tumuRunning ? 'animate-spin' : ''}`} />
+              {tumuRunning
+                ? (t ? `Çekiliyor: ${tumuAdim ?? '...'}` : `Pulling: ${tumuAdim ?? '...'}`)
+                : (t ? 'Tümünü Çek' : 'Pull All')}
+            </button>
+          </div>
         </div>
+
+        {tumuOzet?.bitti && (
+          <div className={`mb-4 px-3 py-2 rounded-xl text-xs font-medium ${tumuOzet.hata > 0 ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-700'}`}>
+            {t
+              ? `Bitti — ${tumuOzet.ok} adım tamam${tumuOzet.hata > 0 ? `, ${tumuOzet.hata} adım hatalı (ayrıntı ilgili kartta)` : ''}. Stok miktarları arka planda sürüyor olabilir.`
+              : `Done — ${tumuOzet.ok} steps OK${tumuOzet.hata > 0 ? `, ${tumuOzet.hata} failed (see the card)` : ''}. Stock quantities may still be running.`}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <PullCard
             icon={<Users className="w-4 h-4 text-[#1a3a5c]" />}
