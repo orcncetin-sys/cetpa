@@ -2086,6 +2086,35 @@ function mikroData(raw: unknown): Record<string, unknown> {
   return (r?.Data ?? r?.data ?? {}) as Record<string, unknown>;
 }
 
+/** Mikro yanıt zarfından SATIR DİZİSİNİ çıkarır — zarf iki farklı şekilde gelir.
+ *
+ *  Gözlenen şekiller (2026-07-30, canlı):
+ *    Data = { SQLResult1: [ {...}, ... ] }        // nesne sarmalı
+ *    Data = [ { SQLResult1: [ {...}, ... ] } ]    // DİZİ sarmalı  ← SqlVeriOkuV2
+ *    Data = { StokListesi: [...] }                // liste metotları
+ *
+ *  Eski kod yalnız `Object.values(Data).find(Array.isArray)` yapıyordu; dizi
+ *  sarmalında dizinin İÇİNDEKİ nesneye inmediği için her zaman boş dönüyordu.
+ *  Sonuç: SqlVeriOkuV2'ye dayanan HER ŞEY sessizce 0 kayıt veriyordu (mizan,
+ *  KDV, yedi liste import'u, cari bakiye).
+ *
+ *  Neden fark etmedik: PowerShell tek elemanlı dizileri otomatik açtığı için
+ *  doğrulama probe'larında zarf doğru görünüyordu. DERS: dış API zarfını
+ *  kabuktan değil, uygulamanın kendi ayrıştırıcısından doğrula.
+ */
+function mikroSatirlar(raw: unknown): Record<string, unknown>[] {
+  const d = mikroData(raw) as unknown;
+  const adaylar: unknown[] = Array.isArray(d) ? d : [d];
+  for (const a of adaylar) {
+    if (Array.isArray(a)) return a as Record<string, unknown>[];
+    if (a && typeof a === 'object') {
+      const dizi = Object.values(a as Record<string, unknown>).find(Array.isArray);
+      if (dizi) return dizi as Record<string, unknown>[];
+    }
+  }
+  return [];
+}
+
 /** Mikro yanıt zarfındaki hata metni. `Mikro API 501` gibi anlamsız durum
  *  kodları yerine gerçek sebebi (ör. "metot V17'de bulunmuyor") gösterir. */
 function mikroHata(raw: unknown, fallback = 'Mikro API yanıt vermedi.'): string {
@@ -2119,9 +2148,7 @@ async function mikroSql(sorgu: string): Promise<{ rows: Record<string, unknown>[
   const { ok, data } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sorgu });
   const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
   if (!ok || !r0 || r0.IsError) return { rows: [], hata: mikroHata(data, 'SqlVeriOkuV2 yanıt vermedi.') };
-  const d = (r0.Data ?? {}) as Record<string, unknown>;
-  const rows = (Object.values(d).find(Array.isArray) ?? []) as Record<string, unknown>[];
-  return { rows, hata: null };
+  return { rows: mikroSatirlar(data), hata: null };
 }
 
 /** Bir tablonun kolon adları — INFORMATION_SCHEMA'dan, 10 dk önbellekli.
@@ -5161,10 +5188,13 @@ async function startServer() {
   // biten ilk alan, yoksa otomatik. UI panelleri ham alanları gösterebilir.
 
   /** Data objesi içindeki ilk diziyi döndür (anahtar adı ne olursa olsun) */
+  /** @deprecated mikroSatirlar kullan — o, dizi-sarmalı zarfı da açar.
+   *  Burada yalnız geriye uyum için duruyor; çağıranlar mikroSatirlar'a geçti. */
   function firstArrayIn(d: Record<string, unknown>): Record<string, unknown>[] {
     for (const v of Object.values(d)) if (Array.isArray(v)) return v as Record<string, unknown>[];
     return [];
   }
+  void firstArrayIn;
 
   /** Satırda regex ile alan anahtarı bul (örnek satırdan tespit) */
   function findKey(row: Record<string, unknown>, re: RegExp): string | null {
@@ -5294,7 +5324,7 @@ async function startServer() {
           if (r0?.IsError) {
             return res.status(502).json({ success: false, error: (r0.ErrorMessage as string) || `${opts.method} hatası` });
           }
-          const rows = firstArrayIn(mikroData(data));
+          const rows = mikroSatirlar(data);
           if (rows.length === 0) break;
 
           let batch = adminDb.batch();
@@ -5724,7 +5754,7 @@ async function startServer() {
       if (!ok || !r0 || r0.IsError) {
         return res.status(502).json({ success: false, error: (r0?.ErrorMessage as string) || `HTTP ${status}` });
       }
-      const rows = firstArrayIn(mikroData(data));
+      const rows = mikroSatirlar(data);
       void mirrorMikroInsert('mikro_cari_hesap_hareketleri',
         rows.map(r => ({ ...r, __kaynak: 'sql_import' })), CHA_COLS);
       let satis = 0, alis = 0;
@@ -6179,9 +6209,7 @@ async function startServer() {
         });
       }
 
-      // Yanıt zarfı: Data içindeki tek dizi anahtarı satırları taşır.
-      const md = mikroData(data);
-      const rows = (Object.values(md).find(Array.isArray) ?? []) as Record<string, unknown>[];
+      const rows = mikroSatirlar(data);
       if (!rows.length) {
         return res.json({ success: true, total: 0, updated: 0, skipped: 0, duration: Date.now() - t0,
                           note: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' });
@@ -6559,7 +6587,7 @@ async function startServer() {
           // Hiçbir şey yazma — yarım liste "tam liste" gibi görünmesin.
           return res.status(502).json({ success: false, error: `Gelen e-fatura listesi alınamadı: ${mikroHata(data)}` });
         }
-        const rows = (Object.values((r0.Data ?? {}) as Record<string, unknown>).find(Array.isArray) ?? []) as Record<string, unknown>[];
+        const rows = mikroSatirlar(data);
         if (!rows.length) break;
         tumu.push(...rows);
         if (rows.length < SAYFA) break;
@@ -6640,7 +6668,7 @@ async function startServer() {
         if (!ok || !r0 || r0.IsError) {
           return res.status(502).json({ success: false, error: `e-İrsaliye listesi alınamadı: ${mikroHata(data)}` });
         }
-        const rows = (Object.values((r0.Data ?? {}) as Record<string, unknown>).find(Array.isArray) ?? []) as Record<string, unknown>[];
+        const rows = mikroSatirlar(data);
         if (!rows.length) break;
         tumu.push(...rows);
         if (rows.length < SAYFA) break;
