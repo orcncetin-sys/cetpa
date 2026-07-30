@@ -2008,6 +2008,19 @@ function buildMikroDailySifre(plainPassword: string): string {
   return createHash('md5').update(`${today} ${plainPassword}`).digest('hex');
 }
 
+/** "Şu ana kadarki" stok/maliyet sorgularının bitiş tarihi = BUGÜN.
+ *  GenelAmacliMaliyetListesiV2 GELECEK tarihli SonTarih aldığında hata vermeden
+ *  EldekiMiktar=0, MaliyetBedeli=0 döner (2026-07-30'da canlıda kanıtlandı:
+ *  SonTarih=2027-12-31 -> 0 ; SonTarih=bugün -> 1044 birim, aynı SKU).
+ *  Tarih, günlük şifre hash'iyle aynı takvimden okunur (lokalde makine saati).
+ */
+function mikroBugun(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    ...(MIKRO_LOCAL_MODE ? {} : { timeZone: 'Europe/Istanbul' }),
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
 function buildMikroContext(creds: MikroCreds): Record<string, unknown> {
   // Lokal Jump API'sinde bağlam yalnız FirmaKodu/CalismaYili/KullaniciKodu/Sifre
   // (+FirmaNo/SubeNo) içerir; Alias & ApiKey yalnız bulut/APILogin tarafında var.
@@ -2409,7 +2422,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       const items = invSnap.docs
         .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
         .filter(x => x.sku);
-      const sonTarih = `${new Date().getFullYear() + 1}-12-31`;
+      const sonTarih = mikroBugun();
       let updated = 0;
       let batch = adminDb.batch(); let ops = 0;
       const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
@@ -2422,7 +2435,11 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
             const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
             if (!ok || !r0 || r0.IsError) return null;
             const d = (r0.Data ?? {}) as Record<string, unknown>;
-            const qty = Number(d.EldekiMiktar ?? 0);
+            // Alan hiç yoksa "0 stok" DEĞİL, "yanıt okunamadı" demektir — 0 yazıp
+            // başarılı saymak gerçek stoğu siler. Başarısıza düşür.
+            if (d.EldekiMiktar == null) return null;
+            const qty = Number(d.EldekiMiktar);
+            if (!Number.isFinite(qty)) return null;
             const totalCost = Number(d.MaliyetBedeli ?? 0);
             return { it, qty, cost: qty > 0 ? totalCost / qty : null };
           } catch { return null; }
@@ -5144,7 +5161,7 @@ async function startServer() {
         const total = items.length;
         await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
 
-        const sonTarih = `${new Date().getFullYear() + 1}-12-31`;
+        const sonTarih = mikroBugun();
         const CONCURRENCY = 8;
         let batch = adminDb!.batch(); let ops = 0;
         const commitBatch = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
@@ -5159,7 +5176,11 @@ async function startServer() {
               const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
               if (!ok || !r0 || r0.IsError) return { it, qty: null as number | null, cost: null as number | null };
               const d = (r0.Data ?? {}) as Record<string, unknown>;
-              const qty = Number(d.EldekiMiktar ?? 0);
+              // Alan hiç yoksa "0 stok" DEĞİL, "yanıt okunamadı" demektir — 0 yazıp
+              // başarılı saymak gerçek stoğu siler. Başarısıza düşür.
+              if (d.EldekiMiktar == null) return { it, qty: null as number | null, cost: null as number | null };
+              const qty = Number(d.EldekiMiktar);
+              if (!Number.isFinite(qty)) return { it, qty: null as number | null, cost: null as number | null };
               const totalCost = Number(d.MaliyetBedeli ?? 0);
               return { it, qty, cost: qty > 0 ? totalCost / qty : null };
             } catch { return { it, qty: null, cost: null }; }
