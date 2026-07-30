@@ -3,7 +3,7 @@ import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Send, AlertTriangle, Clock, Plus, X, RefreshCw,
-  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown
+  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
@@ -24,9 +24,17 @@ interface EBelge {
   tutar: number;
   belgeDate: string;
   tur: BelgeTur;
-  durum: BelgeDurum;
+  durum: BelgeDurum | string;
   notes: string;
   createdAt?: unknown;
+  // ── Mikro'dan çekilen belgelerde dolu (2026-07-30) ──
+  /** 'mikro' ise belge GİB/Mikro kaynaklıdır; elle girilenlerde tanımsızdır. */
+  kaynak?: string;
+  yon?: 'gelen' | 'giden';
+  uuid?: string;
+  gibDurumu?: string;
+  /** Mikro'da belge türü kolonu bulunamadığında true — tür tahmini güvenilmez. */
+  turBelirsiz?: boolean;
 }
 
 interface EBelgeMerkeziProps {
@@ -113,6 +121,63 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const { toast, show: showToast } = useToast();
+
+  // ── Mikro'dan çekme (2026-07-30) ──────────────────────────────────────────
+  // Bu ekran daha önce TAMAMEN elle giriliyordu; belgeler artık Mikro/GİB'den
+  // gelir. Elle giriş "Yeni Belge" ile korunuyor (Mikro'ya düşmeyen kayıtlar
+  // için), ama asıl kaynak çekim.
+  const [cekiliyor, setCekiliyor] = useState<string | null>(null);
+  const [yonFiltre, setYonFiltre] = useState<'hepsi' | 'gelen' | 'giden'>('hepsi');
+  const yilBasi = `${new Date().getFullYear()}-01-01`;
+  const bugun = new Date().toISOString().slice(0, 10);
+
+  /** Sunucu ucunu çağır; başarısızlıkta HATAYI GÖSTER — sessizce "başarılı"
+   *  gösterip boş liste bırakmak bu projede tekrar eden bir hataydı. */
+  const cek = async (etiket: string, url: string, body: Record<string, unknown>) => {
+    setCekiliyor(etiket);
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ ilkTarih: yilBasi, sonTarih: bugun, ...body }),
+      });
+      const d = await r.json() as { success?: boolean; total?: number; error?: string; uyari?: string };
+      if (!r.ok || !d.success) { showToast(d.error || `${etiket} çekilemedi.`, 'error'); return; }
+      showToast(`${etiket}: ${d.total ?? 0} belge alındı.${d.uyari ? ' ' + d.uyari : ''}`);
+    } catch {
+      showToast(`${etiket} çekilemedi — sunucuya ulaşılamadı.`, 'error');
+    } finally {
+      setCekiliyor(null);
+    }
+  };
+
+  /** Belgenin RESMİ PDF'ini Mikro'dan al ve indir.
+   *  Uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu gerçek olanıdır. */
+  const indirPdf = async (belge: EBelge) => {
+    try {
+      const r = await fetch('/api/mikro/ebelge/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(belge.uuid ? { uuid: belge.uuid } : { faturaGuid: belge.id }),
+      });
+      const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
+      if (!r.ok || !d.success) { showToast(d.error || 'PDF alınamadı.', 'error'); return; }
+      // Mikro PDF'i base64 döner; alan adı sürüme göre değişebildiği için ara.
+      const alan = Object.values(d.data ?? {}).find(v => typeof v === 'string' && v.length > 500);
+      if (typeof alan !== 'string') { showToast('PDF yanıtı beklenen biçimde değil.', 'error'); return; }
+      const bin = atob(alan.replace(/^data:.*?;base64,/, ''));
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = `${belge.belgeNo || belge.id}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('PDF indirilemedi.', 'error');
+    }
+  };
 
   // GIB connection — live from Firestore settings/gib
   const [gibConnected, setGibConnected] = useState(false);
@@ -225,12 +290,13 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
 
   const filtered = belgeler.filter(b => {
     const matchesTab = b.tur === activeTab;
+    const matchesYon = yonFiltre === 'hepsi' || b.yon === yonFiltre;
     const matchesSearch =
       !search ||
       b.belgeNo.toLowerCase().includes(search.toLowerCase()) ||
       b.alici.toLowerCase().includes(search.toLowerCase()) ||
       b.vergiNo.includes(search);
-    return matchesTab && matchesSearch;
+    return matchesTab && matchesYon && matchesSearch;
   });
 
   // KPI counts — all docs (not just active tab)
@@ -310,6 +376,35 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
             </span>
             {gibLastCheck && <span className="text-[10px] text-gray-400 hidden sm:inline">{gibLastCheck.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
           </button>
+          {/* Mikro'dan çekme — gelen ve giden ayrı uçlar (V17'de giden için
+              liste metodu yok, SQL'den gelir; bkz. server.ts /api/mikro/ebelge/*) */}
+          <button
+            onClick={() => cek('Gelen e-Fatura', '/api/mikro/ebelge/gelen', {})}
+            disabled={!!cekiliyor}
+            title="GİB'den gelen e-faturaları çek"
+            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <Inbox size={15} />
+            {cekiliyor === 'Gelen e-Fatura' ? 'Çekiliyor…' : 'Gelen'}
+          </button>
+          <button
+            onClick={() => cek('Giden e-Belge', '/api/mikro/ebelge/giden', {})}
+            disabled={!!cekiliyor}
+            title="Mikro'dan giden e-fatura ve e-arşiv belgelerini çek"
+            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <Upload size={15} />
+            {cekiliyor === 'Giden e-Belge' ? 'Çekiliyor…' : 'Giden'}
+          </button>
+          <button
+            onClick={() => cek('e-İrsaliye', '/api/mikro/ebelge/eirsaliye', { yon: 'giden' })}
+            disabled={!!cekiliyor}
+            title="e-İrsaliye listesini çek"
+            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <RefreshCw size={15} className={cekiliyor === 'e-İrsaliye' ? 'animate-spin' : ''} />
+            e-İrsaliye
+          </button>
           <button onClick={openModal} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
             <Plus size={15} />
             Yeni Belge
@@ -330,6 +425,15 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+          {/* Yön filtresi — Mikro'dan çekilen belgeler gelen/giden olarak damgalanır */}
+          <div className="flex gap-1 p-0.5 bg-gray-100 rounded-lg">
+            {([['hepsi','Hepsi'],['gelen','Gelen'],['giden','Giden']] as const).map(([k, l]) => (
+              <button key={k} onClick={() => setYonFiltre(k)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${yonFiltre === k ? 'bg-white shadow-sm text-[#1D1D1F]' : 'text-gray-500 hover:text-[#1D1D1F]'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
           <span className="text-xs text-gray-400">{filtered.length} kayıt</span>
         </div>
 
@@ -344,6 +448,7 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
                 <th className="px-4 py-3 text-right font-medium">Tutar (₺)</th>
                 <th className="px-4 py-3 text-left font-medium">Tarih</th>
                 <th className="px-4 py-3 text-left font-medium">Tür</th>
+                <th className="px-4 py-3 text-left font-medium">Yön</th>
                 <th className="px-4 py-3 text-left font-medium">Durum</th>
                 <th className="px-4 py-3 text-center font-medium">İşlemler</th>
               </tr>
@@ -351,14 +456,24 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
             <tbody className="divide-y divide-gray-50">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
                     Bu kategoride henüz belge yok.
                   </td>
                 </tr>
               ) : (
                 filtered.map(belge => {
-                  const dur = DURUM_CONFIG[belge.durum];
-                  const canResend = belge.durum === 'Hata' || belge.durum === 'Bekliyor';
+                  // Mikro'dan gelen durum metni bizim 4 sabitimizden farklı
+                  // olabilir (GİB statüleri serbest metin). Eşleşmezse ÇÖKME —
+                  // ham metni nötr rozetle göster.
+                  const dur = DURUM_CONFIG[belge.durum as BelgeDurum] ?? {
+                    label: String(belge.durum || '—'),
+                    color: 'bg-gray-100 text-gray-600',
+                    icon: null,
+                  };
+                  const mikroKaynakli = belge.kaynak === 'mikro';
+                  // Mikro kaynaklı belge bizim tarafımızdan "yeniden gönderilemez" —
+                  // GİB'e giden gerçek belgedir, yerel durum değiştirmek yanıltıcı olur.
+                  const canResend = !mikroKaynakli && (belge.durum === 'Hata' || belge.durum === 'Bekliyor');
                   return (
                     <tr key={belge.id} className="hover:bg-gray-50/60 transition-colors">
                       <td className="px-4 py-3 font-mono text-xs font-semibold text-gray-800">{belge.belgeNo}</td>
@@ -370,6 +485,20 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
                         <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium">
                           {TUR_LABELS[belge.tur]}
                         </span>
+                        {belge.turBelirsiz && (
+                          <span className="ml-1 text-[10px] text-amber-600" title="Mikro'da belge türü kolonu bulunamadı — tür kesin değil">?</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {belge.yon ? (
+                          <span className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium',
+                            belge.yon === 'gelen' ? 'bg-purple-50 text-purple-700' : 'bg-teal-50 text-teal-700')}>
+                            {belge.yon === 'gelen' ? <Inbox size={11} /> : <Upload size={11} />}
+                            {belge.yon === 'gelen' ? 'Gelen' : 'Giden'}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400" title="Elle girilmiş kayıt">elle</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium', dur.color)}>
@@ -379,6 +508,15 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-2">
+                          {mikroKaynakli && (belge.uuid || belge.belgeNo) && (
+                            <button
+                              onClick={() => void indirPdf(belge)}
+                              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+                              title="Resmi PDF'i indir (Mikro/GİB)"
+                            >
+                              <Download size={14} />
+                            </button>
+                          )}
                           {canResend && (
                             <button
                               onClick={() => handleResend(belge)}
