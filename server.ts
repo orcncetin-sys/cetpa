@@ -6256,25 +6256,33 @@ async function startServer() {
       const lastDay   = new Date(yil, ay, 0).getDate();
       const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
 
-      const cols     = await mikroKolonlar('MUHASEBE_FIS_DETAYLARI');
-      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FIS_DETAYLARI tablosu okunamadı (SqlVeriOkuV2 izni?).' });
-      const hesapCol = kolonBul(cols, /hesap_?kod/i);
-      const borcCol  = kolonBul(cols, /borc/i);
-      const alacakCol= kolonBul(cols, /alacak/i);
-      const tarihCol = kolonBul(cols, /tarih/i);
-      if (!hesapCol || !borcCol || !alacakCol) {
+      const cols     = await mikroKolonlar('MUHASEBE_FISLERI');
+      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FISLERI tablosu okunamadı (SqlVeriOkuV2 izni?).' });
+      // Mikro'da ayrı borç/alacak kolonu YOK: fis_meblag0 İŞARETLİ tutulur
+      // (borç +, alacak −). MUHASEBE_FISLERI_OZET'teki mfo_Grp0_B_Meblag /
+      // mfo_Grp0_A_Meblag ayrımı bu kuralı bağımsız olarak doğruluyor.
+      // Grup 0 = genel muhasebe seti (1-6 mali/UFRS/enflasyon alternatifleri).
+      const hesapCol  = kolonBul(cols, /hesap_kod/i);
+      const meblagCol = kolonBul(cols, /meblag0$/i);
+      const tarihCol  = kolonBul(cols, /tarih$/i);
+      const iptalCol  = kolonBul(cols, /_iptal$/i);
+      if (!hesapCol || !meblagCol) {
         return res.status(502).json({ success: false,
-          error: `Mizan kolonları eşleşmedi (hesap=${hesapCol}, borç=${borcCol}, alacak=${alacakCol}). Hiçbir şey yazılmadı.` });
+          error: `Mizan kolonları eşleşmedi (hesap=${hesapCol}, meblağ=${meblagCol}). Hiçbir şey yazılmadı.` });
       }
-      // INFORMATION_SCHEMA'dan geldiler ama yine de doğrula (derinlemesine savunma).
-      for (const c of [hesapCol, borcCol, alacakCol, tarihCol].filter(Boolean)) {
+      for (const c of [hesapCol, meblagCol, tarihCol, iptalCol].filter(Boolean)) {
         if (!sqlTanimlayici(c)) return res.status(500).json({ success: false, error: 'Geçersiz kolon adı.' });
       }
 
-      const where = tarihCol ? ` WHERE ${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'` : '';
+      const kosul: string[] = [];
+      if (tarihCol) kosul.push(`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
+      if (iptalCol) kosul.push(`${iptalCol} = 0`);   // iptal edilmiş fişler mizana girmez
+      const where = kosul.length ? ` WHERE ${kosul.join(' AND ')}` : '';
       const { rows, hata } = await mikroSql(
-        `SELECT ${hesapCol} AS hesapKodu, SUM(${borcCol}) AS borc, SUM(${alacakCol}) AS alacak ` +
-        `FROM MUHASEBE_FIS_DETAYLARI${where} GROUP BY ${hesapCol} ORDER BY ${hesapCol}`,
+        `SELECT ${hesapCol} AS hesapKodu, ` +
+        `SUM(CASE WHEN ${meblagCol} > 0 THEN ${meblagCol} ELSE 0 END) AS borc, ` +
+        `SUM(CASE WHEN ${meblagCol} < 0 THEN -${meblagCol} ELSE 0 END) AS alacak ` +
+        `FROM MUHASEBE_FISLERI${where} GROUP BY ${hesapCol} ORDER BY ${hesapCol}`,
       );
       if (hata) return res.status(502).json({ success: false, error: `Mizan sorgusu başarısız: ${hata}. Hiçbir şey yazılmadı.` });
 
@@ -6285,14 +6293,23 @@ async function startServer() {
         bakiye: Number(r.borc ?? 0) - Number(r.alacak ?? 0),
       })).filter(r => r.hesapKodu);
 
+      // ÇİFT TARAFLI KAYIT DENETİMİ — mizan tanımı gereği borç toplamı alacak
+      // toplamına EŞİT olmalıdır. Tutmuyorsa işaret varsayımım (meblag>0=borç)
+      // ya da grup seçimi yanlış demektir; yanlış mizan yazmaktansa dur.
+      const toplamBorc   = satirlar.reduce((t, r) => t + r.borc, 0);
+      const toplamAlacak = satirlar.reduce((t, r) => t + r.alacak, 0);
+      const fark = Math.abs(toplamBorc - toplamAlacak);
+      if (satirlar.length && fark > Math.max(1, (toplamBorc + toplamAlacak) * 0.0001)) {
+        return res.status(502).json({ success: false,
+          error: `Mizan dengesiz: borç ${toplamBorc.toFixed(2)} ≠ alacak ${toplamAlacak.toFixed(2)} (fark ${fark.toFixed(2)}). ` +
+                 `Borç/alacak işaret kuralı bu kurulumda farklı olabilir — hiçbir şey yazılmadı.` });
+      }
+
       await adminDb.collection('accountingPeriods').doc(period).set({
         companyId: await reqCompanyId(req),
         period, yil, ay, rows: satirlar,
-        toplam: {
-          borc:   satirlar.reduce((s, r) => s + r.borc, 0),
-          alacak: satirlar.reduce((s, r) => s + r.alacak, 0),
-        },
-        kaynak: `SQL:MUHASEBE_FIS_DETAYLARI (${hesapCol}/${borcCol}/${alacakCol})`,
+        toplam: { borc: toplamBorc, alacak: toplamAlacak },
+        kaynak: `SQL:MUHASEBE_FISLERI (${hesapCol}/${meblagCol}, işaretli meblağ, denge doğrulandı)`,
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
@@ -6393,33 +6410,38 @@ async function startServer() {
       const lastDay   = new Date(yil, ay, 0).getDate();
       const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
 
-      const cols     = await mikroKolonlar('MUHASEBE_FIS_DETAYLARI');
-      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FIS_DETAYLARI okunamadı (SqlVeriOkuV2 izni?).' });
-      const hesapCol = kolonBul(cols, /hesap_?kod/i);
-      const borcCol  = kolonBul(cols, /borc/i);
-      const alacakCol= kolonBul(cols, /alacak/i);
-      const tarihCol = kolonBul(cols, /tarih/i);
-      if (!hesapCol || !borcCol || !alacakCol) {
+      const cols      = await mikroKolonlar('MUHASEBE_FISLERI');
+      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FISLERI okunamadı (SqlVeriOkuV2 izni?).' });
+      // Mizanla aynı kolon modeli: işaretli fis_meblag0 (borç +, alacak −).
+      const hesapCol  = kolonBul(cols, /hesap_kod/i);
+      const meblagCol = kolonBul(cols, /meblag0$/i);
+      const tarihCol  = kolonBul(cols, /tarih$/i);
+      const iptalCol  = kolonBul(cols, /_iptal$/i);
+      if (!hesapCol || !meblagCol) {
         return res.status(502).json({ success: false,
-          error: `KDV kolonları eşleşmedi (hesap=${hesapCol}, borç=${borcCol}, alacak=${alacakCol}). taxSummary'ye dokunulmadı.` });
+          error: `KDV kolonları eşleşmedi (hesap=${hesapCol}, meblağ=${meblagCol}). taxSummary'ye dokunulmadı.` });
       }
-      for (const c of [hesapCol, borcCol, alacakCol, tarihCol].filter(Boolean)) {
+      for (const c of [hesapCol, meblagCol, tarihCol, iptalCol].filter(Boolean)) {
         if (!sqlTanimlayici(c)) return res.status(500).json({ success: false, error: 'Geçersiz kolon adı.' });
       }
 
-      const where = tarihCol ? ` AND ${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'` : '';
+      const ek: string[] = [];
+      if (tarihCol) ek.push(`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
+      if (iptalCol) ek.push(`${iptalCol} = 0`);
+      const where = ek.length ? ` AND ${ek.join(' AND ')}` : '';
       const { rows, hata } = await mikroSql(
-        `SELECT LEFT(${hesapCol}, 3) AS grup, SUM(${borcCol}) AS borc, SUM(${alacakCol}) AS alacak ` +
-        `FROM MUHASEBE_FIS_DETAYLARI WHERE (${hesapCol} LIKE '191%' OR ${hesapCol} LIKE '391%')${where} ` +
+        `SELECT LEFT(${hesapCol}, 3) AS grup, SUM(${meblagCol}) AS netMeblag ` +
+        `FROM MUHASEBE_FISLERI WHERE (${hesapCol} LIKE '191%' OR ${hesapCol} LIKE '391%')${where} ` +
         `GROUP BY LEFT(${hesapCol}, 3)`,
       );
       if (hata) return res.status(502).json({ success: false, error: `KDV sorgusu başarısız: ${hata}. taxSummary'ye dokunulmadı.` });
 
       const grup = (g: string) => rows.find(r => String(r.grup ?? '') === g);
       const g191 = grup('191'), g391 = grup('391');
-      // 191 borç bakiyeli (indirilecek), 391 alacak bakiyeli (hesaplanan).
-      const kdvIndirilecek = Number(g191?.borc ?? 0) - Number(g191?.alacak ?? 0);
-      const kdvHesaplanan  = Number(g391?.alacak ?? 0) - Number(g391?.borc ?? 0);
+      // İşaretli meblağ: 191 borç bakiyelidir (net pozitif), 391 alacak
+      // bakiyelidir (net negatif) — ikincisinin işaretini çeviriyoruz.
+      const kdvIndirilecek = Number(g191?.netMeblag ?? 0);
+      const kdvHesaplanan  = -Number(g391?.netMeblag ?? 0);
 
       // Hiç 191/391 hareketi yoksa bu "KDV sıfır" DEĞİL, "hesap planı farklı
       // olabilir" demektir — yazma, uyar.
@@ -6434,7 +6456,7 @@ async function startServer() {
         kdvHesaplanan, kdvIndirilecek,
         kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
         devredenKdv: Math.max(kdvIndirilecek - kdvHesaplanan, 0),
-        kaynak: 'SQL:MUHASEBE_FIS_DETAYLARI 191/391 — TÜRETİLMİŞTİR, beyan öncesi Mikro KDV raporuyla karşılaştırın',
+        kaynak: 'SQL:MUHASEBE_FISLERI 191/391 — TÜRETİLMİŞTİR, beyan öncesi Mikro KDV raporuyla karşılaştırın',
         rawData: rows,
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
