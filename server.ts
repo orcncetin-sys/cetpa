@@ -2134,8 +2134,10 @@ async function mikroKolonlar(tablo: string): Promise<string[]> {
   if (!t) return [];
   const c = mikroKolonCache.get(t);
   if (c && c.exp > Date.now()) return c.cols;
+  // ORDER BY ORDINAL_POSITION şart: kolonBul ilk EŞLEŞENİ döndürür, dolayısıyla
+  // sıra anlamlıdır. SQL Server genelde ordinal sırayla döner ama garanti etmez.
   const { rows } = await mikroSql(
-    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '${t}'`,
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '${t}' ORDER BY ORDINAL_POSITION`,
   );
   const cols = rows.map(r => String(r.COLUMN_NAME ?? '')).filter(Boolean);
   if (cols.length) mikroKolonCache.set(t, { cols, exp: Date.now() + 10 * 60_000 });
