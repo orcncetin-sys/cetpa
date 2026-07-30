@@ -6321,6 +6321,15 @@ async function startServer() {
         bakiye: Number(r.borc ?? 0) - Number(r.alacak ?? 0),
       })).filter(r => r.hesapKodu);
 
+      // Hiç satır yoksa BOŞ MİZAN YAZMA. Bu "dönemde hareket yok" da olabilir,
+      // "muhasebe modülü hiç kullanılmıyor / yanlış tablo" da — ikisi arasında
+      // ayrım yapamadığımız için var olan mizanı boşla ezmek kabul edilemez.
+      if (!satirlar.length) {
+        return res.status(502).json({ success: false,
+          error: `${period} döneminde MUHASEBE_FISLERI'nde hiç kayıt bulunamadı. ` +
+                 `Muhasebe fişleri Mikro'ya işlenmiyor olabilir — mizan DEĞİŞTİRİLMEDİ.` });
+      }
+
       // ÇİFT TARAFLI KAYIT DENETİMİ — mizan tanımı gereği borç toplamı alacak
       // toplamına EŞİT olmalıdır. Tutmuyorsa işaret varsayımım (meblag>0=borç)
       // ya da grup seçimi yanlış demektir; yanlış mizan yazmaktansa dur.
