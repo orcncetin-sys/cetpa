@@ -502,6 +502,21 @@ async function initDocsTable(): Promise<void> {
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (coll, id)
   )`);
+  // Kiracı filtresi indeksleri. PK (coll,id) yalnız koleksiyon önekini kapsar;
+  // tenantWhere'in `data->>'companyId' = $2 OR NOT (data ? 'companyId')`
+  // yüklemi indekssiz kalınca koleksiyonun TÜM satırları taranır. İki indeks
+  // gerekli çünkü OR'un iki kolu farklı: eşitlik kolu ifade indeksinden,
+  // "etiketsiz" kolu kısmi indeksten gelir (BitmapOr). Kısmi indeks backfill
+  // sonrası neredeyse boş kalır — maliyeti yok denecek kadar az.
+  // Hata boot'u DÜŞÜRMEZ: indeks bir optimizasyon, doğruluk koşulu değil.
+  for (const ddl of [
+    `CREATE INDEX IF NOT EXISTS idx_docs_coll_company ON docs (coll, (data->>'companyId'))`,
+    `CREATE INDEX IF NOT EXISTS idx_docs_coll_untagged ON docs (coll) WHERE NOT (data ? 'companyId')`,
+    `CREATE INDEX IF NOT EXISTS idx_docs_coll_user ON docs (coll, (data->>'userId'))`,
+  ]) {
+    try { await pgPool.query(ddl); }
+    catch (e) { console.warn('docs indeks oluşturulamadı (devam ediliyor):', (e as Error).message); }
+  }
   console.log('PostgreSQL docs table ready ✓');
   await initMikroTables();
   await initMfaTable();
@@ -2860,7 +2875,25 @@ async function startServer() {
         return true;
       };
       try {
-        const { rows } = await docsDb.query('SELECT coll, id, data FROM docs WHERE coll = ANY($1)', [colls]);
+        // Kiracı filtresini SQL'e it. Eskiden bu sorgu koleksiyonların TÜM
+        // satırlarını (her kiracınınkini) çekip JS'te eliyordu — her istemci
+        // bağlantısında tüm veritabanı belleğe okunuyordu. Filtre artık
+        // WHERE'de ve idx_docs_coll_company/untagged/user indekslerini kullanır.
+        // rowVisible ikinci kapı olarak KALIR (derinlemesine savunma + settings
+        // gibi SQL'e taşınmayan özel kurallar orada).
+        const tenantColls = colls.filter(c => TENANT_COLLECTIONS.has(c));
+        const userColls   = colls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
+        // SERVER_ONLY hiç sorgulanmaz (rowVisible zaten eliyordu; artık diske de
+        // gitmiyor). colls'ta KALIR ki istemci o koleksiyon için boş bir init
+        // eventi alsın ve beklemede kalmasın.
+        const otherColls  = colls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
+        const { rows } = await docsDb.query(
+          `SELECT coll, id, data FROM docs WHERE
+             (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
+          OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
+          OR (coll = ANY($3))`,
+          [tenantColls, userColls, otherColls, streamCid, streamUid],
+        );
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
         for (const c of colls) byColl[c] = [];
         for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: r.data });
