@@ -162,6 +162,7 @@ import ConfirmModal from './components/ConfirmModal';
 import GlobalConfirm from './components/GlobalConfirm';
 import { confirmDelete } from './lib/confirm';
 import { MUHASEBE_MENU, type MuhasebeTarget } from './lib/muhasebeMenu';
+import { koleksiyonAktif, resetLazyCollections } from './lib/lazyCollections';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import DataImportWizard from './components/DataImportWizard';
 import GlobalSearch from './components/GlobalSearch';
@@ -2379,6 +2380,7 @@ function AppContent() {
     storeSetUser(null);
     storeSetCompanyId(null);
     resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
+    resetLazyCollections(); // tembel koleksiyon kapıları da başa alınsın
     try { await authedFetch('/api/db/session/logout', { method: 'POST' }); } catch { /* ignore */ }
   };
 
@@ -2572,8 +2574,12 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     const u: (() => void)[] = [];
-    const sub = (col: string, setter: (d: unknown[]) => void) =>
+    // Bkz. lazyCollections.ts — modül-özel koleksiyonlar ilgili sekme açılana
+    // kadar dinlenmez. useDataSync ile AYNI kararı vermeleri için ortak kapı.
+    const sub = (col: string, setter: (d: unknown[]) => void) => {
+      if (!koleksiyonAktif(col, activeTab)) return;
       u.push(onSnapshot(collection(db, col), s => setter(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => setter([])));
+    };
 
     sub('projectCosts',    (d) => setP582Projects(d as typeof p582Projects));
     sub('workflowTasks',   (d) => setP595Tasks(d as typeof p595Tasks));
@@ -2589,7 +2595,7 @@ function AppContent() {
     sub('intercompanyTxns',(d) => setP643Txns(d as typeof p643Txns));
 
     return () => u.forEach(fn => fn());
-  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.uid, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {

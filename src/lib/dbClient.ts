@@ -366,7 +366,16 @@ class StreamManager {
     const haveSession = await this.ensureSession();
     this.es?.close();
     this.connectedColls = colls;
-    let url = `/api/db/stream?colls=${encodeURIComponent(colls)}`;
+    // Artımlı init: yalnız önbellekte OLMAYAN koleksiyonlar için tam veri iste.
+    // Abone kümesi her değiştiğinde yeniden bağlanıyoruz; bu olmadan sunucu her
+    // seferinde TÜM koleksiyonları baştan gönderiyordu, yani bir sekmeye geçip
+    // tek koleksiyon eklemek o ana kadarki her şeyi yeniden indiriyordu.
+    // force=true (hata sonrası yeniden bağlanma) durumunda hepsini iste —
+    // bağlantı kopukken kaçırdığımız değişiklikler ancak böyle yakalanır.
+    const need = force
+      ? colls.split(',')
+      : colls.split(',').filter(c => !this.ready.has(c));
+    let url = `/api/db/stream?colls=${encodeURIComponent(colls)}&init=${encodeURIComponent(need.join(','))}`;
     if (!haveSession) {
       let token: string;
       try { token = await getToken(); } catch { this.retryLater(); return; }

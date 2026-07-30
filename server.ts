@@ -795,6 +795,12 @@ type PgDocData = Record<string, any>;
 /** Mikro Jump kurulum sürümü — V16'da SqlVeriOkuV2 ve cha_ebelge_turu YOK.
  *  (V16/V17 Postman koleksiyonları diff'i, 2026-06-12). Müşteri V17'ye
  *  geçtiğinde .env.production'a MIKRO_JUMP_SURUM=17 eklemek yeterli. */
+/** SSE init'te koleksiyon başına gönderilecek azami satır. Emniyet supabı:
+ *  tek bir koleksiyonun büyümesi tarayıcıyı kilitlemesin. Çarpıldığında SESSİZCE
+ *  kırpılmaz — sunucuda uyarı loglanır ve init eventine `truncated`+`total`
+ *  eklenir, böylece eksik veri "tam veri" gibi görünmez. */
+const STREAM_INIT_MAX_ROWS = Number(process.env.STREAM_INIT_MAX_ROWS || 20000);
+
 const MIKRO_JUMP_SURUM = Number(process.env.MIKRO_JUMP_SURUM || 16);
 
 /** Kodun çağırdığı ama Mikro Jump V17'de BULUNMAYAN metotlar.
@@ -2933,6 +2939,19 @@ async function startServer() {
       const collChecks = await Promise.all(requestedColls.map(c => canAccessCollection(streamUid!, c, 'read')));
       const colls = requestedColls.filter((_, i) => collChecks[i]);
       if (!colls.length) { res.status(403).json({ error: 'Bu koleksiyonlar üzerinde okuma yetkiniz yok.' }); return; }
+      // Artımlı init: istemci zaten önbelleğinde olan koleksiyonları tekrar
+      // istemez. `init` parametresi verilmezse hepsi gönderilir (geriye uyum).
+      //
+      // Neden gerekli: StreamManager abone kümesi HER değiştiğinde yeniden
+      // bağlanıyor. Bir sekmeye geçip tek bir koleksiyon eklemek, o ana kadar
+      // yüklenmiş TÜM koleksiyonların baştan indirilmesine yol açıyordu —
+      // sekme gezinmesi boyunca aynı veri defalarca akıyordu.
+      // DİKKAT: "parametre yok" ile "parametre boş" AYRI. Boş `init=` meşru bir
+      // istektir (istemcinin her şeyi önbellekte var, sadece canlı değişiklik
+      // dinleyecek) — bunu "hepsini gönder"e çevirmek hatayı geri getirir.
+      const initColls = req.query.init === undefined
+        ? colls
+        : colls.filter(c => String(req.query.init).split(',').includes(c));
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -2957,23 +2976,38 @@ async function startServer() {
         // WHERE'de ve idx_docs_coll_company/untagged/user indekslerini kullanır.
         // rowVisible ikinci kapı olarak KALIR (derinlemesine savunma + settings
         // gibi SQL'e taşınmayan özel kurallar orada).
-        const tenantColls = colls.filter(c => TENANT_COLLECTIONS.has(c));
-        const userColls   = colls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
+        // Yalnız istemcinin önbelleğinde OLMAYAN koleksiyonlar sorgulanır.
+        const tenantColls = initColls.filter(c => TENANT_COLLECTIONS.has(c));
+        const userColls   = initColls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
         // SERVER_ONLY hiç sorgulanmaz (rowVisible zaten eliyordu; artık diske de
-        // gitmiyor). colls'ta KALIR ki istemci o koleksiyon için boş bir init
+        // gitmiyor). initColls'ta KALIR ki istemci o koleksiyon için boş bir init
         // eventi alsın ve beklemede kalmasın.
-        const otherColls  = colls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
-        const { rows } = await docsDb.query(
-          `SELECT coll, id, data FROM docs WHERE
-             (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
-          OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
-          OR (coll = ANY($3))`,
-          [tenantColls, userColls, otherColls, streamCid, streamUid],
-        );
+        const otherColls  = initColls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
+        const { rows } = initColls.length
+          ? await docsDb.query(
+              `SELECT coll, id, data FROM docs WHERE
+                 (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
+              OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
+              OR (coll = ANY($3))`,
+              [tenantColls, userColls, otherColls, streamCid, streamUid],
+            )
+          : { rows: [] as Array<{ coll: string; id: string; data: unknown }> };
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
-        for (const c of colls) byColl[c] = [];
+        for (const c of initColls) byColl[c] = [];
         for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: r.data });
-        for (const c of colls) res.write(`event: init\ndata: ${JSON.stringify({ coll: c, docs: byColl[c] })}\n\n`);
+        for (const c of initColls) {
+          const docs = byColl[c];
+          // Sessiz kırpma YOK: tavana çarpınca logla ve istemciye bildir.
+          const truncated = docs.length > STREAM_INIT_MAX_ROWS;
+          if (truncated) {
+            console.warn(`[/api/db/stream] ${c}: ${docs.length} satır -> ${STREAM_INIT_MAX_ROWS} ile sınırlandı (uid=${streamUid})`);
+          }
+          res.write(`event: init\ndata: ${JSON.stringify({
+            coll: c,
+            docs: truncated ? docs.slice(0, STREAM_INIT_MAX_ROWS) : docs,
+            ...(truncated ? { truncated: true, total: docs.length } : {}),
+          })}\n\n`);
+        }
       } catch (e) {
         res.write(`event: err\ndata: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
       }

@@ -5,6 +5,7 @@ import {
 } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { useDataStore } from '../store/dataStore';
+import { koleksiyonAktif } from '../lib/lazyCollections';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
 import type { Lead, Order, InventoryItem, Warehouse, InventoryMovement, Consignment, StockDiscrepancy, Employee, Payroll, Shipment, Quotation, Vehicle, LocationStock } from '../types';
 import { UserRole } from '../types';
@@ -335,8 +336,12 @@ export function useDataSync({
   useEffect(() => {
     if (!user) return;
     const u: (() => void)[] = [];
-    const sub = (col: string, setter: (d: unknown[]) => void) =>
+    // Modül-özel koleksiyonlar ilgili sekme ilk açılana kadar dinlenmez —
+    // hiç girilmeyen modülün verisi hiç indirilmez (bkz. lazyCollections.ts).
+    const sub = (col: string, setter: (d: unknown[]) => void) => {
+      if (!koleksiyonAktif(col, activeTab)) return;
       u.push(onSnapshot(collection(db, col), s => setter(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => setter([])));
+    };
 
     sub('projectCosts',    setP582Projects);
     sub('workflowTasks',   setP595Tasks);
@@ -352,7 +357,9 @@ export function useDataSync({
     sub('intercompanyTxns',setP643Txns);
 
     return () => u.forEach(fn => fn());
-  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+    // activeTab bağımlılık: modül sekmesi ilk açıldığında o koleksiyon dinlemeye
+    // girsin (koleksiyonAktif yapışkandır, sekmeden çıkınca kapanmaz).
+  }, [user?.uid, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {
