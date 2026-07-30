@@ -6,6 +6,11 @@ import {
   type AppRole, type DbOp, ADMIN_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
   isAllowed, isSelfDocAccess, blocksRoleEscalation,
 } from "./src/lib/rbac.js";
+import {
+  TENANT_COLLECTIONS as TENANT_COLLECTION_LIST,
+  USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
+  SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
+} from "./src/lib/collections.js";
 import pg from "pg";
 import { EventEmitter } from "events";
 // vite is imported dynamically below — only in development, never in production
@@ -679,56 +684,12 @@ function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, da
 // ── Çoklu kiracı izolasyonu (companyId / userId kapsamı) ─────────────────────
 // İş verisi koleksiyonları companyId ile, kullanıcı verisi userId ile izole
 // edilir. Diğerleri (settings global, users RBAC, append-only loglar) filtresiz.
-const TENANT_COLLECTIONS = new Set([
-  // ── Çekirdek satış/stok/lojistik ──
-  'inventory', 'leads', 'orders', 'quotations', 'shipments', 'warehouseItems',
-  'warehouses', 'employees', 'customerRisks', 'inventoryMovements', 'priceLists',
-  'priceOverrides', 'suppliers', 'purchaseOrders', 'returns', 'recurringOrders',
-  'recurringBilling', 'revenueContracts', 'contracts', 'supportTickets',
-  'demandRequests', 'productionOrders', 'projectCosts', 'projectTimelines',
-  'capacityLines', 'letterOfCredit', 'intercompanyTxns', 'approvalRequests',
-  'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
-  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
-  'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
-  'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
-  // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi
-  // konsinyesi (giden 'consignments'tan FARKLI — gelen mal), kampanya metrikleri
-  'purchaseBudgets', 'supplierRisks', 'supplierConsignments', 'campaignMetrics',
-  'autoInvoiceSchedules', // p591 Oto.Fatura (p640'ın recurringBilling'inden ayrı — şema farklı)
-  // Batch 3 (2026-07-21): Siparişler yerel tabloları — mevcut gerçek akışlardan
-  // (rmaRequests/orderReturns, supportTickets, ihracatlar) BİLEREK ayrı şemalar
-  'salesReturns', 'serviceRequests', 'helpdeskTickets', 'exportShipments',
-  'rfqQuotes', 'stockBatches', 'pricingRules', 'qualityChecklist',
-  // Batch 4 (2026-07-21): koşu-anlık-görüntüsü + oturum kalıcılığı
-  'payrollRuns', 'bankMatchRuns', 'revExpBudgets', 'stockCountSessions',
-  'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
-  // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
-  'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',
-  'bankAccounts', 'bankTransactions', 'boardMeetings', 'bom', 'campaigns', 'cargoTracking',
-  'complaints', 'complianceItems', 'cpqQuotes', 'cpqTemplates', 'ctpatRecords',
-  'documentTemplates', 'dunningInvoices', 'dunningPolicies', 'eBelgeler', 'eightDRecords',
-  'ekipmanlar', 'fiveSRecords', 'fmeaRecords', 'garantiler', 'gumrukBeyannameleri',
-  'holdingAccounts', 'holdingEntities', 'holdingIntercompany', 'ihracatlar', 'invoices',
-  'isEmirleri', 'ithalatlar', 'jobs', 'journalEntries', 'kaizenRecords', 'kasaHareketleri',
-  'kasaKapanislar', 'kasalar', 'legalCases', 'legalDocs', 'lotHareketleri', 'lotKayitlari',
-  'machines', 'maliyetKalemleri', 'maliyetMerkezleri', 'masraflar', 'orderReturns',
-  'payments', 'payrollEntries', 'performanceReviews', 'pfmeaRecords', 'projects',
-  'qcRecords', 'resources', 'revenueSchedules', 'rmaRequests', 'routingTemplates',
-  'sabitKiymetBakim', 'sabitKiymetSigorta', 'sabitKiymetler', 'seriNolar', 'servisTalepleri',
-  'shareholders', 'skuMappings', 'subeTransferler', 'tahsilatKayitlari', 'tahsilatOdemeleri',
-  'tasks', 'taxDeclarations', 'teknisyenler', 'territories', 'timeAttendance', 'trainings',
-  'travelRequests', 'warehouseBins', 'webhookConfigs', 'wmsCycleCounts', 'wmsTasks', 'workCenters',
-  // Entegrasyon senkron logları (firma-bazlı)
-  'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',
-  // İstemci hata logu — append-only; firma-bazlı okuma izolasyonu (PII/stack sızıntısı)
-  'clientErrors',
-]);
-const USER_SCOPED_COLLECTIONS = new Set(['notifications', 'userPrefs', 'userOnboarding', 'aiConsents']);
-// Yalnız sunucunun yazıp okuduğu operasyonel koleksiyonlar — /api/db'den ve SSE
-// stream'den TAMAMEN kapalı. Okuma dahi süper-admin'e özel dedicated endpoint'lerden
-// yapılır (örn. opsChecks → GET /api/ops/watchdog). TENANT dışı oldukları için
-// tenantWhere filtre eklemez; buraya konmazlarsa her kiracıya açılırlar.
-const SERVER_ONLY_COLLECTIONS = new Set(['opsChecks']);
+// Sınıflandırma src/lib/collections.ts'te — server.ts ve backfill scripti aynı
+// kaynaktan okur (liste iki yerde elle kopyalanınca 2026-07'de kaydı, bkz. dosya
+// başlığı). Yeni koleksiyon eklerken YALNIZ o dosyayı düzenle.
+const TENANT_COLLECTIONS = new Set(TENANT_COLLECTION_LIST);
+const USER_SCOPED_COLLECTIONS = new Set(USER_SCOPED_COLLECTION_LIST);
+const SERVER_ONLY_COLLECTIONS = new Set(SERVER_ONLY_COLLECTION_LIST);
 // Firma-bazlı izole edilen ayar anahtarları (settings/{key}). Yalnız UI/config —
 // ERP/email/iyzico gibi deployment-seviyesi creds GLOBAL kalır (server cron/API okur).
 // docs tablosu PK (coll,id) olduğu için id companyId ile namespace'lenir: `${cid}__{key}`.
@@ -2221,7 +2182,10 @@ async function writeAuditLog(
       details,
       ...(diff && Object.keys(diff).length ? { diff } : {}),
       userId:    actor.uid,
-      companyId: actor.uid,
+      // Kullanıcının uid'i DEĞİL, ait olduğu firmanın id'si. Tek-kullanıcılı
+      // hesapta ikisi aynıdır; bir firmaya bağlı çalışanda FARKLIDIR ve uid
+      // yazmak satırı firmanın denetim görünümünden düşürür (2026-07-30).
+      companyId: await getUserCompanyId(actor.uid),
       userName:  actor.email || 'Sunucu',
       userEmail: actor.email,
       source:    'server',
