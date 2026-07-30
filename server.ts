@@ -3003,7 +3003,9 @@ async function startServer() {
       // DİKKAT: "parametre yok" ile "parametre boş" AYRI. Boş `init=` meşru bir
       // istektir (istemcinin her şeyi önbellekte var, sadece canlı değişiklik
       // dinleyecek) — bunu "hepsini gönder"e çevirmek hatayı geri getirir.
-      const initColls = req.query.init === undefined
+      // '*' = hepsi (istemci ilk bağlantıda bunu gönderir; koleksiyon listesini
+      // sorgu dizesinde İKİ KEZ taşımamak için — IIS maxQueryString sınırı).
+      const initColls = req.query.init === undefined || req.query.init === '*'
         ? colls
         : colls.filter(c => String(req.query.init).split(',').includes(c));
       res.writeHead(200, {
@@ -6496,7 +6498,11 @@ async function startServer() {
     for (const k of kayitlar) {
       const uuid = String(k.uuid || '').trim();
       const belgeNo = String(k.belgeNo || '').trim();
-      const id = uuid || (belgeNo ? `${k.yon}-${belgeNo}` : adminDb.collection('eBelgeler').doc().id);
+      // UUID (GİB ETTN) küresel benzersizdir, doğrudan id olabilir. belgeNo
+      // DEĞİLDİR ("EF-2026-0001" her firmada olabilir) — docs tablosunun PK'sı
+      // (coll,id) olduğu için kiracı öneki olmadan iki firma birbirinin
+      // belgesini ezer. Bu, recurringBilling'de bir kez yaşandı.
+      const id = uuid || (belgeNo ? `${companyId}__${k.yon}-${belgeNo}` : adminDb.collection('eBelgeler').doc().id);
       batch.set(adminDb.collection('eBelgeler').doc(id.replace(/[/\\]/g, '_')), {
         ...k, companyId, syncedAt: pgServerTimestamp(),
       }, { merge: true });
@@ -6643,11 +6649,20 @@ async function startServer() {
       const d = (r0.Data ?? {}) as Record<string, unknown>;
       // Durumu belgeye işle (varsa) — ama alan yoksa UYDURMA.
       if (adminDb && (d.Durum ?? d.durum ?? d.DurumKodu) !== undefined) {
-        await adminDb.collection('eBelgeler').doc(uuid).set({
-          gibDurumu: String(d.Durum ?? d.durum ?? ''),
-          gibDurumKodu: String(d.DurumKodu ?? d.durumKodu ?? ''),
-          gibSorguZamani: pgServerTimestamp(),
-        }, { merge: true }).catch(() => { /* belge bizde yoksa sorun değil */ });
+        // SAHİPLİK: doc id ham UUID olduğu için başka bir kiracının belgesinin
+        // UUID'sini bilen biri onun kaydını değiştirebilirdi. Var olan kaydın
+        // companyId'si farklıysa yerel yazmayı ATLA (Mikro yanıtı yine döner).
+        const mevcut = await adminDb.collection('eBelgeler').doc(uuid).get().catch(() => null);
+        const sahibi = mevcut?.exists ? (mevcut.data()?.companyId as string | undefined) : undefined;
+        const cid = await reqCompanyId(req);
+        if (!sahibi || sahibi === cid) {
+          await adminDb.collection('eBelgeler').doc(uuid).set({
+            companyId: cid,
+            gibDurumu: String(d.Durum ?? d.durum ?? ''),
+            gibDurumKodu: String(d.DurumKodu ?? d.durumKodu ?? ''),
+            gibSorguZamani: pgServerTimestamp(),
+          }, { merge: true }).catch(() => { /* yazamazsak sorgu sonucu yine döner */ });
+        }
       }
       res.json({ success: true, data: d });
     } catch (err) {
@@ -6721,9 +6736,15 @@ async function startServer() {
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
       if (adminDb) {
-        await adminDb.collection('eBelgeler').doc(uuid).set({
-          durum: 'İptal', iptalAciklamasi: aciklama, iptalZamani: pgServerTimestamp(),
-        }, { merge: true }).catch(() => {});
+        // Sahiplik kontrolü — bkz. /ebelge/durum'daki aynı gerekçe.
+        const mevcut = await adminDb.collection('eBelgeler').doc(uuid).get().catch(() => null);
+        const sahibi = mevcut?.exists ? (mevcut.data()?.companyId as string | undefined) : undefined;
+        const cid = await reqCompanyId(req);
+        if (!sahibi || sahibi === cid) {
+          await adminDb.collection('eBelgeler').doc(uuid).set({
+            companyId: cid, durum: 'İptal', iptalAciklamasi: aciklama, iptalZamani: pgServerTimestamp(),
+          }, { merge: true }).catch(() => {});
+        }
       }
       await writeAuditLog(reqActor(req), 'e-Arşiv İptal', `${uuid} iptal edildi: ${aciklama}`);
       res.json({ success: true, data: r0.Data ?? {} });

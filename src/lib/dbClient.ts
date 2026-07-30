@@ -372,10 +372,25 @@ class StreamManager {
     // tek koleksiyon eklemek o ana kadarki her şeyi yeniden indiriyordu.
     // force=true (hata sonrası yeniden bağlanma) durumunda hepsini iste —
     // bağlantı kopukken kaçırdığımız değişiklikler ancak böyle yakalanır.
+    //
+    // DİKKAT — aboneliği BIRAKILAN koleksiyon `ready`'den düşürülmeli. Abone
+    // olmadığımız sürece sunucu o koleksiyonun `change` olaylarını göndermez;
+    // önbellek sessizce bayatlar. `ready`'de kalırsa tekrar abone olunduğunda
+    // init istenmez ve o aradaki değişiklikler KALICI OLARAK kaybolur.
+    // (Sekme kapılı koleksiyonlar — bankAccounts, masraflar, timeAttendance,
+    // warehouseBins, rmaRequests, vergiTakvimi, auditLog, webhookConfigs —
+    // sekmeden çıkınca gerçekten abonelikten düşüyor.)
+    const aktif = new Set(colls.split(','));
+    for (const c of Array.from(this.ready)) if (!aktif.has(c)) this.ready.delete(c);
+
     const need = force
       ? colls.split(',')
       : colls.split(',').filter(c => !this.ready.has(c));
-    let url = `/api/db/stream?colls=${encodeURIComponent(colls)}&init=${encodeURIComponent(need.join(','))}`;
+    // Tümü isteniyorsa '*' gönder. Sorgu dizesi IIS'in maxQueryString sınırına
+    // (varsayılan 2048 bayt) yaklaşmasın: koleksiyon listesini iki kez taşımak
+    // ilk bağlantıda dizeyi ikiye katlıyordu.
+    const initParam = need.length === aktif.size ? '*' : need.join(',');
+    let url = `/api/db/stream?colls=${encodeURIComponent(colls)}&init=${encodeURIComponent(initParam)}`;
     if (!haveSession) {
       let token: string;
       try { token = await getToken(); } catch { this.retryLater(); return; }
