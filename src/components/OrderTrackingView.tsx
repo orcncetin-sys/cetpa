@@ -144,7 +144,14 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
                 {order.shippingAddress && (
                   <div className="flex items-start gap-1.5">
                     <MapPin className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                    <span>{order.shippingAddress}</span>
+                    {/* Sunucu adresi ilçe/il'e kırpar — bu sayfa kimliksizdir ve
+                        bağlantı iletilebilir, tam adres dışarı çıkmamalı. */}
+                    <span>
+                      {order.shippingAddress}
+                      <span className="block text-[11px] text-gray-400">
+                        {tr ? 'Tam adres gizlenmiştir' : 'Full address hidden'}
+                      </span>
+                    </span>
                   </div>
                 )}
                 {order.trackingNumber && (

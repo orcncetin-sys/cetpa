@@ -679,6 +679,24 @@ function mergeDocData(existing: Record<string, unknown>, patch: Record<string, u
 }
 
 const DOC_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+/** "Orçun Çetin" → "Orçun Ç." — kimliksiz takip sayfasında müşterinin kendi
+ *  siparişi olduğunu teyit etmesine yeter, tam adı ifşa etmez. */
+function maskName(name?: string): string {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(' ')} ${parts[parts.length - 1][0]}.`;
+}
+
+/** Tam adresi kimliksiz uca vermeyip yalnız son iki bileşeni (ilçe, il) döner.
+ *  Müşteri doğru şehre gittiğini görür; sokak/kapı/daire bilgisi dışarı çıkmaz. */
+function maskAddress(addr: unknown): string | null {
+  if (typeof addr !== 'string' || !addr.trim()) return null;
+  const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length <= 2) return parts.join(', ') || null;
+  return parts.slice(-2).join(', ');
+}
+
 function genDocId(): string {
   let s = '';
   for (let i = 0; i < 20; i++) s += DOC_ID_CHARS[Math.floor(Math.random() * DOC_ID_CHARS.length)];
@@ -3330,6 +3348,19 @@ async function startServer() {
     legacyHeaders: false,
     keyGenerator: userOrIpKey,
     message: { error: 'Çok fazla Mikro senkron isteği, lütfen biraz bekleyin.' },
+  });
+
+  /** Kimliksiz sipariş takibi — 40 req / 15 dk per IP. Sipariş id'si zaten
+   *  ~119 bitlik rastgele bir sır, yani sayım riski yok; bu limit sızmış bir
+   *  id listesinin toplu kazınmasını yavaşlatmak ve ucu ucuz bir DoS yüzeyi
+   *  olmaktan çıkarmak için. Genel apiLimiter (300/15dk) bunun için gevşek. */
+  const trackLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    message: { success: false, error: 'Çok fazla takip sorgusu, lütfen biraz bekleyin.' },
   });
 
   // Apply general limiter to all /api/* routes
@@ -6953,23 +6984,28 @@ async function startServer() {
   // GET /api/track/:orderId — no auth required
   // Returns sanitised order data safe to expose to customers
 
-  app.get('/api/track/:orderId', async (req: Request, res: Response) => {
+  app.get('/api/track/:orderId', trackLimiter, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     const orderId = req.params['orderId'] as string;
     try {
       const snap = await adminDb.collection('orders').doc(orderId).get();
       if (!snap.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       const o = snap.data() as Record<string, unknown>;
-      // Return only safe fields — no email, payment info, or internal refs
+      // Return only safe fields — no email, payment info, or internal refs.
+      // Kimlik doğrulaması YOK: tek sır sipariş id'sinin kendisi (genDocId, 20
+      // karakter × 62'lik alfabe ≈ 119 bit — sayımla bulunamaz). Ama bağlantı
+      // paylaşılabilir/iletilebilir olduğu için PII asgariye indirilir: ad
+      // kısaltılır, adresin yalnız ilçe/il kuyruğu gösterilir. Tam adres ve
+      // e-posta oturum açmış personelde kalır.
       res.json({
         success: true,
         order: {
           id:                orderId,
           orderNo:           (o.shopifyOrderId as string | undefined) ?? orderId.slice(0, 8).toUpperCase(),
-          customerName:      o.customerName,
+          customerName:      maskName(o.customerName as string | undefined),
           status:            o.status,
           trackingNumber:    o.trackingNumber ?? null,
-          shippingAddress:   o.shippingAddress ?? null,
+          shippingAddress:   maskAddress(o.shippingAddress),
           estimatedDelivery: o.estimatedDelivery ?? null,
           lineItems:         (o.lineItems as unknown[] | undefined)?.map((l: unknown) => {
             const li = l as Record<string, unknown>;
@@ -6980,7 +7016,9 @@ async function startServer() {
         },
       });
     } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      // Kimliksiz uç — ham hata metni (SQL/şema ipuçları) dışarı verilmez.
+      console.error('[/api/track]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Sipariş bilgisi alınamadı.' });
     }
   });
 
