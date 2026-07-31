@@ -1979,7 +1979,7 @@ async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: 
                hata: `posta yolu yok (RESEND_API_KEY=${resendKey ? 'var' : 'YOK'}, alıcı=${recipient ? 'var' : 'YOK'})` };
     }
 
-    await fetch('https://api.resend.com/emails', {
+    const postaRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1999,6 +1999,15 @@ async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: 
         </div>`,
       }),
     });
+    // Resend YANITINI OKU. Sadece fetch'in patlamamasına bakmak, gönderilmemiş
+    // postayı "gönderildi" saymaktır — doğrulanmamış alan adında Resend 403
+    // döner ve eskiden bunu göremiyorduk (2026-07-31 testinde yakalandı).
+    if (!postaRes.ok) {
+      const govde = await postaRes.text().catch(() => '');
+      const hata = `Resend HTTP ${postaRes.status}: ${govde.slice(0, 300)}`;
+      console.error('[disk-nobetcisi] posta REDDEDİLDİ —', hata);
+      return { freeGB, totalGB, freePct, seviye, postaDenendi: false, hata };
+    }
     return { freeGB, totalGB, freePct, seviye, postaDenendi: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -2045,7 +2054,7 @@ async function runOpsWatchdogAndAlert(): Promise<void> {
     <p style="font-size:11px;color:#888;margin-top:14px">Detay: Yönetim → süper-admin panelindeki Operasyon Bekçisi kartı. Bu e-posta sunucudan otomatik gönderildi (AI kullanılmaz).</p>
   </div>`;
   try {
-    await fetch('https://api.resend.com/emails', {
+    const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2057,6 +2066,13 @@ async function runOpsWatchdogAndAlert(): Promise<void> {
         html,
       }),
     });
+    // Resend yanıtını oku — reddedilen postayı "gönderildi" saymak, izlemenin
+    // sessiz kalmasının ta kendisidir (2026-07-31 dersi).
+    if (!r.ok) {
+      const govde = await r.text().catch(() => '');
+      console.error(`Ops uyarısı REDDEDİLDİ — Resend HTTP ${r.status}: ${govde.slice(0, 300)}`);
+      return;
+    }
     console.log(`Ops uyarısı gönderildi → ${recipient} (bozuk: ${failing.length})`);
   } catch (err) {
     console.error('Ops uyarı e-postası gönderilemedi:', err);
