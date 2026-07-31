@@ -5673,6 +5673,35 @@ async function startServer() {
     collection: 'odemePlanlari', label: 'Mikro Ödeme Planları',
   });
 
+  // 8. Depolar → warehouses  (Mikro'da DEPOLAR tablosu var, hiç çekilmiyordu:
+  //    Depo Tanımları ekranı bu yüzden yalnız elle girilmiş "Depo 1"i gösteriyordu.
+  //    Müşterinin 5 deposu var: 1 HAVALIMANI, 2 ESKI SANAYI, 3-5 araç plakaları.)
+  makeMikroSqlImport({
+    route: '/api/mikro/import/depo', tablo: 'DEPOLAR', siralama: 'dep_Guid',
+    collection: 'warehouses', label: 'Mikro Depo Tanımları',
+    postProcess: async (rows) => {
+      if (!adminDb) return null;
+      // warehouses ekranı `name`/`code` bekliyor; ham dep_* alanlarından eşle.
+      const sample = rows[0];
+      const kodKey = findKey(sample, /dep_no|dep_kod/i);
+      const adKey  = findKey(sample, /dep_adi|dep_isim/i);
+      if (!kodKey || !adKey) return `alan eşleşmedi (kod=${kodKey}, ad=${adKey})`;
+      let batch = adminDb.batch(); let ops = 0;
+      for (const r of rows) {
+        const guidKey = findKey(r, /_Guid$/i);
+        const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
+        if (!id) continue;
+        batch.set(adminDb.collection('warehouses').doc(id), {
+          code: String(r[kodKey] ?? ''),
+          name: String(r[adKey] ?? '') || `Depo ${r[kodKey]}`,
+        }, { merge: true });
+        if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${rows.length} depo eşlendi (${adKey})`;
+    },
+  });
+
   // 7. Barkodlar → barkodlar + envanter ürünlerine barcode alanı yaz
   makeMikroSqlImport({
     route: '/api/mikro/import/barkod', tablo: 'BARKOD_TANIMLARI', siralama: 'bar_Guid',
