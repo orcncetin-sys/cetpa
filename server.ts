@@ -5546,6 +5546,34 @@ async function startServer() {
     res.json({ success: true, started: true });
   });
 
+  /** GET /api/mikro/cari-hareket/turler — bu firmanın GERÇEKTEN kullandığı
+   *  cari hareket türleri (cha_evrak_tip dağılımı) + her tür için örnek alan
+   *  değerleri.
+   *
+   *  Neden: Mikro'da onlarca evrak tipi var ama her firma birkaçını kullanır.
+   *  Dekont ekranına sabit bir tür listesi gömmek tahmin olurdu; bunun yerine
+   *  kullanıcının kendi verisinden okuyoruz. Örnek alanlar da dönüyor ki
+   *  DekontKaydetV2 gövdesini onların kullandığı kalıba göre dolduralım.
+   */
+  app.get('/api/mikro/cari-hareket/turler', requireAuth, mikroLimiter, async (_req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      const { rows, hata } = await mikroSql(
+        `SELECT cha_evrak_tip, cha_cinsi, cha_tip, ` +
+        `COUNT(*) AS adet, MIN(cha_evrakno_seri) AS ornekSeri, ` +
+        `MIN(cha_cari_cins) AS ornekCariCins, MIN(cha_d_cins) AS ornekDovizCins ` +
+        `FROM CARI_HESAP_HAREKETLERI ` +
+        `GROUP BY cha_evrak_tip, cha_cinsi, cha_tip ` +
+        `ORDER BY COUNT(*) DESC`,
+      );
+      if (hata) return res.status(502).json({ success: false, error: hata });
+      res.json({ success: true, turler: rows });
+    } catch (err) {
+      console.error('[cari-hareket/turler]', err);
+      res.status(500).json({ success: false, error: 'Hareket türleri okunamadı.' });
+    }
+  });
+
   /** POST /api/mikro/cari-hareket/kaydet — cari hareket (dekont) → Mikro
    *  Body: { hareket: Record<string, unknown>, aciklama?: string }
    *

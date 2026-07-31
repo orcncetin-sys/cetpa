@@ -388,8 +388,17 @@ export function ziyaretPayload(z: {
 }
 
 // ── 12. Dekont (Muhasebe) ────────────────────────────────────────────────────
+/** DekontKaydetV2 gövdesi.
+ *
+ *  `evrakTip`/`seri` ARTIK PARAMETRE: eskiden `cha_evrak_tip: 29` ve seri 'CTP'
+ *  gömülüydü ve yorumunda "deneysel" yazıyordu — yani tahmindi. Artık çağıran,
+ *  firmanın GERÇEKTEN kullandığı türlerden seçiyor
+ *  (GET /api/mikro/cari-hareket/turler, CARI_HESAP_HAREKETLERI'nden okunur).
+ *  Verilmezse eski değerler korunur ki mevcut çağıranlar kırılmasın.
+ */
 export function dekontPayload(d: {
   cariKod: string; tutar: number; tip: 'borc' | 'alacak'; date?: string; aciklama?: string;
+  evrakTip?: number; seri?: string;
 }) {
   return {
     evraklar: [{
@@ -398,8 +407,8 @@ export function dekontPayload(d: {
         cha_tarihi: trDate(d.date),
         cha_tip: d.tip === 'borc' ? 0 : 1,
         cha_normal_Iade: 0,
-        cha_evrak_tip: 29, // dekont (deneysel)
-        cha_evrakno_seri: 'CTP',
+        cha_evrak_tip: d.evrakTip ?? 29,
+        cha_evrakno_seri: d.seri ?? 'CTP',
         cha_cari_cins: 0,
         cha_kod: d.cariKod,
         cha_d_kurtar: null, cha_d_cins: 0, cha_d_kur: 1,

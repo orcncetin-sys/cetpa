@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
 import MikroPushButton from './MikroPushButton';
+import DekontModal from './DekontModal';
 import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -9,8 +10,7 @@ import {
   X, Save, RefreshCw, Link, Eye, Calculator, BarChart3, FileText, Briefcase,
   AlertCircle, CheckCircle, Info, ArrowUpDown, ShoppingCart, Users, Truck, Package,
   ArrowRightLeft, CreditCard, FileUp, FileDown, Search, Home, MapPin, User, PieChart,
-  Wallet, Layers, Landmark, Palette, Settings
-} from 'lucide-react';
+  Wallet, Layers, Landmark, Palette, Settings, Upload} from 'lucide-react';
 import TahsilatModule from './TahsilatModule';
 import KasaModule from './KasaModule';
 import MaliyetMerkeziModule from './MaliyetMerkeziModule';
@@ -322,6 +322,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [showStockModal, setShowStockModal] = useState(false);
   const [stockForm, setStockForm] = useState({ productName: '', sku: '', quantity: 0, warehouseId: '', category: '', notes: '' });
   const [editingStock, setEditingStock] = useState<WarehouseItem | null>(null);
+  // Dekont modalı hedefi (null = kapalı). Bkz. müşteri satırındaki Mikro düğmesi.
+  const [dekontHedef, setDekontHedef] = useState<{ cariKod: string; ad: string; bakiye: number; id: string } | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [editingService, setEditingService] = useState<Service | null>(null);
@@ -3593,27 +3595,29 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       </td>
                       <td className="py-2.5 px-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {(c.balance || 0) !== 0 && (
-                            <MikroPushButton
-                              compact
-                              method="DekontKaydetV2"
-                              entityType="cariDekont"
-                              entityId={c.id}
-                              buildPayload={() => {
-                                const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
-                                  ?? (c as unknown as { code?: string }).code
-                                  ?? c.taxNo;
-                                if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
-                                const bal = c.balance || 0;
-                                return dekontPayload({
-                                  cariKod,
-                                  tutar: Math.abs(bal),
-                                  tip: bal > 0 ? 'borc' : 'alacak',
-                                  aciklama: `${c.name} bakiye dekontu`,
-                                });
-                              }}
-                            />
-                          )}
+                          {/* Dekont girişi — 2026-07-30'a kadar burada tek tıkla,
+                              HİÇBİR ŞEY SORMADAN, müşterinin TÜM bakiyesi kadar
+                              dekont atan bir düğme vardı (açıklama "<ad> bakiye
+                              dekontu", evrak tipi tahmini 29). İki kez basmak iki
+                              muhasebe kaydı üretiyordu. Artık modal açılıyor:
+                              tür/yön/tutar/tarih/açıklama girilir, kayıt sonrası
+                              bakiye önizlenir. */}
+                          {(() => {
+                            const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+                              ?? (c as unknown as { code?: string }).code
+                              ?? c.taxNo;
+                            if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
+                            return (
+                              <button
+                                onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: c.balance || 0, id: c.id })}
+                                title="Mikro'ya dekont/masraf gir"
+                                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 flex flex-col items-center"
+                              >
+                                <Upload size={13} />
+                                <span className="text-[8px] font-semibold leading-none mt-0.5">Mikro</span>
+                              </button>
+                            );
+                          })()}
                           <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
                           <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                           <button onClick={() => deleteCustomer(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
@@ -5545,6 +5549,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
         cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
       />
+
+      {dekontHedef && (
+        <DekontModal
+          cariKod={dekontHedef.cariKod}
+          cariAdi={dekontHedef.ad}
+          mevcutBakiye={dekontHedef.bakiye}
+          entityId={dekontHedef.id}
+          onClose={() => setDekontHedef(null)}
+        />
+      )}
     </div>
   );
 }

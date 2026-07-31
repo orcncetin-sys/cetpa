@@ -6,6 +6,22 @@ on:
   pull_request:
     branches: [main]
 
+# Ayni anda TEK deploy kossun. 2026-07-30'da iki push 70 saniye arayla gitti;
+# ikinci kosu, birincisi saglik yoklamasi yaparken servisi yeniden baslatti ve
+# birinciyi haksiz yere dusurdu (health check 10/10 basarisiz, oysa uygulama
+# saglikliydi).
+#
+# cancel-in-progress KESINLIKLE false: kosan bir deploy'u yarida kesmek sunucuyu
+# yarim dosya durumunda birakabilir (git reset + npm ci + build ortasinda).
+# Yeni push kuyrukta bekler, siras gelince tam olarak kosar.
+#
+# Grup ref bazli: main'e giden tum push'lar TEK kuyrukta bekler, ama acik bir
+# PR'in kontrolleri main deploy'unun arkasina takilmaz (sabit grup adi
+# kullanilsaydi takilirdi).
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Typecheck & Build
