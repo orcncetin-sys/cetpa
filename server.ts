@@ -2291,6 +2291,53 @@ async function mikroKolonlar(tablo: string): Promise<string[]> {
   return cols;
 }
 
+/** ── Mikro vergi oranları: sto_perakende_vergi bir YÜZDE DEĞİL, İNDEKStir ──
+ *
+ *  2026-07-31'de bulundu: kod `vatRate: Number(s.sto_perakende_vergi) || 20`
+ *  yazıyordu. Ama o alan VergiListesiV2'deki `vergiSiraNo`ya işaret eder:
+ *    sıra 1 "YOK" %0 · sıra 2 "KDV %1" · sıra 3 "KDV %10" · sıra 4 "KDV %20"
+ *  Müşterinin 2.351 ürünü sıra 4 (=%20), 12 ürünü sıra 3 (=%10) kullanıyor;
+ *  envantere `vatRate: 4` ve `3` yazılmıştı. Teklif ekranı bunu yüzde sanıp
+ *  `fiyat × (1 + vatRate/100)` hesapladığı için %20 yerine %4 KDV uyguluyordu.
+ *
+ *  Tablo saatlik önbelleklenir. Boş isimli/çöp satırlar (Mikro'nun
+ *  ilklendirilmemiş dizi hücreleri: vergiOrani 4.6e-322 gibi) ELENİR.
+ */
+const vergiOranCache = { map: null as Map<number, number> | null, exp: 0 };
+
+async function mikroVergiOranlari(): Promise<Map<number, number>> {
+  if (vergiOranCache.map && vergiOranCache.exp > Date.now()) return vergiOranCache.map;
+  const map = new Map<number, number>();
+  try {
+    const { ok, data } = await mikroPost('VergiListesiV2', {});
+    const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+    if (ok && r0 && !r0.IsError) {
+      for (const v of mikroSatirlar(data)) {
+        const sira = Number(v.vergiSiraNo);
+        const oran = Number(v.vergiOrani);
+        const ad   = String(v.vergiAdi ?? '').trim();
+        // Adı boş olan satırlar Mikro'nun ayrılmış ama kullanılmayan hücreleri.
+        // Oran 0..100 dışındaysa (çöp float) güvenme.
+        if (!Number.isFinite(sira) || !ad) continue;
+        if (!Number.isFinite(oran) || oran < 0 || oran > 100) continue;
+        map.set(sira, oran);
+      }
+    }
+  } catch { /* ağ hatası — boş map döner, çağıran vatRate'e dokunmaz */ }
+  if (map.size) { vergiOranCache.map = map; vergiOranCache.exp = Date.now() + 3600_000; }
+  return map;
+}
+
+/** Stok kartındaki vergi işaretçisini GERÇEK yüzdeye çevir.
+ *  Çözülemezse `null` — çağıran vatRate'e DOKUNMAMALI (uydurma %20 yazmaktansa
+ *  eski değeri koru; bkz. sessiz-sıfır arıza sınıfı). */
+function vergiOraniCoz(isaretci: unknown, tablo: Map<number, number>): number | null {
+  const p = Number(isaretci);
+  if (!Number.isFinite(p)) return null;
+  const oran = tablo.get(p);
+  return oran === undefined ? null : oran;
+}
+
 /** Kolon listesinde regex'e uyan İLK kolonu bul (şema keşfi için). */
 function kolonBul(cols: string[], re: RegExp): string | null {
   return cols.find(c => re.test(c)) ?? null;
@@ -2547,6 +2594,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         Sort: 'sto_kod',
       });
       void mirrorMikroStoklar(stoklar);
+      const vergiTablosu = await mikroVergiOranlari(); // döngü öncesi bir kez
       const invSnap = await adminDb.collection('inventory').get();
       const invBySku = new Map<string, { ref: PgDocRef; stockLevel: number; name: string }>();
       for (const d of invSnap.docs) {
@@ -2565,10 +2613,13 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (!sku || seenSku.has(sku)) continue;
         seenSku.add(sku);
         const mikroQty = mikroStokMiktari(s);
+        const kdvOran = vergiOraniCoz(s.sto_perakende_vergi, vergiTablosu);
         const fields = {
           name: (s.sto_isim as string) || sku,
           unit: (s.sto_birim1_ad as string) || 'ADET',
-          vatRate: Number(s.sto_perakende_vergi) || 20,
+          // sto_perakende_vergi İNDEKStir, yüzde değil (bkz. vergiOraniCoz).
+          // Çözülemezse vatRate'e DOKUNMA — uydurma %20 yazmaktansa eskisi kalsın.
+          ...(kdvOran !== null ? { vatRate: kdvOran } : {}),
           // Miktar alanı YOKSA stockLevel'a DOKUNMA. Eskiden `?? 0` vardı: alan
           // gelmediğinde her senkron tüm ürünlerin stoğunu sıfırlıyor ve üstelik
           // her ürün için sahte bir sayım farkı üretiyordu. Miktarın güvenilir
@@ -4997,6 +5048,10 @@ async function startServer() {
         if (sku && !existingBySku.has(sku)) existingBySku.set(sku, docSnap.ref);
       }
 
+      // Vergi tablosunu bir kez çek: sto_perakende_vergi indeksini gerçek
+      // yüzdeye çevirmek için gerekli (bkz. vergiOraniCoz).
+      const vergiTablosu = await mikroVergiOranlari();
+
       let batch = adminDb.batch();
       let batchOps = 0;
       const commitBatch = async () => {
@@ -5079,13 +5134,15 @@ async function startServer() {
             // (bkz. mikroStokMiktari). Yeni kayıtta 0 ile açılır, miktar
             // /api/mikro/import/stok-miktar koşusunda dolar.
             const qty = mikroStokMiktari(s);
+            const kdvOran = vergiOraniCoz(s.sto_perakende_vergi, vergiTablosu);
             const item = {
               companyId,
               sku,
               name:             (s.sto_isim as string)     || sku,
               category:         (s.sto_grup_isim as string) || (s.sto_grup_kodu as string) || 'Genel',
               unit:             (s.sto_birim1_ad as string) || 'ADET',
-              vatRate:          Number(s.sto_perakende_vergi) || 20,
+              // sto_perakende_vergi İNDEKStir, yüzde değil (bkz. vergiOraniCoz).
+              ...(kdvOran !== null ? { vatRate: kdvOran } : {}),
               ...(qty !== null ? { stockLevel: qty } : {}),
               lowStockThreshold: 5,
               prices,
@@ -6596,19 +6653,21 @@ async function startServer() {
   // ── KDV Özet Pull ─────────────────────────────────────────────────────────────
   // POST /api/mikro/pull/kdv  — aylık KDV özeti → taxSummary
   //
-  // 2026-07-30'da YENİDEN YAZILDI: eski hali `KdvOzetV2` çağırıyordu, o metot
-  // V17'de YOK ve `Number(md?.kdvHesaplanan ?? 0)` ile dönemin KDV'sini
-  // SIFIRLIYORDU.
+  // 2026-07-31'de İKİNCİ KEZ yeniden yazıldı. Önce KdvOzetV2 çağırıyordu (V17'de
+  // yok, sıfır yazıyordu), sonra muhasebe hesaplarından (191/391) türetiyordu —
+  // ama bu kurulumda MUHASEBE_FISLERI BOŞ (muhasebe Mikro'da tutulmuyor).
   //
-  // Yeni yol: tek düzen hesap planından türetilir — Türkiye muhasebesinde
-  // 191 = İndirilecek KDV (borç bakiyeli), 391 = Hesaplanan KDV (alacak
-  // bakiyeli). Bu kodlar standarttır, firmaya göre değişmez; alt kırılımlar
-  // (191.01 gibi) LIKE '191%' ile kapsanır.
+  // Doğru kaynak: STOK_HAREKETLERI. Fatura satırları orada ve `sth_vergi` her
+  // satırın GERÇEK KDV tutarını taşıyor. Ürün kartındaki orandan hesaplamak
+  // YANLIŞ olurdu: gelen faturalarda satır satır farklı oran olabilir
+  // (kullanıcı 2026-07-31'de bunu özellikle belirtti).
   //
-  // ⚠️ Bu bir TÜRETME'dir, Mikro'nun kendi KDV beyanname ekranının birebir
-  // kopyası değildir (tevkifat, iade, devreden KDV gibi kalemler beyannamede
-  // ayrıca işlenir). Yanıtta `kaynak` alanı bunu açıkça söyler; beyan öncesi
-  // Mikro'nun KDV raporuyla karşılaştırılmalıdır.
+  // sth_tip: 0 = giriş (alış → indirilecek KDV), 1 = çıkış (satış → hesaplanan).
+  // sth_vergisiz_fl = 1 olan satırlar vergiye tabi değil, dışarıda bırakılır.
+  //
+  // ⚠️ Bu bir TÜRETME'dir. Tevkifat, iade, devreden KDV ve ÖTV/OİV beyannamede
+  // ayrıca işlenir — bu özet onları KAPSAMAZ. Beyan öncesi Mikro'nun kendi KDV
+  // raporuyla karşılaştırılmalıdır; yanıt ve kayıt bunu açıkça söyler.
   app.post('/api/mikro/pull/kdv', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -6622,44 +6681,52 @@ async function startServer() {
       const lastDay   = new Date(yil, ay, 0).getDate();
       const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
 
-      const cols      = await mikroKolonlar('MUHASEBE_FISLERI');
-      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FISLERI okunamadı (SqlVeriOkuV2 izni?).' });
-      // Mizanla aynı kolon modeli: işaretli fis_meblag0 (borç +, alacak −).
-      const hesapCol  = kolonBul(cols, /hesap_kod/i);
-      const meblagCol = kolonBul(cols, /meblag0$/i);
-      const tarihCol  = kolonBul(cols, /tarih$/i);
-      const iptalCol  = kolonBul(cols, /_iptal$/i);
-      if (!hesapCol || !meblagCol) {
+      const cols = await mikroKolonlar('STOK_HAREKETLERI');
+      if (!cols.length) return res.status(502).json({ success: false, error: 'STOK_HAREKETLERI okunamadı (SqlVeriOkuV2 izni?).' });
+      const vergiCol   = kolonBul(cols, /^sth_vergi$/i);
+      const pntrCol    = kolonBul(cols, /vergi_pntr/i);
+      const tutarCol   = kolonBul(cols, /^sth_tutar$/i);
+      const tipCol     = kolonBul(cols, /^sth_tip$/i);
+      const tarihCol   = kolonBul(cols, /^sth_tarih$/i);
+      const iptalCol   = kolonBul(cols, /_iptal$/i);
+      if (!vergiCol || !tipCol || !tarihCol) {
         return res.status(502).json({ success: false,
-          error: `KDV kolonları eşleşmedi (hesap=${hesapCol}, meblağ=${meblagCol}). taxSummary'ye dokunulmadı.` });
+          error: `KDV kolonları eşleşmedi (vergi=${vergiCol}, tip=${tipCol}, tarih=${tarihCol}). taxSummary'ye dokunulmadı.` });
       }
-      for (const c of [hesapCol, meblagCol, tarihCol, iptalCol].filter(Boolean)) {
+      for (const c of [vergiCol, pntrCol, tutarCol, tipCol, tarihCol, iptalCol].filter(Boolean)) {
         if (!sqlTanimlayici(c)) return res.status(500).json({ success: false, error: 'Geçersiz kolon adı.' });
       }
 
-      const ek: string[] = [];
-      if (tarihCol) ek.push(`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
-      if (iptalCol) ek.push(`${iptalCol} = 0`);
-      const where = ek.length ? ` AND ${ek.join(' AND ')}` : '';
+      const kosul = [`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`];
+      if (iptalCol) kosul.push(`${iptalCol} = 0`);
+      const secim = [`${tipCol} AS tip`, `SUM(${vergiCol}) AS kdv`];
+      if (tutarCol) secim.push(`SUM(${tutarCol}) AS matrah`);
+      const grup = [tipCol];
+      if (pntrCol) { secim.unshift(`${pntrCol} AS oranPntr`); grup.push(pntrCol); }
+
       const { rows, hata } = await mikroSql(
-        `SELECT LEFT(${hesapCol}, 3) AS grup, SUM(${meblagCol}) AS netMeblag ` +
-        `FROM MUHASEBE_FISLERI WHERE (${hesapCol} LIKE '191%' OR ${hesapCol} LIKE '391%')${where} ` +
-        `GROUP BY LEFT(${hesapCol}, 3)`,
+        `SELECT ${secim.join(', ')} FROM STOK_HAREKETLERI WHERE ${kosul.join(' AND ')} ` +
+        `GROUP BY ${grup.join(', ')} ORDER BY ${tipCol}`,
       );
       if (hata) return res.status(502).json({ success: false, error: `KDV sorgusu başarısız: ${hata}. taxSummary'ye dokunulmadı.` });
 
-      const grup = (g: string) => rows.find(r => String(r.grup ?? '') === g);
-      const g191 = grup('191'), g391 = grup('391');
-      // İşaretli meblağ: 191 borç bakiyelidir (net pozitif), 391 alacak
-      // bakiyelidir (net negatif) — ikincisinin işaretini çeviriyoruz.
-      const kdvIndirilecek = Number(g191?.netMeblag ?? 0);
-      const kdvHesaplanan  = -Number(g391?.netMeblag ?? 0);
-
-      // Hiç 191/391 hareketi yoksa bu "KDV sıfır" DEĞİL, "hesap planı farklı
-      // olabilir" demektir — yazma, uyar.
-      if (!g191 && !g391) {
+      if (!rows.length) {
         return res.status(502).json({ success: false,
-          error: `${period} döneminde 191/391 hesaplarında hiç hareket bulunamadı. Hesap planınız farklı olabilir — taxSummary'ye dokunulmadı.` });
+          error: `${period} döneminde STOK_HAREKETLERI'nde kayıt yok — taxSummary DEĞİŞTİRİLMEDİ.` });
+      }
+
+      // Satır oranını gerçek yüzdeye çevir (pntr indekstir, yüzde değil).
+      const vergiTablosu = await mikroVergiOranlari();
+      let kdvHesaplanan = 0, kdvIndirilecek = 0;
+      const kirilim: Array<{ yon: string; oran: number | null; kdv: number; matrah: number | null }> = [];
+      for (const r of rows) {
+        const kdv    = Number(r.kdv ?? 0);
+        const matrah = r.matrah === undefined ? null : Number(r.matrah);
+        const cikis  = Number(r.tip) === 1;          // 1 = çıkış = satış
+        const oran   = pntrCol ? vergiOraniCoz(r.oranPntr, vergiTablosu) : null;
+        if (!Number.isFinite(kdv)) continue;
+        if (cikis) kdvHesaplanan += kdv; else kdvIndirilecek += kdv;
+        kirilim.push({ yon: cikis ? 'satis' : 'alis', oran, kdv, matrah });
       }
 
       await adminDb.collection('taxSummary').doc(period).set({
@@ -6668,15 +6735,17 @@ async function startServer() {
         kdvHesaplanan, kdvIndirilecek,
         kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
         devredenKdv: Math.max(kdvIndirilecek - kdvHesaplanan, 0),
-        kaynak: 'SQL:MUHASEBE_FISLERI 191/391 — TÜRETİLMİŞTİR, beyan öncesi Mikro KDV raporuyla karşılaştırın',
-        rawData: rows,
+        oranKirilimi: kirilim,
+        kaynak: `SQL:STOK_HAREKETLERI (${vergiCol}${pntrCol ? '/' + pntrCol : ''}) — TÜRETİLMİŞTİR; tevkifat/iade/devreden KAPSAM DIŞI, beyan öncesi Mikro KDV raporuyla karşılaştırın`,
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
-      await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', `${period} — hesaplanan ${kdvHesaplanan}, indirilecek ${kdvIndirilecek}`);
+      await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme',
+        `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)`);
       res.json({ success: true, period, kdvHesaplanan, kdvIndirilecek,
                  kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
-                 uyari: 'Türetilmiş özet — beyan öncesi Mikro KDV raporuyla karşılaştırın.',
+                 oranKirilimi: kirilim,
+                 uyari: 'Türetilmiş özet — tevkifat/iade/devreden kapsam dışı. Beyan öncesi Mikro KDV raporuyla karşılaştırın.',
                  duration: Date.now() - t0 });
     } catch (err) {
       console.error('[pull/kdv]', err);
@@ -6948,6 +7017,35 @@ async function startServer() {
     } catch (err) {
       console.error('[ebelge/pdf]', err);
       res.status(500).json({ success: false, error: 'PDF alınamadı.' });
+    }
+  });
+
+  /** POST /api/mikro/ebelge/xml — belgenin resmi UBL/XML'i (EBelgeXMLV2)
+   *  Body: { uuid, tur?: 'e-fatura'|'e-arsiv'|'e-irsaliye', yon?: 'gelen'|'giden' }
+   *
+   *  XML, e-belgenin YASAL aslıdır (PDF yalnız görüntüsüdür). Mali müşavire
+   *  gönderirken veya arşivlerken istenen budur.
+   *  Spec: EFaturaTipi 0=gönderilen 1=gelen · EBelgeTipi 0=EFatura 1=EArsiv 2=EIrsaliye
+   */
+  app.post('/api/mikro/ebelge/xml', requireAuth, mikroLimiter, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const uuid = String(req.body?.uuid ?? '').trim();
+    if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });
+    const belgeTipi = req.body?.tur === 'e-arsiv' ? 1 : req.body?.tur === 'e-irsaliye' ? 2 : 0;
+    try {
+      const { ok, data } = await mikroPost('EBelgeXMLV2', {
+        EBelge: {
+          EFaturaTipi: req.body?.yon === 'gelen' ? 1 : 0,
+          EBelgeTipi:  belgeTipi,
+          UUID: uuid,
+        },
+      }, true);
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
+      res.json({ success: true, data: r0.Data ?? {} });
+    } catch (err) {
+      console.error('[ebelge/xml]', err);
+      res.status(500).json({ success: false, error: 'XML alınamadı.' });
     }
   });
 
