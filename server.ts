@@ -4683,7 +4683,19 @@ async function startServer() {
       }
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (ok && r0 && !r0.IsError) {
-        return res.json({ configured: true, connected: true, mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud', apiBase: MIKRO_API_BASE });
+        return res.json({
+          configured: true, connected: true,
+          mode: MIKRO_LOCAL_MODE ? 'local' : 'cloud', apiBase: MIKRO_API_BASE,
+          // Otomatik senkron GERÇEKTEN kurulu mu? Ayarın .env'e yazılmış olması
+          // çalıştığı anlamına gelmiyor — süreç yeniden başlamadıysa eski değeri
+          // taşır. Bunu dışarıdan görebilmek 2026-07-31'de gerekti.
+          cronSync: {
+            enabled: process.env.MIKRO_CRON_SYNC === 'true',
+            program: process.env.MIKRO_CRON_SYNC === 'true'
+              ? ['saatlik: stok+cari kartları', '03:20 SQL listeleri (90 gün)', '04:00 stok miktar/maliyet']
+              : [],
+          },
+        });
       }
       // Cloudflare/WAF/gateway HTML hata sayfasını anlaşılır mesaja çevir (v17 IP-block)
       const gatewayBlock = detectMikroGatewayBlock(data);
