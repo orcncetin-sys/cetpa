@@ -91,6 +91,12 @@ if (-not $svc) {
     New-Item -ItemType Directory -Force -Path "$AppDir\logs" | Out-Null
     nssm set cetpa AppStdout "$AppDir\logs\service-out.log"
     nssm set cetpa AppStderr "$AppDir\logs\service-err.log"
+    # Log rotation - without this the log grows without bound. On 2026-07-31
+    # service-err.log reached 1.6 GB (a pg-boss error loop) and contributed to
+    # filling the disk, which took the whole app down.
+    nssm set cetpa AppRotateFiles 1
+    nssm set cetpa AppRotateOnline 1
+    nssm set cetpa AppRotateBytes 52428800
     nssm set cetpa Start SERVICE_AUTO_START
     Ok 'Service created (not started). Next: create .env, npm ci, npm run build, then start it.'
 } else {

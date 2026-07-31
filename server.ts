@@ -522,8 +522,35 @@ async function initDocsTable(): Promise<void> {
   await initMfaTable();
   if (process.env.DATABASE_URL && !boss) {
     boss = new PgBoss(process.env.DATABASE_URL);
-    boss.on('error', error => console.error('pg-boss error:', error));
+
+    // Hata logunu BOĞMA. pg-boss 12'de kuyruk yoksa her yoklama hata üretir;
+    // ham console.error 2026-07'de service-err.log'u 1.6 GB'a çıkardı (15.044
+    // aynı hata bloğu, 1 Temmuz'dan beri kesintisiz) ve her yoklama ayrıca
+    // PostgreSQL'e başarısız bir sorgu attı. Aynı mesajı 5 dakikada bir kez
+    // logla, tekrar sayısını da yaz.
+    const bossHataSon = new Map<string, { t: number; n: number }>();
+    boss.on('error', (error: unknown) => {
+      const anahtar = (error as { message?: string })?.message ?? String(error);
+      const simdi = Date.now();
+      const onceki = bossHataSon.get(anahtar);
+      if (onceki && simdi - onceki.t < 5 * 60_000) { onceki.n++; return; }
+      const tekrar = onceki?.n ? ` (son 5 dk'da ${onceki.n} kez daha)` : '';
+      bossHataSon.set(anahtar, { t: simdi, n: 0 });
+      console.error('pg-boss error:', anahtar + tekrar);
+    });
+
     await boss.start();
+
+    // KUYRUKLARI ÖNCE OLUŞTUR. pg-boss 12'de work() kuyruğu kendiliğinden
+    // yaratmaz; olmayan kuyruğa işçi bağlamak sonsuz "Queue does not exist"
+    // hata döngüsü üretir. Bu üç işçi 2026-07 boyunca tam olarak bunu yaptı.
+    // createQueue idempotent — zaten varsa sorun çıkarmaz.
+    const kuyruklar = ['shopify-webhook', 'stripe-webhook', 'outbound-webhook'] as const;
+    for (const q of kuyruklar) {
+      try { await boss.createQueue(q); }
+      catch (e) { console.warn(`pg-boss kuyruk oluşturulamadı (${q}):`, (e as Error).message); }
+    }
+
     await boss.work('shopify-webhook', async (jobs: any) => {
       for (const job of jobs) await processShopifyWebhook(job.data.topic, job.data.body);
     });
@@ -533,7 +560,7 @@ async function initDocsTable(): Promise<void> {
     await boss.work('outbound-webhook', async (jobs: any) => {
       for (const job of jobs) await processOutboundWebhook(job.data);
     });
-    console.log('pg-boss ready ✓');
+    console.log('pg-boss ready ✓ (kuyruklar: ' + kuyruklar.join(', ') + ')');
   }
 }
 initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
@@ -1907,6 +1934,70 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
 }
 // Her sabah 08:30 (sunucu saati) — gece yedeği ve gece cron'ları bittikten sonra.
 cron.schedule('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
+
+/** ── Disk nöbetçisi: SAATLİK, PostgreSQL'e BAĞIMSIZ ──────────────────────────
+ *
+ *  Neden ayrı: 2026-07-31'de disk %100 doldu (sistem-yönetimli sayfa dosyası
+ *  şişti) ve uygulama tamamen yanıt veremez oldu. Bekçi'nin `disk_space`
+ *  kontrolü doğru yazılmıştı ama HABER VEREMEDİ:
+ *    - günde bir kez (08:30) koşuyor — saatler içinde dolan diski kaçırır
+ *    - sonucu opsChecks'e PostgreSQL üzerinden yazıyor; disk dolunca PG de
+ *      yanıt vermiyordu, yani izleme tam da izlediği şey bozulunca bozuluyordu
+ *
+ *  Bu nöbetçi hiçbir şey yazmaz, sadece doğrudan e-posta atar. İki eşik:
+ *  uyarı (<%15) ve kritik (<%8). Aynı seviye için 6 saatte bir kez postalar —
+ *  disk dolu kaldığı sürece dakikada bir posta atmasın.
+ */
+let diskUyariSon: { seviye: string; t: number } | null = null;
+
+async function diskNobetcisi(): Promise<void> {
+  try {
+    const st = await fs.promises.statfs(process.platform === 'win32' ? 'C:\\' : '/');
+    const totalGB = (st.blocks * st.bsize) / 1e9;
+    const freeGB  = (st.bavail * st.bsize) / 1e9;
+    const freePct = totalGB > 0 ? (freeGB / totalGB) * 100 : 0;
+
+    const seviye = freePct < 8 ? 'KRITIK' : freePct < 15 ? 'UYARI' : 'OK';
+    if (seviye === 'OK') { diskUyariSon = null; return; }
+
+    // Aynı seviyeyi 6 saatte bir kez bildir.
+    const simdi = Date.now();
+    if (diskUyariSon && diskUyariSon.seviye === seviye && simdi - diskUyariSon.t < 6 * 3600_000) return;
+    diskUyariSon = { seviye, t: simdi };
+
+    const mesaj = `Disk ${seviye}: boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(1)})`;
+    console.error('[disk-nobetcisi]', mesaj);
+
+    const resendKey = process.env.RESEND_API_KEY;
+    const recipient = process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL;
+    if (!resendKey || !recipient) return; // log'a yazdık, posta yolu yoksa sessiz kal
+
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+        to: [recipient],
+        subject: `${seviye === 'KRITIK' ? '🔴' : '⚠️'} CETPA sunucu diski: %${freePct.toFixed(0)} boş`,
+        html: `<div style="font-family:-apple-system,Segoe UI,sans-serif">
+          <h2 style="margin:0 0 8px">Sunucu diski doluyor</h2>
+          <p style="font-size:15px"><b>${mesaj}</b></p>
+          <p style="color:#555;font-size:13px">Disk dolduğunda PostgreSQL yazamaz ve uygulama tamamen durur
+          (2026-07-31'de yaşandı). Bakılacaklar: <code>C:\\cetpa\\logs</code> boyutu,
+          <code>pagefile.sys</code>, yedek klasörleri.</p>
+          <p style="font-size:11px;color:#888">Saatlik otomatik kontrol. AI kullanılmaz.</p>
+        </div>`,
+      }),
+    }).catch(() => { /* posta gidemezse log yeter */ });
+  } catch (e) {
+    console.warn('[disk-nobetcisi] çalışamadı:', e instanceof Error ? e.message : String(e));
+  }
+}
+
+// Saatte bir — Bekçi'den bağımsız, PostgreSQL gerektirmez.
+cron.schedule('7 * * * *', () => { void diskNobetcisi(); });
+// Açılışta bir kez: sunucu dolu diskle ayağa kalkmışsa hemen haber ver.
+setTimeout(() => { void diskNobetcisi(); }, 30_000);
 
 /** Bekçiyi koştur, BOZUK kontrol varsa e-posta at (2026-07-28).
  *  Tamamen kod — AI/token maliyeti YOK. Sessizlik = iyi haber:

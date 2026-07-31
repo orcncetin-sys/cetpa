@@ -56,6 +56,20 @@ try {
         $bkPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         Register-ScheduledTask -TaskName $bkTask -Action $bkAction -Trigger $bkTrigger -Settings $bkSettings -Principal $bkPrincipal -Description 'Cetpa: gunluk pg_dump + uploads -> Firebase Storage off-server yedek.' | Out-Null
         Info "Backup scheduled task '$bkTask' ensured (daily 03:30, SYSTEM)."
+
+    # ---- NSSM log rotation (idempotent) ---------------------------------
+    # Without rotation the service log grows without bound. On 2026-07-31
+    # service-err.log hit 1.6 GB from a pg-boss error loop and helped fill
+    # the disk, taking the app down. 50 MB per file, rotate while running.
+    try {
+        nssm set cetpa AppRotateFiles 1  | Out-Null
+        nssm set cetpa AppRotateOnline 1 | Out-Null
+        nssm set cetpa AppRotateBytes 52428800 | Out-Null
+        Info 'Service log rotation ensured (50 MB per file).'
+    } catch {
+        Info 'WARN: could not set NSSM log rotation - continuing.'
+    }
+
     } else {
         Write-Host "    Backup task skipped: node veya script bulunamadi." -ForegroundColor Yellow
     }
