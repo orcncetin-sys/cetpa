@@ -1950,27 +1950,34 @@ cron.schedule('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
  */
 let diskUyariSon: { seviye: string; t: number } | null = null;
 
-async function diskNobetcisi(): Promise<void> {
+async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: number; freePct: number; seviye: string; postaDenendi: boolean; hata?: string }> {
+  const bos = { freeGB: 0, totalGB: 0, freePct: 0, seviye: 'BILINMIYOR', postaDenendi: false };
   try {
     const st = await fs.promises.statfs(process.platform === 'win32' ? 'C:\\' : '/');
     const totalGB = (st.blocks * st.bsize) / 1e9;
     const freeGB  = (st.bavail * st.bsize) / 1e9;
     const freePct = totalGB > 0 ? (freeGB / totalGB) * 100 : 0;
 
-    const seviye = freePct < 8 ? 'KRITIK' : freePct < 15 ? 'UYARI' : 'OK';
-    if (seviye === 'OK') { diskUyariSon = null; return; }
+    const gercekSeviye = freePct < 8 ? 'KRITIK' : freePct < 15 ? 'UYARI' : 'OK';
+    const seviye = zorla ? 'TEST' : gercekSeviye;
+    if (!zorla && gercekSeviye === 'OK') { diskUyariSon = null; return { freeGB, totalGB, freePct, seviye: gercekSeviye, postaDenendi: false }; }
 
-    // Aynı seviyeyi 6 saatte bir kez bildir.
+    // Aynı seviyeyi 6 saatte bir kez bildir. (zorla=true bunu atlar — test yolu)
     const simdi = Date.now();
-    if (diskUyariSon && diskUyariSon.seviye === seviye && simdi - diskUyariSon.t < 6 * 3600_000) return;
-    diskUyariSon = { seviye, t: simdi };
+    if (!zorla && diskUyariSon && diskUyariSon.seviye === seviye && simdi - diskUyariSon.t < 6 * 3600_000) {
+      return { freeGB, totalGB, freePct, seviye, postaDenendi: false };
+    }
+    if (!zorla) diskUyariSon = { seviye, t: simdi };
 
     const mesaj = `Disk ${seviye}: boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(1)})`;
     console.error('[disk-nobetcisi]', mesaj);
 
     const resendKey = process.env.RESEND_API_KEY;
     const recipient = process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL;
-    if (!resendKey || !recipient) return; // log'a yazdık, posta yolu yoksa sessiz kal
+    if (!resendKey || !recipient) {
+      return { freeGB, totalGB, freePct, seviye, postaDenendi: false,
+               hata: `posta yolu yok (RESEND_API_KEY=${resendKey ? 'var' : 'YOK'}, alıcı=${recipient ? 'var' : 'YOK'})` };
+    }
 
     await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -1978,9 +1985,12 @@ async function diskNobetcisi(): Promise<void> {
       body: JSON.stringify({
         from: process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
         to: [recipient],
-        subject: `${seviye === 'KRITIK' ? '🔴' : '⚠️'} CETPA sunucu diski: %${freePct.toFixed(0)} boş`,
+        subject: zorla
+          ? '✅ CETPA disk uyarı TESTİ — bu posta geldiyse uyarı yolu çalışıyor'
+          : `${seviye === 'KRITIK' ? '🔴' : '⚠️'} CETPA sunucu diski: %${freePct.toFixed(0)} boş`,
         html: `<div style="font-family:-apple-system,Segoe UI,sans-serif">
-          <h2 style="margin:0 0 8px">Sunucu diski doluyor</h2>
+          ${zorla ? '<p style="background:#e8f5e9;padding:8px 12px;border-radius:8px;color:#1b5e20"><b>Bu bir TESTTİR.</b> Elle tetiklendi; disk durumu normal olabilir. Bu postayı aldıysanız uyarı yolu çalışıyor demektir.</p>' : ''}
+          <h2 style="margin:0 0 8px">Sunucu disk durumu</h2>
           <p style="font-size:15px"><b>${mesaj}</b></p>
           <p style="color:#555;font-size:13px">Disk dolduğunda PostgreSQL yazamaz ve uygulama tamamen durur
           (2026-07-31'de yaşandı). Bakılacaklar: <code>C:\\cetpa\\logs</code> boyutu,
@@ -1988,9 +1998,12 @@ async function diskNobetcisi(): Promise<void> {
           <p style="font-size:11px;color:#888">Saatlik otomatik kontrol. AI kullanılmaz.</p>
         </div>`,
       }),
-    }).catch(() => { /* posta gidemezse log yeter */ });
+    });
+    return { freeGB, totalGB, freePct, seviye, postaDenendi: true };
   } catch (e) {
-    console.warn('[disk-nobetcisi] çalışamadı:', e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[disk-nobetcisi] çalışamadı:', msg);
+    return { ...bos, postaDenendi: false, hata: msg };
   }
 }
 
@@ -4238,6 +4251,33 @@ async function startServer() {
    *  durumunu okuyabilsin. Sadece operasyonel metrik döner — kişisel/iş verisi YOK.
    *  OPS_SUMMARY_TOKEN env'i tanımlı değilse uç KAPALIDIR (503).
    *  Token: `X-Ops-Token` başlığı veya ?token= ile; karşılaştırma sabit-zamanlı. */
+  /** POST /api/ops/disk-test — disk uyarı YOLUNU elle sına.
+   *
+   *  Neden gerekli: 2026-07-31 kesintisinde izleme sessiz kaldı. Uyarı
+   *  mekanizmasının "yazıldı" olması onun ÇALIŞTIĞI anlamına gelmiyor; postanın
+   *  gerçekten ulaştığını kanıtlamadan güvenmemek gerek. Eşiklerle oynayıp iki
+   *  kez deploy etmek yerine kalıcı bir sınama yolu.
+   *
+   *  Eşikleri ve 6 saatlik tekrar kısıtını atlar, postayı "TEST" olarak
+   *  işaretler. /api/ops/summary ile AYNI token korumasını kullanır.
+   */
+  app.post('/api/ops/disk-test', async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    const sonuc = await diskNobetcisi(true);
+    res.json({
+      success: !sonuc.hata,
+      ...sonuc,
+      alici: process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || null,
+      not: sonuc.postaDenendi
+        ? 'Test postası gönderildi. Gelen kutunu (ve spam) kontrol et.'
+        : 'Posta GÖNDERİLEMEDİ — hata alanına bak.',
+    });
+  });
+
   app.get('/api/ops/summary', async (req: Request, res: Response) => {
     const expected = process.env.OPS_SUMMARY_TOKEN || '';
     if (!expected) return res.status(503).json({ error: 'ops summary kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
