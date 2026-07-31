@@ -69,6 +69,10 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'stockDiscrepancies',  // sayım farkları (istemci zaten companyId ile sorguluyor)
   'syncJobs',            // istemci-yazımlı retry kuyruğu (injectTenant artık damgalar)
   'auditLog',            // denetim kaydı — actor e-postası + alan diff'leri taşır
+  // Mikro ham veri aynaları (2026-07-31). Kirli/ham satırlar tipli UI
+  // koleksiyonlarını kirletmesin diye ayrı tutulur; temiz doküman postProcess
+  // ile ilgili UI koleksiyonuna yazılır.
+  'mikroDepolar',
 ];
 
 /** Kullanıcının kendi verisi — `userId` ile izole. */

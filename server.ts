@@ -5673,32 +5673,47 @@ async function startServer() {
     collection: 'odemePlanlari', label: 'Mikro Ödeme Planları',
   });
 
-  // 8. Depolar → warehouses  (Mikro'da DEPOLAR tablosu var, hiç çekilmiyordu:
-  //    Depo Tanımları ekranı bu yüzden yalnız elle girilmiş "Depo 1"i gösteriyordu.
-  //    Müşterinin 5 deposu var: 1 HAVALIMANI, 2 ESKI SANAYI, 3-5 araç plakaları.)
+  // 8. Depolar → mikroDepolar (ham) + warehouses (temiz)
+  //
+  // Mikro'da DEPOLAR tablosu var ama hiç çekilmiyordu; Depo Tanımları ekranı
+  // yalnız elle girilmiş "Depo 1"i gösteriyordu. Müşterinin 5 deposu var:
+  // 1 HAVALIMANI · 2 ESKI SANAYI · 3 "34 CGC 119" · 4 "07 AGU 291" · 5 "07 ACR 832"
+  // (3-5 araç plakası — QR transfer sistemindeki araçlarla aynı numaralar).
+  //
+  // Ham satır `mikroDepolar`a, temiz doküman `warehouses`a yazılır: genel
+  // importer ham satırı olduğu gibi döküyor ve 80 dep_* alanı tipli bir UI
+  // koleksiyonunu kirletirdi.
   makeMikroSqlImport({
     route: '/api/mikro/import/depo', tablo: 'DEPOLAR', siralama: 'dep_Guid',
-    collection: 'warehouses', label: 'Mikro Depo Tanımları',
-    postProcess: async (rows) => {
+    collection: 'mikroDepolar', label: 'Mikro Depo Tanımları',
+    postProcess: async (rows, companyId) => {
       if (!adminDb) return null;
-      // warehouses ekranı `name`/`code` bekliyor; ham dep_* alanlarından eşle.
-      const sample = rows[0];
-      const kodKey = findKey(sample, /dep_no|dep_kod/i);
-      const adKey  = findKey(sample, /dep_adi|dep_isim/i);
-      if (!kodKey || !adKey) return `alan eşleşmedi (kod=${kodKey}, ad=${adKey})`;
-      let batch = adminDb.batch(); let ops = 0;
+      let batch = adminDb.batch(); let ops = 0, yazilan = 0;
       for (const r of rows) {
-        const guidKey = findKey(r, /_Guid$/i);
-        const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
-        if (!id) continue;
-        batch.set(adminDb.collection('warehouses').doc(id), {
-          code: String(r[kodKey] ?? ''),
-          name: String(r[adKey] ?? '') || `Depo ${r[kodKey]}`,
+        const depoNo = Number(r.dep_no);
+        const ad     = String(r.dep_adi ?? '').trim();
+        if (!Number.isFinite(depoNo)) continue;
+        // Adres parçalarını yalnız DOLU olanlardan kur — boşları birleştirip
+        // ", , TÜRKİYE" gibi anlamsız bir konum üretme.
+        const konum = [r.dep_Ilce, r.dep_Il, r.dep_Ulke]
+          .map(x => String(x ?? '').trim()).filter(Boolean).join(', ');
+        const yetkili = String(r.dep_yetkili_email ?? '').trim();
+        // Depo no'yu doc id yap: locationStocks ve QR transfer sistemi depo
+        // kodlarını (1-5) kullanıyor, GUID değil — eşleşsinler.
+        batch.set(adminDb.collection('warehouses').doc(`mikro-depo-${depoNo}`), {
+          companyId,
+          name: ad || `Depo ${depoNo}`,
+          depoNo,
+          ...(konum   ? { location: konum } : {}),
+          ...(yetkili ? { manager: yetkili } : {}),
+          source: 'mikro',
+          syncedAt: pgServerTimestamp(),
         }, { merge: true });
+        yazilan++;
         if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
-      return `${rows.length} depo eşlendi (${adKey})`;
+      return `${yazilan} depo tanımı warehouses'a yazıldı`;
     },
   });
 
