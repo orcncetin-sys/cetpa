@@ -5423,78 +5423,121 @@ async function startServer() {
    *  (kod içinde), tarih ve sayfa boyutu sqlTarih/sqlTamsayi ile KATI doğrulanır.
    *  İstemciden gelen hiçbir string doğrudan sorguya girmez.
    */
-  function makeMikroSqlImport(opts: {
-    route:        string;
-    tablo:        string;                          // Mikro SQL tablosu (sabit)
-    siralama:     string;                          // ORDER BY kolonu (sabit, OFFSET için zorunlu)
+  /** SQL import'un ÇEKİRDEĞİ — hem HTTP route'u hem gece cron'u bunu çağırır.
+   *  2026-07-31'de route handler'ından ayrıldı: cron'dan da koşabilmesi için.
+   *  Ayrıntılı gerekçe makeMikroSqlImport'ta. */
+  type SqlImportOpts = {
+    route?:       string;
+    tablo:        string;
+    siralama:     string;
     collection:   string;
     label:        string;
-    tarihKolonu?: string;                          // verilirse IlkTarih/SonTarih filtresi uygulanır
-    ekKosul?:     string;                          // sabit WHERE eki (ör. "cha_evrak_tip = 63")
+    tarihKolonu?: string;
+    ekKosul?:     string;
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
-  }) {
+  };
+
+  async function mikroSqlImportCalistir(
+    opts: SqlImportOpts,
+    companyId: string,
+    ilkTarih: string,
+    sonTarih: string,
+    actor: { uid: string; email: string },
+  ): Promise<{ ok: boolean; total: number; note: string | null; truncated: boolean; error?: string; duration: number }> {
+    const t0 = Date.now();
+    const SAYFA = 500;
+    const MAKS_SAYFA = 40; // 20.000 satır tavanı — sessiz değil, yanıtta bildirilir
+    if (!adminDb) return { ok: false, total: 0, note: null, truncated: false, error: 'Firebase Admin başlatılamadı.', duration: 0 };
+
+    const kosullar: string[] = [];
+    if (opts.ekKosul) kosullar.push(opts.ekKosul);
+    if (opts.tarihKolonu) kosullar.push(`${opts.tarihKolonu} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
+    const where = kosullar.length ? ` WHERE ${kosullar.join(' AND ')}` : '';
+
+    const allRows: Record<string, unknown>[] = [];
+    let sayfa = 0, total = 0, tavanaCarpti = false;
+    try {
+      while (sayfa < MAKS_SAYFA) {
+        const offset = sayfa * SAYFA;
+        const { rows, hata } = await mikroSql(
+          `SELECT * FROM ${opts.tablo}${where} ORDER BY ${opts.siralama} ` +
+          `OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
+        );
+        if (hata) {
+          // Başarısızsa hiçbir şey yazma — yarım/boş veri gerçek veriyi ezmesin.
+          await writeSyncLog(`SQL:${opts.tablo}`, opts.collection, opts.label, false, null, hata, Date.now() - t0, actor);
+          return { ok: false, total: 0, note: null, truncated: false, error: `${opts.label}: ${hata}`, duration: Date.now() - t0 };
+        }
+        if (!rows.length) break;
+
+        let batch = adminDb.batch(); let ops = 0;
+        for (const row of rows) {
+          const guidKey = findKey(row, /_Guid$/i);
+          const docId = guidKey && row[guidKey]
+            ? String(row[guidKey])
+            : adminDb.collection(opts.collection).doc().id;
+          batch.set(adminDb.collection(opts.collection).doc(docId), {
+            ...row, companyId, source: 'mikro_sql', syncedAt: pgServerTimestamp(),
+          }, { merge: true });
+          if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+        }
+        if (ops > 0) await batch.commit();
+
+        allRows.push(...rows);
+        total += rows.length;
+        if (rows.length < SAYFA) break;
+        sayfa++;
+        if (sayfa >= MAKS_SAYFA) tavanaCarpti = true;
+      }
+
+      let postNote: string | null = null;
+      if (opts.postProcess && allRows.length > 0) postNote = await opts.postProcess(allRows, companyId);
+
+      const duration = Date.now() - t0;
+      const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}${postNote ? ` — ${postNote}` : ''}`;
+      // Senkronizasyon Geçmişi bu koleksiyonu okur — import'lar 2026-07-31'e
+      // kadar buraya HİÇ yazmıyordu, panel bu yüzden boş görünüyordu.
+      await writeSyncLog(`SQL:${opts.tablo}`, opts.collection, ozet, true, null, null, duration, actor);
+      await writeAuditLog(actor, opts.label, `${ozet} (SQL: ${opts.tablo})`);
+      return { ok: true, total, note: postNote, truncated: tavanaCarpti, duration };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[sqlImport ${opts.tablo}]`, msg);
+      await writeSyncLog(`SQL:${opts.tablo}`, opts.collection, opts.label, false, null, msg, Date.now() - t0, actor);
+      return { ok: false, total: 0, note: null, truncated: false, error: `${opts.label} başarısız.`, duration: Date.now() - t0 };
+    }
+  }
+
+  /** SqlVeriOkuV2 tabanlı liste import — V17'de karşılığı OLMAYAN liste
+   *  metotlarının yerine geçer.
+   *
+   *  Neden: `SiparisListesiV2`, `FaturaListesiV2`, `StokHareketListesiV2`,
+   *  `BankaListesiV2`, `KasaListesiV2`, `OdemePlanListesiV2`, `BarkodListesiV2`
+   *  Mikro Jump V17'de YOK (Postman koleksiyonu + OpenAPI spec, ikisi de).
+   *
+   *  `SELECT *` kullanılıyor: kolon adlarını önceden bilmeye gerek yok.
+   *  Sayfalama SQL Server'ın OFFSET/FETCH'i ile (ORDER BY zorunlu).
+   *
+   *  GÜVENLİK: tablo/sıralama adı sabit (kod içinde), tarih sqlTarih ile KATI
+   *  doğrulanır. İstemciden gelen hiçbir string doğrudan sorguya girmez.
+   */
+  const SQL_IMPORT_TANIMLARI: SqlImportOpts[] = [];
+
+  function makeMikroSqlImport(opts: SqlImportOpts) {
+    SQL_IMPORT_TANIMLARI.push(opts);   // cron da aynı tanımları kullanır
+    if (!opts.route) return;
     app.post(opts.route, requireAuth, async (req: Request, res: Response) => {
       if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-      if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-      const companyId = await reqCompanyId(req);
-      const t0 = Date.now();
-      const SAYFA = 500;
-      const MAKS_SAYFA = 40; // 20.000 satır tavanı — sessiz değil, yanıtta bildirilir
-
-      const ilk = sqlTarih(req.body?.ilkTarih, '2020-01-01');
-      const son = sqlTarih(req.body?.sonTarih, mikroBugun());
-      const kosullar: string[] = [];
-      if (opts.ekKosul) kosullar.push(opts.ekKosul);
-      if (opts.tarihKolonu) kosullar.push(`${opts.tarihKolonu} BETWEEN '${ilk}' AND '${son}'`);
-      const where = kosullar.length ? ` WHERE ${kosullar.join(' AND ')}` : '';
-
-      const allRows: Record<string, unknown>[] = [];
-      let sayfa = 0, total = 0, tavanaCarpti = false;
-      try {
-        while (sayfa < MAKS_SAYFA) {
-          const offset = sayfa * SAYFA;
-          const { rows, hata } = await mikroSql(
-            `SELECT * FROM ${opts.tablo}${where} ORDER BY ${opts.siralama} ` +
-            `OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
-          );
-          if (hata) {
-            // Başarısızsa hiçbir şey yazma — yarım/boş veri gerçek veriyi ezmesin.
-            return res.status(502).json({ success: false, error: `${opts.label}: ${hata}` });
-          }
-          if (!rows.length) break;
-
-          let batch = adminDb.batch(); let ops = 0;
-          for (const row of rows) {
-            const guidKey = findKey(row, /_Guid$/i);
-            const docId = guidKey && row[guidKey]
-              ? String(row[guidKey])
-              : adminDb.collection(opts.collection).doc().id;
-            batch.set(adminDb.collection(opts.collection).doc(docId), {
-              ...row, companyId, source: 'mikro_sql', syncedAt: pgServerTimestamp(),
-            }, { merge: true });
-            if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
-          }
-          if (ops > 0) await batch.commit();
-
-          allRows.push(...rows);
-          total += rows.length;
-          if (rows.length < SAYFA) break;
-          sayfa++;
-          if (sayfa >= MAKS_SAYFA) tavanaCarpti = true;
-        }
-
-        let postNote: string | null = null;
-        if (opts.postProcess && allRows.length > 0) postNote = await opts.postProcess(allRows, companyId);
-
-        const duration = Date.now() - t0;
-        await writeAuditLog(reqActor(req), opts.label,
-          `${total} kayıt çekildi (SQL: ${opts.tablo})${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}${postNote ? ` — ${postNote}` : ''}`);
-        res.json({ success: true, total, note: postNote, tablo: opts.tablo,
-                   ...(tavanaCarpti ? { truncated: true, limit: MAKS_SAYFA * SAYFA } : {}), duration });
-      } catch (err) {
-        console.error(`[${opts.route}]`, err);
-        res.status(500).json({ success: false, error: `${opts.label} başarısız.` });
-      }
+      const sonuc = await mikroSqlImportCalistir(
+        opts,
+        await reqCompanyId(req),
+        sqlTarih(req.body?.ilkTarih, '2020-01-01'),
+        sqlTarih(req.body?.sonTarih, mikroBugun()),
+        reqActor(req),
+      );
+      if (!sonuc.ok) return res.status(502).json({ success: false, error: sonuc.error });
+      res.json({ success: true, total: sonuc.total, note: sonuc.note, tablo: opts.tablo,
+                 ...(sonuc.truncated ? { truncated: true, limit: 40 * 500 } : {}), duration: sonuc.duration });
     });
   }
 
@@ -5648,6 +5691,49 @@ async function startServer() {
     },
   });
 
+  // ── Gece SQL senkronu (MIKRO_CRON_SYNC=true ise) ─────────────────────────
+  // Kullanıcı her seferinde Ayarlar > ERP Hub'a girip tek tek düğmeye basmak
+  // zorunda kalmasın diye (2026-07-31 talebi). Login tetiklemesi YERİNE cron:
+  // login'de çalıştırmak her kullanıcı girişinde tüm veriyi yeniden çeker,
+  // birkaç kişi aynı anda girince Mikro'ya kat kat yük biner ve kullanıcı
+  // bekler. Mikro tek servis ve eşzamanlı yükte çöktüğü biliniyor.
+  //
+  // Adımlar SIRAYLA koşar (paralel değil, aynı gerekçe). Bir adım patlarsa
+  // durmaz; her adım syncLog'a kendi sonucunu yazar.
+  if (process.env.MIKRO_CRON_SYNC === 'true') {
+    const sqlSenkronHedefTenant = async (): Promise<string> => {
+      if (process.env.MIKRO_CRON_COMPANY_ID) return process.env.MIKRO_CRON_COMPANY_ID;
+      if (!adminDb) return '';
+      const snap = await adminDb.collection('users').get();
+      const cids = new Set(snap.docs.map(d => (d.data().companyId as string) || d.id));
+      if (cids.size === 1) return [...cids][0];
+      console.error(`Mikro SQL senkron: ${cids.size} tenant var ve MIKRO_CRON_COMPANY_ID tanımsız → atlandı.`);
+      return '';
+    };
+
+    // 03:20 — gece yedeğinden (03:30) ÖNCE bitsin diye erken.
+    cron.schedule('20 3 * * *', async () => {
+      const companyId = await sqlSenkronHedefTenant();
+      if (!companyId) return;
+      if (!(await getMikroCreds())) { console.warn('Mikro SQL senkron: kimlik yok, atlandı.'); return; }
+      const actor = { uid: 'system', email: '' };
+      // Son 90 gün: tam geçmişi her gece yeniden çekmek gereksiz yük.
+      // İlk dolum elle (ERP Hub) yapılır; cron güncellemeyi taze tutar.
+      const son = mikroBugun();
+      const ilk = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+      console.log(`Mikro SQL senkron başlıyor (${ilk} → ${son}, ${SQL_IMPORT_TANIMLARI.length} adım)`);
+      let ok = 0, hata = 0;
+      for (const opts of SQL_IMPORT_TANIMLARI) {
+        try {
+          const r = await mikroSqlImportCalistir(opts, companyId, ilk, son, actor);
+          if (r.ok) { ok++; console.log(`  ${opts.label}: ${r.total} kayıt`); }
+          else { hata++; console.warn(`  ${opts.label}: ${r.error}`); }
+        } catch (e) { hata++; console.warn(`  ${opts.label} istisna:`, e instanceof Error ? e.message : String(e)); }
+      }
+      console.log(`Mikro SQL senkron bitti: ${ok} başarılı, ${hata} hatalı`);
+    });
+  }
+
 
   /** POST /api/mikro/import/stok-miktar — stok miktarlarını Mikro'dan çek.
    *  StokListesiV2 miktar DÖNDÜRMEZ; tek kaynak GenelAmacliMaliyetListesiV2
@@ -5736,7 +5822,9 @@ async function startServer() {
         await commitBatch();
         const duration = Date.now() - t0;
         await jobRef.set({ running: false, processed, updated, failed, finishedAt: pgServerTimestamp(), durationMs: duration }, { merge: true });
-        await writeAuditLog(actor, 'Mikro Stok Miktarları', `${updated} ürünün miktarı güncellendi, ${failed} hata (${Math.round(duration / 1000)}sn)`);
+        const miktarOzet = `${updated} ürünün miktarı güncellendi, ${failed} hata (${Math.round(duration / 1000)}sn)`;
+        await writeSyncLog('GenelAmacliMaliyetListesiV2', 'inventory', miktarOzet, failed === 0, null, failed ? `${failed} SKU okunamadı` : null, duration, actor);
+        await writeAuditLog(actor, 'Mikro Stok Miktarları', miktarOzet);
         console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, ${duration}ms`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -6482,8 +6570,9 @@ async function startServer() {
       }
       await flush();
 
-      await writeAuditLog(reqActor(req), 'Mikro Bakiye Çekme',
-        `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`);
+      const ozet = `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`;
+      await writeSyncLog('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', ozet, true, null, null, Date.now() - t0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Bakiye Çekme', ozet);
       res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable,
                  mikroRows: rows.length, duration: Date.now() - t0 });
     } catch (err) {
@@ -6582,7 +6671,9 @@ async function startServer() {
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
-      await writeAuditLog(reqActor(req), 'Mikro Mizan Çekme', `${period} dönemi — ${satirlar.length} hesap satırı`);
+      const mizanOzet = `${period} dönemi — ${satirlar.length} hesap satırı`;
+      await writeSyncLog('SQL:MUHASEBE_FISLERI', 'accountingPeriods', mizanOzet, true, null, null, Date.now() - t0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Mizan Çekme', mizanOzet);
       res.json({ success: true, period, rowCount: satirlar.length, duration: Date.now() - t0 });
     } catch (err) {
       console.error('[pull/mizan]', err);
@@ -6740,8 +6831,9 @@ async function startServer() {
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
-      await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme',
-        `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)`);
+      const kdvOzet = `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)`;
+      await writeSyncLog('SQL:STOK_HAREKETLERI(KDV)', 'taxSummary', kdvOzet, true, null, null, Date.now() - t0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', kdvOzet);
       res.json({ success: true, period, kdvHesaplanan, kdvIndirilecek,
                  kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
                  oranKirilimi: kirilim,
