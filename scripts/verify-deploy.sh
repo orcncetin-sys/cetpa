@@ -91,9 +91,22 @@ else
       else
         CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X "$(printf '%s' "$METHOD" | tr '[:lower:]' '[:upper:]')" -d '' "$URL")
       fi
+      # 000 = baglanti/zaman asimi. 77 ucu pes pese yagdirinca IIS/ARR kuyruguna
+      # takilip nadiren 15 sn'yi asiyor; tek tek denendiginde ayni uc 401 donuyor.
+      # Bir kez daha dene: gercekten bozuk bir uc iki denemede de 000 verir,
+      # ani yuk kaynakli tek seferlik takilma elenir. Kapinin sikiligi korunur.
+      if [ "$CODE" = 000 ]; then
+        sleep 2
+        if [ "$METHOD" = get ]; then
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL")
+        else
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -X "$(printf '%s' "$METHOD" | tr '[:lower:]' '[:upper:]')" -d '' "$URL")
+        fi
+      fi
       case "$CODE" in
         401|403) pass "route $METHOD $RPATH -> $CODE (korumalı + yüklü)" ;;
         404)     fail "route $METHOD $RPATH -> 404 (deploy'da YOK)" ;;
+        000)     fail "route $METHOD $RPATH -> yanıt yok (2 denemede de zaman aşımı)" ;;
         *)       fail "route $METHOD $RPATH -> $CODE (401/403 bekleniyordu)" ;;
       esac
     done <<<"$ROUTES"
