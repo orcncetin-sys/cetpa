@@ -3,6 +3,7 @@ import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu'
 import { authFetch } from '../services/authFetch';
 import MikroPushButton from './MikroPushButton';
 import DekontModal from './DekontModal';
+import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -473,6 +474,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
     id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
     kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
+    uuid?: string;
   }>>([]);
   const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
   /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
@@ -482,6 +484,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   /** Fatura yönü — Mikro'da hem giden (satış) hem gelen (alış) fatura var.
    *  Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */
   const [faturaYon, setFaturaYon] = useState<'hepsi' | 'giden' | 'gelen'>('hepsi');
+  /** Fatura detay penceresi (XML/PDF indirme) — 2026-08-01 kullanıcı isteği. */
+  const [faturaDetay, setFaturaDetay] = useState<MikroFaturaDetayVerisi | null>(null);
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -802,6 +806,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               // vergiPntr İNDEKS (4 = %20). Bilinen eşlemeler; çözülemezse null
               // ve ekranda '—' gösterilir — uydurma oran yazmaktansa boş kalsın.
               oran:     ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
+              // GİB belge kimliği — e-belge XML/PDF çekmek için. Alan adı
+              // sürüme göre değişebildiği için birkaç aday deneniyor.
+              uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
               // cha_tip 0 = satış (GİDEN fatura), 1 = alış (GELEN fatura).
               // Eskiden burada sabit olarak yalnız 0 tutuluyordu; gelen faturalar
               // veritabanında olmasına rağmen HİÇ görünmüyordu (2026-08-01).
@@ -2209,8 +2216,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
                       Mevcut mantık değişmedi, kaynak seçici opt-in. */}
                   {faturaKaynak !== 'cetpa' && mikroFaturaSatirlari.map(f => (
-                    <tr key={`mikro-fat-${f.id}`} className="border-b border-gray-50 hover:bg-blue-50/40 bg-blue-50/20 transition-colors">
-                      <td className="px-4 py-3 font-mono font-semibold text-blue-600">{f.faturaNo || '—'}</td>
+                    <tr key={`mikro-fat-${f.id}`}
+                      onClick={() => setFaturaDetay({ ...f, uuid: f.uuid })}
+                      title={currentLanguage==='tr'?'Detay ve XML/PDF için tıklayın':'Click for detail and XML/PDF'}
+                      className="border-b border-gray-50 hover:bg-blue-50/60 bg-blue-50/20 transition-colors cursor-pointer">
+                      <td className="px-4 py-3 font-mono font-semibold text-blue-600 underline decoration-dotted underline-offset-2">{f.faturaNo || '—'}</td>
                       <td className="px-4 py-3">
                         <p className="font-semibold text-[#1D1D1F]">{f.musteri}</p>
                         <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Cari: ' : 'Account: '}{f.cariKod}</p>
@@ -5762,6 +5772,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
         cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
       />
+
+      {faturaDetay && (
+        <MikroFaturaDetay
+          fatura={faturaDetay}
+          currentLanguage={currentLanguage}
+          onClose={() => setFaturaDetay(null)}
+        />
+      )}
 
       {dekontHedef && (
         <DekontModal

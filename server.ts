@@ -5733,15 +5733,26 @@ async function startServer() {
     route: '/api/mikro/import/fatura-listesi',
     tablo: 'CARI_HESAP_HAREKETLERI cha',
     fromEk: ' LEFT JOIN (' +
-              'SELECT sth_evrakno_seri, sth_evrakno_sira, ' +
+              'SELECT sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, ' +
               'SUM(sth_vergi) AS kdv, SUM(sth_tutar) AS matrah, MIN(sth_vergi_pntr) AS vergiPntr ' +
-              'FROM STOK_HAREKETLERI WHERE sth_evraktip = 4 ' +
-              'GROUP BY sth_evrakno_seri, sth_evrakno_sira' +
-            ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri AND sat.sth_evrakno_sira = cha.cha_evrakno_sira',
+              'FROM STOK_HAREKETLERI WHERE sth_evraktip IN (3, 4) ' +
+              'GROUP BY sth_evrakno_seri, sth_evrakno_sira, sth_evraktip' +
+            ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri ' +
+            'AND sat.sth_evrakno_sira = cha.cha_evrakno_sira ' +
+            // Yön eşleşmesi ŞART: satış ve alış aynı evrak numarasını
+            // kullanabiliyor (seri boş). evraktip'i de anahtara katmazsak
+            // bir satış faturasına alış satırının KDV'si bağlanabilir.
+            'AND sat.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END',
     secim: 'cha.*, ISNULL(sat.kdv, 0) AS kdvTutari, ISNULL(sat.matrah, 0) AS matrah, sat.vergiPntr',
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
-    tarihKolonu: 'cha.cha_tarihi', ekKosul: 'cha.cha_evrak_tip = 63',
+    tarihKolonu: 'cha.cha_tarihi',
+    // ALIŞ FATURALARI 63'TE DEĞİL (2026-08-01 keşfi): satış = evrak_tip 63 /
+    // tip 0 (320 adet, 15,6M ₺); ALIŞ = evrak_tip 0 / tip 1 (567 adet, 134,6M ₺).
+    // Eski filtre yalnız 63'ü aldığı için alış faturaları — satışın 8 katı
+    // tutarında — hiç çekilmiyordu.
+    // Doğrulama: fatura 378 başlık 155.088 = satır 129.240 matrah + 25.848 KDV ✓
+    ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_tip = 1))',
     postProcess: async (rows) => {
       const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
       return `${kdvli}/${rows.length} faturada KDV eşleşti`;
