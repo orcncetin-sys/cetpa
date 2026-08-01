@@ -472,13 +472,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
    *  DOKUNULMAZ — Mikro yalnız EK bir kaynak olarak eklenir. */
   const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
     id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
-    kdv: number; matrah: number; oran: number | null;
+    kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
   }>>([]);
   const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
   /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
    *  Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
    *  `mikroFaturalar`da duruyor ve hiç görünmüyordu. Varsayılan 'cetpa'. */
   const [faturaKaynak, setFaturaKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('hepsi');
+  /** Fatura yönü — Mikro'da hem giden (satış) hem gelen (alış) fatura var.
+   *  Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */
+  const [faturaYon, setFaturaYon] = useState<'hepsi' | 'giden' | 'gelen'>('hepsi');
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -799,7 +802,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               // vergiPntr İNDEKS (4 = %20). Bilinen eşlemeler; çözülemezse null
               // ve ekranda '—' gösterilir — uydurma oran yazmaktansa boş kalsın.
               oran:     ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
-              // cha_tip 0 = satış (borç). Satışlar sekmesi yalnız satışı gösterir.
+              // cha_tip 0 = satış (GİDEN fatura), 1 = alış (GELEN fatura).
+              // Eskiden burada sabit olarak yalnız 0 tutuluyordu; gelen faturalar
+              // veritabanında olmasına rağmen HİÇ görünmüyordu (2026-08-01).
+              yon:      Number(x.cha_tip ?? 0) === 1 ? 'gelen' as const : 'giden' as const,
               _tip:     Number(x.cha_tip ?? 0),
               // Mikro kayıt SİLMEZ, *_iptal=1 diye işaretler. İptal edilmiş
               // faturayı geçerli göstermek yanlış olur. Alan yoksa (şema farkı)
@@ -807,7 +813,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               _iptal:   x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
             };
           })
-          .filter(f => f._tip === 0 && !f._iptal)
+          .filter(f => !f._iptal)
           .map(({ _tip, _iptal, ...f }) => { void _tip; void _iptal; return f; }),
         );
       }, () => setMikroFaturalar([])),
@@ -1682,7 +1688,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const kod = (c as unknown as { mikroCariKod?: string }).mikroCariKod;
     if (kod) cariAdMap.set(String(kod).trim(), c.name);
   }
-  const mikroSatisSatirlari = mikroFaturalar
+  // Faturalar sekmesi yön filtresine uyar; Satışlar sekmesi (aşağıda) yalnız
+  // GİDEN fatura gösterir — satış tanımı gereği.
+  const mikroFaturaSatirlari = mikroFaturalar
+    .filter(f => faturaYon === 'hepsi' || f.yon === faturaYon)
     .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
     .filter(f => {
@@ -1694,6 +1703,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
       : a.tarih.localeCompare(b.tarih)
     ));
+  // Satışlar sekmesi: yalnız giden (satış) faturaları.
+  const mikroSatisSatirlari = mikroFaturaSatirlari.filter(f => f.yon === 'giden');
   const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
 
   // Satışlar computed
@@ -2062,8 +2073,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 const cetpaVar = faturaKaynak !== 'mikro';
                 const mikroVar = faturaKaynak !== 'cetpa';
                 const cetpaAdet = cetpaVar ? invoices.length : 0;
-                const mikroAdet = mikroVar ? mikroSatisSatirlari.length : 0;
-                const mikroToplam = mikroVar ? mikroSatisSatirlari.reduce((a, f) => a + f.tutar, 0) : 0;
+                const mikroAdet = mikroVar ? mikroFaturaSatirlari.length : 0;
+                const mikroToplam = mikroVar ? mikroFaturaSatirlari.reduce((a, f) => a + f.tutar, 0) : 0;
                 const cetpaToplam = cetpaVar ? invoices.reduce((a, i) => a + ((i.totalPrice as number) || 0), 0) : 0;
                 return [
                   { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices',
@@ -2113,11 +2124,25 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
             <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
               {([
                 ['hepsi', currentLanguage==='tr'?'Tümü':'All'],
-                ['mikro', `Mikro (${mikroSatisSatirlari.length})`],
+                ['mikro', `Mikro (${mikroFaturaSatirlari.length})`],
                 ['cetpa', `Cetpa (${invoices.length})`],
               ] as const).map(([k,l]) => (
                 <button key={k} onClick={()=>setFaturaKaynak(k)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaKaynak===k?'bg-blue-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {/* Yön — Mikro'da hem giden (satış) hem gelen (alış) fatura var.
+                Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */}
+            <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
+              {([
+                ['hepsi', currentLanguage==='tr'?'Her Yön':'Both'],
+                ['giden', currentLanguage==='tr'?'Giden':'Outgoing'],
+                ['gelen', currentLanguage==='tr'?'Gelen':'Incoming'],
+              ] as const).map(([k,l]) => (
+                <button key={k} onClick={()=>setFaturaYon(k)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaYon===k?'bg-teal-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
                   {l}
                 </button>
               ))}
@@ -2183,14 +2208,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
                       `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
                       Mevcut mantık değişmedi, kaynak seçici opt-in. */}
-                  {faturaKaynak !== 'cetpa' && mikroSatisSatirlari.map(f => (
+                  {faturaKaynak !== 'cetpa' && mikroFaturaSatirlari.map(f => (
                     <tr key={`mikro-fat-${f.id}`} className="border-b border-gray-50 hover:bg-blue-50/40 bg-blue-50/20 transition-colors">
                       <td className="px-4 py-3 font-mono font-semibold text-blue-600">{f.faturaNo || '—'}</td>
                       <td className="px-4 py-3">
                         <p className="font-semibold text-[#1D1D1F]">{f.musteri}</p>
                         <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Cari: ' : 'Account: '}{f.cariKod}</p>
                       </td>
-                      <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span></td>
+                      <td className="px-4 py-3">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span>
+                        <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
+                          {f.yon === 'gelen' ? (currentLanguage==='tr'?'GELEN':'IN') : (currentLanguage==='tr'?'GİDEN':'OUT')}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{f.oran !== null ? `%${f.oran}` : '—'}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
@@ -2199,16 +2229,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       {isAuthenticated && <td className="px-4 py-3" />}
                     </tr>
                   ))}
-                  {invoices.length===0 && (faturaKaynak === 'cetpa' || mikroSatisSatirlari.length === 0) && (
+                  {invoices.length===0 && (faturaKaynak === 'cetpa' || mikroFaturaSatirlari.length === 0) && (
                     <tr><td colSpan={9} className="text-center py-12 text-gray-400">
                       <FileText className="w-10 h-10 mx-auto mb-2 opacity-20"/>
                       <p className="text-sm">{currentLanguage==='tr'?'Henüz fatura kesilmedi.':'No invoices yet.'}</p>
                       <p className="text-xs mt-1">{currentLanguage==='tr'?'Siparişler listesinden "Fatura Kes" butonunu kullanın.':'Use the "Create Invoice" button from the orders list.'}</p>
-                      {mikroSatisSatirlari.length > 0 && (
+                      {mikroFaturaSatirlari.length > 0 && (
                         <p className="text-xs mt-2 text-blue-600">
                           {currentLanguage==='tr'
-                            ? `Mikro'da ${mikroSatisSatirlari.length} fatura var — yukarıdaki "Mikro" seçeneğiyle görün.`
-                            : `${mikroSatisSatirlari.length} invoices exist in Mikro — use the "Mikro" filter above.`}
+                            ? `Mikro'da ${mikroFaturaSatirlari.length} fatura var — yukarıdaki "Mikro" seçeneğiyle görün.`
+                            : `${mikroFaturaSatirlari.length} invoices exist in Mikro — use the "Mikro" filter above.`}
                         </p>
                       )}
                     </td></tr>

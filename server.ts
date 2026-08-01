@@ -5791,6 +5791,14 @@ async function startServer() {
         sql: 'SELECT dep_no, dep_adi FROM DEPOLAR ORDER BY dep_no' },
       { ad: 'stokDepoKoduDagilimi',
         sql: "SELECT sto_yer_kod, COUNT(*) AS adet FROM STOKLAR GROUP BY sto_yer_kod ORDER BY COUNT(*) DESC" },
+      // Gelen (alış) fatura doğrulaması: cha_tip 1 başlığı ile sth_evraktip 3
+      // satırı aynı evrak numarasında buluşuyor mu, toplamlar tutuyor mu?
+      { ad: 'alisFaturaBasliklari',
+        sql: 'SELECT TOP 3 cha_evrakno_seri, cha_evrakno_sira, cha_tip, cha_meblag, cha_tarihi FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_tip = 1 ORDER BY cha_tarihi DESC' },
+      { ad: 'alisSatirOrnegi',
+        sql: 'SELECT TOP 5 sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, sth_vergi, sth_tutar, sth_vergi_pntr FROM STOK_HAREKETLERI WHERE sth_evraktip = 3 ORDER BY sth_tarih DESC' },
+      { ad: 'faturaYonDagilimi',
+        sql: 'SELECT cha_tip, COUNT(*) AS adet FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 GROUP BY cha_tip' },
       { ad: 'tabloSatirSayilari',
         sql: "SELECT 'CARI_HESAP_HAREKETLERI' t, COUNT(*) n FROM CARI_HESAP_HAREKETLERI " +
              "UNION ALL SELECT 'STOK_HAREKETLERI', COUNT(*) FROM STOK_HAREKETLERI " +
