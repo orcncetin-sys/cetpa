@@ -5814,6 +5814,21 @@ async function startServer() {
       // 377/378/380 alış satırlarının başlığı hangi kayıtta? Evrak no ile ara.
       { ad: 'alisEvrakNoBasliklari',
         sql: 'SELECT cha_evrak_tip, cha_tip, cha_evrakno_sira, cha_kod, cha_meblag FROM CARI_HESAP_HAREKETLERI WHERE cha_evrakno_sira IN (377, 378, 380) ORDER BY cha_evrakno_sira' },
+      // evrak_tip 0 / tip 1 içindeki 567 kaydın KAÇI gerçekten alış faturası?
+      // Gerçek fatura STOK_HAREKETLERI'nde satırı olandır; tahsilat/virman gibi
+      // hareketlerin stok satırı OLMAZ. Bu ayrım filtrenin doğruluğunu belirler.
+      { ad: 'evrakTip0SatirEslesmesi',
+        sql: 'SELECT CASE WHEN sat.sth_evrakno_sira IS NULL THEN 0 ELSE 1 END AS satiriVar, ' +
+             'COUNT(*) AS adet, SUM(cha.cha_meblag) AS toplam ' +
+             'FROM CARI_HESAP_HAREKETLERI cha ' +
+             'LEFT JOIN (SELECT DISTINCT sth_evrakno_seri, sth_evrakno_sira FROM STOK_HAREKETLERI WHERE sth_evraktip = 3) sat ' +
+             'ON sat.sth_evrakno_seri = cha.cha_evrakno_seri AND sat.sth_evrakno_sira = cha.cha_evrakno_sira ' +
+             'WHERE cha.cha_evrak_tip = 0 AND cha.cha_tip = 1 ' +
+             'GROUP BY CASE WHEN sat.sth_evrakno_sira IS NULL THEN 0 ELSE 1 END' },
+      // evrak_tip 0 içinde başka ayırt edici alan var mı (cha_cinsi kırılımı)
+      { ad: 'evrakTip0CinsDagilimi',
+        sql: 'SELECT cha_cinsi, COUNT(*) AS adet, SUM(cha_meblag) AS toplam FROM CARI_HESAP_HAREKETLERI ' +
+             'WHERE cha_evrak_tip = 0 AND cha_tip = 1 GROUP BY cha_cinsi ORDER BY COUNT(*) DESC' },
       { ad: 'faturaYonDagilimi',
         sql: 'SELECT cha_tip, COUNT(*) AS adet FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 GROUP BY cha_tip' },
       { ad: 'tabloSatirSayilari',
