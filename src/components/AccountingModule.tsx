@@ -481,7 +481,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
     uuid?: string;
   }>>([]);
-  const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
+  // Varsayılan 'hepsi': Mikro satış faturaları da görünsün. Eskiden 'cetpa'
+  // idi ve Cetpa siparişi 0 olduğu için Satışlar ekranı bomboş açılıyordu (2026-08-01).
+  const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('hepsi');
   /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
    *  Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
    *  `mikroFaturalar`da duruyor ve hiç görünmüyordu. Varsayılan 'cetpa'. */
@@ -3565,8 +3567,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   ))}
                 </div>
               </div>
-              <p className="text-xl font-bold text-green-600">{formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro</p>
+              {/* Toplam Ciro = Cetpa sipariş cirosu + (kaynak Mikro'yu içeriyorsa) Mikro satış faturaları.
+                  mikroSatisToplam yalnız 'giden' (satış) faturalarıdır — alış karışmaz. */}
+              <p className="text-xl font-bold text-green-600">{formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) + (satisKaynak !== 'cetpa' ? mikroSatisToplam : 0))}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{satisKaynak !== 'cetpa' && mikroSatisToplam > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
             </div>
             {/* Faturalı / Faturasız — count, no currency toggle */}
             <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: orders.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number }) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
