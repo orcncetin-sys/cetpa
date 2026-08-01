@@ -5797,6 +5797,12 @@ async function startServer() {
         sql: 'SELECT TOP 3 cha_evrakno_seri, cha_evrakno_sira, cha_tip, cha_meblag, cha_tarihi FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_tip = 1 ORDER BY cha_tarihi DESC' },
       { ad: 'alisSatirOrnegi',
         sql: 'SELECT TOP 5 sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, sth_vergi, sth_tutar, sth_vergi_pntr FROM STOK_HAREKETLERI WHERE sth_evraktip = 3 ORDER BY sth_tarih DESC' },
+      // Alış faturası başlığı hangi cha_evrak_tip'te? 63 yalnız satışı tutuyor.
+      { ad: 'evrakTipDagilimi',
+        sql: 'SELECT cha_evrak_tip, cha_tip, COUNT(*) AS adet, SUM(cha_meblag) AS toplam FROM CARI_HESAP_HAREKETLERI GROUP BY cha_evrak_tip, cha_tip ORDER BY COUNT(*) DESC' },
+      // 377/378/380 alış satırlarının başlığı hangi kayıtta? Evrak no ile ara.
+      { ad: 'alisEvrakNoBasliklari',
+        sql: 'SELECT cha_evrak_tip, cha_tip, cha_evrakno_sira, cha_kod, cha_meblag FROM CARI_HESAP_HAREKETLERI WHERE cha_evrakno_sira IN (377, 378, 380) ORDER BY cha_evrakno_sira' },
       { ad: 'faturaYonDagilimi',
         sql: 'SELECT cha_tip, COUNT(*) AS adet FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 GROUP BY cha_tip' },
       { ad: 'tabloSatirSayilari',
