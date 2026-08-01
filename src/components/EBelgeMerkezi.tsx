@@ -3,7 +3,7 @@ import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Send, AlertTriangle, Clock, Plus, X, RefreshCw,
-  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload
+  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload, FileCode
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
@@ -176,6 +176,36 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
       URL.revokeObjectURL(url);
     } catch {
       showToast('PDF indirilemedi.', 'error');
+    }
+  };
+
+  /** Belgenin XML'ini (UBL) indir — e-belgenin YASAL aslı budur; PDF yalnız
+   *  görüntüsüdür. Mali müşavire gönderim ve arşiv için gereken bu. */
+  const indirXml = async (belge: EBelge) => {
+    if (!belge.uuid) { showToast('Bu belgede UUID yok — XML çekilemez.', 'error'); return; }
+    try {
+      const r = await fetch('/api/mikro/ebelge/xml', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ uuid: belge.uuid, tur: belge.tur, yon: belge.yon }),
+      });
+      const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
+      if (!r.ok || !d.success) { showToast(d.error || 'XML alınamadı.', 'error'); return; }
+      // Alan adı sürüme göre değişebildiği için en uzun string alanı ara.
+      const alan = Object.values(d.data ?? {}).find(v => typeof v === 'string' && v.length > 200);
+      if (typeof alan !== 'string') { showToast('XML yanıtı beklenen biçimde değil.', 'error'); return; }
+      // Base64 olabilir de olmayabilir — '<' ile başlıyorsa düz XML'dir.
+      const metin = alan.trimStart().startsWith('<') ? alan : (() => {
+        try { return decodeURIComponent(escape(atob(alan.replace(/^data:.*?;base64,/, '')))); }
+        catch { return alan; }
+      })();
+      const url = URL.createObjectURL(new Blob([metin], { type: 'application/xml;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = `${belge.belgeNo || belge.uuid}.xml`; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('XML indirilemedi.', 'error');
     }
   };
 
@@ -515,6 +545,15 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
                               title="Resmi PDF'i indir (Mikro/GİB)"
                             >
                               <Download size={14} />
+                            </button>
+                          )}
+                          {mikroKaynakli && belge.uuid && (
+                            <button
+                              onClick={() => void indirXml(belge)}
+                              className="p-1.5 rounded-lg hover:bg-indigo-50 text-indigo-600 transition-colors"
+                              title="XML indir — e-belgenin yasal aslı (PDF yalnız görüntüsüdür)"
+                            >
+                              <FileCode size={14} />
                             </button>
                           )}
                           {canResend && (

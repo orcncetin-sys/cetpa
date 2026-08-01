@@ -465,6 +465,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // New tab states
   const [customers, setCustomers] = useState<Customer[]>([]);
+  /** Mikro faturaları — Satışlar sekmesinde Cetpa satışlarının YANINDA gösterilir.
+   *  Kullanıcı tanımı (2026-07-31): "satışlar = faturalar ama Q serisi = faturasız
+   *  satış; Mikro faturalarını DA orada görmem gerekli."
+   *  Bu yüzden mevcut orders tabanlı KPI'lara ve faturalı/faturasız ayrımına
+   *  DOKUNULMAZ — Mikro yalnız EK bir kaynak olarak eklenir. */
+  const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
+    id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
+  }>>([]);
+  const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -766,6 +775,24 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsubs = [
+      onSnapshot(collection(db, 'mikroFaturalar'), snap => {
+        setMikroFaturalar(
+          snap.docs.map(d => {
+            const x = d.data() as Record<string, unknown>;
+            const seri = String(x.cha_evrakno_seri ?? '').trim();
+            const sira = x.cha_evrakno_sira;
+            return {
+              id: d.id,
+              cariKod:  String(x.cha_kod ?? '').trim(),
+              tarih:    String(x.cha_tarihi ?? '').slice(0, 10),
+              tutar:    Number(x.cha_meblag ?? 0) || 0,
+              faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+              // cha_tip 0 = satış (borç). Satışlar sekmesi yalnız satışı gösterir.
+              _tip:     Number(x.cha_tip ?? 0),
+            };
+          }).filter(f => f._tip === 0).map(({ _tip, ...f }) => { void _tip; return f; }),
+        );
+      }, () => setMikroFaturalar([])),
       // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
       // (type==='Supplier' olanlar Tedarikçiler sekmesine aittir, burada gizlenir.)
       onSnapshot(collection(db, 'leads'), s => {
@@ -1615,6 +1642,37 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const displayedMizan = mizanSearch
     ? sortedMizanRows.filter(r => r.hesap.toLowerCase().includes(mizanSearch.toLowerCase()))
     : sortedMizanRows;
+
+  // ── Mikro faturaları, Cetpa satışlarının YANINDA ────────────────────────
+  // Mevcut `displayedSatis` (orders tabanlı) ve tüm KPI kartları AYNEN kalır;
+  // burada yalnız EK satırlar hazırlanır. Varsayılan kaynak 'cetpa' olduğu için
+  // ekran davranışı değişmez — Mikro'yu görmek opt-in.
+  //
+  // MÜKERRER SAYIM ELEMESİ: Cetpa siparişi Mikro'ya gönderildiğinde evrak no
+  // `mikroEvrakNo` alanına geri yazılıyor. Aynı satış iki kez görünmesin diye
+  // o evrak numaralarına sahip Mikro faturaları listelenmez.
+  const cetpayaAitEvrakNo = new Set(
+    orders.map(o => String((o as unknown as { mikroEvrakNo?: string }).mikroEvrakNo ?? '').trim())
+          .filter(Boolean),
+  );
+  const cariAdMap = new Map<string, string>();
+  for (const c of customers) {
+    const kod = (c as unknown as { mikroCariKod?: string }).mikroCariKod;
+    if (kod) cariAdMap.set(String(kod).trim(), c.name);
+  }
+  const mikroSatisSatirlari = mikroFaturalar
+    .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
+    .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
+    .filter(f => {
+      const q = satisSearch.toLowerCase();
+      return !q || f.musteri.toLowerCase().includes(q) || String(f.tutar).includes(q) || f.faturaNo.toLowerCase().includes(q);
+    })
+    .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
+      satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
+      : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
+      : a.tarih.localeCompare(b.tarih)
+    ));
+  const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
 
   // Satışlar computed
   const displayedSatis = orders
@@ -3446,17 +3504,40 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h3 className="font-semibold text-gray-800">{t.satislar}</h3>
             </div>
-            {/* Search bar */}
-            <div className="relative mb-3">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder={currentLanguage === 'tr' ? 'Müşteri veya tutar ara...' : 'Search customer or amount...'}
-                value={satisSearch}
-                onChange={e => setSatisSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20"
-              />
+            {/* Search + kaynak seçici */}
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder={currentLanguage === 'tr' ? 'Müşteri, tutar veya fatura no ara...' : 'Search customer, amount or invoice no...'}
+                  value={satisSearch}
+                  onChange={e => setSatisSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20"
+                />
+              </div>
+              {/* Kaynak seçici — varsayılan 'cetpa', yani ekran eskisi gibi davranır.
+                  Mikro faturalarını görmek opt-in (2026-07-31 talebi). */}
+              <div className="flex gap-1 p-0.5 bg-gray-100 rounded-lg">
+                {([
+                  ['cetpa',  currentLanguage === 'tr' ? `Cetpa (${displayedSatis.length})` : `Cetpa (${displayedSatis.length})`],
+                  ['mikro',  `Mikro (${mikroSatisSatirlari.length})`],
+                  ['hepsi',  currentLanguage === 'tr' ? 'Tümü' : 'All'],
+                ] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setSatisKaynak(k)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${satisKaynak === k ? 'bg-white shadow-sm text-[#1D1D1F]' : 'text-gray-500 hover:text-[#1D1D1F]'}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
+            {satisKaynak !== 'cetpa' && mikroSatisSatirlari.length > 0 && (
+              <div className="mb-3 px-3 py-2 bg-blue-50 rounded-xl text-xs text-blue-800">
+                {currentLanguage === 'tr'
+                  ? `${mikroSatisSatirlari.length} Mikro satış faturası · toplam ${formatTRY(mikroSatisToplam)}`
+                  : `${mikroSatisSatirlari.length} Mikro sales invoices · total ${formatTRY(mikroSatisToplam)}`}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="apple-table">
                 <thead>
@@ -3492,8 +3573,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   </tr>
                 </thead>
                 <tbody>
-                  {displayedSatis.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>}
-                  {displayedSatis.map((o: { id?: string, customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number, faturali?: boolean, kdvOran?: number }) => (
+                  {satisKaynak !== 'mikro' && displayedSatis.length === 0 && mikroSatisSatirlari.length === 0 &&
+                    <tr><td colSpan={5} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>}
+                  {satisKaynak !== 'mikro' && displayedSatis.map((o: { id?: string, customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number, faturali?: boolean, kdvOran?: number }) => (
                     <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3 font-medium text-gray-800">{o.customerName}</td>
                       <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
@@ -3507,6 +3589,23 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                         }
                       </td>
                       <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">%{o.kdvOran ?? 0}</td>
+                    </tr>
+                  ))}
+                  {/* Mikro satış faturaları — Cetpa satırlarından rozetle ayrılır.
+                      Cetpa'dan Mikro'ya gönderilmiş olanlar mükerrer sayılmasın diye
+                      mikroEvrakNo eşleşmesiyle zaten elenmiş durumda. */}
+                  {satisKaynak !== 'cetpa' && mikroSatisSatirlari.map(f => (
+                    <tr key={`mikro-${f.id}`} className="border-b border-gray-50 hover:bg-blue-50/40 bg-blue-50/20">
+                      <td className="py-2.5 px-3 font-medium text-gray-800">
+                        {f.musteri}
+                        <span className="ml-1.5 text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full align-middle">MİKRO</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
+                        {f.tarih ? new Date(f.tarih).toLocaleDateString('tr-TR') : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(f.tutar)}</td>
+                      <td className="py-2.5 px-3 text-center text-xs font-mono text-gray-600">{f.faturaNo || '—'}</td>
+                      <td className="py-2.5 px-3 text-center text-xs text-gray-400 hidden sm:table-cell">—</td>
                     </tr>
                   ))}
                 </tbody>

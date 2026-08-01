@@ -4918,49 +4918,106 @@ async function startServer() {
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
   app.post('/api/mikro/cari/listesi', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
+    // 2026-07-31'de YENİDEN YAZILDI. Eski hali iki yönden eksikti:
+    //  1) SAYFALAMA YOKTU — tek çağrı, `index` hiç artmıyordu. Bugün Mikro'da
+    //     tam 200 cari olduğu için zarar görünmüyordu (sayfa boyutu da 200),
+    //     ama 201. cari eklendiği gün gerisi SESSİZCE kaybolacaktı.
+    //  2) YENİ MÜŞTERİ OLUŞTURMUYORDU — yalnız mikroCariKod'u eşleşen mevcut
+    //     lead'i güncelliyordu; eşleşmeyen atlanıyordu. "Oluşturuldu: 0" bundan.
+    // Artık gece cron'uyla AYNI mantık: tam sayfalama + upsert, eşleme
+    // önceliği mikroCariKod → VKN → isim (elle oluşturulmuş kayıtların
+    // mikroCariKod'u olmadığı için salt-kod eşleşme onları ikinci kez yaratırdı).
     const body = req.body || {};
     const nameSearch = typeof body.nameSearch === 'string' ? body.nameSearch.trim().slice(0, 100) : '';
     // Mikro WhereStr serbest SQL parçası kabul eder; istemci whereStr'i ASLA
-    // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir,
-    // aksi halde sabit sunucu-tarafı filtre kullanılır.
+    // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir.
     const whereStr = nameSearch
       ? `cari_unvan1 LIKE '%${nameSearch.replace(/'/g, "''")}%'`
-      : "cari_baglanti_tipi=0 and cari_lastup_date > '2020/01/01'";
-    const { size = 200, index = 0 } = body;
+      : "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'";
+    const SAYFA = 200;
+    const MAKS_SAYFA = 50;   // 10.000 cari tavanı; çarparsa yanıtta bildirilir
     const t0 = Date.now();
 
     try {
-      const { ok, data, status } = await mikroPost('CariListesiV2', {
-        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
-        WhereStr:  whereStr,
-        Sort:      'cari_kod',
-        Size:      String(size),
-        Index:     index,
-      });
-
-      if (!ok) return res.status(status).json({ success: false, error: data });
-
-      const cariler = (mikroData(data).CariListesi ?? []) as Record<string, unknown>[];
+      const cariler: Record<string, unknown>[] = [];
+      let tavanaCarpti = false;
+      for (let index = 0; index < MAKS_SAYFA; index++) {
+        const { ok, data, status } = await mikroPost('CariListesiV2', {
+          FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
+          WhereStr:  whereStr,
+          Sort:      'cari_kod',
+          Size:      String(SAYFA),
+          Index:     index,
+        });
+        if (!ok) return res.status(status).json({ success: false, error: mikroHata(data) });
+        const sayfa = (mikroData(data).CariListesi ?? []) as Record<string, unknown>[];
+        if (!sayfa.length) break;
+        cariler.push(...sayfa);
+        if (sayfa.length < SAYFA) break;
+        if (index === MAKS_SAYFA - 1) tavanaCarpti = true;
+      }
       void mirrorMikroCariler(cariler);
 
-      if (adminDb && Array.isArray(cariler)) {
-        for (const c of cariler) {
-          const cariKod = c.cari_kod as string;
-          if (!cariKod) continue;
-          const snap = await adminDb.collection('leads').where('mikroCariKod', '==', cariKod).limit(1).get();
-          if (!snap.empty) {
-            await snap.docs[0].ref.update({
-              email:         (c.cari_EMail  as string) || '',
-              phone:         (c.cari_CepTel as string) || '',
-              mikroSyncedAt: pgServerTimestamp(),
-            });
-          }
-        }
+      // ── Upsert: eşleşen güncellenir, eşleşmeyen OLUŞTURULUR ──
+      const companyId = await reqCompanyId(req);
+      const leadSnap = await adminDb.collection('leads').get();
+      const leadByKod = new Map<string, PgDocRef>();
+      const leadByVkn = new Map<string, PgDocRef>();
+      const leadByName = new Map<string, PgDocRef>();
+      const vknNorm = (v?: string) => (v || '').replace(/\D/g, '');
+      for (const d of leadSnap.docs) {
+        const data = d.data();
+        const kod = (data.mikroCariKod as string)?.trim();
+        if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
+        const vkn = vknNorm((data.taxId as string) || (data.taxNo as string));
+        if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
+        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
 
-      await writeAuditLog(reqActor(req), 'Mikro Cari Listesi Çekme', `${Array.isArray(cariler) ? cariler.length : 0} cari kaydı çekildi`);
-      res.json({ success: true, count: Array.isArray(cariler) ? cariler.length : 0, data: cariler, duration: Date.now() - t0 });
+      let yeni = 0, guncel = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+      for (const c of cariler) {
+        const kod = (c.cari_kod as string)?.trim();
+        if (!kod) continue;
+        const fields = {
+          name: (c.cari_unvan1 as string) || kod,
+          company: (c.cari_unvan1 as string) || '',
+          email: (c.cari_EMail as string) || '',
+          phone: (c.cari_CepTel as string) || '',
+          taxId: (c.cari_vdaire_no as string) || '',
+          taxOffice: (c.cari_vdaire_adi as string) || '',
+          eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
+          type: Number(c.cari_hareket_tipi ?? 0) === 1 ? 'Supplier' : 'Customer',
+          mikroCariKod: kod,
+          mikroSynced: true, mikroSyncedAt: pgServerTimestamp(),
+          companyId,
+        };
+        const vkn = vknNorm(fields.taxId);
+        const nameKey = fields.name.trim().toLowerCase();
+        const ref = leadByKod.get(kod)
+          || (vkn ? leadByVkn.get(vkn) : undefined)
+          || (nameKey ? leadByName.get(nameKey) : undefined);
+        if (ref) { batch.update(ref, fields); guncel++; }
+        else {
+          const newRef = adminDb.collection('leads').doc();
+          batch.set(newRef, { ...fields, status: 'Active', source: 'mikro_import', createdAt: pgServerTimestamp() });
+          leadByKod.set(kod, newRef);
+          yeni++;
+        }
+        if (++ops >= 400) await flush();
+      }
+      await flush();
+
+      const duration = Date.now() - t0;
+      const ozet = `${cariler.length} cari çekildi — ${yeni} yeni, ${guncel} güncellendi${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}`;
+      await writeSyncLog('CariListesiV2', 'lead', ozet, true, null, null, duration, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Cari Listesi Çekme', ozet);
+      res.json({ success: true, count: cariler.length, created: yeni, updated: guncel,
+                 ...(tavanaCarpti ? { truncated: true, limit: MAKS_SAYFA * SAYFA } : {}), duration });
     } catch (err) {
       console.error('Mikro CariListesiV2 hatası:', err);
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
