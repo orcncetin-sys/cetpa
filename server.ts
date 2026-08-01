@@ -5518,12 +5518,16 @@ async function startServer() {
    *  Ayrıntılı gerekçe makeMikroSqlImport'ta. */
   type SqlImportOpts = {
     route?:       string;
-    tablo:        string;
+    tablo:        string;              // takma ad içerebilir: "TABLO t"
     siralama:     string;
     collection:   string;
     label:        string;
     tarihKolonu?: string;
     ekKosul?:     string;
+    /** SELECT listesi (varsayılan '*'). JOIN'li sorgularda "t.*, x AS y" gibi. */
+    secim?:       string;
+    /** FROM'a eklenecek JOIN ifadesi. Kod içinde SABİT — istemciden gelmez. */
+    fromEk?:      string;
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
   };
 
@@ -5550,8 +5554,8 @@ async function startServer() {
       while (sayfa < MAKS_SAYFA) {
         const offset = sayfa * SAYFA;
         const { rows, hata } = await mikroSql(
-          `SELECT * FROM ${opts.tablo}${where} ORDER BY ${opts.siralama} ` +
-          `OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
+          `SELECT ${opts.secim ?? '*'} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
+          `ORDER BY ${opts.siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
         );
         if (hata) {
           // Başarısızsa hiçbir şey yazma — yarım/boş veri gerçek veriyi ezmesin.
@@ -5713,11 +5717,35 @@ async function startServer() {
   });
 
   // 2. Faturalar → mikroFaturalar     (eski: FaturaListesiV2, V17'de YOK)
-  // Fatura = CARI_HESAP_HAREKETLERI'nde cha_evrak_tip 63 (bkz. mikro-api-quirks).
+  //
+  // Fatura BAŞLIĞI = CARI_HESAP_HAREKETLERI, cha_evrak_tip 63.
+  // Ama başlıkta KDV ve MATRAH YOK — onlar SATIRLARDA (STOK_HAREKETLERI).
+  // Bu yüzden satırlar fatura bazında toplanıp başlığa JOIN'leniyor.
+  //
+  // Birleştirme anahtarı canlıda DOĞRULANDI (2026-08-01):
+  //   sth_evraktip = 4 (satış faturası satırı), sth_evrakno_sira = cha_evrakno_sira
+  //   Fatura 321: başlık 21.600 = satır 18.000 (matrah) + 3.600 (KDV) ✓
+  //   Fatura 322: başlık 13.062 = 10.885 + 2.177 ✓
+  // Seri bu kurulumda boş; yine de anahtara dahil (başka kurulumda dolu olabilir).
+  //
+  // vergiPntr İNDEKStir, yüzde değil — vergiOraniCoz ile çevrilir (bkz. o fonksiyon).
   makeMikroSqlImport({
-    route: '/api/mikro/import/fatura-listesi', tablo: 'CARI_HESAP_HAREKETLERI', siralama: 'cha_Guid',
+    route: '/api/mikro/import/fatura-listesi',
+    tablo: 'CARI_HESAP_HAREKETLERI cha',
+    fromEk: ' LEFT JOIN (' +
+              'SELECT sth_evrakno_seri, sth_evrakno_sira, ' +
+              'SUM(sth_vergi) AS kdv, SUM(sth_tutar) AS matrah, MIN(sth_vergi_pntr) AS vergiPntr ' +
+              'FROM STOK_HAREKETLERI WHERE sth_evraktip = 4 ' +
+              'GROUP BY sth_evrakno_seri, sth_evrakno_sira' +
+            ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri AND sat.sth_evrakno_sira = cha.cha_evrakno_sira',
+    secim: 'cha.*, ISNULL(sat.kdv, 0) AS kdvTutari, ISNULL(sat.matrah, 0) AS matrah, sat.vergiPntr',
+    siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
-    tarihKolonu: 'cha_tarihi', ekKosul: 'cha_evrak_tip = 63',
+    tarihKolonu: 'cha.cha_tarihi', ekKosul: 'cha.cha_evrak_tip = 63',
+    postProcess: async (rows) => {
+      const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
+      return `${kdvli}/${rows.length} faturada KDV eşleşti`;
+    },
   });
 
   // 3. Stok hareketleri → inventoryMovements  (eski: StokHareketListesiV2, V17'de YOK)

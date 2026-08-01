@@ -472,6 +472,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
    *  DOKUNULMAZ — Mikro yalnız EK bir kaynak olarak eklenir. */
   const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
     id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
+    kdv: number; matrah: number; oran: number | null;
   }>>([]);
   const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
   /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
@@ -791,6 +792,13 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               tarih:    String(x.cha_tarihi ?? '').slice(0, 10),
               tutar:    Number(x.cha_meblag ?? 0) || 0,
               faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+              // KDV/matrah fatura SATIRLARINDAN toplanıp başlığa JOIN'lendi
+              // (server: /api/mikro/import/fatura-listesi). Başlıkta yoklar.
+              kdv:      Number(x.kdvTutari ?? 0) || 0,
+              matrah:   Number(x.matrah ?? 0) || 0,
+              // vergiPntr İNDEKS (4 = %20). Bilinen eşlemeler; çözülemezse null
+              // ve ekranda '—' gösterilir — uydurma oran yazmaktansa boş kalsın.
+              oran:     ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
               // cha_tip 0 = satış (borç). Satışlar sekmesi yalnız satışı gösterir.
               _tip:     Number(x.cha_tip ?? 0),
               // Mikro kayıt SİLMEZ, *_iptal=1 diye işaretler. İptal edilmiş
@@ -2184,8 +2192,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       </td>
                       <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span></td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-400">—</td>
-                      <td className="px-4 py-3 text-right text-gray-400">—</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{f.oran !== null ? `%${f.oran}` : '—'}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
                       <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{f.tutar.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                       <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>
                       {isAuthenticated && <td className="px-4 py-3" />}
@@ -3679,7 +3687,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       </td>
                       <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(f.tutar)}</td>
                       <td className="py-2.5 px-3 text-center text-xs font-mono text-gray-600">{f.faturaNo || '—'}</td>
-                      <td className="py-2.5 px-3 text-center text-xs text-gray-400 hidden sm:table-cell">—</td>
+                      <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">
+                        {f.kdv ? formatTRY(f.kdv) : '—'}{f.oran !== null ? ` (%${f.oran})` : ''}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
