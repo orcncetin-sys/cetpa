@@ -115,7 +115,7 @@ export default function LogoSyncPanel({ lang = 'tr' }: { lang?: string }) {
   ) {
     setState({ running: true, result: null, error: null });
     try {
-      const r = await fetch(endpoint, { method: 'POST' });
+      const r = await authFetch(endpoint, { method: 'POST' });
       const d = await r.json() as ErpImportResult & { notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Logo yapılandırılmamış. Ayarlar\'dan env değişkenlerini girin.' : 'Logo not configured. Set env vars in Settings.');
       setState({ running: false, result: d, error: d.success ? null : (d.error ?? 'Hata') });

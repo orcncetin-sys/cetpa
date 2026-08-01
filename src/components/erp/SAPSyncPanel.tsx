@@ -29,6 +29,7 @@ import { db } from '../../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
 import type { ErpImportResult, ErpStatusResult } from '../../types/erp';
+import { authFetch } from '../../services/authFetch';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export default function SAPSyncPanel({ lang = 'tr' }: { lang?: string }) {
   async function runImport(endpoint: string, set: React.Dispatch<React.SetStateAction<ImportState>>) {
     set({ running: true, result: null, error: null });
     try {
-      const r = await fetch(endpoint, { method: 'POST' });
+      const r = await authFetch(endpoint, { method: 'POST' });
       const d = await r.json() as ErpImportResult & { notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'SAP yapılandırılmamış. Env değişkenlerini kontrol edin.' : 'SAP not configured. Check env vars.');
       set({ running: false, result: d, error: d.success ? null : (d.error ?? 'Hata') });
@@ -110,7 +111,7 @@ export default function SAPSyncPanel({ lang = 'tr' }: { lang?: string }) {
     if (!id) { set(s => ({ ...s, error: t ? 'Sipariş ID girin.' : 'Enter an order ID.' })); return; }
     set({ running: true, result: null, error: null });
     try {
-      const r = await fetch(endpoint, {
+      const r = await authFetch(endpoint, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ orderId: id }),

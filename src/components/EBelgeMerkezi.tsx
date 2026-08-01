@@ -137,10 +137,13 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   const cek = async (etiket: string, url: string, body: Record<string, unknown>) => {
     setCekiliyor(etiket);
     try {
-      const r = await fetch(url, {
+      // authFetch ŞART — /api/mikro/ebelge/{gelen,giden,eirsaliye} requireAuth
+      // arkasında. Düz fetch olduğu için bu ekranın ÜÇ ÇEKME DÜĞMESİ de
+      // canlıda hiç çalışmamıştı (401). Yakalanamamasının sebebi: url burada
+      // değişken, o yüzden "fetch('/api/..." taramasına takılmıyordu.
+      const r = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify({ ilkTarih: yilBasi, sonTarih: bugun, ...body }),
       });
       const d = await r.json() as { success?: boolean; total?: number; error?: string; uyari?: string };

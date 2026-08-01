@@ -119,7 +119,7 @@ export default function AdminPage({
   const fetchSystemHealth = useCallback(async () => {
     setHealthLoading(true);
     try {
-      const [hr, sr] = await Promise.all([fetch('/api/health'), fetch('/api/admin/stats')]);
+      const [hr, sr] = await Promise.all([fetch('/api/health'), authFetch('/api/admin/stats')]);
       if (hr.ok) setHealthData(await hr.json() as typeof healthData);
       if (sr.ok) { const sd = await sr.json() as { counts: Record<string, number> }; setStatsData(sd.counts); }
     } catch { /* ignore — offline */ }

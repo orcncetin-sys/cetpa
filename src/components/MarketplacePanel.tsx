@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { doc, onSnapshot, setDoc } from '../lib/dbClient';
 import { db } from '../firebase';
+import { authFetch } from '../services/authFetch';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ function MarketplaceCard({
   const handleSync = async () => {
     setSync({ running: true, result: null });
     try {
-      const r = await fetch(syncEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ daysBack: 7 }) });
+      const r = await authFetch(syncEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ daysBack: 7 }) });
       const d = await r.json() as SyncResult;
       setSync({ running: false, result: d });
       if (d.success) checkStatus();

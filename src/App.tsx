@@ -630,7 +630,7 @@ function AppContent() {
   } | null>(null);
 
   useEffect(() => {
-    fetch('/api/reports/summary')
+    authFetch('/api/reports/summary')
       .then(r => r.ok ? r.json() : null)
       .then((d: typeof summaryData) => { if (d) setSummaryData(d); })
       .catch(() => {});
@@ -3044,7 +3044,7 @@ function AppContent() {
         const toPhone = lead?.phone || (ord as (Order & { customerPhone?: string }) | undefined)?.customerPhone;
 
         if (toEmail && ord) {
-          fetch('/api/email/order-notification', {
+          authFetch('/api/email/order-notification', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
