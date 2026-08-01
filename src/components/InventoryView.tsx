@@ -40,6 +40,7 @@ import BarcodeScanner from './BarcodeScanner';
 import SortHeader from './SortHeader';
 import ConfirmModal from './ConfirmModal';
 import ModuleHeader from './ModuleHeader';
+import { authFetch } from '../services/authFetch';
 import { type LabelItem } from './LabelSheetModal';
 
 import { type InventoryItem, type InventoryMovement, type Warehouse, type Consignment, type StockDiscrepancy } from '../types';
@@ -424,7 +425,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     setAutoReorderLoading(true);
     setAutoReorderResult(null);
     try {
-      const r = await fetch('/api/inventory/auto-reorder', { method: 'POST' });
+      const r = await authFetch('/api/inventory/auto-reorder', { method: 'POST' });
       const d = await r.json() as {
         success: boolean; created: number; lowStockCount: number;
         message?: string; error?: string; items?: string[];

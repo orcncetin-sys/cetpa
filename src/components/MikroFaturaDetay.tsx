@@ -14,6 +14,7 @@
  */
 import { useState } from 'react';
 import { X, Download, FileCode, Loader2, AlertTriangle } from 'lucide-react';
+import { authFetch } from '../services/authFetch';
 
 export interface MikroFaturaDetayVerisi {
   id: string;
@@ -56,10 +57,12 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
       const govde = tur === 'xml'
         ? { uuid: fatura.uuid, tur: 'e-fatura', yon: fatura.yon }
         : (fatura.uuid ? { uuid: fatura.uuid } : { faturaGuid: fatura.id });
-      const r = await fetch(url, {
+      // authFetch ŞART: /api/mikro/ebelge/* requireAuth arkasında. Düz fetch +
+      // credentials:'same-origin' yetmiyor — oturum çerezle değil Firebase ID
+      // token'ıyla taşınıyor, o yüzden "Missing Authorization header" dönüyordu.
+      const r = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(govde),
       });
       const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };

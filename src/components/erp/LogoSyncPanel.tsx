@@ -24,6 +24,7 @@ import { db } from '../../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
 import type { ErpImportResult, ErpStatusResult } from '../../types/erp';
+import { authFetch } from '../../services/authFetch';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ export default function LogoSyncPanel({ lang = 'tr' }: { lang?: string }) {
     if (!id) { setSiparisExport(s => ({ ...s, error: t ? 'Sipariş ID girin.' : 'Enter an order ID.' })); return; }
     setSiparisExport({ running: true, result: null, error: null });
     try {
-      const r = await fetch('/api/logo/export/siparis', {
+      const r = await authFetch('/api/logo/export/siparis', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ orderId: id }),

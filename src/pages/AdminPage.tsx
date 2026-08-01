@@ -16,6 +16,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import DocumentDesigner from '../components/DocumentDesigner';
 import SuperAdminPanel from '../components/SuperAdminPanel';
+import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
 
@@ -386,7 +387,7 @@ export default function AdminPage({
               if (!inviteEmail.trim()) return;
               setInviteLoading(true);
               try {
-                const r = await fetch('/api/admin/invite', {
+                const r = await authFetch('/api/admin/invite', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),

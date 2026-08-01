@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { X, Loader2, AlertTriangle } from 'lucide-react';
 import { pushMikroEvrak, dekontPayload } from '../services/mikroEvrak';
+import { authFetch } from '../services/authFetch';
 
 interface HareketTuru {
   cha_evrak_tip: number;
@@ -55,7 +56,7 @@ export default function DekontModal({ cariKod, cariAdi, mevcutBakiye, entityId, 
     let iptal = false;
     (async () => {
       try {
-        const r = await fetch('/api/mikro/cari-hareket/turler', { credentials: 'same-origin' });
+        const r = await authFetch('/api/mikro/cari-hareket/turler');
         const d = await r.json() as { success?: boolean; turler?: HareketTuru[]; error?: string };
         if (iptal) return;
         if (!r.ok || !d.success) { setTurHata(d.error || 'Türler alınamadı.'); return; }

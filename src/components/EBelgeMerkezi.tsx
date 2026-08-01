@@ -6,6 +6,7 @@ import {
   CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload, FileCode
 } from 'lucide-react';
 import { db } from '../firebase';
+import { authFetch } from '../services/authFetch';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
@@ -156,10 +157,9 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
    *  Uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu gerçek olanıdır. */
   const indirPdf = async (belge: EBelge) => {
     try {
-      const r = await fetch('/api/mikro/ebelge/pdf', {
+      const r = await authFetch('/api/mikro/ebelge/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(belge.uuid ? { uuid: belge.uuid } : { faturaGuid: belge.id }),
       });
       const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
@@ -184,10 +184,9 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   const indirXml = async (belge: EBelge) => {
     if (!belge.uuid) { showToast('Bu belgede UUID yok — XML çekilemez.', 'error'); return; }
     try {
-      const r = await fetch('/api/mikro/ebelge/xml', {
+      const r = await authFetch('/api/mikro/ebelge/xml', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify({ uuid: belge.uuid, tur: belge.tur, yon: belge.yon }),
       });
       const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
