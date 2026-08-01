@@ -1,74 +1,66 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Edit2, Package, Tag, Layers, DollarSign, History, TrendingUp, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ProductForm from './ProductForm';
-import { collection, query, where, onSnapshot, limit } from '../lib/dbClient';
-import { db } from '../firebase';
 import { format } from 'date-fns';
-import { logFirestoreError, OperationType } from '../utils/firebase';
 
 import { InventoryItem } from '../types';
 
+/** Hem Cetpa şeması hem normalize edilmiş Mikro hareketi buraya oturur. */
 interface InventoryMovement {
   id: string;
-  productId: string;
-  productName: string;
+  productId?: string;
+  productName?: string;
+  sku?: string;
   type: 'in' | 'out';
   quantity: number;
-  reason: string;
+  reason?: string;
   notes?: string;
-  timestamp?: { toDate: () => Date };
+  timestamp?: unknown;
   date?: string;
+  birimFiyat?: number;   // KDV hariç birim fiyat (Mikro hareketinden türetilir)
 }
 
 interface ProductDetailProps {
   product: InventoryItem;
   onClose: () => void;
+  /** InventoryView'da normalize edilmiş TÜM hareketler — burada bu ürüne göre süzülür. */
+  movements?: InventoryMovement[];
 }
 
-export default function ProductDetail({ product, onClose }: ProductDetailProps) {
+const tl = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function toDate(ts: unknown): Date | null {
+  if (!ts) return null;
+  const t = ts as { toDate?: () => Date };
+  if (typeof t.toDate === 'function') { try { return t.toDate(); } catch { /* düş */ } }
+  const d = new Date(ts as string | number);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export default function ProductDetail({ product, onClose, movements = [] }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [movements, setMovements] = useState<InventoryMovement[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!product) return;
-
-    // Fetch inventory movements for this product
-    const q = query(
-      collection(db, 'inventoryMovements'),
-      where('productId', '==', product.id),
-      limit(20)
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        return {
-          id: docSnap.id,
-          productId: d.productId ?? '',
-          productName: d.productName ?? '',
-          type: d.type as 'in' | 'out',
-          quantity: d.quantity ?? 0,
-          reason: d.reason ?? '',
-          notes: d.notes,
-          timestamp: d.timestamp,
-          date: d.timestamp?.toDate ? format(d.timestamp.toDate(), 'dd.MM.yyyy HH:mm') : '—',
-        } as InventoryMovement;
-      });
-      setMovements(data);
-      setLoading(false);
-    }, (error) => {
-      logFirestoreError(error, OperationType.LIST, 'inventoryMovements');
-      setLoading(false);
-    });
-
-    return () => unsub();
-  }, [product]);
 
   if (!product) return null;
+
+  // Bu ürünün hareketleri: productId VEYA SKU eşleşmesi (Mikro satırları SKU ile gelir).
+  const urunHareketleri = movements
+    .filter(m => (m.productId && m.productId === product.id) || (m.sku && m.sku === product.sku))
+    .sort((a, b) => (toDate(b.timestamp)?.getTime() ?? 0) - (toDate(a.timestamp)?.getTime() ?? 0));
+
+  // Son/ortalama satış fiyatı — 'out' (satış) hareketlerinin KDV hariç birim fiyatından.
+  const satisHareketleri = urunHareketleri.filter(m => m.type === 'out' && (m.birimFiyat ?? 0) > 0);
+  const sonSatisFiyati = satisHareketleri[0]?.birimFiyat ?? 0;
+  const ortSatisFiyati = satisHareketleri.length
+    ? satisHareketleri.reduce((s, m) => s + (m.birimFiyat || 0) * (m.quantity || 0), 0) /
+      satisHareketleri.reduce((s, m) => s + (m.quantity || 0), 0)
+    : 0;
+
+  const vatRate = Number((product as unknown as { vatRate?: number }).vatRate ?? 0);
+  const satisFiyati = product.prices?.['Retail'] || product.price || 0;
+  const loading = false;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -106,10 +98,10 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
           {/* Stats Row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Mevcut Stok', value: product.stockLevel, icon: Layers, color: product.stockLevel <= product.lowStockThreshold ? 'text-red-600' : 'text-green-600', bg: product.stockLevel <= product.lowStockThreshold ? 'bg-red-50' : 'bg-green-50' },
-              { label: 'Kritik Eşik', value: product.lowStockThreshold, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
-              { label: 'Maliyet', value: `₺${product.costPrice?.toLocaleString()}`, icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Satış Fiyatı', value: `₺${(product.prices?.['Retail'] || product.price || 0).toLocaleString()}`, icon: TrendingUp, color: 'text-brand', bg: 'bg-brand/5' },
+              { label: 'Mevcut Stok', value: String(product.stockLevel), note: '', icon: Layers, color: product.stockLevel <= product.lowStockThreshold ? 'text-red-600' : 'text-green-600', bg: product.stockLevel <= product.lowStockThreshold ? 'bg-red-50' : 'bg-green-50' },
+              { label: 'Kritik Eşik', value: String(product.lowStockThreshold), note: '', icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
+              { label: 'Maliyet', value: tl(Number(product.costPrice) || 0), note: 'KDV hariç', icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Satış Fiyatı', value: tl(satisFiyati), note: satisFiyati > 0 ? 'KDV hariç' : 'tanımsız', icon: TrendingUp, color: 'text-brand', bg: 'bg-brand/5' },
             ].map((stat, i) => (
               <div key={i} className={cn("p-4 rounded-2xl border border-transparent transition-all", stat.bg)}>
                 <div className="flex items-center gap-2 mb-1">
@@ -117,6 +109,7 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{stat.label}</span>
                 </div>
                 <p className={cn("text-xl font-black", stat.color)}>{stat.value}</p>
+                {stat.note && <p className="text-[10px] text-gray-400 mt-0.5">{stat.note}</p>}
               </div>
             ))}
           </div>
@@ -130,7 +123,10 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
               <div className="space-y-4">
                 {[
                   { label: 'Kategori', value: product.category || 'Belirtilmemiş' },
-                  { label: 'Konum', value: product.location || 'Ana Depo' },
+                  { label: 'KDV Oranı', value: vatRate > 0 ? `%${vatRate}` : 'Tanımsız' },
+                  { label: 'Konum', value: product.location || (product.warehouseId ? product.warehouseId : '—') },
+                  { label: 'Son Satış Fiyatı', value: sonSatisFiyati > 0 ? `${tl(sonSatisFiyati)} (KDV hariç)` : '—' },
+                  { label: 'Ort. Satış Fiyatı', value: ortSatisFiyati > 0 ? `${tl(ortSatisFiyati)} (KDV hariç)` : '—' },
                   { label: 'Tedarikçi', value: product.supplier || 'Belirtilmemiş' },
                   { label: 'Tedarikçi SKU', value: product.supplierSku || '-' },
                 ].map((item, i) => (
@@ -181,14 +177,16 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
                     <tr className="text-gray-400 italic">
                       <td colSpan={4} className="px-4 py-8 text-center">Hareket geçmişi yükleniyor...</td>
                     </tr>
-                  ) : movements.length === 0 ? (
+                  ) : urunHareketleri.length === 0 ? (
                     <tr className="text-gray-400 italic">
                       <td colSpan={4} className="px-4 py-8 text-center">Henüz hareket bulunmuyor.</td>
                     </tr>
                   ) : (
-                    movements.map((m) => (
+                    urunHareketleri.slice(0, 20).map((m) => {
+                      const d = toDate(m.timestamp);
+                      return (
                       <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="px-4 py-3 text-xs text-gray-600">{m.date}</td>
+                        <td className="px-4 py-3 text-xs text-gray-600">{d ? format(d, 'dd.MM.yyyy') : '—'}</td>
                         <td className="px-4 py-3 text-xs font-medium">
                           <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>
                             {m.type === 'in' ? '▲ Giriş' : '▼ Çıkış'}
@@ -198,11 +196,14 @@ export default function ProductDetail({ product, onClose }: ProductDetailProps) 
                           {m.type === 'in' ? '+' : '-'}{m.quantity}
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[200px]" title={m.notes || m.reason}>
-                          <span className="font-medium text-gray-700">{m.reason}</span>
+                          {(m.birimFiyat ?? 0) > 0
+                            ? <span className="font-medium text-gray-700">{tl(m.birimFiyat!)} <span className="text-gray-400">/ birim</span></span>
+                            : <span className="font-medium text-gray-700">{m.reason || '—'}</span>}
                           {m.notes && <span className="ml-1 text-gray-400">— {m.notes}</span>}
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>

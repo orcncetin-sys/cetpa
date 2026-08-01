@@ -123,14 +123,20 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       // Zaten normalize (Cetpa hareketi) ise dokunma.
       if (m.type || typeof sku !== 'string' || !sku) return m;
       const prod = inventory.find(p => p.sku === sku);
+      const miktar = Math.abs(Number(raw.sth_miktar) || 0);
+      // sth_tutar = KDV HARİÇ satır matrahı (fatura JOIN'inde de matrah bu).
+      // Birim fiyat = tutar / miktar → satış/alış birim fiyatı (KDV hariç).
+      const tutar = Math.abs(Number(raw.sth_tutar) || 0);
       return {
         ...m,
         productId: prod?.id ?? sku,
         productName: prod?.name ?? sku,
         sku,
-        quantity: Math.abs(Number(raw.sth_miktar) || 0),
+        quantity: miktar,
         type: Number(raw.sth_tip) === 0 ? 'in' : 'out',
         timestamp: (raw.sth_tarih as string) ?? m.timestamp,
+        tutar,
+        birimFiyat: miktar > 0 ? tutar / miktar : 0,
       } as typeof m;
     });
     setMovements(norm);
@@ -730,7 +736,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         existingCategories={categories}
         exchangeRates={exchangeRates ?? undefined}
       />
-      {selectedProduct && <ProductDetail product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
+      {selectedProduct && <ProductDetail product={selectedProduct} movements={movements as never} onClose={() => setSelectedProduct(null)} />}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 space-y-6">
