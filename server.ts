@@ -5733,6 +5733,52 @@ async function startServer() {
     },
   });
 
+  /** GET /api/mikro/sema-kesif — Mikro şemasını keşfetmek için SABİT sorgular.
+   *
+   *  Neden var: bu şemayı keşfetmek için sürekli sunucuda PowerShell koşturmak
+   *  gerekiyordu ve her seferinde bir şey ters gidiyordu (fonksiyon tanımsız,
+   *  cd işlememiş, .env bulunamamış). Aynı bilgiyi uygulamadan almak hem hızlı
+   *  hem tekrarlanabilir.
+   *
+   *  GÜVENLİK: sorgular KODDA SABİT, istemciden hiçbir SQL parçası alınmaz —
+   *  enjeksiyon yüzeyi yok. /api/ops/summary ile aynı token korumasında.
+   *  Yalnız şema/örnek veri döner; toplu iş verisi dökmez (TOP 3/5).
+   */
+  app.get('/api/mikro/sema-kesif', async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+
+    const sorgular: Array<{ ad: string; sql: string }> = [
+      { ad: 'faturaBasliklari',
+        sql: 'SELECT TOP 3 cha_evrakno_seri, cha_evrakno_sira, cha_evrak_tip, cha_meblag, cha_tarihi FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 ORDER BY cha_tarihi DESC' },
+      { ad: 'satirEvrakTipleri',
+        sql: 'SELECT sth_evraktip, COUNT(*) AS adet FROM STOK_HAREKETLERI GROUP BY sth_evraktip ORDER BY COUNT(*) DESC' },
+      { ad: 'satirOrnegi',
+        sql: 'SELECT TOP 5 sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, sth_vergi, sth_tutar, sth_vergi_pntr, sth_stok_kod FROM STOK_HAREKETLERI ORDER BY sth_tarih DESC' },
+      { ad: 'depolar',
+        sql: 'SELECT dep_no, dep_adi FROM DEPOLAR ORDER BY dep_no' },
+      { ad: 'stokDepoKoduDagilimi',
+        sql: "SELECT sto_yer_kod, COUNT(*) AS adet FROM STOKLAR GROUP BY sto_yer_kod ORDER BY COUNT(*) DESC" },
+      { ad: 'tabloSatirSayilari',
+        sql: "SELECT 'CARI_HESAP_HAREKETLERI' t, COUNT(*) n FROM CARI_HESAP_HAREKETLERI " +
+             "UNION ALL SELECT 'STOK_HAREKETLERI', COUNT(*) FROM STOK_HAREKETLERI " +
+             "UNION ALL SELECT 'CARI_HESAPLAR', COUNT(*) FROM CARI_HESAPLAR " +
+             "UNION ALL SELECT 'STOKLAR', COUNT(*) FROM STOKLAR " +
+             "UNION ALL SELECT 'EBELGE_EVRAK_HAREKETLERI', COUNT(*) FROM EBELGE_EVRAK_HAREKETLERI" },
+    ];
+
+    const sonuc: Record<string, unknown> = {};
+    for (const q of sorgular) {
+      const { rows, hata } = await mikroSql(q.sql);
+      sonuc[q.ad] = hata ? { hata } : rows;
+    }
+    res.json({ success: true, sonuc });
+  });
+
   /** POST /api/mikro/tamir/ham-satir-temizle — UI koleksiyonlarına yanlışlıkla
    *  dökülmüş HAM Mikro satırlarını siler.
    *
