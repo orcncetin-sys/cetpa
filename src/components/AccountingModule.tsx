@@ -477,7 +477,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
    *  Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
    *  `mikroFaturalar`da duruyor ve hiç görünmüyordu. Varsayılan 'cetpa'. */
-  const [faturaKaynak, setFaturaKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
+  const [faturaKaynak, setFaturaKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('hepsi');
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -844,6 +844,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               creditLimit: Number(x.creditLimit ?? 0),
               balance:     Number(x.bakiye ?? x.balance ?? 0),
               riskGroup:   (x.riskGroup as Customer['riskGroup']) || 'Düşük',
+              // Mikro cari kodu — Mikro faturalarında müşteri ADINI çözmek için
+              // şart. Eşlemede yoktu, bu yüzden fatura satırlarında ad yerine
+              // "1470747917" gibi cari kodu görünüyordu (2026-08-01).
+              mikroCariKod: (x.mikroCariKod as string) || '',
               createdAt:   x.createdAt,
             } as Customer;
           })
@@ -2043,14 +2047,33 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           {/* KPI + header */}
           <div className="flex items-center justify-between">
             <div className="grid grid-cols-3 gap-3 flex-1 mr-4">
-              {[
-                { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices', value: invoices.length, color: 'text-[#ff4000]' },
-                { label: 'e-Fatura', value: invoices.filter(i=>i.faturaTipi==='e-fatura').length, color: 'text-green-600' },
-                { label: 'e-Arşiv', value: invoices.filter(i=>i.faturaTipi==='e-arsiv').length, color: 'text-purple-600' },
-              ].map((k,i)=>(
+              {/* KPI'lar KAYNAK FİLTRESİNE UYAR — 320 Mikro faturası varken
+                  "Toplam Fatura 0" göstermek yanlıştı (2026-08-01).
+                  Cetpa sayıları invoices'tan, Mikro sayısı mikroSatisSatirlari'ndan. */}
+              {(() => {
+                const cetpaVar = faturaKaynak !== 'mikro';
+                const mikroVar = faturaKaynak !== 'cetpa';
+                const cetpaAdet = cetpaVar ? invoices.length : 0;
+                const mikroAdet = mikroVar ? mikroSatisSatirlari.length : 0;
+                const mikroToplam = mikroVar ? mikroSatisSatirlari.reduce((a, f) => a + f.tutar, 0) : 0;
+                const cetpaToplam = cetpaVar ? invoices.reduce((a, i) => a + ((i.totalPrice as number) || 0), 0) : 0;
+                return [
+                  { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices',
+                    value: cetpaAdet + mikroAdet,
+                    alt: mikroAdet && cetpaAdet ? `${cetpaAdet} Cetpa · ${mikroAdet} Mikro` : null,
+                    color: 'text-[#ff4000]' },
+                  { label: currentLanguage==='tr'?'Toplam Tutar':'Total Amount',
+                    value: formatTRY(cetpaToplam + mikroToplam),
+                    alt: null, color: 'text-green-600' },
+                  { label: 'e-Fatura / e-Arşiv',
+                    value: `${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-fatura').length : 0} / ${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-arsiv').length : 0}`,
+                    alt: currentLanguage==='tr'?'yalnız Cetpa':'Cetpa only', color: 'text-purple-600' },
+                ];
+              })().map((k,i)=>(
                 <div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
                   <p className="text-xs text-gray-500 mt-1">{k.label}</p>
+                  {k.alt && <p className="text-[10px] text-gray-400 mt-0.5">{k.alt}</p>}
                 </div>
               ))}
             </div>
@@ -2081,9 +2104,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 Varsayılan 'cetpa', yani ekran eskisi gibi davranır. */}
             <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
               {([
-                ['cetpa', 'Cetpa'],
-                ['mikro', `Mikro (${mikroSatisSatirlari.length})`],
                 ['hepsi', currentLanguage==='tr'?'Tümü':'All'],
+                ['mikro', `Mikro (${mikroSatisSatirlari.length})`],
+                ['cetpa', `Cetpa (${invoices.length})`],
               ] as const).map(([k,l]) => (
                 <button key={k} onClick={()=>setFaturaKaynak(k)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaKaynak===k?'bg-blue-600 text-white':'text-gray-500 hover:text-gray-700'}`}>

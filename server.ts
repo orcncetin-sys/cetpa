@@ -5121,6 +5121,19 @@ async function startServer() {
       // yüzdeye çevirmek için gerekli (bkz. vergiOraniCoz).
       const vergiTablosu = await mikroVergiOranlari();
 
+      // Depo adları — "Depo 2" yerine "ESKI SANAYI" gösterebilmek için.
+      // Depo Tanımları import'u çalıştıysa warehouses'ta mikro-depo-<no> id'li
+      // dokümanlar vardır. Yoksa harita boş kalır ve kod numarası gösterilir.
+      const depoAdlari = new Map<string, string>();
+      try {
+        const depoSnap = await adminDb.collection('warehouses').get();
+        for (const d of depoSnap.docs) {
+          const x = d.data() as Record<string, unknown>;
+          const no = x.depoNo;
+          if (no != null && x.name) depoAdlari.set(String(no), String(x.name));
+        }
+      } catch { /* depo adı çözülemezse kod gösterilir */ }
+
       let batch = adminDb.batch();
       let batchOps = 0;
       const commitBatch = async () => {
@@ -5238,8 +5251,16 @@ async function startServer() {
             categorySet.add(item.category);
 
             // Depo kaydı: Depo sekmesi warehouseItems koleksiyonundan okur
-            const yerKod = String(s.sto_yer_kod ?? '').trim() || '1';
-            depotCodes.set(yerKod, (depotCodes.get(yerKod) ?? 0) + 1);
+            // sto_yer_kod BOŞSA '1' UYDURMA (2026-08-01 düzeltmesi). Eski kod
+            // `|| '1'` yapıyordu; Mikro'da bu alan doldurulmadığı için TÜM
+            // ürünler "Depo 1"de görünüyordu, oysa stok fiilen 2 numarada.
+            // Bilinmiyorsa bilinmiyor yazılır — yanlış depo göstermek, depo
+            // göstermemekten kötüdür.
+            const yerKod = String(s.sto_yer_kod ?? '').trim();
+            if (yerKod) depotCodes.set(yerKod, (depotCodes.get(yerKod) ?? 0) + 1);
+            const depoAdi = yerKod
+              ? (depoAdlari.get(yerKod) || `Depo ${yerKod}`)
+              : 'Depo belirtilmemiş';
             const whItemRef = adminDb.collection('warehouseItems')
               .doc(`mikro-${sku.replace(/[/\\]/g, '_')}`);
             batch.set(whItemRef, {
@@ -5248,8 +5269,8 @@ async function startServer() {
               sku,
               // Miktar bilinmiyorsa depo kaydının quantity'sini de EZME.
               ...(qty !== null ? { quantity: qty } : {}),
-              warehouseId: `mikro-depo-${yerKod}`,
-              location:    `Depo ${yerKod}`,
+              ...(yerKod ? { warehouseId: `mikro-depo-${yerKod}` } : {}),
+              location:    depoAdi,
               category:    item.category,
               source:      'mikro_import',
               updatedAt:   pgServerTimestamp(),
@@ -5947,6 +5968,33 @@ async function startServer() {
         } catch (e) { hata++; console.warn(`  ${opts.label} istisna:`, e instanceof Error ? e.message : String(e)); }
       }
       console.log(`Mikro SQL senkron bitti: ${ok} başarılı, ${hata} hatalı`);
+    });
+
+    // ── Ayda bir TAM senkron (ayın 1'i, 02:00) ────────────────────────────
+    // Gecelik koşu son 90 günü tazeliyor; onun dışında kalan eski kayıtlar
+    // hiç güncellenmiyordu. Mikro kayıt SİLMEZ, `iptal=1` diye işaretler —
+    // yani eski bir faturanın iptal edilmesi 90 günü geçtiyse bize hiç
+    // yansımıyordu. Tam senkron bunu kapatır.
+    //
+    // 02:00: gecelik SQL senkronundan (03:20) ve yedekten (03:30) ÖNCE biter.
+    // Ayda bir olduğu için yükü kabul edilebilir.
+    cron.schedule('0 2 1 * *', async () => {
+      const companyId = await sqlSenkronHedefTenant();
+      if (!companyId) return;
+      if (!(await getMikroCreds())) { console.warn('Mikro TAM senkron: kimlik yok, atlandı.'); return; }
+      const actor = { uid: 'system', email: '' };
+      const son = mikroBugun();
+      const ilk = '2000-01-01';   // tüm geçmiş
+      console.log(`Mikro TAM senkron başlıyor (${ilk} → ${son}, ${SQL_IMPORT_TANIMLARI.length} adım)`);
+      let ok = 0, hata = 0;
+      for (const opts of SQL_IMPORT_TANIMLARI) {
+        try {
+          const r = await mikroSqlImportCalistir(opts, companyId, ilk, son, actor);
+          if (r.ok) { ok++; console.log(`  ${opts.label}: ${r.total} kayıt${r.truncated ? ' (TAVANA ÇARPTI)' : ''}`); }
+          else { hata++; console.warn(`  ${opts.label}: ${r.error}`); }
+        } catch (e) { hata++; console.warn(`  ${opts.label} istisna:`, e instanceof Error ? e.message : String(e)); }
+      }
+      console.log(`Mikro TAM senkron bitti: ${ok} başarılı, ${hata} hatalı`);
     });
   }
 

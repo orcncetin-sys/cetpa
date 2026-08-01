@@ -375,6 +375,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     { key: 'banka',        route: '/api/mikro/import/banka',          title: t ? 'Bankalar' : 'Banks',                   desc: t ? 'Banka hesap tanımlarını çek.' : 'Pull bank account definitions.' },
     { key: 'kasa',         route: '/api/mikro/import/kasa',           title: t ? 'Kasalar' : 'Cash Registers',           desc: t ? 'Kasa tanımlarını çek.' : 'Pull cash register definitions.' },
     { key: 'barkod',       route: '/api/mikro/import/barkod',         title: t ? 'Barkodlar' : 'Barcodes',               desc: t ? 'Barkodları çek ve ürünlere eşle.' : 'Pull barcodes and map to products.' },
+    // Depo tanımları — uç 2026-07-31'de eklendi ama BU LİSTEYE eklenmemişti,
+    // yani düğmesi hiç görünmedi ve kullanıcı "çekmemişsin" dedi. Haklıydı.
+    { key: 'depo',         route: '/api/mikro/import/depo',           title: t ? 'Depo Tanımları' : 'Warehouses',        desc: t ? 'Mikro depo tanımlarını çek (Depo Tanımları ekranını doldurur).' : 'Pull warehouse definitions from Mikro.' },
     { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan',     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
   ];
 
