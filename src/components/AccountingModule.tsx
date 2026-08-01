@@ -4,6 +4,7 @@ import { authFetch } from '../services/authFetch';
 import MikroPushButton from './MikroPushButton';
 import DekontModal from './DekontModal';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
+import CariEkstrePanel from './CariEkstrePanel';
 import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -319,6 +320,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [showWarehouseModal, setShowWarehouseModal] = useState(false);
   const [warehouseForm, setWarehouseForm] = useState({ name: '', location: '', manager: '', notes: '' });
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+  // Depo Tanımları kartına tıklayınca o depodaki envanteri gösteren detay (2026-08-01).
+  const [detayDepo, setDetayDepo] = useState<Warehouse | null>(null);
+  // Müşteriye tıklayınca cari ekstre/hareket detayını gösteren modal (2026-08-01).
+  const [ekstreMusteri, setEkstreMusteri] = useState<Customer | null>(null);
 
   const [showStockModal, setShowStockModal] = useState(false);
   const [stockForm, setStockForm] = useState({ productName: '', sku: '', quantity: 0, warehouseId: '', category: '', notes: '' });
@@ -3819,7 +3824,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   )}
                   {displayedMusteriler.map(c => (
                     <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{c.name}</td>
+                      <td className="py-2.5 px-3 font-medium text-gray-800">
+                        <button onClick={() => setEkstreMusteri(c)} className="text-left hover:text-[#ff4000] hover:underline transition-colors"
+                          title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri gör' : 'View account statement'}>
+                          {c.name}
+                        </button>
+                      </td>
                       <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{c.company || '—'}</td>
                       <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{c.email || '—'}</td>
                       <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{c.phone || '—'}</td>
@@ -3860,8 +3870,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                               </button>
                             );
                           })()}
-                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                          <button onClick={() => setEkstreMusteri(c)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                           <button onClick={() => deleteCustomer(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                         </div>
                       </td>
@@ -3871,6 +3881,24 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               </table>
             </div>
           </div>
+
+          {/* Cari ekstre / hareket detayı — müşteri adına/göze tıklayınca */}
+          {ekstreMusteri && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEkstreMusteri(null)}>
+              <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
+                  <div>
+                    <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{ekstreMusteri.name}</p>
+                  </div>
+                  <button onClick={() => setEkstreMusteri(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+                </div>
+                <div className="overflow-y-auto flex-1 p-2 sm:p-4">
+                  <CariEkstrePanel currentLanguage={currentLanguage} leadId={ekstreMusteri.id} customerName={ekstreMusteri.name} />
+                </div>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -4054,24 +4082,103 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {warehouses.map(w => (
-                <div key={w.id} className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative group">
+              {warehouses.map(w => {
+                // O depodaki envanter özeti — kartta göster, tıklanınca detay aç.
+                const depoKalemleri = warehouseItems.filter(wi => wi.warehouseId === w.id);
+                const toplamAdet = depoKalemleri.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
+                return (
+                <div key={w.id} onClick={() => setDetayDepo(w)}
+                  className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative group cursor-pointer hover:border-[#ff4000]/40 hover:shadow-sm transition-all"
+                  title={currentLanguage === 'tr' ? 'Envanter detayını gör' : 'View inventory detail'}>
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="font-bold text-gray-800">{w.name}</h4>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => { setEditingWarehouse(w); setWarehouseForm({ name: w.name, location: w.location || '', manager: w.manager || '', notes: w.notes || '' }); setShowWarehouseModal(true); }} className="p-1.5 hover:bg-white rounded-lg text-blue-500"><Eye size={12} /></button>
-                          <button onClick={() => { setEditingWarehouse(w); setWarehouseForm({ name: w.name, location: w.location || '', manager: w.manager || '', notes: w.notes || '' }); setShowWarehouseModal(true); }} className="p-1.5 hover:bg-white rounded-lg text-gray-500"><Edit2 size={12} /></button>
-                      <button onClick={() => deleteWarehouse(w.id)} className="p-1.5 hover:bg-white rounded-lg text-red-500"><Trash2 size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setDetayDepo(w); }} className="p-1.5 hover:bg-white rounded-lg text-blue-500" title={currentLanguage === 'tr' ? 'Envanter detayı' : 'Inventory detail'}><Eye size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingWarehouse(w); setWarehouseForm({ name: w.name, location: w.location || '', manager: w.manager || '', notes: w.notes || '' }); setShowWarehouseModal(true); }} className="p-1.5 hover:bg-white rounded-lg text-gray-500"><Edit2 size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteWarehouse(w.id); }} className="p-1.5 hover:bg-white rounded-lg text-red-500"><Trash2 size={12} /></button>
                     </div>
                   </div>
                   <div className="space-y-1 text-xs text-gray-500">
                     <div className="flex items-center gap-1.5"><MapPin size={12} /> {w.location || '—'}</div>
                     <div className="flex items-center gap-1.5"><User size={12} /> {w.manager || '—'}</div>
                   </div>
+                  <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-gray-600">
+                      {depoKalemleri.length} {currentLanguage === 'tr' ? 'kalem' : 'items'}
+                    </span>
+                    <span className="text-[11px] text-gray-400">
+                      {toplamAdet.toLocaleString('tr-TR')} {currentLanguage === 'tr' ? 'adet' : 'units'}
+                    </span>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
+
+          {/* Depo envanter detayı — kart tıklanınca o depodaki kalemler */}
+          {detayDepo && (() => {
+            const kalemler = warehouseItems
+              .filter(wi => wi.warehouseId === detayDepo.id)
+              .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
+            const toplamAdet = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
+            const toplamDeger = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0) * (Number((wi as unknown as { costPrice?: number }).costPrice) || 0), 0);
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDetayDepo(null)}>
+                <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-start justify-between p-5 border-b border-gray-100">
+                    <div>
+                      <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Home size={16} /> {detayDepo.name}</h3>
+                      <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1"><MapPin size={11} /> {detayDepo.location || '—'}</p>
+                    </div>
+                    <button onClick={() => setDetayDepo(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 p-5 border-b border-gray-100">
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-xl font-bold text-[#1D1D1F]">{kalemler.length}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Kalem' : 'Items'}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-xl font-bold text-[#1D1D1F]">{toplamAdet.toLocaleString('tr-TR')}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam Adet' : 'Total Units'}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-xl font-bold text-green-600">{toplamDeger > 0 ? formatTRY(toplamDeger) : '—'}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value'}</p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-y-auto flex-1 p-5">
+                    {kalemler.length === 0 ? (
+                      <div className="py-10 text-center text-sm text-gray-400">
+                        {currentLanguage === 'tr' ? 'Bu depoda kayıtlı envanter yok.' : 'No inventory recorded in this warehouse.'}
+                      </div>
+                    ) : (
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="text-left py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.product}</th>
+                            <th className="text-left py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">SKU</th>
+                            <th className="text-right py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.quantity}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {kalemler.map(wi => (
+                            <tr key={wi.id} className="border-b border-gray-50">
+                              <td className="py-2.5 text-sm font-medium text-gray-800">{wi.productName}</td>
+                              <td className="py-2.5 font-mono text-xs text-gray-500 hidden sm:table-cell">{wi.sku || '—'}</td>
+                              <td className="py-2.5 text-right font-semibold text-sm">{(Number(wi.quantity) || 0).toLocaleString('tr-TR')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </motion.div>
       )}
 
