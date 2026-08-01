@@ -5747,12 +5747,22 @@ async function startServer() {
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',
-    // ALIŞ FATURALARI 63'TE DEĞİL (2026-08-01 keşfi): satış = evrak_tip 63 /
-    // tip 0 (320 adet, 15,6M ₺); ALIŞ = evrak_tip 0 / tip 1 (567 adet, 134,6M ₺).
-    // Eski filtre yalnız 63'ü aldığı için alış faturaları — satışın 8 katı
-    // tutarında — hiç çekilmiyordu.
-    // Doğrulama: fatura 378 başlık 155.088 = satır 129.240 matrah + 25.848 KDV ✓
-    ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_tip = 1))',
+    // ALIŞ FATURALARI 63'TE DEĞİL (2026-08-01 keşfi):
+    //   SATIŞ  = cha_evrak_tip 63            → 320 adet,  15,6M ₺
+    //   ALIŞ   = cha_evrak_tip 0, cha_cinsi 6 → 269 adet, 132,7M ₺
+    //
+    // ⚠️ İLK DENEMEM YANLIŞTI: `evrak_tip 0 AND cha_tip 1` yazmıştım, o 567
+    // kayıt getiriyor. Ama kullanıcının şüphesi üzerine kontrol edince
+    // yarısının fatura OLMADIĞI çıktı: 289 kaydın STOK_HAREKETLERI'nde hiç
+    // satırı yok (tahsilat/ödeme benzeri hareketler, 1,88M ₺). Gerçek alış
+    // faturası stok satırı olandır — 278 kayıt, 132,7M ₺.
+    // cha_cinsi kırılımı bunu doğruluyor: cinsi 6 = alış faturası (132,7M),
+    // cinsi 8 = fatura olmayan (1,87M). Ayırt edici alan olarak cha_cinsi
+    // kullanılıyor: tek kolon, anlamsal, stok satırının varlığına bağlı değil.
+    //
+    // Toplam doğrulaması: fatura 378 başlık 155.088 = satır 129.240 matrah +
+    // 25.848 KDV ✓ · fatura 380: 36.000 = 30.000 + 6.000 ✓
+    ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))',
     postProcess: async (rows) => {
       const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
       return `${kdvli}/${rows.length} faturada KDV eşleşti`;
