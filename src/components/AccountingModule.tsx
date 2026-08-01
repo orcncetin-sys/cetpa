@@ -2081,16 +2081,35 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 const mikroVar = faturaKaynak !== 'cetpa';
                 const cetpaAdet = cetpaVar ? invoices.length : 0;
                 const mikroAdet = mikroVar ? mikroFaturaSatirlari.length : 0;
-                const mikroToplam = mikroVar ? mikroFaturaSatirlari.reduce((a, f) => a + f.tutar, 0) : 0;
+                // YÖN KIRILIMI (2026-08-01): "Toplam Tutar" önce satış (giden) ve
+                // alış (gelen) faturalarının tutarlarını TOPLUYORDU → "Her Yön"de
+                // 148M gibi anlamsız bir birleşik rakam çıkıyordu (kullanıcı
+                // haklı olarak reddetti). Satış cirosu ile alış gideri toplanmaz.
+                // Cetpa + Mikro-giden = satış tarafı (doğrulanmış); Mikro-gelen =
+                // alış tarafı. ⚠️ Alış toplamı cha_cinsi=6 filtresine dayanıyor,
+                // henüz portal raporuyla tie-out edilmedi — o yüzden ayrı, satışa
+                // karıştırılmadan gösteriliyor.
+                const mikroGiden = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'giden') : [];
+                const mikroGelen = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'gelen') : [];
                 const cetpaToplam = cetpaVar ? invoices.reduce((a, i) => a + ((i.totalPrice as number) || 0), 0) : 0;
+                const satisToplam = cetpaToplam + mikroGiden.reduce((a, f) => a + f.tutar, 0);
+                const alisToplam  = mikroGelen.reduce((a, f) => a + f.tutar, 0);
+                const tutarLabel = faturaYon==='gelen'
+                  ? (currentLanguage==='tr'?'Alış Tutarı':'Purchases')
+                  : (currentLanguage==='tr'?'Satış Tutarı':'Sales');
+                const tutarValue = faturaYon==='gelen' ? formatTRY(alisToplam) : formatTRY(satisToplam);
+                const tutarAlt = faturaYon==='hepsi' && alisToplam > 0
+                  ? `${currentLanguage==='tr'?'Alış':'Purch.'} ${formatTRY(alisToplam)}`
+                  : null;
                 return [
                   { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices',
                     value: cetpaAdet + mikroAdet,
-                    alt: mikroAdet && cetpaAdet ? `${cetpaAdet} Cetpa · ${mikroAdet} Mikro` : null,
+                    alt: mikroAdet && cetpaAdet ? `${cetpaAdet} Cetpa · ${mikroAdet} Mikro`
+                      : (faturaYon==='hepsi' && mikroGiden.length && mikroGelen.length
+                          ? `${mikroGiden.length} ${currentLanguage==='tr'?'satış':'sales'} · ${mikroGelen.length} ${currentLanguage==='tr'?'alış':'purch.'}`
+                          : null),
                     color: 'text-[#ff4000]' },
-                  { label: currentLanguage==='tr'?'Toplam Tutar':'Total Amount',
-                    value: formatTRY(cetpaToplam + mikroToplam),
-                    alt: null, color: 'text-green-600' },
+                  { label: tutarLabel, value: tutarValue, alt: tutarAlt, color: 'text-green-600' },
                   { label: 'e-Fatura / e-Arşiv',
                     value: `${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-fatura').length : 0} / ${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-arsiv').length : 0}`,
                     alt: currentLanguage==='tr'?'yalnız Cetpa':'Cetpa only', color: 'text-purple-600' },
