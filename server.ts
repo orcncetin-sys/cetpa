@@ -5748,20 +5748,28 @@ async function startServer() {
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',
     // ALIŞ FATURALARI 63'TE DEĞİL (2026-08-01 keşfi):
-    //   SATIŞ  = cha_evrak_tip 63            → 320 adet,  15,6M ₺
-    //   ALIŞ   = cha_evrak_tip 0, cha_cinsi 6 → 269 adet, 132,7M ₺
+    //   SATIŞ  = cha_evrak_tip 63
+    //   ALIŞ   = cha_evrak_tip 0, cha_cinsi 6
     //
-    // ⚠️ İLK DENEMEM YANLIŞTI: `evrak_tip 0 AND cha_tip 1` yazmıştım, o 567
-    // kayıt getiriyor. Ama kullanıcının şüphesi üzerine kontrol edince
-    // yarısının fatura OLMADIĞI çıktı: 289 kaydın STOK_HAREKETLERI'nde hiç
-    // satırı yok (tahsilat/ödeme benzeri hareketler, 1,88M ₺). Gerçek alış
-    // faturası stok satırı olandır — 278 kayıt, 132,7M ₺.
-    // cha_cinsi kırılımı bunu doğruluyor: cinsi 6 = alış faturası (132,7M),
-    // cinsi 8 = fatura olmayan (1,87M). Ayırt edici alan olarak cha_cinsi
-    // kullanılıyor: tek kolon, anlamsal, stok satırının varlığına bağlı değil.
+    // Satır eşleşmesi doğrulandı: fatura 378 başlık 155.088 = satır 129.240
+    // matrah + 25.848 KDV ✓ · fatura 380: 36.000 = 30.000 + 6.000 ✓
     //
-    // Toplam doğrulaması: fatura 378 başlık 155.088 = satır 129.240 matrah +
-    // 25.848 KDV ✓ · fatura 380: 36.000 = 30.000 + 6.000 ✓
+    // ⚠️ AÇIK BULGU — cha_cinsi=6 filtresi HENÜZ CİRO OLARAK DOĞRULANMADI.
+    // Kullanıcının Mikro portal raporuyla (01.01.2026–01.08.2026) tie-out:
+    //   portal GELEN 220 belge 13.907.047 ₺ · GİDEN 188 belge 9.360.355 ₺
+    // Benim cinsi=6 üzerinden verdiğim 269 belge / 132.737.531 ₺ belge başına
+    // 493k ortalama demek; portal ortalaması 63k. 8 kat fark filtreyle de
+    // açıklanamaz, tarih kapsamıyla da (bkz. aşağı).
+    //
+    // Hatanın kökü: bu rakamları ürettiğim keşif sorgularının HİÇBİRİNDE tarih
+    // filtresi yoktu — tüm tabloyu tarıyorlardı. Giden raporda 2026 evrak sıra
+    // aralığı 120→321 (202 belge) iken benim "320 satış" rakamım önceki yılları
+    // da kapsıyor. Yıl bazlı doğrulama sorguları sema-kesif'e eklendi
+    // (y2026_satisOzet / y2026_alisCinsDagilimi / y2026_cinsi6Ornek).
+    // O çıktı portal raporuna oturmadan bu filtreden ciro rakamı SUNULMAYACAK.
+    //
+    // Not: import'un kendisi zaten tarih aralığıyla çalışıyor (tarihKolonu),
+    // yani listelenen faturalar doğru; şüpheli olan yalnız cinsi=6 kapsamı.
     ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))',
     postProcess: async (rows) => {
       const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
@@ -5841,6 +5849,48 @@ async function startServer() {
              'WHERE cha_evrak_tip = 0 AND cha_tip = 1 GROUP BY cha_cinsi ORDER BY COUNT(*) DESC' },
       { ad: 'faturaYonDagilimi',
         sql: 'SELECT cha_tip, COUNT(*) AS adet FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 GROUP BY cha_tip' },
+
+      // ── 2026-08-01: TARİH FİLTRESİ OLMAYAN SORGULARIN BEDELİ ───────────────
+      // Yukarıdaki kırılımlar TÜM tabloyu tarıyor. Ben bunların çıktısını
+      // "2026 cirosu" diye sundum; kullanıcı Mikro'nun kendi 01.01.2026–bugün
+      // raporuyla karşılaştırınca tutmadı:
+      //   Mikro portal raporu (2026) → GELEN 220 belge 13.907.047 ₺
+      //                                GİDEN 188 belge  9.360.355 ₺
+      //   Benim (tarihsiz) rakamım   → ALIŞ  269 belge 132.737.531 ₺  ✗ 10 kat
+      //                                SATIŞ 320 belge  15.630.595 ₺
+      // Giden raporda 2026 evrak sıra aralığı 120→321. Yani 2026'da 202 satış
+      // belgesi var; "320" bu DB'deki ÖNCEKİ yılları da kapsıyor. Aynı şey alış
+      // tarafında da geçerli, üstüne cha_cinsi=6'nın belge başına ortalaması
+      // (493k) portal ortalamasının (63k) 8 katı — filtre de şüpheli.
+      //
+      // Bu yüzden aşağıdaki sorgular YIL BAZLI. Sonuç portal raporuyla
+      // karşılaştırılabilir olmadan hiçbir ciro rakamı sunulmayacak.
+      { ad: 'y2026_satisOzet',
+        sql: "SELECT COUNT(*) AS adet, SUM(cha_meblag) AS toplam, MIN(cha_evrakno_sira) AS ilkSira, " +
+             "MAX(cha_evrakno_sira) AS sonSira FROM CARI_HESAP_HAREKETLERI " +
+             "WHERE cha_evrak_tip = 63 AND cha_tarihi >= '20260101' AND cha_tarihi < '20270101'" },
+      { ad: 'y2026_alisCinsDagilimi',
+        sql: "SELECT cha_cinsi, COUNT(*) AS adet, SUM(cha_meblag) AS toplam FROM CARI_HESAP_HAREKETLERI " +
+             "WHERE cha_evrak_tip = 0 AND cha_tip = 1 AND cha_tarihi >= '20260101' AND cha_tarihi < '20270101' " +
+             "GROUP BY cha_cinsi ORDER BY COUNT(*) DESC" },
+      // cha_cinsi=6 GERÇEKTEN alış faturası mı? Örnek satırlara bakmadan
+      // "evet" demeyeceğim — bir önceki sefer tam burada yanıldım. En büyük 5
+      // kayda bakılıyor: ortalamayı 8 kat şişiren şey buradaysa görünür.
+      { ad: 'y2026_cinsi6EnBuyuk',
+        sql: "SELECT TOP 5 cha_evrakno_seri, cha_evrakno_sira, cha_kod, cha_meblag, cha_tarihi, " +
+             "cha_ebelge_turu, cha_aciklama " +
+             "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 0 AND cha_tip = 1 AND cha_cinsi = 6 " +
+             "AND cha_tarihi >= '20260101' AND cha_tarihi < '20270101' ORDER BY cha_meblag DESC" },
+      // Portal raporu YALNIZ e-faturayı kapsar (e-arşiv ve kağıt fatura orada
+      // görünmez). Bu yüzden tie-out'un anahtarı cha_ebelge_turu kırılımı:
+      // e-fatura satırlarının toplamı 220 belge/13,9M (alış) ve 188/9,36M
+      // (satış) ile örtüşmeli; artan kısım e-arşiv+kağıt olarak açıklanmalı.
+      { ad: 'y2026_ebelgeTuruDagilimi',
+        sql: "SELECT cha_evrak_tip, cha_tip, cha_ebelge_turu, COUNT(*) AS adet, SUM(cha_meblag) AS toplam " +
+             "FROM CARI_HESAP_HAREKETLERI " +
+             "WHERE cha_tarihi >= '20260101' AND cha_tarihi < '20270101' " +
+             "AND (cha_evrak_tip = 63 OR (cha_evrak_tip = 0 AND cha_cinsi = 6)) " +
+             "GROUP BY cha_evrak_tip, cha_tip, cha_ebelge_turu ORDER BY COUNT(*) DESC" },
       { ad: 'tabloSatirSayilari',
         sql: "SELECT 'CARI_HESAP_HAREKETLERI' t, COUNT(*) n FROM CARI_HESAP_HAREKETLERI " +
              "UNION ALL SELECT 'STOK_HAREKETLERI', COUNT(*) FROM STOK_HAREKETLERI " +
