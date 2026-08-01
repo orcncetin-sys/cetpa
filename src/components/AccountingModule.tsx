@@ -474,6 +474,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
   }>>([]);
   const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
+  /** Faturalar sekmesi kaynak seçici — Satışlar'daki desenin aynısı.
+   *  Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
+   *  `mikroFaturalar`da duruyor ve hiç görünmüyordu. Varsayılan 'cetpa'. */
+  const [faturaKaynak, setFaturaKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('cetpa');
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -2067,6 +2071,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 </button>
               ))}
             </div>
+            {/* Kaynak seçici — Cetpa'da kesilen faturalar mı, Mikro'dan çekilenler mi.
+                Varsayılan 'cetpa', yani ekran eskisi gibi davranır. */}
+            <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
+              {([
+                ['cetpa', 'Cetpa'],
+                ['mikro', `Mikro (${mikroSatisSatirlari.length})`],
+                ['hepsi', currentLanguage==='tr'?'Tümü':'All'],
+              ] as const).map(([k,l]) => (
+                <button key={k} onClick={()=>setFaturaKaynak(k)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaKaynak===k?'bg-blue-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Invoices table */}
@@ -2124,11 +2142,38 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                         </tr>
                       );
                     })}
-                  {invoices.length===0 && (
+                  {/* Mikro faturaları — Cetpa'da kesilenlerin YANINDA, MİKRO rozetiyle.
+                      Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
+                      `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
+                      Mevcut mantık değişmedi, kaynak seçici opt-in. */}
+                  {faturaKaynak !== 'cetpa' && mikroSatisSatirlari.map(f => (
+                    <tr key={`mikro-fat-${f.id}`} className="border-b border-gray-50 hover:bg-blue-50/40 bg-blue-50/20 transition-colors">
+                      <td className="px-4 py-3 font-mono font-semibold text-blue-600">{f.faturaNo || '—'}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-[#1D1D1F]">{f.musteri}</p>
+                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Cari: ' : 'Account: '}{f.cariKod}</p>
+                      </td>
+                      <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span></td>
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
+                      <td className="px-4 py-3 text-right text-gray-400">—</td>
+                      <td className="px-4 py-3 text-right text-gray-400">—</td>
+                      <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{f.tutar.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                      <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>
+                      {isAuthenticated && <td className="px-4 py-3" />}
+                    </tr>
+                  ))}
+                  {invoices.length===0 && (faturaKaynak === 'cetpa' || mikroSatisSatirlari.length === 0) && (
                     <tr><td colSpan={9} className="text-center py-12 text-gray-400">
                       <FileText className="w-10 h-10 mx-auto mb-2 opacity-20"/>
                       <p className="text-sm">{currentLanguage==='tr'?'Henüz fatura kesilmedi.':'No invoices yet.'}</p>
                       <p className="text-xs mt-1">{currentLanguage==='tr'?'Siparişler listesinden "Fatura Kes" butonunu kullanın.':'Use the "Create Invoice" button from the orders list.'}</p>
+                      {mikroSatisSatirlari.length > 0 && (
+                        <p className="text-xs mt-2 text-blue-600">
+                          {currentLanguage==='tr'
+                            ? `Mikro'da ${mikroSatisSatirlari.length} fatura var — yukarıdaki "Mikro" seçeneğiyle görün.`
+                            : `${mikroSatisSatirlari.length} invoices exist in Mikro — use the "Mikro" filter above.`}
+                        </p>
+                      )}
                     </td></tr>
                   )}
                 </tbody>
@@ -2146,19 +2191,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
             {[
               {
                 label: t.tryBalance, value: formatTRY(tryBalance), symbol: '₺', color: 'text-green-600',
-                onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance) })), total: formatTRY(tryBalance) })
+                onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance ?? 0) })), total: formatTRY(tryBalance) })
               },
               {
                 label: t.usdBalance, value: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '$', color: 'text-blue-600',
-                onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `$${a.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
+                onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `$${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
               },
               {
                 label: t.eurBalance, value: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '€', color: 'text-purple-600',
-                onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `€${a.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
+                onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `€${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
               },
               {
                 label: t.accountCount, value: String(bankAccounts.length), symbol: '#', color: 'text-[#ff4000]',
-                onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: a.currency === 'TRY' ? formatTRY(a.balance) : a.currency === 'USD' ? `$${a.balance.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `€${a.balance.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` })) })
+                onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: a.currency === 'TRY' ? formatTRY(a.balance ?? 0) : a.currency === 'USD' ? `$${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `€${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` })) })
               },
             ].map((kpi, i) => (
               <button key={i} onClick={kpi.onClick} className="apple-card p-4 text-left cursor-pointer group">
@@ -2257,10 +2302,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       <td className="py-2.5 px-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{acc.iban}</td>
                       <td className="py-2.5 px-3 text-right font-semibold text-gray-800">
                         {acc.currency === 'TRY'
-                          ? formatTRY(acc.balance)
+                          ? formatTRY(acc.balance ?? 0)
                           : acc.currency === 'USD'
-                            ? `$${acc.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : `€${acc.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            ? `$${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : `€${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         }
                       </td>
                       <td className="py-2.5 px-3 hidden sm:table-cell">
@@ -2414,10 +2459,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                           </span>
                         </td>
                         <td className={`px-4 py-3 text-sm font-semibold text-right whitespace-nowrap ${tx.type === 'credit' ? 'text-green-600' : 'text-red-500'}`}>
-                          {tx.type === 'debit' ? '−' : '+'}{tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{tx.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {tx.type === 'debit' ? '−' : '+'}{tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.amount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-gray-600 whitespace-nowrap">
-                          {tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{tx.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                     ));
@@ -3293,11 +3338,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                     <div className="flex justify-between items-end">
                       <div>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Kalan Kontör</p>
-                        <p className="text-4xl font-bold text-gray-900">{lucaKontor.remaining.toLocaleString('tr-TR')}</p>
+                        <p className="text-4xl font-bold text-gray-900">{(lucaKontor.remaining ?? 0).toLocaleString('tr-TR')}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Toplam</p>
-                        <p className="text-sm font-bold text-gray-900">{lucaKontor.limit.toLocaleString('tr-TR')}</p>
+                        <p className="text-sm font-bold text-gray-900">{(lucaKontor.limit ?? 0).toLocaleString('tr-TR')}</p>
                       </div>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">

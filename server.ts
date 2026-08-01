@@ -5712,16 +5712,119 @@ async function startServer() {
     },
   });
 
-  // 4. Bankalar → bankAccounts        (eski: BankaListesiV2, V17'de YOK)
-  makeMikroSqlImport({
-    route: '/api/mikro/import/banka', tablo: 'BANKALAR', siralama: 'ban_Guid',
-    collection: 'bankAccounts', label: 'Mikro Banka Listesi',
+  /** POST /api/mikro/tamir/ham-satir-temizle — UI koleksiyonlarına yanlışlıkla
+   *  dökülmüş HAM Mikro satırlarını siler.
+   *
+   *  2026-08-01: banka/kasa import'ları ham Mikro satırlarını doğrudan
+   *  `bankAccounts` ve `kasalar`a yazıyordu. O satırlarda `balance`/`bakiye`
+   *  yok; ekran `acc.balance.toLocaleString()` dediği için Muhasebe modülü
+   *  komple çöküyordu. Import düzeltildi ama CANLIDA yazılmış satırlar duruyor.
+   *
+   *  Yalnız `source: 'mikro_sql'` damgalı (yani o hatalı import'un yazdığı)
+   *  dokümanları siler — elle girilmiş veya düzeltilmiş kayıtlara (source:'mikro')
+   *  DOKUNMAZ.
+   */
+  app.post('/api/mikro/tamir/ham-satir-temizle', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const hedefler = ['bankAccounts', 'kasalar', 'warehouses'];
+    const sonuc: Record<string, number> = {};
+    try {
+      const cid = await reqCompanyId(req);
+      for (const coll of hedefler) {
+        const snap = await adminDb.collection(coll).get();
+        let batch = adminDb.batch(); let ops = 0, silinen = 0;
+        for (const d of snap.docs) {
+          const x = d.data() as Record<string, unknown>;
+          if (x.source !== 'mikro_sql') continue;              // yalnız hatalı import
+          if (x.companyId && x.companyId !== cid) continue;    // başka kiracıya dokunma
+          batch.delete(d.ref); silinen++;
+          if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+        }
+        if (ops > 0) await batch.commit();
+        sonuc[coll] = silinen;
+      }
+      const ozet = Object.entries(sonuc).map(([k, v]) => `${k}: ${v}`).join(', ');
+      await writeAuditLog(reqActor(req), 'Ham Satır Temizliği', ozet);
+      res.json({ success: true, silinen: sonuc, not: `Silinen ham satırlar — ${ozet}. İlgili import'ları yeniden çalıştırın.` });
+    } catch (err) {
+      console.error('[tamir/ham-satir-temizle]', err);
+      res.status(500).json({ success: false, error: 'Temizlik başarısız.' });
+    }
   });
 
-  // 5. Kasalar → kasalar              (eski: KasaListesiV2, V17'de YOK)
+  // 4. Bankalar → mikroBankalar (ham) + bankAccounts (temiz)
+  //
+  // ⚠️ 2026-08-01 DÜZELTMESİ: ham ban_* satırları DOĞRUDAN `bankAccounts`a
+  // yazılıyordu. O koleksiyon tipli bir UI koleksiyonu ve ekran
+  // `acc.balance.toLocaleString()` diyor — ham satırda `balance` alanı YOK,
+  // dolayısıyla Muhasebe modülü komple çöküyordu
+  // ("Cannot read properties of undefined (reading 'toLocaleString')").
+  // Aynı hatayı DEPOLAR'da fark edip ayırmıştım, banka/kasa'yı atlamışım.
+  makeMikroSqlImport({
+    route: '/api/mikro/import/banka', tablo: 'BANKALAR', siralama: 'ban_Guid',
+    collection: 'mikroBankalar', label: 'Mikro Banka Listesi',
+    postProcess: async (rows, companyId) => {
+      if (!adminDb) return null;
+      // Alan adları çalışma anında bulunur — tahmin yok, bulunamazsa bildirilir.
+      const ornek = rows[0];
+      const adKey  = findKey(ornek, /ban_(adi|isim|ad)$/i) ?? findKey(ornek, /ban_.*ad/i);
+      const noKey  = findKey(ornek, /ban_no$/i) ?? findKey(ornek, /ban_kod/i);
+      const hspKey = findKey(ornek, /hesap_?no|iban/i);
+      if (!adKey) return `banka adı alanı bulunamadı — bankAccounts'a yazılmadı`;
+      let batch = adminDb.batch(); let ops = 0, n = 0;
+      for (const r of rows) {
+        const guidKey = findKey(r, /_Guid$/i);
+        const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
+        if (!id) continue;
+        batch.set(adminDb.collection('bankAccounts').doc(`mikro-${id}`), {
+          companyId,
+          bankName:      String(r[adKey] ?? '').trim() || `Banka ${noKey ? r[noKey] : ''}`.trim(),
+          accountType:   'Vadesiz',
+          accountHolder: '',
+          currency:      'TRY',
+          // Bakiye Mikro'nun banka TANIMINDA yok (hareketlerde). 0 yazmak
+          // "bakiye sıfır" demek olur — UI'ın çökmemesi için gerekli asgari,
+          // gerçek bakiye banka hareketlerinden gelir.
+          balance:       0,
+          ...(hspKey && r[hspKey] ? { accountNo: String(r[hspKey]) } : {}),
+          source: 'mikro', syncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        n++;
+        if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${n} banka bankAccounts'a yazıldı (${adKey})`;
+    },
+  });
+
+  // 5. Kasalar → mikroKasalar (ham) + kasalar (temiz) — bkz. banka gerekçesi
   makeMikroSqlImport({
     route: '/api/mikro/import/kasa', tablo: 'KASALAR', siralama: 'kas_Guid',
-    collection: 'kasalar', label: 'Mikro Kasa Listesi',
+    collection: 'mikroKasalar', label: 'Mikro Kasa Listesi',
+    postProcess: async (rows, companyId) => {
+      if (!adminDb) return null;
+      const ornek = rows[0];
+      const adKey = findKey(ornek, /kas_(adi|isim|ad)$/i) ?? findKey(ornek, /kas_.*ad/i);
+      const noKey = findKey(ornek, /kas_no$/i) ?? findKey(ornek, /kas_kod/i);
+      if (!adKey) return `kasa adı alanı bulunamadı — kasalar'a yazılmadı`;
+      let batch = adminDb.batch(); let ops = 0, n = 0;
+      for (const r of rows) {
+        const guidKey = findKey(r, /_Guid$/i);
+        const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
+        if (!id) continue;
+        batch.set(adminDb.collection('kasalar').doc(`mikro-${id}`), {
+          companyId,
+          kasaAdi:  String(r[adKey] ?? '').trim() || `Kasa ${noKey ? r[noKey] : ''}`.trim(),
+          currency: 'TRY',
+          bakiye:   0,
+          source: 'mikro', syncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        n++;
+        if (++ops >= 450) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${n} kasa kasalar'a yazıldı (${adKey})`;
+    },
   });
 
   // 6. Ödeme planları → odemePlanlari (eski: OdemePlanListesiV2, V17'de YOK)

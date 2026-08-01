@@ -72,7 +72,7 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   // Mikro ham veri aynaları (2026-07-31). Kirli/ham satırlar tipli UI
   // koleksiyonlarını kirletmesin diye ayrı tutulur; temiz doküman postProcess
   // ile ilgili UI koleksiyonuna yazılır.
-  'mikroDepolar',
+  'mikroDepolar', 'mikroBankalar', 'mikroKasalar',
 ];
 
 /** Kullanıcının kendi verisi — `userId` ile izole. */

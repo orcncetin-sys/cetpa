@@ -16,6 +16,7 @@ import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import ModuleHeader from '../components/ModuleHeader';
 import DashboardAnalysis from '../components/DashboardAnalysis';
 import DateRangePicker from '../components/DateRangePicker';
+import SonSenkronRozeti from '../components/SonSenkronRozeti';
 import type { Order, Lead, InventoryItem, Shipment } from '../types';
 
 const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
@@ -123,6 +124,9 @@ export default function DashboardPage(props: Props) {
                 icon={LayoutDashboard}
                 actionButton={
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    {/* Mikro verisinin tazeliği — gece senkronu sessizce durursa
+                        burada görünür. Tıklayınca ERP Hub'a gider. */}
+                    <SonSenkronRozeti currentLanguage={currentLanguage} onNavigate={() => setActiveTab('settings')} />
                     <DashboardAnalysis data={{
                       orders: filteredOrders,
                       leads: filteredLeads,
