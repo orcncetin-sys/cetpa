@@ -110,9 +110,31 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     onConfirm: () => {},
   });
 
+  // Mikro'dan çekilen stok hareketleri inventoryMovements'a HAM satır olarak
+  // düşüyor (sth_stok_kod / sth_miktar / sth_tip / sth_tarih) — panel ise
+  // Cetpa şeması bekliyor (productName / quantity / type / timestamp). Eşleşme
+  // olmadığı için tablo "ÇIKIŞ · Mikro · —" diye boş görünüyordu (2026-08-01).
+  // Burada ham satırlar normalize edilir; sth_tip semantiği server'da sabit:
+  // 0 = giriş (alış), 1 = çıkış (satış) — bkz. server.ts ~7194.
   useEffect(() => {
-    setMovements(inventoryMovements);
-  }, [inventoryMovements]);
+    const norm = inventoryMovements.map(m => {
+      const raw = m as unknown as Record<string, unknown>;
+      const sku = raw.sth_stok_kod;
+      // Zaten normalize (Cetpa hareketi) ise dokunma.
+      if (m.type || typeof sku !== 'string' || !sku) return m;
+      const prod = inventory.find(p => p.sku === sku);
+      return {
+        ...m,
+        productId: prod?.id ?? sku,
+        productName: prod?.name ?? sku,
+        sku,
+        quantity: Math.abs(Number(raw.sth_miktar) || 0),
+        type: Number(raw.sth_tip) === 0 ? 'in' : 'out',
+        timestamp: (raw.sth_tarih as string) ?? m.timestamp,
+      } as typeof m;
+    });
+    setMovements(norm);
+  }, [inventoryMovements, inventory]);
 
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
