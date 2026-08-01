@@ -306,6 +306,31 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   // Bu kurulumda Mizan/KDV/Siparişler/Ödeme Planları yapısal olarak boş
   // (Mikro'da o modüller kullanılmıyor); yine de koşulurlar ki durum değişirse
   // kendiliğinden dolsunlar.
+  // Ham satır temizliği — 2026-08-01'de banka/kasa import'ları ham Mikro
+  // satırlarını tipli UI koleksiyonlarına dökmüştü ve Muhasebe modülü
+  // çöküyordu. Import düzeltildi; bu düğme CANLIDA kalmış kirli kayıtları siler.
+  const [temizlikRunning, setTemizlikRunning] = useState(false);
+  const [temizlikSonuc, setTemizlikSonuc] = useState<string | null>(null);
+
+  async function handleHamSatirTemizle() {
+    if (temizlikRunning) return;
+    setTemizlikRunning(true);
+    setTemizlikSonuc(null);
+    try {
+      const r = await fetch('/api/mikro/tamir/ham-satir-temizle', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
+      const d = await r.json() as { success?: boolean; silinen?: Record<string, number>; error?: string };
+      if (!r.ok || !d.success) { setTemizlikSonuc(d.error || 'Temizlik başarısız.'); return; }
+      const toplam = Object.values(d.silinen ?? {}).reduce((a, b) => a + b, 0);
+      setTemizlikSonuc(toplam === 0
+        ? 'Temizlenecek ham satır bulunamadı.'
+        : `${toplam} ham satır silindi (${Object.entries(d.silinen ?? {}).filter(([, v]) => v > 0).map(([k, v]) => `${k}: ${v}`).join(', ')}). Banka/Kasa/Depo import'larını yeniden çalıştırın.`);
+    } catch {
+      setTemizlikSonuc('Temizlik başarısız — sunucuya ulaşılamadı.');
+    } finally {
+      setTemizlikRunning(false);
+    }
+  }
+
   const [tumuRunning, setTumuRunning] = useState(false);
   const [tumuAdim, setTumuAdim] = useState<string | null>(null);
   const [tumuOzet, setTumuOzet] = useState<{ ok: number; hata: number; bitti: boolean } | null>(null);
@@ -729,9 +754,22 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
                 ? (t ? `Çekiliyor: ${tumuAdim ?? '...'}` : `Pulling: ${tumuAdim ?? '...'}`)
                 : (t ? 'Tümünü Çek' : 'Pull All')}
             </button>
+            <button
+              onClick={handleHamSatirTemizle}
+              disabled={temizlikRunning || tumuRunning}
+              title="Banka/Kasa/Depo koleksiyonlarına yanlışlıkla yazılmış ham Mikro satırlarını siler (elle girilenlere dokunmaz)"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-xs font-semibold hover:bg-amber-100 disabled:opacity-60 transition-colors"
+            >
+              {temizlikRunning ? 'Temizleniyor…' : 'Ham Satır Temizliği'}
+            </button>
           </div>
         </div>
 
+        {temizlikSonuc && (
+          <div className="mb-4 px-3 py-2 rounded-xl text-xs font-medium bg-amber-50 text-amber-800">
+            {temizlikSonuc}
+          </div>
+        )}
         {tumuOzet?.bitti && (
           <div className={`mb-4 px-3 py-2 rounded-xl text-xs font-medium ${tumuOzet.hata > 0 ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-700'}`}>
             {t
