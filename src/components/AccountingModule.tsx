@@ -3894,7 +3894,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   <button onClick={() => setEkstreMusteri(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
                 </div>
                 <div className="overflow-y-auto flex-1 p-2 sm:p-4">
-                  <CariEkstrePanel currentLanguage={currentLanguage} leadId={ekstreMusteri.id} customerName={ekstreMusteri.name} />
+                  {(() => {
+                    // Mikro cari kodu varsa gerçek fatura hareketleri gelir; yoksa
+                    // (elle eklenmiş müşteri) eski Cetpa orders/aging moduna düşer.
+                    const cariKod = (ekstreMusteri as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+                      || (ekstreMusteri as unknown as { code?: string }).code
+                      || ekstreMusteri.taxNo || '';
+                    return cariKod
+                      ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} balance={ekstreMusteri.balance || 0} customerName={ekstreMusteri.name} />
+                      : <CariEkstrePanel currentLanguage={currentLanguage} leadId={ekstreMusteri.id} customerName={ekstreMusteri.name} />;
+                  })()}
                 </div>
               </div>
             </div>

@@ -110,14 +110,20 @@ function BucketBar({ buckets, lang }: { buckets: AgingBuckets; lang: string }) {
 
 interface CariEkstrePanelProps {
   currentLanguage?: string;
-  leadId?: string;       // if set: show only this customer's data
+  leadId?: string;       // if set: show only this customer's data (Cetpa orders modu)
   customerName?: string; // display name for the header
+  /** Mikro cari kodu — verilirse ekstre mikroFaturalar'dan (gerçek fatura hareketleri) gelir. */
+  cariKod?: string;
+  /** cariBalances'tan gelen güncel bakiye — mikroFaturalar tahsilatı içermez, bakiye ayrı gelir. */
+  balance?: number;
 }
 
 export default function CariEkstrePanel({
   currentLanguage = 'tr',
   leadId,
   customerName,
+  cariKod,
+  balance,
 }: CariEkstrePanelProps) {
   const t = currentLanguage === 'tr';
 
@@ -128,8 +134,53 @@ export default function CariEkstrePanel({
   const [sortCol, setSortCol] = useState<'ageD' | 'amount' | 'customerName'>('ageD');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
-  // ── Live Firestore subscription ────────────────────────────────────────────
+  const mikroModu = !!cariKod;
+
+  // ── MİKRO MODU: cari'nin gerçek fatura hareketleri (mikroFaturalar) ──────────
+  // orders (Cetpa) boştu — Mikro carilerinde sipariş yok, fatura var. cariKod
+  // verilince ham mikroFaturalar okunur (cha_kod = cariKod). Her fatura bir
+  // ekstre satırı: tarih + evrak no + yön (satış/alış) + tutar. Vade, fatura
+  // tarihinden hesaplanır.
   useEffect(() => {
+    if (!mikroModu) return;
+    const ref = collection(db, 'mikroFaturalar');
+    const q = query(ref, where('cha_kod', '==', cariKod));
+    const unsub = onSnapshot(q, snap => {
+      const now = Date.now();
+      const newBuckets: AgingBuckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
+      const newRows: AgingRow[] = [];
+      snap.docs.forEach(d => {
+        const x = d.data() as Record<string, unknown>;
+        const dt = toDate(x.cha_tarihi);
+        const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
+        const amount = Number(x.cha_meblag ?? 0);
+        // cha_tip 0 = satış (giden), 1 = alış (gelen). Ekstrede yön etiketi.
+        const yon = Number(x.cha_tip ?? 0) === 1 ? (t ? 'Alış' : 'Purchase') : (t ? 'Satış' : 'Sale');
+        const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('') || (customerName ?? '—');
+        if (ageD <= 30)       newBuckets.current += amount;
+        else if (ageD <= 60)  newBuckets.d30     += amount;
+        else if (ageD <= 90)  newBuckets.d60     += amount;
+        else if (ageD <= 120) newBuckets.d90     += amount;
+        else                  newBuckets.over90  += amount;
+        newRows.push({
+          id: d.id,
+          customerName: String(evrakNo),
+          amount,
+          ageD,
+          status: yon,
+          createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
+        });
+      });
+      setBuckets(newBuckets);
+      setRows(newRows);
+      setLoading(false);
+    }, () => setLoading(false));
+    return () => unsub();
+  }, [mikroModu, cariKod, t, customerName]);
+
+  // ── ORDERS MODU (Cetpa, eski davranış — CRM aging) ──────────────────────────
+  useEffect(() => {
+    if (mikroModu) return;
     const ordersRef = collection(db, 'orders');
     let q = query(
       ordersRef,
@@ -176,7 +227,7 @@ export default function CariEkstrePanel({
     }, () => setLoading(false));
 
     return () => unsub();
-  }, [leadId]);
+  }, [mikroModu, leadId]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const totalAR = Object.values(buckets).reduce((s, v) => s + v, 0);
@@ -228,17 +279,25 @@ export default function CariEkstrePanel({
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 rounded-xl p-3 text-center">
-          <div className="text-[10px] text-blue-500 font-bold uppercase">{t ? 'Toplam Alacak' : 'Total AR'}</div>
+          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Fatura Toplamı' : 'Invoiced Total') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
           <div className="text-base font-bold text-blue-700">₺{fmt(totalAR)}</div>
         </div>
         <div className={`rounded-xl p-3 text-center ${overdueAR > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
           <div className={`text-[10px] font-bold uppercase ${overdueAR > 0 ? 'text-red-500' : 'text-green-500'}`}>{t ? 'Vadesi Geçmiş' : 'Overdue'}</div>
           <div className={`text-base font-bold ${overdueAR > 0 ? 'text-red-700' : 'text-green-700'}`}>₺{fmt(overdueAR)}</div>
         </div>
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <div className="text-[10px] text-gray-500 font-bold uppercase">{t ? 'Açık Sipariş' : 'Open Orders'}</div>
-          <div className="text-base font-bold text-gray-700">{rows.length}</div>
-        </div>
+        {mikroModu && balance !== undefined ? (
+          // Bakiye: eksi = Cetpa borçlu (yeşil), artı = cari borçlu (kırmızı).
+          <div className={`rounded-xl p-3 text-center ${balance < 0 ? 'bg-green-50' : balance > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+            <div className={`text-[10px] font-bold uppercase ${balance < 0 ? 'text-green-500' : balance > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? 'Bakiye' : 'Balance'}</div>
+            <div className={`text-base font-bold ${balance < 0 ? 'text-green-700' : balance > 0 ? 'text-red-700' : 'text-gray-700'}`}>₺{fmt(Math.abs(balance))}</div>
+          </div>
+        ) : (
+          <div className="bg-gray-50 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-gray-500 font-bold uppercase">{mikroModu ? (t ? 'Hareket' : 'Entries') : (t ? 'Açık Sipariş' : 'Open Orders')}</div>
+            <div className="text-base font-bold text-gray-700">{rows.length}</div>
+          </div>
+        )}
       </div>
 
       {/* Aging bar */}
@@ -276,7 +335,9 @@ export default function CariEkstrePanel({
         ) : displayed.length === 0 ? (
           <div className="py-10 text-center">
             <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-2" />
-            <p className="text-sm text-gray-500 font-medium">{t ? 'Açık alacak yok.' : 'No open receivables.'}</p>
+            <p className="text-sm text-gray-500 font-medium">
+              {mikroModu ? (t ? 'Bu cariye ait fatura hareketi yok.' : 'No invoice entries for this account.') : (t ? 'Açık alacak yok.' : 'No open receivables.')}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -288,7 +349,7 @@ export default function CariEkstrePanel({
                       onClick={() => handleSort('customerName')}
                       className="px-4 py-2.5 font-bold text-gray-400 uppercase text-[10px] cursor-pointer hover:text-gray-600 select-none"
                     >
-                      {t ? 'Müşteri' : 'Customer'} {sortCol === 'customerName' ? (sortDir === -1 ? '↓' : '↑') : ''}
+                      {mikroModu ? (t ? 'Belge No' : 'Doc No') : (t ? 'Müşteri' : 'Customer')} {sortCol === 'customerName' ? (sortDir === -1 ? '↓' : '↑') : ''}
                     </th>
                   )}
                   <th
