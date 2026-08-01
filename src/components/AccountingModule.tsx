@@ -793,8 +793,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
               // cha_tip 0 = satış (borç). Satışlar sekmesi yalnız satışı gösterir.
               _tip:     Number(x.cha_tip ?? 0),
+              // Mikro kayıt SİLMEZ, *_iptal=1 diye işaretler. İptal edilmiş
+              // faturayı geçerli göstermek yanlış olur. Alan yoksa (şema farkı)
+              // hiçbir şey filtrelenmez — savunmacı davranış.
+              _iptal:   x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
             };
-          }).filter(f => f._tip === 0).map(({ _tip, ...f }) => { void _tip; return f; }),
+          })
+          .filter(f => f._tip === 0 && !f._iptal)
+          .map(({ _tip, _iptal, ...f }) => { void _tip; void _iptal; return f; }),
         );
       }, () => setMikroFaturalar([])),
       // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
