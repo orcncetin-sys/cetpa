@@ -5907,6 +5907,44 @@ async function startServer() {
     res.json({ success: true, sonuc });
   });
 
+  /** GET /api/mikro/ebelge-tani — GelenFaturalarV2'nin HAM yanıtını döndürür.
+   *
+   *  E-Belge Merkezi'nde "Gelen" çekince "İstenilen aralıktaki kayıtlar
+   *  getirilirken hata oluştu" dönüyor — bu Mikro'nun KENDİ hatası, kod hatası
+   *  değil. Ham yanıtı görmeden kök neden bilinemez; tahminle parametre
+   *  değiştirmek (geçen sefer cha_cinsi'de yanıldığım hata sınıfı) yanlış olur.
+   *
+   *  Bu uç 3 farklı parametre setiyle metodu dener ve ham data'yı döndürür:
+   *  hangisi çalışıyor / Mikro tam olarak ne diyor görülür. sema-kesif ile
+   *  aynı token koruması; toplu veri dökmez (Size 5). */
+  app.get('/api/mikro/ebelge-tani', async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+
+    const yil = new Date().getFullYear();
+    const bugun = mikroBugun();
+    const denemeler: Array<{ ad: string; p: Record<string, unknown> }> = [
+      { ad: 'A_tam_parametre', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, GIBFaturaNo: '', VKNo: '', Size: 5, Index: 0 } },
+      { ad: 'B_size_index_yok', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, GIBFaturaNo: '', VKNo: '' } },
+      { ad: 'C_gibfaturano_yok', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, VKNo: '', Size: 5, Index: 0 } },
+      { ad: 'D_dar_aralik_1gun', p: { IlkTarih: bugun, SonTarih: bugun, GIBFaturaNo: '', VKNo: '', Size: 5, Index: 0 } },
+    ];
+    const sonuc: Record<string, unknown> = {};
+    for (const d of denemeler) {
+      try {
+        const { ok, status, data } = await mikroPost('GelenFaturalarV2', d.p);
+        sonuc[d.ad] = { ok, status, hata: mikroHata(data), ham: data };
+      } catch (e) {
+        sonuc[d.ad] = { hata: (e as Error).message };
+      }
+    }
+    res.json({ success: true, sonuc });
+  });
+
   /** POST /api/mikro/tamir/ham-satir-temizle — UI koleksiyonlarına yanlışlıkla
    *  dökülmüş HAM Mikro satırlarını siler.
    *
