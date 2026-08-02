@@ -137,6 +137,9 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         timestamp: (raw.sth_tarih as string) ?? m.timestamp,
         tutar,
         birimFiyat: miktar > 0 ? tutar / miktar : 0,
+        // Hangi cariye giriş/çıkış (kullanıcı isteği 2026-08-02). Mikro
+        // stok hareketi sth_cari_kodu taşır; ad çözülemezse kod gösterilir.
+        cariKod: (raw.sth_cari_kodu as string) ?? (raw.sth_cari_kod as string) ?? '',
       } as typeof m;
     });
     setMovements(norm);

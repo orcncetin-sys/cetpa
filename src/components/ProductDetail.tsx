@@ -21,6 +21,7 @@ interface InventoryMovement {
   timestamp?: unknown;
   date?: string;
   birimFiyat?: number;   // KDV hariç birim fiyat (Mikro hareketinden türetilir)
+  cariKod?: string;      // hangi cariye giriş/çıkış (Mikro sth_cari_kodu)
 }
 
 interface ProductDetailProps {
@@ -195,11 +196,13 @@ export default function ProductDetail({ product, onClose, movements = [] }: Prod
                         <td className={`px-4 py-3 text-xs text-right font-bold ${m.type === 'in' ? 'text-green-600' : 'text-red-500'}`}>
                           {m.type === 'in' ? '+' : '-'}{m.quantity}
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[200px]" title={m.notes || m.reason}>
-                          {(m.birimFiyat ?? 0) > 0
-                            ? <span className="font-medium text-gray-700">{tl(m.birimFiyat!)} <span className="text-gray-400">/ birim</span></span>
-                            : <span className="font-medium text-gray-700">{m.reason || '—'}</span>}
-                          {m.notes && <span className="ml-1 text-gray-400">— {m.notes}</span>}
+                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[240px]" title={m.cariKod || m.notes || m.reason}>
+                          {m.cariKod
+                            ? <span className="font-semibold text-gray-800">{m.type === 'in' ? 'Alış' : 'Satış'}: {m.cariKod}</span>
+                            : (m.birimFiyat ?? 0) > 0
+                              ? <span className="font-medium text-gray-700">{tl(m.birimFiyat!)} <span className="text-gray-400">/ birim</span></span>
+                              : <span className="font-medium text-gray-700">{m.reason || '—'}</span>}
+                          {m.cariKod && (m.birimFiyat ?? 0) > 0 && <span className="ml-1 text-gray-400">· {tl(m.birimFiyat!)}/br</span>}
                         </td>
                       </tr>
                       );
