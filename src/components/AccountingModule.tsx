@@ -1760,10 +1760,37 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     else { setMusteriSortKey(key); setMusteriSortDir('asc'); }
   };
 
-  // Tedarikçiler computed
+  // Tedarikçiler computed — TEK CARİ HAVUZU (kullanıcı kararı 2026-08-01):
+  // Mikro'da tek CARI_HESAPLAR var; her cari rolünü faturasından alır. Alış
+  // faturası (mikroFaturalar yon='gelen') olan cariler tedarikçidir. suppliers
+  // koleksiyonu Mikro'da boş olduğu için ekran bomboştu.
+  const alisCariKodSet = new Set(
+    mikroFaturalar.filter(f => f.yon === 'gelen').map(f => f.cariKod).filter(Boolean),
+  );
+  const mikroTedarikcileri: Supplier[] = customers
+    .filter(c => {
+      const kod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+        || (c as unknown as { code?: string }).code || c.taxNo;
+      return !!kod && alisCariKodSet.has(kod);
+    })
+    .map(c => ({
+      id: c.id,
+      name: c.name,
+      company: c.company || '',
+      email: c.email || '',
+      phone: c.phone || '',
+      taxNo: c.taxNo || '',
+      address: c.address || '',
+    } as Supplier));
+  // Üç kaynak: elle girilmiş suppliers + leads(type='Supplier') + alış faturalı
+  // cariler. Ad/vergi no ile dedup.
+  const birlesikTedarikciler = [
+    ...mikroSuppliers,
+    ...mikroTedarikcileri.filter(m => !mikroSuppliers.some(s => s.name === m.name || (!!s.taxNo && s.taxNo === m.taxNo))),
+  ];
   const allSuppliers = [
     ...suppliers,
-    ...mikroSuppliers.filter(m => !suppliers.some(s => s.name === m.name)),
+    ...birlesikTedarikciler.filter(m => !suppliers.some(s => s.name === m.name || (!!s.taxNo && s.taxNo === m.taxNo))),
   ];
   const displayedTedarikciler = allSuppliers
     .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company || '').toLowerCase().includes(supplierSearch.toLowerCase()))
