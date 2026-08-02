@@ -4752,7 +4752,7 @@ async function startServer() {
         ].filter(p => p.sfiyat_fiyati > 0),
       };
 
-      const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] });
+      const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] }, true); // V17: stoklar Mikro objesi İÇİNDE (inMikro)
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
@@ -4881,7 +4881,8 @@ async function startServer() {
         }],
       };
 
-      const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] });
+      // inMikro: V17 evrak kalıbı — payload (cariler) Mikro objesi İÇİNDE gider.
+      const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] }, true);
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
@@ -5056,9 +5057,10 @@ async function startServer() {
         sip_vergisiz_fl:  false,
       }));
 
+      // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
       const { ok, data, status } = await mikroPost('SiparisKaydetV2', {
         evraklar: [{ satirlar }],
-      });
+      }, true);
 
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
