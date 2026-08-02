@@ -1980,8 +1980,18 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const d = new Date(e.date);
     return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear;
   });
-  const hesaplananKDV = kdvFilteredEntries.filter(e => e.alacakHesap === '391 - Hesaplanan KDV').reduce((s, e) => s + e.alacak, 0);
-  const indirilecekKDV = kdvFilteredEntries.filter(e => e.debitHesap === '191 - İndirilecek KDV').reduce((s, e) => s + e.borc, 0);
+  // Mikro faturalarından KDV özeti (2026-08-02): journalEntries boş — Mikro'da
+  // muhasebe fişi yok. Satış faturası (giden) KDV'si = HESAPLANAN (391); alış
+  // faturası (gelen) = İNDİRİLECEK (191). Seçili döneme (ay/yıl) filtrelenir.
+  // mikroFaturalar zaten iptal edilmişleri dışlamış (server + client _iptal).
+  const mikroKdvDonem = mikroFaturalar.filter(f => {
+    const ts = String((f as { tarih?: string }).tarih || '');
+    return Number(ts.slice(0, 4)) === kdvYear && Number(ts.slice(5, 7)) === kdvMonth;
+  });
+  const mikroHesaplananKDV = mikroKdvDonem.filter(f => f.yon === 'giden').reduce((s, f) => s + (Number((f as { kdv?: number }).kdv) || 0), 0);
+  const mikroIndirilecekKDV = mikroKdvDonem.filter(f => f.yon === 'gelen').reduce((s, f) => s + (Number((f as { kdv?: number }).kdv) || 0), 0);
+  const hesaplananKDV = kdvFilteredEntries.filter(e => e.alacakHesap === '391 - Hesaplanan KDV').reduce((s, e) => s + e.alacak, 0) + mikroHesaplananKDV;
+  const indirilecekKDV = kdvFilteredEntries.filter(e => e.debitHesap === '191 - İndirilecek KDV').reduce((s, e) => s + e.borc, 0) + mikroIndirilecekKDV;
   const odenecekKDV = hesaplananKDV - indirilecekKDV;
   // Matrah yalnız gelir (alacakHesap 6xx) fişlerinden, oran bazında; KDV = matrah*oran.
   // (Önceki sürüm her borç satırından matrah uyduruyordu.)

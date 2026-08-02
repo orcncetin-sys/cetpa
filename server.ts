@@ -5927,11 +5927,19 @@ async function startServer() {
 
     const yil = new Date().getFullYear();
     const bugun = mikroBugun();
+    // Kullanıcı Mikro programından e-faturalara ERİŞEBİLİYOR → GİB bağlantısı var,
+    // sorun büyük olasılıkla parametre. Tek denenmemiş: VKNo (firma VKN'si).
+    // ?vkn=... ile geç; E/F denemeleri onu kullanır.
+    const vkn = String(req.query.vkn ?? '').replace(/\D/g, '').slice(0, 11);
     const denemeler: Array<{ ad: string; p: Record<string, unknown> }> = [
       { ad: 'A_tam_parametre', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, GIBFaturaNo: '', VKNo: '', Size: 5, Index: 0 } },
       { ad: 'B_size_index_yok', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, GIBFaturaNo: '', VKNo: '' } },
       { ad: 'C_gibfaturano_yok', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, VKNo: '', Size: 5, Index: 0 } },
       { ad: 'D_dar_aralik_1gun', p: { IlkTarih: bugun, SonTarih: bugun, GIBFaturaNo: '', VKNo: '', Size: 5, Index: 0 } },
+      ...(vkn ? [
+        { ad: 'E_vkn_ile', p: { IlkTarih: `${yil}-07-01`, SonTarih: bugun, GIBFaturaNo: '', VKNo: vkn, Size: 5, Index: 0 } },
+        { ad: 'F_vkn_dar_aralik', p: { IlkTarih: bugun, SonTarih: bugun, GIBFaturaNo: '', VKNo: vkn, Size: 5, Index: 0 } },
+      ] : []),
     ];
     const sonuc: Record<string, unknown> = {};
     for (const d of denemeler) {
