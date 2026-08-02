@@ -56,7 +56,7 @@ export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   { id: 'kdv',              tr: 'KDV',                 en: 'VAT',             icon: Calculator,    target: A('kdv') },             // ← 'kdv' (KDV Analiz) indirgendi
   { id: 'gelir',            tr: 'Gelir/Gider',         en: 'Income/Expense',  icon: BarChart3,     target: A('gelir') },
   { id: 'satislar',         tr: 'Satışlar',            en: 'Sales',           icon: ShoppingCart,  target: A('satislar') },
-  { id: 'musteriler',       tr: 'Müşteriler',          en: 'Customers',       icon: Users,         target: A('musteriler') },
+  { id: 'musteriler',       tr: 'Cariler',             en: 'Accounts',        icon: Users,         target: A('musteriler') },
   { id: 'tedarikciler',     tr: 'Tedarikçiler',        en: 'Suppliers',       icon: Truck,         target: A('tedarikciler') },
   { id: 'urunler',          tr: 'Hizmet & Ürünler',    en: 'Services & Items',icon: Package,       target: A('urunler') },
   { id: 'calisanlar',       tr: 'Çalışanlar',          en: 'Employees',       icon: Users,         target: A('calisanlar') },

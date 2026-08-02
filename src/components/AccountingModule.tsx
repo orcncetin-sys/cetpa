@@ -207,7 +207,7 @@ const AT = {
     importedLabel: 'İçe aktarıldı',
     searchAccounts: 'Hesap ara...',
     sortBy: 'Sırala',
-    satislar: 'Satışlar', musteriler: 'Müşteriler', tedarikciler: 'Tedarikçiler',
+    satislar: 'Satışlar', musteriler: 'Cariler', tedarikciler: 'Tedarikçiler',
     urunler: 'Hizmet & Ürünler', depo: 'Depo', transfer: 'Depolar Arası',
     cekler: 'Çekler', calisanlar: 'Çalışanlar', gidenIrsaliye: 'Giden İrsaliye',
     gelenIrsaliye: 'Gelen İrsaliye', butce: 'Bütçe', isletme_sermayesi: 'İşletme Sermayesi',
@@ -273,7 +273,7 @@ const AT = {
     importedLabel: 'Imported',
     searchAccounts: 'Search accounts...',
     sortBy: 'Sort',
-    satislar: 'Sales', musteriler: 'Customers', tedarikciler: 'Suppliers',
+    satislar: 'Sales', musteriler: 'Accounts', tedarikciler: 'Suppliers',
     urunler: 'Services & Products', depo: 'Warehouse', transfer: 'Inter-Warehouse',
     cekler: 'Checks', calisanlar: 'Employees', gidenIrsaliye: 'Outgoing Waybills',
     gelenIrsaliye: 'Incoming Waybills', butce: 'Budget', isletme_sermayesi: 'Working Capital',
@@ -1767,6 +1767,21 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const alisCariKodSet = new Set(
     mikroFaturalar.filter(f => f.yon === 'gelen').map(f => f.cariKod).filter(Boolean),
   );
+  // Satış faturası olan cariler = müşteri. Rol, cari'nin faturasından türer.
+  const satisCariKodSet = new Set(
+    mikroFaturalar.filter(f => f.yon === 'giden').map(f => f.cariKod).filter(Boolean),
+  );
+  /** Bir cari'nin rolü: satış faturası varsa müşteri, alış varsa tedarikçi. */
+  const cariRol = (c: Customer): { label: string; cls: string } | null => {
+    const kod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+      || (c as unknown as { code?: string }).code || c.taxNo || '';
+    const m = !!kod && satisCariKodSet.has(kod);
+    const td = !!kod && alisCariKodSet.has(kod);
+    if (m && td) return { label: currentLanguage === 'tr' ? 'Müşteri + Tedarikçi' : 'Customer + Supplier', cls: 'bg-purple-100 text-purple-700' };
+    if (td)      return { label: currentLanguage === 'tr' ? 'Tedarikçi' : 'Supplier', cls: 'bg-amber-100 text-amber-700' };
+    if (m)       return { label: currentLanguage === 'tr' ? 'Müşteri' : 'Customer', cls: 'bg-teal-100 text-teal-700' };
+    return null;
+  };
   const mikroTedarikcileri: Supplier[] = customers
     .filter(c => {
       const kod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
@@ -3856,10 +3871,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   {displayedMusteriler.map(c => (
                     <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3 font-medium text-gray-800">
-                        <button onClick={() => setEkstreMusteri(c)} className="text-left hover:text-[#ff4000] hover:underline transition-colors"
+                        <button onClick={() => setEkstreMusteri(c)} className="text-left hover:text-[#ff4000] hover:underline transition-colors block"
                           title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri gör' : 'View account statement'}>
                           {c.name}
                         </button>
+                        {(() => { const r = cariRol(c); return r ? <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${r.cls}`}>{r.label}</span> : null; })()}
                       </td>
                       <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{c.company || '—'}</td>
                       <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{c.email || '—'}</td>
