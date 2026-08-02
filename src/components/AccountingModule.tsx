@@ -491,6 +491,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   /** Fatura yönü — Mikro'da hem giden (satış) hem gelen (alış) fatura var.
    *  Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */
   const [faturaYon, setFaturaYon] = useState<'hepsi' | 'giden' | 'gelen'>('hepsi');
+  // Fatura yıl filtresi — import TÜM yılları çekiyor (2020+), KPI hepsini
+  // topluyordu; kullanıcı 2026 raporuyla karşılaştırınca "132M hatalı" sandı.
+  // Aslında cha_cinsi=6 doğru; 2026 alışı 12,8M (portal 13,9M ✓). Varsayılan
+  // cari yıl; 'hepsi' ile tüm zamanlar.
+  const [faturaYil, setFaturaYil] = useState<string>(String(new Date().getFullYear()));
   /** Fatura detay penceresi (XML/PDF indirme) — 2026-08-01 kullanıcı isteği. */
   const [faturaDetay, setFaturaDetay] = useState<MikroFaturaDetayVerisi | null>(null);
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
@@ -1706,6 +1711,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // GİDEN fatura gösterir — satış tanımı gereği.
   const mikroFaturaSatirlari = mikroFaturalar
     .filter(f => faturaYon === 'hepsi' || f.yon === faturaYon)
+    // Yıl filtresi: tarih 'YYYY-...' ile başlıyorsa o yıl. 'hepsi' → tüm yıllar.
+    .filter(f => faturaYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(faturaYil)))
     .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
     .filter(f => {
@@ -2222,6 +2229,21 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 </button>
               ))}
             </div>
+            {/* Yıl filtresi — import tüm yılları çekiyor; varsayılan cari yıl.
+                Yıllar mikroFaturalar tarihlerinden türetilir. */}
+            {(() => {
+              const yillar = Array.from(new Set(
+                mikroFaturalar.map(f => (typeof f.tarih === 'string' ? f.tarih.slice(0, 4) : '')).filter(y => /^\d{4}$/.test(y)),
+              )).sort((a, b) => b.localeCompare(a));
+              if (yillar.length === 0) return null;
+              return (
+                <select value={faturaYil} onChange={e => setFaturaYil(e.target.value)}
+                  className="px-3 py-1.5 rounded-2xl text-xs font-bold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#ff4000]">
+                  <option value="hepsi">{currentLanguage==='tr'?'Tüm Yıllar':'All Years'}</option>
+                  {yillar.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              );
+            })()}
           </div>
 
           {/* Invoices table */}
