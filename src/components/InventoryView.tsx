@@ -1152,8 +1152,15 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               ) : (
                 <div className="divide-y divide-gray-50">
-                  {movements.map((mov) => (
-                    <div key={mov.id} className="py-3 first:pt-0 last:pb-0">
+                  {movements.map((mov) => {
+                    // Harekete tıklayınca ürün detayını aç (no-op'tı — 2026-08-02).
+                    // productId (normalize) veya SKU ile envanterdeki ürünü bul.
+                    const movProd = inventory.find(p => p.id === (mov as unknown as { productId?: string }).productId || (!!(mov as unknown as { sku?: string }).sku && p.sku === (mov as unknown as { sku?: string }).sku));
+                    return (
+                    <div key={mov.id}
+                      onClick={() => { if (movProd) setSelectedProduct(movProd); }}
+                      className={cn('py-3 first:pt-0 last:pb-0 rounded-lg -mx-1 px-1 transition-colors', movProd ? 'cursor-pointer hover:bg-gray-50' : '')}
+                      title={movProd ? (currentLanguage === 'tr' ? 'Ürün detayını gör' : 'View product detail') : undefined}>
                       <div className="flex items-center justify-between mb-1">
                         <span className={cn(
                           'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded',
@@ -1165,7 +1172,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           {mov.timestamp && typeof (mov.timestamp as { toDate?: () => Date }).toDate === 'function' ? format((mov.timestamp as { toDate: () => Date }).toDate(), 'HH:mm') : ''}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between gap-1">
+                      <div className="flex items-center justify-between gap-1" onClick={e => e.stopPropagation()}>
                         <p className="text-xs font-bold text-gray-900 truncate">{mov.productName}</p>
                         <MikroPushButton
                           compact
@@ -1195,7 +1202,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                         </span>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
