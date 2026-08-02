@@ -1727,6 +1727,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Satışlar sekmesi: yalnız giden (satış) faturaları.
   const mikroSatisSatirlari = mikroFaturaSatirlari.filter(f => f.yon === 'giden');
   const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
+  const mikroSatisKdvToplam = mikroSatisSatirlari.reduce((t, f) => t + (f.kdv || 0), 0);
+  // Mikro satış faturaları tanım gereği FATURALI. Satışlar KPI'larına additive
+  // katılır (satisKaynak Mikro'yu içeriyorsa); orders mantığı (q-serisi faturasız
+  // dahil) korunur — kullanıcının "bu modülü bozma" uyarısı gereği toplamlar
+  // toplanır, drill-down/orders akışına dokunulmaz.
+  const mikroDahil = satisKaynak !== 'cetpa';
+  const mikroSatisAdet = mikroDahil ? mikroSatisSatirlari.length : 0;
+  const mikroSatisCiro = mikroDahil ? mikroSatisToplam : 0;
+  const mikroSatisKdv = mikroDahil ? mikroSatisKdvToplam : 0;
 
   // Satışlar computed
   const displayedSatis = orders
@@ -3643,7 +3652,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   <FileText size={15} className="text-blue-600" />
                 </div>
               </div>
-              <p className="text-xl font-bold text-blue-600">{orders.filter((o: { faturali?: boolean }) => o.faturali).length} / {orders.filter((o: { faturali?: boolean }) => !o.faturali).length}</p>
+              <p className="text-xl font-bold text-blue-600">{orders.filter((o: { faturali?: boolean }) => o.faturali).length + mikroSatisAdet} / {orders.filter((o: { faturali?: boolean }) => !o.faturali).length}</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı / Faturasız</p>
             </button>
             {/* Toplam KDV — stays TRY */}
@@ -3653,8 +3662,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   <Calculator size={15} className="text-purple-600" />
                 </div>
               </div>
-              <p className="text-xl font-bold text-purple-600">{formatTRY(orders.reduce((s: number, o: { kdvTutari?: number }) => s + (o.kdvTutari || 0), 0))}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam KDV</p>
+              <p className="text-xl font-bold text-purple-600">{formatTRY(orders.reduce((s: number, o: { kdvTutari?: number }) => s + (o.kdvTutari || 0), 0) + mikroSatisKdv)}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam KDV{mikroDahil && mikroSatisKdv > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
             </button>
           </div>
           {/* KPI Cards Row 2 */}
@@ -3674,8 +3683,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   ))}
                 </div>
               </div>
-              <p className="text-xl font-bold text-green-600">{formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro</p>
+              <p className="text-xl font-bold text-green-600">{formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) + mikroSatisCiro)}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro{mikroDahil && mikroSatisCiro > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
             </div>
             {/* Faturasız Ciro */}
             <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturasız Ciro Detayı' : 'Non-Invoiced Revenue Detail', rows: orders.filter((o: { faturali?: boolean }) => !o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(orders.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
