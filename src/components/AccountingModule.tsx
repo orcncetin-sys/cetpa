@@ -2019,6 +2019,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     kdvOranBreakdown[oran].matrah += matrah;
     kdvOranBreakdown[oran].kdv += matrah * (oran / 100);
   });
+  // Mikro satış faturaları oran bazında (2026-08-02): tablo journalEntries'ten
+  // türüyordu, o boş → tablo boştu. mikroFaturaSatirlari matrah/kdv/oran taşır.
+  mikroKdvDonem.filter(f => f.yon === 'giden').forEach(f => {
+    const oran = Number((f as { oran?: number }).oran) || 0;
+    if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
+    kdvOranBreakdown[oran].matrah += Number((f as { matrah?: number }).matrah) || 0;
+    kdvOranBreakdown[oran].kdv += Number((f as { kdv?: number }).kdv) || 0;
+  });
 
   const tabs = [
     { key: 'faturalar', label: currentLanguage === 'tr' ? 'Faturalar' : 'Invoices', icon: FileText },
