@@ -60,7 +60,9 @@ export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   { id: 'tedarikciler',     tr: 'Tedarikçiler',        en: 'Suppliers',       icon: Truck,         target: A('tedarikciler') },
   { id: 'urunler',          tr: 'Hizmet & Ürünler',    en: 'Services & Items',icon: Package,       target: A('urunler') },
   { id: 'calisanlar',       tr: 'Çalışanlar',          en: 'Employees',       icon: Users,         target: A('calisanlar') },
-  { id: 'depo',             tr: 'Depo',                en: 'Warehouse',       icon: Package,       target: A('depo') },
+  // 'depo' (Depo operasyonu) KALDIRILDI — Lojistik & Depo menüsünde zaten var,
+  // Muhasebe'de tekrar ediyordu (kullanıcı bildirdi). Depo Tanımları (tanım ekranı)
+  // ve Depolar Arası (transfer) ayrı işlevler, burada kalır.
   { id: 'warehouses',       tr: 'Depo Tanımları',      en: 'Warehouse Defs',  icon: Home,          target: A('warehouses') },
   { id: 'transfer',         tr: 'Depolar Arası',       en: 'Transfers',       icon: ArrowRightLeft,target: A('transfer') },
   { id: 'giden_irsaliye',   tr: 'Giden İrsaliye',      en: 'Outbound Waybill',icon: FileUp,        target: A('giden_irsaliye') },

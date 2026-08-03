@@ -95,12 +95,66 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
     return () => unsubscribe();
   }, [userRole]);
 
+  // ── Mikro cari bakiyeleri (gerçek risk kaynağı) ─────────────────────────────
+  // customerRisks (Cetpa) hiç dolmuyor → panel hep ₺0 görünüyordu. Gerçek bakiye
+  // cariBalances'ta (Mikro, /api/mikro/pull/bakiye doldurur; doc id = cariKod,
+  // {cariKod, bakiye}). İsim/limit için leads (mikroCariKod ile eşleşir).
+  const [cariBalances, setCariBalances] = useState<Map<string, number>>(new Map());
+  const [mikroLeads, setMikroLeads] = useState<Array<{ cariKod: string; name: string; creditLimit: number }>>([]);
+
+  useEffect(() => {
+    if (!userRole) return;
+    const unsub = onSnapshot(collection(db, 'cariBalances'), (snapshot) => {
+      const m = new Map<string, number>();
+      snapshot.docs.forEach(d => {
+        const x = d.data() as Record<string, unknown>;
+        const kod = String(x.cariKod ?? d.id).trim();
+        if (kod) m.set(kod, Number(x.bakiye ?? 0));
+      });
+      setCariBalances(m);
+    }, (error) => logFirestoreError(error, OperationType.LIST, 'cariBalances'));
+    return () => unsub();
+  }, [userRole]);
+
+  useEffect(() => {
+    if (!userRole) return;
+    const unsub = onSnapshot(collection(db, 'leads'), (snapshot) => {
+      setMikroLeads(snapshot.docs.map(d => {
+        const x = d.data() as Record<string, unknown>;
+        return {
+          cariKod: String(x.mikroCariKod ?? '').trim(),
+          name: String(x.company ?? x.name ?? '—'),
+          creditLimit: Number(x.creditLimit ?? 0),
+        };
+      }).filter(l => l.cariKod));
+    }, (error) => logFirestoreError(error, OperationType.LIST, 'leads'));
+    return () => unsub();
+  }, [userRole]);
+
+  // Etkin risk listesi. customerRisks (Cetpa) BAYAT — isim var ama bakiye hep 0
+  // (ekranda görünen sorun buydu). Bu yüzden Mikro bakiyesi (cariBalances) VARSA
+  // gerçek kaynak odur; customerRisks yalnız Mikro hiç çekilmemişse geriye-uyum.
+  // Bakiye>0 = müşteri Cetpa'ya borçlu (exposure). Skor = kredi limiti kullanım
+  // oranı; limit yoksa 0 (hesaplanamaz — uydurmuyoruz, bakiye yine listelenir).
+  const effectiveRisks = useMemo<CustomerRisk[]>(() => {
+    if (cariBalances.size && mikroLeads.length) {
+      return mikroLeads.map(l => {
+        const bakiye = cariBalances.get(l.cariKod) ?? 0;
+        const limit = l.creditLimit || 0;
+        const score = limit > 0 ? Math.min(100, Math.max(0, Math.round((bakiye / limit) * 100))) : 0;
+        return { id: l.cariKod, customerName: l.name, currentBalance: bakiye, creditLimit: limit, riskScore: score };
+      }).filter(r => r.currentBalance !== 0 || r.creditLimit > 0);
+    }
+    return risks;
+  }, [risks, cariBalances, mikroLeads]);
+
   const kpis = useMemo(() => {
-    const totalExposure = risks.reduce((sum, r) => sum + (Number(r.currentBalance) || 0), 0);
-    const highRiskCount = risks.filter(r => Number(r.riskScore) > 70).length;
-    const avgRiskScore = risks.length > 0 ? (risks.reduce((sum, r) => sum + Number(r.riskScore), 0) / risks.length).toFixed(1) : 0;
+    // Exposure = yalnız POZİTİF bakiyeler (müşteri borcu). Eksi = Cetpa borçlu, risk değil.
+    const totalExposure = effectiveRisks.reduce((sum, r) => sum + Math.max(0, Number(r.currentBalance) || 0), 0);
+    const highRiskCount = effectiveRisks.filter(r => Number(r.riskScore) > 70).length;
+    const avgRiskScore = effectiveRisks.length > 0 ? (effectiveRisks.reduce((sum, r) => sum + Number(r.riskScore), 0) / effectiveRisks.length).toFixed(1) : 0;
     return { totalExposure, highRiskCount, avgRiskScore };
-  }, [risks]);
+  }, [effectiveRisks]);
 
   const chartData = useMemo(() => {
     const tr = currentLanguage === 'tr';
@@ -109,14 +163,14 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
       [tr ? 'Orta' : 'Mid']: 0,
       [tr ? 'Yüksek' : 'High']: 0
     };
-    risks.forEach(r => {
+    effectiveRisks.forEach(r => {
       const score = Number(r.riskScore);
       if (score < 40) categories[tr ? 'Düşük' : 'Low']++;
       else if (score < 70) categories[tr ? 'Orta' : 'Mid']++;
       else categories[tr ? 'Yüksek' : 'High']++;
     });
     return Object.entries(categories).map(([name, value]) => ({ name, value }));
-  }, [risks, currentLanguage]);
+  }, [effectiveRisks, currentLanguage]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 5;
@@ -141,9 +195,9 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
   }, [orders, leads]);
 
   const filteredRisks = useMemo(() => {
-    let base = risks;
-    if (activeFilter === 'highRisk') base = risks.filter(r => Number(r.riskScore) > 70);
-    else if (activeFilter === 'exposure') base = risks.filter(r => (Number(r.currentBalance) || 0) > 0);
+    let base = effectiveRisks;
+    if (activeFilter === 'highRisk') base = effectiveRisks.filter(r => Number(r.riskScore) > 70);
+    else if (activeFilter === 'exposure') base = effectiveRisks.filter(r => (Number(r.currentBalance) || 0) > 0);
     return [...base].sort((a, b) => {
       const av = Number(a[riskSort.key]) || String(a[riskSort.key] || '');
       const bv = Number(b[riskSort.key]) || String(b[riskSort.key] || '');
@@ -151,7 +205,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
       if (av > bv) return riskSort.dir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [risks, activeFilter, riskSort]);
+  }, [effectiveRisks, activeFilter, riskSort]);
 
   const sortedOverdue = useMemo(() => [...overdueOrders].sort((a, b) => {
     const av = (a as Record<string, unknown>)[overdueSort.key] as string | number ?? '';
