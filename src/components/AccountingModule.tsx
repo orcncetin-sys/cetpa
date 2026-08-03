@@ -1727,12 +1727,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     .filter(f => faturaYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(faturaYil)))
     .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
     // e-belge türü filtresi (eskiden yalnız Cetpa invoices'a uygulanıyordu):
-    // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. İhracat cha_ebelge_turu'da YOK (ayrı
-    // kavram) → o filtrede Mikro faturası ayırt edilemez, gösterilmez.
+    // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. Tür BİLİNMİYORSA (-1: cha_ebelge_turu
+    // Mikro'da dolu değil) filtreden GİZLEME — aksi halde alan boşsa e-Fatura/e-Arşiv
+    // seçince liste bombos görünür. Yalnız KESİN karşıt türü ele; İhracat türü
+    // cha_ebelge_turu'da YOK (ayrı kavram) → o filtrede Mikro faturası gösterilmez.
     .filter(f => {
       if (invoiceTypeFilter === 'all') return true;
-      if (invoiceTypeFilter === 'e-fatura') return f.ebelgeTuru === 0;
-      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1;
+      if (invoiceTypeFilter === 'e-fatura') return f.ebelgeTuru === 0 || f.ebelgeTuru === -1;
+      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1 || f.ebelgeTuru === -1;
       return false; // ihracat
     })
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
