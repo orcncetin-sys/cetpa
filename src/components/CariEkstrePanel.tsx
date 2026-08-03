@@ -179,7 +179,11 @@ export default function CariEkstrePanel({
         const borc = Number(x.cha_tip ?? 0) === 0;
         const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
         const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
-        const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('') || (customerName ?? '—');
+        // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
+        // hareketleri ne olduğuyla görünür (kullanıcı isteği). Yoksa evrak no'ya düş.
+        const aciklama = String(x.cha_aciklama ?? '').trim();
+        const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('');
+        const anaEtiket = aciklama || evrakNo || (customerName ?? '—');
         // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
         // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
         // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
@@ -193,11 +197,11 @@ export default function CariEkstrePanel({
         }
         newRows.push({
           id: d.id,
-          customerName: String(evrakNo),
+          customerName: anaEtiket,
           amount,
           ageD,
-          // Tip + yön: "Masraf · Borç", "Tahsilat/Tediye · Alacak", "Fatura · Borç".
-          status: `${tipEtiket} · ${yon}`,
+          // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
+          status: `${tipEtiket} · ${yon}${aciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
           createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
         });
       });

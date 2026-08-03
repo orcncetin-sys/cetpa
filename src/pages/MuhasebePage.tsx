@@ -3205,8 +3205,21 @@ export default function MuhasebePage(props: Props) {
                     // eski kod totalPrice'ı 1.18'e bölüyordu — burada bölme YOK, gerçek
                     // matrah/kdv kullanılır (daha doğru). oran vergiPntr'den (20/10/0/1).
                     const donemFaturalar = mikroFaturalar.filter(f => f.yon === 'giden' && f.tarih.startsWith(p617Month));
-                    const totalRevenue = donemFaturalar.reduce((s, f) => s + f.tutar, 0);
-                    const totalMatrah = donemFaturalar.reduce((s, f) => s + f.matrah, 0);
+                    // Faturasız satış/işlemler (Cetpa, Mikro'ya gitmeyen KDV'siz satışlar):
+                    // Mikro-only rewrite'ta bu %0/Muaf kalemi düşmüştü — geri kondu (additive,
+                    // ayrı bantta, KDV=0). Faturalı olanlar Mikro/oran bandında.
+                    const [fy617, fm617] = p617Month.split('-').map(Number);
+                    const donemFaturasiz = orders.filter(o => {
+                      if (o.status === 'Cancelled') return false;
+                      const inv = o as unknown as { faturali?: boolean; hasInvoice?: boolean };
+                      if (inv.faturali ?? inv.hasInvoice ?? false) return false;
+                      const raw = o.createdAt ?? (o as unknown as { syncedAt?: unknown }).syncedAt;
+                      const d = raw ? new Date(typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : (raw as string)) : null;
+                      return !!d && d.getFullYear() === fy617 && d.getMonth() + 1 === fm617;
+                    });
+                    const faturasizTutar = donemFaturasiz.reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
+                    const totalRevenue = donemFaturalar.reduce((s, f) => s + f.tutar, 0) + faturasizTutar;
+                    const totalMatrah = donemFaturalar.reduce((s, f) => s + f.matrah, 0) + faturasizTutar;
                     const totalKdv = donemFaturalar.reduce((s, f) => s + f.kdv, 0);
                     // Oran bazlı gruplama — DİNAMİK (veride hangi oranlar varsa). Sabit
                     // %18/%8 bandı yanlıştı: TR oranları 20/10/1/0'a geçti.
@@ -3249,9 +3262,17 @@ export default function MuhasebePage(props: Props) {
                                 <span className="text-gray-400">{row.count} {tr617?'fatura':'invoices'}</span>
                               </div>
                             ))}
+                            {donemFaturasiz.length > 0 && (
+                              <div key="faturasiz" className="grid grid-cols-4 px-4 py-3 text-xs bg-gray-50/60">
+                                <span className="font-bold text-gray-500">{tr617?'Faturasız / Muaf':'Non-Invoiced / Exempt'}</span>
+                                <span className="tabular-nums text-gray-600">₺{Math.round(faturasizTutar).toLocaleString('tr-TR')}</span>
+                                <span className="tabular-nums font-bold text-gray-800">₺0</span>
+                                <span className="text-gray-400">{donemFaturasiz.length} {tr617?'işlem':'txns'}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
-                        {donemFaturalar.length === 0 && (
+                        {donemFaturalar.length === 0 && donemFaturasiz.length === 0 && (
                           <p className="text-center text-gray-400 text-sm py-8">{tr617?`${p617Month} döneminde Mikro satış faturası bulunamadı. "Faturalar" çekilmiş mi?`:`No Mikro sales invoices for ${p617Month}.`}</p>
                         )}
                       </motion.div>
