@@ -1906,6 +1906,37 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     else { setDepoSortKey(key); setDepoSortDir('asc'); }
   };
 
+  // Bir depoda görünecek kalemler + O DEPODAKİ miktar. Mikro ürünleri (doc id
+  // 'mikro-' ile başlar) TEK depoya toplanmaz — depoBreakdown ile stoğu olan HER
+  // depoda kendi miktarıyla görünür (kullanıcı isteği). Manuel ürünler tek warehouseId.
+  const depoKalemleriIcin = (whId: string): Array<WarehouseItem & { quantity: number }> => {
+    const depoNo = whId.startsWith('mikro-depo-') ? whId.slice('mikro-depo-'.length) : null;
+    const out: Array<WarehouseItem & { quantity: number }> = [];
+    for (const wi of warehouseItems) {
+      if (String(wi.id).startsWith('mikro-')) {
+        const bd = (wi as unknown as { depoBreakdown?: Record<string, number> | null }).depoBreakdown;
+        const q = bd && depoNo ? Number(bd[depoNo] ?? 0) : 0;
+        if (q > 0) out.push({ ...wi, quantity: q });
+        // depoBreakdown yok/0 → bu depoda gösterme (bayat warehouseId'ye DÜŞME).
+      } else if (wi.warehouseId === whId) {
+        out.push(wi);
+      }
+    }
+    return out;
+  };
+
+  // Düz listede depo sütunu: mikro ürün stoğu olan HER depoyu miktarıyla gösterir.
+  const depoDagilimEtiket = (wi: WarehouseItem): string => {
+    const bd = (wi as unknown as { depoBreakdown?: Record<string, number> | null }).depoBreakdown;
+    if (bd && Object.keys(bd).length) {
+      return Object.entries(bd)
+        .sort((a, b) => Number(b[1]) - Number(a[1]))
+        .map(([depo, q]) => `${warehouses.find(w => w.id === `mikro-depo-${depo}`)?.name || `Depo ${depo}`}: ${Number(q).toLocaleString('tr-TR')}`)
+        .join(' · ');
+    }
+    return warehouses.find(wh => wh.id === wi.warehouseId)?.name || wi.location || '—';
+  };
+
   // Transfer computed
   const displayedTransfers = transfers
     .filter(tr => !transferSearch || tr.productName.toLowerCase().includes(transferSearch.toLowerCase()))
@@ -4229,7 +4260,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {warehouses.map(w => {
                 // O depodaki envanter özeti — kartta göster, tıklanınca detay aç.
-                const depoKalemleri = warehouseItems.filter(wi => wi.warehouseId === w.id);
+                const depoKalemleri = depoKalemleriIcin(w.id);
                 const toplamAdet = depoKalemleri.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
                 return (
                 <div key={w.id} onClick={() => setDetayDepo(w)}
@@ -4263,8 +4294,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
           {/* Depo envanter detayı — kart tıklanınca o depodaki kalemler */}
           {detayDepo && (() => {
-            const kalemler = warehouseItems
-              .filter(wi => wi.warehouseId === detayDepo.id)
+            const kalemler = depoKalemleriIcin(detayDepo.id)
               .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
             const toplamAdet = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
             const toplamDeger = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0) * (Number((wi as unknown as { costPrice?: number }).costPrice) || 0), 0);
@@ -4381,7 +4411,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       <td className="py-2.5 px-3 font-medium text-gray-800">{w.productName}</td>
                       <td className="py-2.5 px-3 font-mono text-xs text-gray-500 hidden sm:table-cell">{w.sku || '—'}</td>
                       <td className="py-2.5 px-3 text-right font-semibold">{w.quantity}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{warehouses.find(wh => wh.id === w.warehouseId)?.name || w.location || '—'}</td>
+                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{depoDagilimEtiket(w)}</td>
                       <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{w.category || '—'}</td>
                       <td className="py-2.5 px-3 text-right">
                         <div className="flex justify-end gap-1">

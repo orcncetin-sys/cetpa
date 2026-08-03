@@ -6307,7 +6307,7 @@ async function startServer() {
         for (let i = 0; i < items.length; i += CONCURRENCY) {
           const slice = items.slice(i, i + CONCURRENCY);
           const results = await Promise.all(slice.map(async (it) => {
-            const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null, primaryDepo: null as string | null };
+            const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null };
             try {
               // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
@@ -6326,9 +6326,10 @@ async function startServer() {
 
               // 2) Per-depo: stok GERÇEKTE nerede? Kart sto_yer_kod hepsini HAVALIMANI
               //    gösteriyor (varsayılan alan). Yalnız stoğu olan (qty>0) ürünlerde
-              //    depo depo sorgula; en çok stoğu olan depo = birincil atama.
+              //    depo depo sorgula. Ürün TEK birincil depoya TOPLANMAZ — stoğu olan
+              //    HER depoda kendi miktarıyla tutulur (kullanıcı isteği); dağılım
+              //    depoBreakdown'a yazılır, ekran her depoyu ayrı gösterir.
               let depoQtys: Record<string, number> | null = null;
-              let primaryDepo: string | null = null;
               if (qty > 0 && depoNos.length > 1) {
                 // Per-depo sorgular PARALEL (seri değil) — iş süresini depo sayısı
                 // kadar uzatmaz (code-review efficiency bulgusu).
@@ -6347,22 +6348,20 @@ async function startServer() {
                 // tek-depo Depolar'ı YOK SAYIP her çağrıda toplam miktarı dönerse, her
                 // depo aggregate'e eşit çıkar. Bir ürün aynı anda İKİ depoda tam stokta
                 // olamaz → 2+ depo aggregate'e eşitse metod Depolar'ı filtrelemiyordur.
-                // Bu durumda YANLIŞ depo atamaktansa HİÇ atama yapma (warehouseId'ye
-                // dokunma). Böylece varsayım yanlışsa da sessizce HAVALIMANI'na atamaz.
+                // O zaman dağılım güvenilmez → depoBreakdown YAZMA (ürün hiçbir depoda
+                // görünmez; yanlış/şişik dağılım göstermekten iyidir). Kullanıcı canlıda
+                // Depolar'ın farklı yanıt döndüğünü doğruladı → pratikte tetiklenmez.
                 let aggEsit = 0;
                 for (const p of perDepo) {
                   if (!p.dok || !Number.isFinite(p.dqty)) continue;
                   if (p.dqty !== 0) depoQtys[p.depo] = p.dqty;
                   if (Math.abs(p.dqty - qty) < 1e-6) aggEsit++;
                 }
-                if (aggEsit >= 2) {
-                  depoQtys = null;              // Depolar yok sayılıyor — güvenilmez
-                } else {
-                  const entries = Object.entries(depoQtys);
-                  if (entries.length) primaryDepo = entries.sort((a, b) => b[1] - a[1])[0][0];
+                if (aggEsit >= 2 || Object.keys(depoQtys).length === 0) {
+                  depoQtys = null;              // Depolar yok sayılıyor / okunamadı — güvenilmez
                 }
               }
-              return { it, qty, cost, depoQtys, primaryDepo };
+              return { it, qty, cost, depoQtys };
             } catch { return bos; }
           }));
 
@@ -6375,13 +6374,15 @@ async function startServer() {
               mikroSyncedAt: pgServerTimestamp(),
             });
             ops++;
-            // Depo sekmesindeki kayıt: gerçek depo (primaryDepo) + per-depo dağılım.
-            // primaryDepo çözülemezse warehouseId'ye DOKUNMA (yanlış depo yazma).
+            // Depo sekmesindeki kayıt: TEK birincil depo YOK — stoğu olan HER depo
+            // depoBreakdown'da (ekran her depoyu ayrı gösterir). Eski tek-depo atamasını
+            // temizle (warehouseId:null) ki bayat HAVALIMANI kaydı kalmasın; depoBreakdown
+            // güvenilirse onu yaz, değilse (guard) yalnız temizle.
             batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
               companyId,
               quantity: r.qty,
-              ...(r.primaryDepo ? { warehouseId: `mikro-depo-${r.primaryDepo}` } : {}),
-              ...(r.depoQtys ? { depoBreakdown: r.depoQtys } : {}),
+              warehouseId: null,
+              depoBreakdown: r.depoQtys ?? null,
               updatedAt: pgServerTimestamp(),
             }, { merge: true });
             ops++;
