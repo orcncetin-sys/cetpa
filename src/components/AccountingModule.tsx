@@ -21,6 +21,7 @@ import { formatInCurrency } from '../utils/currency';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DocumentDesigner from './DocumentDesigner';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { db, auth } from '../firebase';
 import { 
   pullBankMovementsFromMikro
@@ -478,11 +479,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
    *  satış; Mikro faturalarını DA orada görmem gerekli."
    *  Bu yüzden mevcut orders tabanlı KPI'lara ve faturalı/faturasız ayrımına
    *  DOKUNULMAZ — Mikro yalnız EK bir kaynak olarak eklenir. */
-  const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
-    id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
-    kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
-    uuid?: string; ebelgeTuru: number;
-  }>>([]);
+  // mikroFaturalar ortak hook'tan — cha_* eşlemesi tek yerde (useMikroFaturalar).
+  const mikroFaturalar = useMikroFaturalar(isAuthenticated && !!userRole);
   // Varsayılan 'hepsi': Mikro satış faturaları da görünsün. Eskiden 'cetpa'
   // idi ve Cetpa siparişi 0 olduğu için Satışlar ekranı bomboş açılıyordu (2026-08-01).
   const [satisKaynak, setSatisKaynak] = useState<'cetpa' | 'mikro' | 'hepsi'>('hepsi');
@@ -849,47 +847,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsubs = [
-      onSnapshot(collection(db, 'mikroFaturalar'), snap => {
-        setMikroFaturalar(
-          snap.docs.map(d => {
-            const x = d.data() as Record<string, unknown>;
-            const seri = String(x.cha_evrakno_seri ?? '').trim();
-            const sira = x.cha_evrakno_sira;
-            return {
-              id: d.id,
-              cariKod:  String(x.cha_kod ?? '').trim(),
-              tarih:    String(x.cha_tarihi ?? '').slice(0, 10),
-              tutar:    Number(x.cha_meblag ?? 0) || 0,
-              faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
-              // KDV/matrah fatura SATIRLARINDAN toplanıp başlığa JOIN'lendi
-              // (server: /api/mikro/import/fatura-listesi). Başlıkta yoklar.
-              kdv:      Number(x.kdvTutari ?? 0) || 0,
-              matrah:   Number(x.matrah ?? 0) || 0,
-              // vergiPntr İNDEKS (4 = %20). Bilinen eşlemeler; çözülemezse null
-              // ve ekranda '—' gösterilir — uydurma oran yazmaktansa boş kalsın.
-              oran:     ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
-              // GİB belge kimliği — e-belge XML/PDF çekmek için. Alan adı
-              // sürüme göre değişebildiği için birkaç aday deneniyor.
-              uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
-              // cha_ebelge_turu — e-belge türü. Mikro doküman (EBelgeTipi) + canlı
-              // tie-out (0/1) temelli: 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. Alan
-              // yoksa -1 (bilinmiyor) → tür filtresinde yalnız "Tümü"de görünür.
-              ebelgeTuru: Number(x.cha_ebelge_turu ?? -1),
-              // cha_tip 0 = satış (GİDEN fatura), 1 = alış (GELEN fatura).
-              // Eskiden burada sabit olarak yalnız 0 tutuluyordu; gelen faturalar
-              // veritabanında olmasına rağmen HİÇ görünmüyordu (2026-08-01).
-              yon:      Number(x.cha_tip ?? 0) === 1 ? 'gelen' as const : 'giden' as const,
-              _tip:     Number(x.cha_tip ?? 0),
-              // Mikro kayıt SİLMEZ, *_iptal=1 diye işaretler. İptal edilmiş
-              // faturayı geçerli göstermek yanlış olur. Alan yoksa (şema farkı)
-              // hiçbir şey filtrelenmez — savunmacı davranış.
-              _iptal:   x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
-            };
-          })
-          .filter(f => !f._iptal)
-          .map(({ _tip, _iptal, ...f }) => { void _tip; void _iptal; return f; }),
-        );
-      }, () => setMikroFaturalar([])),
+      // mikroFaturalar dinleyicisi useMikroFaturalar hook'una taşındı (eşleme tek yerde).
       // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
       // (type==='Supplier' olanlar Tedarikçiler sekmesine aittir, burada gizlenir.)
       onSnapshot(collection(db, 'leads'), s => {

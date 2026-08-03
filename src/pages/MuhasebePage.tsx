@@ -14,6 +14,7 @@ import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
+import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
 import UnauthorizedView from '../components/UnauthorizedView';
@@ -244,48 +245,9 @@ export default function MuhasebePage(props: Props) {
   // ── Mikro faturaları (KDV Mutabakat / e-Fatura Takip / Ba-Bs / Finansal Oranlar) ─
   // Bu paneller `orders` (Cetpa) okuyordu; Cetpa siparişi boş → hepsi ₺0/boş.
   // mikroFaturalar hem GİDEN (satış) hem GELEN (alış) faturaları tutar; her panel
-  // uygun yönü kullanır. Mapping AccountingModule ile aynı (tek kaynak: cha_* alanları).
-  const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
-    id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
-    kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
-  }>>([]);
-  useEffect(() => {
-    if (!userRole) return;
-    const unsub = onSnapshot(collection(db, 'mikroFaturalar'), (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
-      setMikroFaturalar(
-        snap.docs.map(d => {
-          const x = d.data();
-          const seri = String(x.cha_evrakno_seri ?? '').trim();
-          const sira = x.cha_evrakno_sira;
-          return {
-            id: d.id,
-            cariKod: String(x.cha_kod ?? '').trim(),
-            tarih: String(x.cha_tarihi ?? '').slice(0, 10),
-            tutar: Number(x.cha_meblag ?? 0) || 0,
-            faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
-            kdv: Number(x.kdvTutari ?? 0) || 0,
-            matrah: Number(x.matrah ?? 0) || 0,
-            oran: ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
-            yon: (Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden') as 'gelen' | 'giden',
-            _iptal: x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
-          };
-        })
-          .filter(f => !f._iptal)
-          .map(({ _iptal, ...f }) => { void _iptal; return f; }),
-      );
-    }, () => setMikroFaturalar([]));
-    return () => unsub();
-  }, [userRole]);
-
-  // cariKod → müşteri adı (leads). Mikro faturasında yalnız cari KODU var.
-  const cariAdMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const l of leads) {
-      const kod = String((l as unknown as { mikroCariKod?: string }).mikroCariKod ?? '').trim();
-      if (kod) m.set(kod, (l as unknown as { company?: string; name?: string }).company || (l as unknown as { name?: string }).name || kod);
-    }
-    return m;
-  }, [leads]);
+  // uygun yönü kullanır. Eşleme ortak hook'ta (useMikroFaturalar) — tek kaynak.
+  const mikroFaturalar = useMikroFaturalar(!!userRole);
+  const cariAdMap = useCariAdMap(leads as unknown as Array<Record<string, unknown>>);
 
   // Cari yıl faturaları — panellerin ortak zaman kapsamı (all-time ciro balonu YOK).
   const mikroFaturalarBuYil = useMemo(() => {

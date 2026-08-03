@@ -198,12 +198,15 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
     let base = effectiveRisks;
     if (activeFilter === 'highRisk') base = effectiveRisks.filter(r => Number(r.riskScore) > 70);
     else if (activeFilter === 'exposure') base = effectiveRisks.filter(r => (Number(r.currentBalance) || 0) > 0);
+    const yon = riskSort.dir === 'asc' ? 1 : -1;
     return [...base].sort((a, b) => {
-      const av = Number(a[riskSort.key]) || String(a[riskSort.key] || '');
-      const bv = Number(b[riskSort.key]) || String(b[riskSort.key] || '');
-      if (av < bv) return riskSort.dir === 'asc' ? -1 : 1;
-      if (av > bv) return riskSort.dir === 'asc' ? 1 : -1;
-      return 0;
+      // Sütun tipine göre karşılaştır. Eskiden `Number(x) || String(x)` kalıbı
+      // gerçek 0 (bakiye/skor) falsy olduğu için String'e düşüyor, sayısal 0'lar
+      // metin gibi sıralanıyordu (code-review bulgusu). customerName metin, diğerleri sayı.
+      if (riskSort.key === 'customerName') {
+        return String(a.customerName ?? '').localeCompare(String(b.customerName ?? '')) * yon;
+      }
+      return ((Number(a[riskSort.key]) || 0) - (Number(b[riskSort.key]) || 0)) * yon;
     });
   }, [effectiveRisks, activeFilter, riskSort]);
 

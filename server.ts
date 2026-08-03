@@ -6292,8 +6292,11 @@ async function startServer() {
         // (hepsi HAVALIMANI); gerçek stok yeri per-depo miktarla bulunur.
         const depoSnap = await adminDb!.collection('warehouses').where('companyId', '==', companyId).get();
         const fetchedDepoNos = depoSnap.docs.map(d => d.id).filter(id => id.startsWith('mikro-depo-')).map(id => id.slice('mikro-depo-'.length)).filter(Boolean);
-        // warehouses henüz çekilmemişse Cetpa'nın bilinen depolarına düş (1-5).
-        const depoNos = fetchedDepoNos.length ? fetchedDepoNos : ['1', '2', '3', '4', '5'];
+        // AGGREGATE (stockLevel) HİÇBİR ZAMAN eski '1,2,3,4,5' kapsamından dar
+        // OLMAMALI — warehouses eksik doluysa toplam stok az sayılırdı (code-review
+        // bulgusu). Union: bilinen 1-5 + warehouses'taki ek depolar. Olmayan depo
+        // sorgusu 0 döner (zararsız).
+        const depoNos = Array.from(new Set([...fetchedDepoNos, '1', '2', '3', '4', '5']));
         await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
 
         const sonTarih = mikroBugun();
@@ -6327,20 +6330,37 @@ async function startServer() {
               let depoQtys: Record<string, number> | null = null;
               let primaryDepo: string | null = null;
               if (qty > 0 && depoNos.length > 1) {
-                depoQtys = {};
-                for (const depo of depoNos) {
+                // Per-depo sorgular PARALEL (seri değil) — iş süresini depo sayısı
+                // kadar uzatmaz (code-review efficiency bulgusu).
+                const perDepo = await Promise.all(depoNos.map(async (depo) => {
                   try {
                     const { ok: dok, data: dd } = await mikroPost('GenelAmacliMaliyetListesiV2', {
                       StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: depo,
                     });
                     const dr0 = ((dd as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
                     const dData = (dr0?.Data ?? {}) as Record<string, unknown>;
-                    const dqty = Number(dData.EldekiMiktar ?? NaN);
-                    if (dok && Number.isFinite(dqty) && dqty !== 0) depoQtys[depo] = dqty;
-                  } catch { /* bu depo okunamadı — atla, birincil ataması etkilenir sadece */ }
+                    return { depo, dok, dqty: Number(dData.EldekiMiktar ?? NaN) };
+                  } catch { return { depo, dok: false, dqty: NaN }; }
+                }));
+                depoQtys = {};
+                // GUARD (code-review correctness bulgusu): GenelAmacliMaliyetListesiV2
+                // tek-depo Depolar'ı YOK SAYIP her çağrıda toplam miktarı dönerse, her
+                // depo aggregate'e eşit çıkar. Bir ürün aynı anda İKİ depoda tam stokta
+                // olamaz → 2+ depo aggregate'e eşitse metod Depolar'ı filtrelemiyordur.
+                // Bu durumda YANLIŞ depo atamaktansa HİÇ atama yapma (warehouseId'ye
+                // dokunma). Böylece varsayım yanlışsa da sessizce HAVALIMANI'na atamaz.
+                let aggEsit = 0;
+                for (const p of perDepo) {
+                  if (!p.dok || !Number.isFinite(p.dqty)) continue;
+                  if (p.dqty !== 0) depoQtys[p.depo] = p.dqty;
+                  if (Math.abs(p.dqty - qty) < 1e-6) aggEsit++;
                 }
-                const entries = Object.entries(depoQtys);
-                if (entries.length) primaryDepo = entries.sort((a, b) => b[1] - a[1])[0][0];
+                if (aggEsit >= 2) {
+                  depoQtys = null;              // Depolar yok sayılıyor — güvenilmez
+                } else {
+                  const entries = Object.entries(depoQtys);
+                  if (entries.length) primaryDepo = entries.sort((a, b) => b[1] - a[1])[0][0];
+                }
               }
               return { it, qty, cost, depoQtys, primaryDepo };
             } catch { return bos; }

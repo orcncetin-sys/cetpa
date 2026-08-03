@@ -180,11 +180,17 @@ export default function CariEkstrePanel({
         const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
         const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
         const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('') || (customerName ?? '—');
-        if (ageD <= 30)       newBuckets.current += amount;
-        else if (ageD <= 60)  newBuckets.d30     += amount;
-        else if (ageD <= 90)  newBuckets.d60     += amount;
-        else if (ageD <= 120) newBuckets.d90     += amount;
-        else                  newBuckets.over90  += amount;
+        // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
+        // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
+        // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
+        // (code-review bulgusu). Tüm hareketler yine satır olarak listelenir.
+        if (borc) {
+          if (ageD <= 30)       newBuckets.current += amount;
+          else if (ageD <= 60)  newBuckets.d30     += amount;
+          else if (ageD <= 90)  newBuckets.d60     += amount;
+          else if (ageD <= 120) newBuckets.d90     += amount;
+          else                  newBuckets.over90  += amount;
+        }
         newRows.push({
           id: d.id,
           customerName: String(evrakNo),
@@ -303,7 +309,7 @@ export default function CariEkstrePanel({
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 rounded-xl p-3 text-center">
-          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Hareket Toplamı' : 'Movements Total') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
+          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Toplam Borç' : 'Total Debit') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
           <div className="text-base font-bold text-blue-700">₺{fmt(totalAR)}</div>
         </div>
         <div className={`rounded-xl p-3 text-center ${overdueAR > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
