@@ -479,7 +479,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
     id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
     kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
-    uuid?: string;
+    uuid?: string; ebelgeTuru: number;
   }>>([]);
   // Varsayılan 'hepsi': Mikro satış faturaları da görünsün. Eskiden 'cetpa'
   // idi ve Cetpa siparişi 0 olduğu için Satışlar ekranı bomboş açılıyordu (2026-08-01).
@@ -821,6 +821,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               // GİB belge kimliği — e-belge XML/PDF çekmek için. Alan adı
               // sürüme göre değişebildiği için birkaç aday deneniyor.
               uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
+              // cha_ebelge_turu — e-belge türü. Mikro doküman (EBelgeTipi) + canlı
+              // tie-out (0/1) temelli: 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. Alan
+              // yoksa -1 (bilinmiyor) → tür filtresinde yalnız "Tümü"de görünür.
+              ebelgeTuru: Number(x.cha_ebelge_turu ?? -1),
               // cha_tip 0 = satış (GİDEN fatura), 1 = alış (GELEN fatura).
               // Eskiden burada sabit olarak yalnız 0 tutuluyordu; gelen faturalar
               // veritabanında olmasına rağmen HİÇ görünmüyordu (2026-08-01).
@@ -1714,6 +1718,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     // Yıl filtresi: tarih 'YYYY-...' ile başlıyorsa o yıl. 'hepsi' → tüm yıllar.
     .filter(f => faturaYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(faturaYil)))
     .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
+    // e-belge türü filtresi (eskiden yalnız Cetpa invoices'a uygulanıyordu):
+    // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. İhracat cha_ebelge_turu'da YOK (ayrı
+    // kavram) → o filtrede Mikro faturası ayırt edilemez, gösterilmez.
+    .filter(f => {
+      if (invoiceTypeFilter === 'all') return true;
+      if (invoiceTypeFilter === 'e-fatura') return f.ebelgeTuru === 0;
+      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1;
+      return false; // ihracat
+    })
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
     .filter(f => {
       const q = satisSearch.toLowerCase();
