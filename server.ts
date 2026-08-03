@@ -6286,6 +6286,14 @@ async function startServer() {
           .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
           .filter(x => x.sku);
         const total = items.length;
+        // companyId + depo listesi bir kez (döngü içinde tekrar tekrar değil).
+        const companyId = await reqCompanyId(req);
+        // Depo numaraları warehouses'tan (mikro-depo-<n>). Kart sto_yer_kod GÜVENİLMEZ
+        // (hepsi HAVALIMANI); gerçek stok yeri per-depo miktarla bulunur.
+        const depoSnap = await adminDb!.collection('warehouses').where('companyId', '==', companyId).get();
+        const fetchedDepoNos = depoSnap.docs.map(d => d.id).filter(id => id.startsWith('mikro-depo-')).map(id => id.slice('mikro-depo-'.length)).filter(Boolean);
+        // warehouses henüz çekilmemişse Cetpa'nın bilinen depolarına düş (1-5).
+        const depoNos = fetchedDepoNos.length ? fetchedDepoNos : ['1', '2', '3', '4', '5'];
         await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
 
         const sonTarih = mikroBugun();
@@ -6296,21 +6304,46 @@ async function startServer() {
         for (let i = 0; i < items.length; i += CONCURRENCY) {
           const slice = items.slice(i, i + CONCURRENCY);
           const results = await Promise.all(slice.map(async (it) => {
+            const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null, primaryDepo: null as string | null };
             try {
+              // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
-                StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: '1,2,3,4,5',
+                StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: depoNos.join(','),
               });
               const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-              if (!ok || !r0 || r0.IsError) return { it, qty: null as number | null, cost: null as number | null };
+              if (!ok || !r0 || r0.IsError) return bos;
               const d = (r0.Data ?? {}) as Record<string, unknown>;
               // Alan hiç yoksa "0 stok" DEĞİL, "yanıt okunamadı" demektir — 0 yazıp
               // başarılı saymak gerçek stoğu siler. Başarısıza düşür.
-              if (d.EldekiMiktar == null) return { it, qty: null as number | null, cost: null as number | null };
+              if (d.EldekiMiktar == null) return bos;
               const qty = Number(d.EldekiMiktar);
-              if (!Number.isFinite(qty)) return { it, qty: null as number | null, cost: null as number | null };
+              if (!Number.isFinite(qty)) return bos;
               const totalCost = Number(d.MaliyetBedeli ?? 0);
-              return { it, qty, cost: qty > 0 ? totalCost / qty : null };
-            } catch { return { it, qty: null, cost: null }; }
+              const cost = qty > 0 ? totalCost / qty : null;
+
+              // 2) Per-depo: stok GERÇEKTE nerede? Kart sto_yer_kod hepsini HAVALIMANI
+              //    gösteriyor (varsayılan alan). Yalnız stoğu olan (qty>0) ürünlerde
+              //    depo depo sorgula; en çok stoğu olan depo = birincil atama.
+              let depoQtys: Record<string, number> | null = null;
+              let primaryDepo: string | null = null;
+              if (qty > 0 && depoNos.length > 1) {
+                depoQtys = {};
+                for (const depo of depoNos) {
+                  try {
+                    const { ok: dok, data: dd } = await mikroPost('GenelAmacliMaliyetListesiV2', {
+                      StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: depo,
+                    });
+                    const dr0 = ((dd as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+                    const dData = (dr0?.Data ?? {}) as Record<string, unknown>;
+                    const dqty = Number(dData.EldekiMiktar ?? NaN);
+                    if (dok && Number.isFinite(dqty) && dqty !== 0) depoQtys[depo] = dqty;
+                  } catch { /* bu depo okunamadı — atla, birincil ataması etkilenir sadece */ }
+                }
+                const entries = Object.entries(depoQtys);
+                if (entries.length) primaryDepo = entries.sort((a, b) => b[1] - a[1])[0][0];
+              }
+              return { it, qty, cost, depoQtys, primaryDepo };
+            } catch { return bos; }
           }));
 
           for (const r of results) {
@@ -6322,10 +6355,14 @@ async function startServer() {
               mikroSyncedAt: pgServerTimestamp(),
             });
             ops++;
-            // Depo sekmesindeki kayıt da güncellensin
+            // Depo sekmesindeki kayıt: gerçek depo (primaryDepo) + per-depo dağılım.
+            // primaryDepo çözülemezse warehouseId'ye DOKUNMA (yanlış depo yazma).
             batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
-              companyId: await reqCompanyId(req),
-              quantity: r.qty, updatedAt: pgServerTimestamp(),
+              companyId,
+              quantity: r.qty,
+              ...(r.primaryDepo ? { warehouseId: `mikro-depo-${r.primaryDepo}` } : {}),
+              ...(r.depoQtys ? { depoBreakdown: r.depoQtys } : {}),
+              updatedAt: pgServerTimestamp(),
             }, { merge: true });
             ops++;
             updated++;
