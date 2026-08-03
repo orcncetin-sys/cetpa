@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import BankStatementImportModal from '../components/BankStatementImportModal';
 import BankBalanceReport from '../components/BankBalanceReport';
@@ -11,7 +11,7 @@ import {
   ShoppingCart, Truck, Percent, Hash, Landmark, PiggyBank, Scale, Repeat, Globe, Tag,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
+import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
@@ -240,6 +240,58 @@ export default function MuhasebePage(props: Props) {
 
   // Banka ekstresi CSV içe aktarma modalı
   const [showBankImport, setShowBankImport] = useState(false);
+
+  // ── Mikro faturaları (KDV Mutabakat / e-Fatura Takip / Ba-Bs / Finansal Oranlar) ─
+  // Bu paneller `orders` (Cetpa) okuyordu; Cetpa siparişi boş → hepsi ₺0/boş.
+  // mikroFaturalar hem GİDEN (satış) hem GELEN (alış) faturaları tutar; her panel
+  // uygun yönü kullanır. Mapping AccountingModule ile aynı (tek kaynak: cha_* alanları).
+  const [mikroFaturalar, setMikroFaturalar] = useState<Array<{
+    id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string;
+    kdv: number; matrah: number; oran: number | null; yon: 'gelen' | 'giden';
+  }>>([]);
+  useEffect(() => {
+    if (!userRole) return;
+    const unsub = onSnapshot(collection(db, 'mikroFaturalar'), (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+      setMikroFaturalar(
+        snap.docs.map(d => {
+          const x = d.data();
+          const seri = String(x.cha_evrakno_seri ?? '').trim();
+          const sira = x.cha_evrakno_sira;
+          return {
+            id: d.id,
+            cariKod: String(x.cha_kod ?? '').trim(),
+            tarih: String(x.cha_tarihi ?? '').slice(0, 10),
+            tutar: Number(x.cha_meblag ?? 0) || 0,
+            faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+            kdv: Number(x.kdvTutari ?? 0) || 0,
+            matrah: Number(x.matrah ?? 0) || 0,
+            oran: ({ '1': 0, '2': 1, '3': 10, '4': 20 } as Record<string, number>)[String(x.vergiPntr ?? '')] ?? null,
+            yon: (Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden') as 'gelen' | 'giden',
+            _iptal: x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
+          };
+        })
+          .filter(f => !f._iptal)
+          .map(({ _iptal, ...f }) => { void _iptal; return f; }),
+      );
+    }, () => setMikroFaturalar([]));
+    return () => unsub();
+  }, [userRole]);
+
+  // cariKod → müşteri adı (leads). Mikro faturasında yalnız cari KODU var.
+  const cariAdMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of leads) {
+      const kod = String((l as unknown as { mikroCariKod?: string }).mikroCariKod ?? '').trim();
+      if (kod) m.set(kod, (l as unknown as { company?: string; name?: string }).company || (l as unknown as { name?: string }).name || kod);
+    }
+    return m;
+  }, [leads]);
+
+  // Cari yıl faturaları — panellerin ortak zaman kapsamı (all-time ciro balonu YOK).
+  const mikroFaturalarBuYil = useMemo(() => {
+    const yil = String(new Date().getFullYear());
+    return mikroFaturalar.filter(f => f.tarih.startsWith(yil));
+  }, [mikroFaturalar]);
 
   return (
             <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -1865,21 +1917,25 @@ export default function MuhasebePage(props: Props) {
                     const tr555 = currentLanguage === 'tr';
                     // Filter orders by selected period
                     const [yr555, mo555] = p555Period.split('-').map(Number);
-                    const periodOrders = orders.filter(o => {
-                      const d = o.createdAt ? new Date(typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : o.createdAt as string) : null;
-                      return d && d.getFullYear()===yr555 && d.getMonth()+1===mo555 && o.status !== 'Cancelled';
-                    });
-                    const periodPOs = apPurchaseOrders.filter(po => {
-                      const d = po.createdAt ? new Date(typeof (po.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (po.createdAt as {toDate:()=>Date}).toDate() : po.createdAt as string) : null;
-                      return d && d.getFullYear()===yr555 && d.getMonth()+1===mo555;
-                    });
-                    // Ba = purchases from suppliers ≥ ₺5,000 per supplier
+                    // KAYNAK: Mikro faturaları (vergi formu = fatura bazlı tek kaynak;
+                    // orders/apPurchaseOrders boştu → panel hep boş). Mükerrer sayım YOK:
+                    // Cetpa siparişi Mikro'ya gönderilince zaten fatura oluyor. Dönem
+                    // eşleşmesi tarih 'YYYY-MM' önekiyle (p555Period).
+                    // Ba = GELEN (alış) faturaları, cari bazında ≥ ₺5.000.
                     const baMap: Record<string,number> = {};
-                    for (const po of periodPOs) { if(po.supplier) baMap[po.supplier]=(baMap[po.supplier]||0)+(po.totalAmount||0); }
+                    for (const f of mikroFaturalar) {
+                      if (f.yon !== 'gelen' || !f.tarih.startsWith(p555Period)) continue;
+                      const ad = cariAdMap.get(f.cariKod) || f.cariKod || '—';
+                      baMap[ad] = (baMap[ad] || 0) + f.tutar;
+                    }
                     const baRows = Object.entries(baMap).filter(([,v])=>v>=5000).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
-                    // Bs = sales to customers ≥ ₺5,000 per customer
+                    // Bs = GİDEN (satış) faturaları, cari bazında ≥ ₺5.000.
                     const bsMap: Record<string,number> = {};
-                    for (const o of periodOrders) { bsMap[o.customerName]=(bsMap[o.customerName]||0)+(o.totalPrice||0); }
+                    for (const f of mikroFaturalar) {
+                      if (f.yon !== 'giden' || !f.tarih.startsWith(p555Period)) continue;
+                      const ad = cariAdMap.get(f.cariKod) || f.cariKod || '—';
+                      bsMap[ad] = (bsMap[ad] || 0) + f.tutar;
+                    }
                     const bsRows = Object.entries(bsMap).filter(([,v])=>v>=5000).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
                     const fBabs = (v:number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
                     return (
@@ -3104,35 +3160,38 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 617: KDV Mutabakat ────────────────────────────────────── */}
                   {muhasebeTab === 'kdv-mutabakat' && (() => {
                     const tr617 = currentLanguage === 'tr';
-                    const [y617, m617] = p617Month.split('-').map(Number);
-                    const monthStart617 = new Date(y617, m617-1, 1);
-                    const monthEnd617 = new Date(y617, m617, 0);
-                    const monthOrders617 = orders.filter(o => {
-                      if (!o.createdAt||o.status==='Cancelled') return false;
-                      try {
-                        const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                        return d>=monthStart617&&d<=monthEnd617;
-                      } catch { return false; }
-                    });
-                    const totalRevenue = monthOrders617.reduce((s,o)=>s+(o.totalPrice||0),0);
-                    const kdv18Revenue = monthOrders617.filter(o=>!o.kdvOran||o.kdvOran===18).reduce((s,o)=>s+(o.totalPrice||0),0);
-                    const kdv8Revenue  = monthOrders617.filter(o=>o.kdvOran===8).reduce((s,o)=>s+(o.totalPrice||0),0);
-                    const kdv0Revenue  = monthOrders617.filter(o=>o.kdvOran===0).reduce((s,o)=>s+(o.totalPrice||0),0);
-                    const calcKdv18 = (totalExcl: number) => totalExcl * 0.18;
-                    const calcKdv8  = (totalExcl: number) => totalExcl * 0.08;
-                    const totalKdvCollected = calcKdv18(kdv18Revenue/1.18) + calcKdv8(kdv8Revenue/1.08);
+                    // KAYNAK: Mikro GİDEN (satış) faturaları — seçili dönem (YYYY-MM).
+                    // orders (Cetpa) boştu → panel hep 0. matrah/kdv/oran Mikro'da ZATEN
+                    // ayrık (fatura-listesi import'u STOK_HAREKETLERI'nden JOIN'liyor);
+                    // eski kod totalPrice'ı 1.18'e bölüyordu — burada bölme YOK, gerçek
+                    // matrah/kdv kullanılır (daha doğru). oran vergiPntr'den (20/10/0/1).
+                    const donemFaturalar = mikroFaturalar.filter(f => f.yon === 'giden' && f.tarih.startsWith(p617Month));
+                    const totalRevenue = donemFaturalar.reduce((s, f) => s + f.tutar, 0);
+                    const totalMatrah = donemFaturalar.reduce((s, f) => s + f.matrah, 0);
+                    const totalKdv = donemFaturalar.reduce((s, f) => s + f.kdv, 0);
+                    // Oran bazlı gruplama — DİNAMİK (veride hangi oranlar varsa). Sabit
+                    // %18/%8 bandı yanlıştı: TR oranları 20/10/1/0'a geçti.
+                    const oranMap = new Map<string, { oran: number | null; matrah: number; kdv: number; count: number }>();
+                    for (const f of donemFaturalar) {
+                      const key = f.oran == null ? 'bilinmiyor' : String(f.oran);
+                      const g = oranMap.get(key) ?? { oran: f.oran, matrah: 0, kdv: 0, count: 0 };
+                      g.matrah += f.matrah; g.kdv += f.kdv; g.count++;
+                      oranMap.set(key, g);
+                    }
+                    const oranRows = [...oranMap.values()].sort((a, b) => (b.oran ?? -1) - (a.oran ?? -1));
+                    const bandColor = (oran: number | null) => oran === 20 ? 'text-purple-600' : oran === 10 ? 'text-amber-600' : oran === 0 ? 'text-gray-500' : 'text-blue-600';
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                        <ModuleHeader title={tr617?'KDV Mutabakat':'VAT Reconciliation'} subtitle={tr617?'Dönem bazında tahsil edilen KDV analizi':'Period KDV analysis and reconciliation'} icon={FileText}/>
+                        <ModuleHeader title={tr617?'KDV Mutabakat':'VAT Reconciliation'} subtitle={tr617?'Dönem bazında Mikro satış faturalarından KDV analizi':'Period KDV analysis from Mikro sales invoices'} icon={FileText}/>
                         <div className="flex items-center gap-3">
                           <input type="month" value={p617Month} onChange={e=>setP617Month(e.target.value)} className="apple-input px-3 py-2 text-sm"/>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           {[
                             {label:tr617?'Toplam Ciro':'Total Revenue',val:`₺${Math.round(totalRevenue).toLocaleString('tr-TR')}`,color:'text-blue-600',bg:'bg-blue-50'},
-                            {label:tr617?'%18 KDV Tabanı':'%18 KDV Base',val:`₺${Math.round(kdv18Revenue/1.18).toLocaleString('tr-TR')}`,color:'text-purple-600',bg:'bg-purple-50'},
-                            {label:tr617?'%8 KDV Tabanı':'%8 KDV Base',val:`₺${Math.round(kdv8Revenue/1.08).toLocaleString('tr-TR')}`,color:'text-amber-600',bg:'bg-amber-50'},
-                            {label:tr617?'Tahsil KDV':'KDV Collected',val:`₺${Math.round(totalKdvCollected).toLocaleString('tr-TR')}`,color:'text-emerald-600',bg:'bg-emerald-50'},
+                            {label:tr617?'Toplam Matrah':'Total Base',val:`₺${Math.round(totalMatrah).toLocaleString('tr-TR')}`,color:'text-purple-600',bg:'bg-purple-50'},
+                            {label:tr617?'Toplam KDV':'Total VAT',val:`₺${Math.round(totalKdv).toLocaleString('tr-TR')}`,color:'text-emerald-600',bg:'bg-emerald-50'},
+                            {label:tr617?'Fatura Sayısı':'Invoices',val:String(donemFaturalar.length),color:'text-amber-600',bg:'bg-amber-50'},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-5 ${k.bg}`}>
                               <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
@@ -3143,22 +3202,18 @@ export default function MuhasebePage(props: Props) {
                         <div className="apple-card overflow-hidden">
                           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50"><h3 className="font-bold text-gray-800 text-sm">{tr617?'KDV Dilimi Analizi':'VAT Band Analysis'}</h3></div>
                           <div className="divide-y divide-gray-50">
-                            {[
-                              {label:tr617?'%18 KDV':'%18 VAT',base:kdv18Revenue/1.18,kdv:calcKdv18(kdv18Revenue/1.18),count:monthOrders617.filter(o=>!o.kdvOran||o.kdvOran===18).length,color:'text-purple-600'},
-                              {label:tr617?'%8 KDV':'%8 VAT',base:kdv8Revenue/1.08,kdv:calcKdv8(kdv8Revenue/1.08),count:monthOrders617.filter(o=>o.kdvOran===8).length,color:'text-amber-600'},
-                              {label:tr617?'%0 KDV / Muaf':'%0 VAT / Exempt',base:kdv0Revenue,kdv:0,count:monthOrders617.filter(o=>o.kdvOran===0).length,color:'text-gray-500'},
-                            ].map(row=>(
-                              <div key={row.label} className="grid grid-cols-4 px-4 py-3 text-xs">
-                                <span className={`font-bold ${row.color}`}>{row.label}</span>
-                                <span className="tabular-nums text-gray-600">₺{Math.round(row.base).toLocaleString('tr-TR')}</span>
+                            {oranRows.map(row=>(
+                              <div key={String(row.oran)} className="grid grid-cols-4 px-4 py-3 text-xs">
+                                <span className={`font-bold ${bandColor(row.oran)}`}>{row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
+                                <span className="tabular-nums text-gray-600">₺{Math.round(row.matrah).toLocaleString('tr-TR')}</span>
                                 <span className="tabular-nums font-bold text-gray-800">₺{Math.round(row.kdv).toLocaleString('tr-TR')}</span>
-                                <span className="text-gray-400">{row.count} {tr617?'sipariş':'orders'}</span>
+                                <span className="text-gray-400">{row.count} {tr617?'fatura':'invoices'}</span>
                               </div>
                             ))}
                           </div>
                         </div>
-                        {monthOrders617.length === 0 && (
-                          <p className="text-center text-gray-400 text-sm py-8">{tr617?`${p617Month} döneminde sipariş bulunamadı.`:`No orders found for ${p617Month}.`}</p>
+                        {donemFaturalar.length === 0 && (
+                          <p className="text-center text-gray-400 text-sm py-8">{tr617?`${p617Month} döneminde Mikro satış faturası bulunamadı. "Faturalar" çekilmiş mi?`:`No Mikro sales invoices for ${p617Month}.`}</p>
                         )}
                       </motion.div>
                     );
