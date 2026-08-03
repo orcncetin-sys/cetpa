@@ -18,6 +18,8 @@ import KasaModule from './KasaModule';
 import MaliyetMerkeziModule from './MaliyetMerkeziModule';
 import SabitKiymetModule from './SabitKiymetModule';
 import { formatInCurrency } from '../utils/currency';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import DocumentDesigner from './DocumentDesigner';
 import { db, auth } from '../firebase';
 import { 
@@ -690,23 +692,71 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     setTimeout(() => setToast(null), 3000);
   };
 
+  // jsPDF gömülü fontları Türkçe karakter taşımaz — sadeleştir.
+  const normTR = (s: string) => s
+    .replace(/ş/g, 's').replace(/Ş/g, 'S').replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
+    .replace(/ç/g, 'c').replace(/Ç/g, 'C').replace(/ü/g, 'u').replace(/Ü/g, 'U')
+    .replace(/ö/g, 'o').replace(/Ö/g, 'O').replace(/ı/g, 'i').replace(/İ/g, 'I');
+
+  // GERÇEK PDF (buton "Beyanname PDF" diyor ama eskiden .txt indiriyordu).
   const downloadVatDeclaration = () => {
-    const content = `
-      KDV BEYANNAMESİ ÖZETİ
-      Dönem: ${kdvMonth}/${kdvYear}
-      ----------------------------------
-      Hesaplanan KDV: ${formatTRY(hesaplananKDV)}
-      İndirilecek KDV: ${formatTRY(indirilecekKDV)}
-      Ödenecek/İade KDV: ${formatTRY(odenecekKDV)}
-      ----------------------------------
-      Matrah Detayları:
-      ${Object.entries(kdvOranBreakdown).map(([oran, data]) => `%${oran} - Matrah: ${formatTRY(data.matrah)} - KDV: ${formatTRY(data.kdv)}`).join('\n')}
-    `;
-    const blob = new Blob([content], { type: 'text/plain' });
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    doc.setFillColor(255, 64, 0);
+    doc.rect(0, 0, W, 26, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(255, 255, 255);
+    doc.text('KDV BEYANNAMESI OZETI', 14, 13);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text(normTR(`Donem: ${kdvMonth}/${kdvYear}`), 14, 20);
+    autoTable(doc, {
+      startY: 34,
+      head: [['Kalem', 'Tutar']],
+      body: [
+        ['Hesaplanan KDV', normTR(formatTRY(hesaplananKDV))],
+        ['Indirilecek KDV', normTR(formatTRY(indirilecekKDV))],
+        ['Odenecek/Iade KDV', normTR(formatTRY(odenecekKDV))],
+      ],
+      styles: { font: 'helvetica', fontSize: 10 },
+      headStyles: { fillColor: [29, 29, 31] },
+    });
+    const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
+      `%${oran}`, normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
+    ]);
+    autoTable(doc, {
+      startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60) + 6,
+      head: [['Oran', 'Matrah', 'KDV']],
+      body: oranBody.length ? oranBody : [['—', '—', '—']],
+      styles: { font: 'helvetica', fontSize: 10 },
+      headStyles: { fillColor: [255, 64, 0] },
+    });
+    doc.save(`KDV_Beyanname_${kdvMonth}_${kdvYear}.pdf`);
+    showToast(t.declarationPreparing);
+  };
+
+  // Excel/pivot çıktısı (CSV): ham SAYI değerleri (₺/format YOK) — Excel'de
+  // toplanabilir/pivotlanabilir. Noktalı virgül ayraç (TR Excel ondalık virgül),
+  // UTF-8 BOM (Türkçe karakter).
+  const downloadVatDeclarationCSV = () => {
+    const rows: (string | number)[][] = [
+      ['KDV Beyannamesi Ozeti'],
+      ['Donem', `${kdvMonth}/${kdvYear}`],
+      [],
+      ['Kalem', 'Tutar'],
+      ['Hesaplanan KDV', Math.round(hesaplananKDV * 100) / 100],
+      ['Indirilecek KDV', Math.round(indirilecekKDV * 100) / 100],
+      ['Odenecek/Iade KDV', Math.round(odenecekKDV * 100) / 100],
+      [],
+      ['Oran (%)', 'Matrah', 'KDV'],
+      ...Object.entries(kdvOranBreakdown).map(([oran, data]) => [
+        oran, Math.round(data.matrah * 100) / 100, Math.round(data.kdv * 100) / 100,
+      ]),
+    ];
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `KDV_Beyanname_${kdvMonth}_${kdvYear}.txt`;
+    a.download = `KDV_Beyanname_${kdvMonth}_${kdvYear}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast(t.declarationPreparing);
@@ -3432,6 +3482,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 </div>
                 <button onClick={downloadVatDeclaration} className="apple-button-primary py-2 px-4 text-sm">
                   <FileText size={14} /> {t.vatDeclaration}
+                </button>
+                <button onClick={downloadVatDeclarationCSV} className="apple-button-secondary py-2 px-4 text-sm">
+                  <FileText size={14} /> {currentLanguage === 'tr' ? 'Excel (CSV)' : 'Excel (CSV)'}
                 </button>
               </div>
             </div>
