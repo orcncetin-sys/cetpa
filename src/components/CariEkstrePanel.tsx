@@ -106,6 +106,26 @@ function BucketBar({ buckets, lang }: { buckets: AgingBuckets; lang: string }) {
   );
 }
 
+/** cha_evrak_tip → okunur hareket tipi etiketi.
+ *  Yalnız kanıtlı türler (Mikro V17 Postman DekontKaydet/FaturaKaydet/Tahsilat
+ *  örneklerinden): 63 Fatura, 31 Borç Dekontu, 33 Virman, 34 Tahsilat/Tediye,
+ *  57 Cari Virman, 58 Banka Virman, 100 Cari Borç Dekontu, 110 Kasa Virman.
+ *  Bilinmeyen tip ham numarayla gösterilir ("Hareket (tip N)") — uydurmak yok. */
+function hareketTipiEtiket(chaEvrakTip: unknown): string {
+  const n = Number(chaEvrakTip);
+  switch (n) {
+    case 63:  return 'Fatura';
+    case 31:  return 'Borç Dekontu';
+    case 33:  return 'Virman Dekontu';
+    case 34:  return 'Tahsilat/Tediye';
+    case 57:  return 'Cari Virman';
+    case 58:  return 'Banka Virman';
+    case 100: return 'Cari Borç Dekontu';
+    case 110: return 'Kasa Virman';
+    default:  return Number.isFinite(n) && n >= 0 ? `Hareket (tip ${n})` : 'Hareket';
+  }
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 interface CariEkstrePanelProps {
@@ -136,14 +156,15 @@ export default function CariEkstrePanel({
 
   const mikroModu = !!cariKod;
 
-  // ── MİKRO MODU: cari'nin gerçek fatura hareketleri (mikroFaturalar) ──────────
-  // orders (Cetpa) boştu — Mikro carilerinde sipariş yok, fatura var. cariKod
-  // verilince ham mikroFaturalar okunur (cha_kod = cariKod). Her fatura bir
-  // ekstre satırı: tarih + evrak no + yön (satış/alış) + tutar. Vade, fatura
-  // tarihinden hesaplanır.
+  // ── MİKRO MODU: cari'nin TÜM hesap hareketleri (mikroCariHareketler) ─────────
+  // Eskiden mikroFaturalar okunuyordu — o YALNIZ faturaları tutar. Fatura-olmayan
+  // hareketi olan cariler (7 MEHMET: sadece masraf; A BALIK) burada BOŞ görünüyordu.
+  // Artık mikroCariHareketler okunur (fatura + masraf + dekont + tahsilat + virman;
+  // /api/mikro/import/cari-hareket doldurur). Her hareket bir ekstre satırı:
+  // tarih + evrak no + tip (Fatura/Masraf/Dekont…) + borç/alacak + tutar.
   useEffect(() => {
     if (!mikroModu) return;
-    const ref = collection(db, 'mikroFaturalar');
+    const ref = collection(db, 'mikroCariHareketler');
     const q = query(ref, where('cha_kod', '==', cariKod));
     const unsub = onSnapshot(q, snap => {
       const now = Date.now();
@@ -154,8 +175,10 @@ export default function CariEkstrePanel({
         const dt = toDate(x.cha_tarihi);
         const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
         const amount = Number(x.cha_meblag ?? 0);
-        // cha_tip 0 = satış (giden), 1 = alış (gelen). Ekstrede yön etiketi.
-        const yon = Number(x.cha_tip ?? 0) === 1 ? (t ? 'Alış' : 'Purchase') : (t ? 'Satış' : 'Sale');
+        // cha_tip 0 = borç (satış/masraf → cari borçlanır), 1 = alacak (tahsilat/alış).
+        const borc = Number(x.cha_tip ?? 0) === 0;
+        const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
+        const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
         const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('') || (customerName ?? '—');
         if (ageD <= 30)       newBuckets.current += amount;
         else if (ageD <= 60)  newBuckets.d30     += amount;
@@ -167,7 +190,8 @@ export default function CariEkstrePanel({
           customerName: String(evrakNo),
           amount,
           ageD,
-          status: yon,
+          // Tip + yön: "Masraf · Borç", "Tahsilat/Tediye · Alacak", "Fatura · Borç".
+          status: `${tipEtiket} · ${yon}`,
           createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
         });
       });
@@ -279,7 +303,7 @@ export default function CariEkstrePanel({
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 rounded-xl p-3 text-center">
-          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Fatura Toplamı' : 'Invoiced Total') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
+          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Hareket Toplamı' : 'Movements Total') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
           <div className="text-base font-bold text-blue-700">₺{fmt(totalAR)}</div>
         </div>
         <div className={`rounded-xl p-3 text-center ${overdueAR > 0 ? 'bg-red-50' : 'bg-green-50'}`}>

@@ -5779,6 +5779,37 @@ async function startServer() {
     },
   });
 
+  // 2b. TÜM cari hareketler → mikroCariHareketler
+  //
+  // fatura-listesi YALNIZ fatura hareketlerini çeker (cha_evrak_tip 63 / cinsi 6).
+  // Fatura-OLMAYAN hareketi olan cariler (7 MEHMET: sadece masraf; A BALIK) Cari
+  // Ekstre'de BOŞ görünüyordu — cariBalances'ta bakiye var ama gösterilecek fatura
+  // yok. Bu import evrak_tip filtresiz TÜM CARI_HESAP_HAREKETLERI'ni (fatura +
+  // masraf + dekont + tahsilat + virman) çeker; Cari Ekstre bunu okur.
+  //
+  // Sıralama cha_tarihi DESC + cha_Guid (benzersiz tiebreak): OFFSET/FETCH sayfalama
+  // deterministik kalır VE 20k tavanına çarparsa en ESKİ hareketler düşer (en az
+  // ilgili olan). Bakiye = SUM(cha_tip=0 ? +meblag : -meblag) — eksi = Cetpa borçlu.
+  // Yürüyen bakiye/etiket (hareketTipi) istemcide cha_evrak_tip'ten türetilir.
+  makeMikroSqlImport({
+    route: '/api/mikro/import/cari-hareket',
+    tablo: 'CARI_HESAP_HAREKETLERI',
+    secim: 'cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, ' +
+           'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, ' +
+           'cha_ebelge_turu, cha_belge_no',
+    siralama: 'cha_tarihi DESC, cha_Guid',
+    ekKosul: 'cha_iptal = 0',
+    tarihKolonu: 'cha_tarihi',
+    collection: 'mikroCariHareketler', label: 'Mikro Cari Hareketleri',
+    postProcess: async (rows) => {
+      // PG aynası (off-server yedek + raporlama). Fatura import'uyla aynı tablo.
+      await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
+        rows.map(r => ({ ...r, __kaynak: 'cari_hareket_import' })), CHA_COLS);
+      const borc = rows.filter(r => Number(r.cha_tip ?? 0) === 0).length;
+      return `${borc} borç / ${rows.length - borc} alacak hareketi`;
+    },
+  });
+
   // 3. Stok hareketleri → inventoryMovements  (eski: StokHareketListesiV2, V17'de YOK)
   makeMikroSqlImport({
     route: '/api/mikro/import/stok-hareket', tablo: 'STOK_HAREKETLERI', siralama: 'sth_Guid',

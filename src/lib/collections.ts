@@ -29,7 +29,7 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'demandRequests', 'productionOrders', 'projectCosts', 'projectTimelines',
   'capacityLines', 'letterOfCredit', 'intercompanyTxns', 'approvalRequests',
   'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
-  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'transfers',
+  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'mikroCariHareketler', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
   'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
   // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi
