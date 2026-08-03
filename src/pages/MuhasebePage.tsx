@@ -293,6 +293,23 @@ export default function MuhasebePage(props: Props) {
     return mikroFaturalar.filter(f => f.tarih.startsWith(yil));
   }, [mikroFaturalar]);
 
+  // Cari bakiyeleri (Finansal Oranlar AR/AP). cariBalances /api/mikro/pull/bakiye
+  // doldurur (doc id=cariKod, {bakiye}). Pozitif = müşteri borçlu (AR), eksi =
+  // Cetpa borçlu (AP). Net bakiye havuzu — müşteri/tedarikçi ayrımı işaretle.
+  const [cariBalanceToplam, setCariBalanceToplam] = useState<{ ar: number; ap: number }>({ ar: 0, ap: 0 });
+  useEffect(() => {
+    if (!userRole) return;
+    const unsub = onSnapshot(collection(db, 'cariBalances'), (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+      let ar = 0, ap = 0;
+      snap.docs.forEach(d => {
+        const b = Number((d.data() as Record<string, unknown>).bakiye ?? 0);
+        if (b > 0) ar += b; else if (b < 0) ap += -b;
+      });
+      setCariBalanceToplam({ ar, ap });
+    }, () => setCariBalanceToplam({ ar: 0, ap: 0 }));
+    return () => unsub();
+  }, [userRole]);
+
   return (
             <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               {!canAccess('muhasebe') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Muhasebe & Finans':'Accounting & Finance'} /> : (
@@ -1213,26 +1230,36 @@ export default function MuhasebePage(props: Props) {
                         icon={Activity}
                       />
                       {(() => {
-                        const totalRevenue132 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                        const totalCOGS132 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
-                        const grossProfit132 = totalRevenue132 - totalCOGS132;
-                        const totalAR132 = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                        const totalAP132 = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status)).reduce((s, po) => s + (po.totalAmount || 0), 0);
+                        // Revenue = Mikro GİDEN (satış) bu yıl + Cetpa orders (additive).
+                        const mikroRevenue = mikroFaturalarBuYil.filter(f => f.yon === 'giden').reduce((s, f) => s + f.tutar, 0);
+                        const cetpaRevenue = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const totalRevenue132 = mikroRevenue + cetpaRevenue;
+                        // COGS: Mikro faturasında satır maliyeti YOK; yalnız Cetpa siparişi
+                        // lineItems taşır. Mikro-only kurulumda COGS bilinmiyor (0 DEĞİL) —
+                        // COGS'a bağlı oranlar '—' gösterilir, YANILTICI %100 marj YAZILMAZ.
+                        const cetpaCOGS = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
+                        const cogsBiliniyor = cetpaCOGS > 0;
+                        const grossProfit132 = totalRevenue132 - cetpaCOGS;
+                        // AR/AP = Mikro cari bakiyeleri (pozitif=alacak, eksi=borç) + Cetpa.
+                        const cetpaAR = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const totalAR132 = cariBalanceToplam.ar + cetpaAR;
+                        const cetpaAP = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status)).reduce((s, po) => s + (po.totalAmount || 0), 0);
+                        const totalAP132 = cariBalanceToplam.ap + cetpaAP;
                         const inventoryValue132 = inventory.reduce((s, i) => s + ((i.stockLevel ?? 0) * (i.prices?.['Retail'] ?? i.price ?? 0)), 0);
                         const totalAssets = totalAR132 + inventoryValue132;
 
-                        const grossMargin = totalRevenue132 > 0 ? (grossProfit132 / totalRevenue132) * 100 : 0;
+                        const grossMargin = cogsBiliniyor && totalRevenue132 > 0 ? (grossProfit132 / totalRevenue132) * 100 : null;
                         const currentRatio = totalAP132 > 0 ? totalAssets / totalAP132 : null;
                         const arTurnover = totalAR132 > 0 ? totalRevenue132 / totalAR132 : null;
                         const dso = totalRevenue132 > 0 ? (totalAR132 / totalRevenue132) * 365 : null;
-                        const inventoryTurnover = inventoryValue132 > 0 ? totalCOGS132 / inventoryValue132 : null;
+                        const inventoryTurnover = cogsBiliniyor && inventoryValue132 > 0 ? cetpaCOGS / inventoryValue132 : null;
 
                         const ratios = [
                           {
                             label: currentLanguage === 'tr' ? 'Brüt Kâr Marjı' : 'Gross Profit Margin',
-                            value: `%${grossMargin.toFixed(1)}`,
-                            desc: currentLanguage === 'tr' ? 'Satışlardan elde edilen brüt kâr yüzdesi' : 'Gross profit as % of revenue',
-                            status: grossMargin >= 30 ? 'good' : grossMargin >= 15 ? 'warn' : 'bad',
+                            value: grossMargin !== null ? `%${grossMargin.toFixed(1)}` : '—',
+                            desc: currentLanguage === 'tr' ? 'Brüt kâr yüzdesi (COGS Cetpa siparişinden; Mikro faturasında satır maliyeti yok → çoğu kurulumda —)' : 'Gross profit as % of revenue (COGS unavailable from Mikro invoices)',
+                            status: grossMargin === null ? 'neutral' : grossMargin >= 30 ? 'good' : grossMargin >= 15 ? 'warn' : 'bad',
                             benchmark: currentLanguage === 'tr' ? 'İdeal: %30+' : 'Benchmark: 30%+',
                           },
                           {
@@ -2474,6 +2501,56 @@ export default function MuhasebePage(props: Props) {
                           subtitle={tr564 ? 'Siparişlerin fatura durumunu ve ERP senkronizasyonunu takip edin' : 'Track invoice status and ERP sync for all orders'}
                           icon={FileText}
                         />
+
+                        {/* Mikro faturaları özeti — panel altta yalnız Cetpa siparişi
+                            izliyor (boş). Kullanıcı: "Mikro'da girişini yapmadığım gelen
+                            faturalar var (Metro vb.)". Mikro giden/gelen faturaları burada. */}
+                        {mikroFaturalar.length > 0 && (() => {
+                          const giden564 = mikroFaturalar.filter(f => f.yon === 'giden');
+                          const gelen564 = mikroFaturalar.filter(f => f.yon === 'gelen');
+                          const buAy564 = new Date().toISOString().slice(0, 7);
+                          const gelenBuAy564 = gelen564.filter(f => f.tarih.startsWith(buAy564));
+                          return (
+                            <div className="apple-card p-4 space-y-3">
+                              <h4 className="font-bold text-sm text-gray-800">{tr564 ? '📄 Mikro Faturaları' : '📄 Mikro Invoices'}</h4>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {[
+                                  { label: tr564?'Toplam Fatura':'Total', val: mikroFaturalar.length, color:'text-gray-700', bg:'bg-gray-50' },
+                                  { label: tr564?'Giden (Satış)':'Outgoing', val: giden564.length, color:'text-blue-700', bg:'bg-blue-50' },
+                                  { label: tr564?'Gelen (Alış)':'Incoming', val: gelen564.length, color:'text-emerald-700', bg:'bg-emerald-50' },
+                                  { label: tr564?'Gelen (Bu Ay)':'Incoming (Month)', val: gelenBuAy564.length, color:'text-amber-700', bg:'bg-amber-50' },
+                                ].map(k => (
+                                  <div key={k.label} className={`rounded-xl p-3 ${k.bg}`}>
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
+                                    <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
+                                  </div>
+                                ))}
+                              </div>
+                              {gelen564.length > 0 && (
+                                <div className="overflow-x-auto">
+                                  <p className="text-[11px] font-semibold text-gray-500 mb-1">{tr564?'Son gelen (alış) faturaları:':'Recent incoming invoices:'}</p>
+                                  <table className="w-full text-xs">
+                                    <thead><tr className="bg-gray-50 border-b border-gray-100">
+                                      {[tr564?'Tarih':'Date', tr564?'Cari':'Account', tr564?'Fatura No':'Invoice', tr564?'Tutar':'Amount'].map(h=>(
+                                        <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
+                                      ))}
+                                    </tr></thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                      {gelen564.slice(0, 20).map(f => (
+                                        <tr key={f.id}>
+                                          <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{f.tarih}</td>
+                                          <td className="px-3 py-2 text-gray-700">{cariAdMap.get(f.cariKod) || f.cariKod}</td>
+                                          <td className="px-3 py-2 text-gray-500">{f.faturaNo}</td>
+                                          <td className="px-3 py-2 text-right font-bold tabular-nums whitespace-nowrap">₺{Math.round(f.tutar).toLocaleString('tr-TR')}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
