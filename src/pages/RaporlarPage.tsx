@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { collection, onSnapshot } from '../lib/dbClient';
+import { db } from '../firebase';
 import { Download, FileText } from 'lucide-react';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
@@ -44,7 +46,7 @@ interface Props {
 
 export default function RaporlarPage({
   canAccess = () => true, hasFullAccess = () => false, currentLanguage, currentT,
-  orders = [], leads = [], inventory = [], userRole, employees = [],
+  orders: ordersProp = [], leads = [], inventory = [], userRole, employees = [],
   appQuotations = [], inventoryMovements = [], recurringOrders = [], exchangeRates,
   appReportsTab, setAppReportsTab, onNavigate,
   p570Targets, setP570Targets, fmtKpi,
@@ -54,6 +56,74 @@ export default function RaporlarPage({
   const [p619MinCoverage, setP619MinCoverage] = useState(30);
   const [p620Horizon, setP620Horizon] = useState<'1m' | '3m' | '6m'>('3m');
   const [p631View, setP631View] = useState<'pipeline' | 'cycle-time' | 'bottleneck'>('pipeline');
+
+  // ── Mikro satış faturaları → pseudo-sipariş ─────────────────────────────────
+  // Cetpa orders BOŞ (satışlar Mikro'da fatura olarak) → tüm Raporlar sekmeleri
+  // ₺0/0 gösteriyordu. Mikro GİDEN faturaları (satış) pseudo-sipariş olarak
+  // eklenir; useReportsData'ya `orders` merged geçtiği için 6 sekme de canlanır.
+  //
+  // Yalnız GİDEN (satış — tie-out DOĞRULANMIŞ: 2026 satış 9,75M ≈ portal 9,36M).
+  // ALIŞ/cinsi=6 CİRO OLARAK DOĞRULANMADI → bilerek dışarıda.
+  // CARİ YIL filtresi: mikroFaturalar 2020+ tüm yılları tutar; hepsini toplamak
+  // all-time ciro balonu yaratır (kullanıcı "132M hatalı" travması). Cari yıl
+  // tied-out ve beklenen değer. (Not: Raporlar'ın timeRange seçicisi bu KPI'ları
+  // zaten scope'lamıyor — mevcut hook davranışı; ayrı iş.)
+  const [mikroSatisFaturalari, setMikroSatisFaturalari] = useState<Array<{ id: string; cariKod: string; tarih: string; tutar: number; faturaNo: string }>>([]);
+  useEffect(() => {
+    if (!userRole) return;
+    const unsub = onSnapshot(collection(db, 'mikroFaturalar'), (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+      const cariYil = String(new Date().getFullYear());
+      setMikroSatisFaturalari(
+        snap.docs.map(d => {
+          const x = d.data();
+          const seri = String(x.cha_evrakno_seri ?? '').trim();
+          const sira = x.cha_evrakno_sira;
+          return {
+            id: d.id,
+            cariKod: String(x.cha_kod ?? '').trim(),
+            tarih: String(x.cha_tarihi ?? '').slice(0, 10),
+            tutar: Number(x.cha_meblag ?? 0) || 0,
+            faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+            _giden: Number(x.cha_tip ?? 0) === 0,   // 0=satış(giden), 1=alış(gelen)
+            _iptal: x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1,
+          };
+        })
+          .filter(f => f._giden && !f._iptal && f.tarih.startsWith(cariYil))
+          .map(({ _giden, _iptal, ...f }) => { void _giden; void _iptal; return f; }),
+      );
+    }, () => setMikroSatisFaturalari([]));
+    return () => unsub();
+  }, [userRole]);
+
+  // cariKod → müşteri adı (leads). Mikro faturasında yalnız cari KODU var.
+  const cariAdMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of leads) {
+      const kod = String((l as unknown as { mikroCariKod?: string }).mikroCariKod ?? '').trim();
+      if (kod) m.set(kod, (l as unknown as { company?: string; name?: string }).company || (l as unknown as { name?: string }).name || kod);
+    }
+    return m;
+  }, [leads]);
+
+  // Cetpa siparişi + Mikro satış. Mükerrer eleme: Cetpa siparişi Mikro'ya
+  // gönderilince evrak no `mikroEvrakNo`ya yazılır; o faturaları tekrar sayma.
+  const orders = useMemo<Order[]>(() => {
+    const cetpaEvrak = new Set(
+      ordersProp.map(o => String((o as unknown as { mikroEvrakNo?: string }).mikroEvrakNo ?? '').trim()).filter(Boolean),
+    );
+    const mikroOrders = mikroSatisFaturalari
+      .filter(f => !cetpaEvrak.has(f.faturaNo))
+      .map(f => ({
+        id: `mikro-${f.id}`,
+        customerName: cariAdMap.get(f.cariKod) || f.cariKod || '—',
+        status: 'Delivered',
+        totalPrice: f.tutar,
+        totalAmount: f.tutar,
+        createdAt: f.tarih,
+        syncedAt: f.tarih,
+      })) as unknown as Order[];
+    return [...ordersProp, ...mikroOrders];
+  }, [ordersProp, mikroSatisFaturalari, cariAdMap]);
 
   if (!canAccess('reports')) {
     return <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Raporlar' : 'Reports'} />;
