@@ -45,8 +45,16 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
   const [hata, setHata] = useState<string | null>(null);
 
   /** Yanıttaki base64/metin alanını bul — alan adı Mikro sürümüne göre değişir. */
-  const uzunAlan = (d: Record<string, unknown> | undefined, minUzunluk: number) =>
-    Object.values(d ?? {}).find(v => typeof v === 'string' && v.length > minUzunluk) as string | undefined;
+  const uzunAlan = (d: unknown, minUzunluk: number) => {
+    if (typeof d === 'string') return d.length > minUzunluk ? d : undefined;
+    if (d && typeof d === 'object') {
+      const vals = Object.values(d);
+      for (const v of vals) {
+        if (typeof v === 'string' && v.length > minUzunluk) return v;
+      }
+    }
+    return undefined;
+  };
 
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;
@@ -65,7 +73,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(govde),
       });
-      const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
+      const d = await r.json() as { success?: boolean; error?: string; data?: unknown };
       if (!r.ok || !d.success) { setHata(d.error || (tr ? 'Belge alınamadı.' : 'Failed to fetch.')); return; }
 
       const alan = uzunAlan(d.data, tur === 'xml' ? 200 : 500);
