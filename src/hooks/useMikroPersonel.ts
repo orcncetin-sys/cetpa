@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiCall } from '../lib/api';
-import { toast } from 'react-hot-toast';
+import { authFetch } from '../services/authFetch';
 
 export interface MikroPersonel {
   mikroPersKod: string;
@@ -23,15 +22,15 @@ export function useMikroPersonel() {
   const fetchPersonel = async () => {
     setLoading(true);
     try {
-      const res = await apiCall('/api/mikro/pull/personel', { method: 'POST' });
-      if (res.success && Array.isArray(res.data)) {
-        setData(res.data);
+      const res = await authFetch('/api/mikro/pull/personel', { method: 'POST' });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setData(json.data);
       } else {
-        throw new Error(res.error || 'Personel verisi alınamadı');
+        throw new Error(json.error || 'Personel verisi alınamadı');
       }
     } catch (err: any) {
       console.error('Personel fetch error:', err);
-      toast.error(err.message || 'Mikro personel listesi çekilirken hata oluştu');
     } finally {
       setLoading(false);
     }

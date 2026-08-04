@@ -214,7 +214,7 @@ export default function OrdersPage({
     mikroBelgeNo: ms.belgeNo,
     notes: ms.satirAciklamasi,
     lineItems: []
-  })) as Order[];
+  })) as unknown as Order[];
   
   const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
 

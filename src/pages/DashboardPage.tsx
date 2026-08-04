@@ -138,8 +138,8 @@ export default function DashboardPage(props: Props) {
     totalPrice: ms.tutar,
     status: 'Pending', // Mikro'daki açık siparişler
     createdAt: ms.tarih,
-    syncedAt: ms.tarih,
-  })) as Order[];
+    syncedAt: new Date().toISOString()
+  })) as unknown as Order[];
   
   const combinedOrders = [...orders, ...mappedMikroSiparisler];
 
