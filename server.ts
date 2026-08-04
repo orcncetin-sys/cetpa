@@ -1390,7 +1390,6 @@ const CHA_COLS: Record<string, (r: Record<string, unknown>) => unknown> = {
   cha_tarihi: r => strOrNull(r.cha_tarihi),
   cha_meblag: r => numOrNull(r.cha_meblag),
   cha_aratoplam: r => numOrNull(r.cha_aratoplam),
-  cha_vergi: r => numOrNull(r.cha_vergi),
   cha_aciklama: r => strOrNull(r.cha_aciklama),
   cha_evrakno_seri: r => strOrNull(r.cha_evrakno_seri),
   cha_evrakno_sira: r => strOrNull(r.cha_evrakno_sira),
@@ -5799,7 +5798,7 @@ async function startServer() {
     route: '/api/mikro/import/cari-hareket',
     tablo: 'CARI_HESAP_HAREKETLERI',
     secim: 'cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, ' +
-           'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, ' +
+           'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, ' +
            'cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet',
     siralama: 'cha_tarihi DESC, cha_Guid',
     ekKosul: 'cha_iptal = 0',
@@ -6646,7 +6645,7 @@ async function startServer() {
     try {
       const sql =
         "SELECT TOP 2000 cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, " +
-        "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet " +
+        "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet " +
         "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_iptal = 0 ORDER BY cha_tarihi DESC";
       const { ok, data, status } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sql });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
