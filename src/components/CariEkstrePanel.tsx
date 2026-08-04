@@ -182,8 +182,10 @@ export default function CariEkstrePanel({
         // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
         // hareketleri ne olduğuyla görünür (kullanıcı isteği). Yoksa evrak no'ya düş.
         const aciklama = String(x.cha_aciklama ?? '').trim();
+        const hizKod = String(x.cha_kasa_hizkod ?? '').trim();
+        const finalAciklama = aciklama || (hizKod ? `Hizmet/Masraf Kodu: ${hizKod}` : '');
         const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('');
-        const anaEtiket = aciklama || evrakNo || (customerName ?? '—');
+        const anaEtiket = finalAciklama || evrakNo || (customerName ?? '—');
         // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
         // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
         // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
@@ -201,7 +203,7 @@ export default function CariEkstrePanel({
           amount,
           ageD,
           // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
-          status: `${tipEtiket} · ${yon}${aciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
+          status: `${tipEtiket} · ${yon}${finalAciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
           createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
         });
       });
@@ -370,7 +372,7 @@ export default function CariEkstrePanel({
           <div className="py-10 text-center">
             <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-2" />
             <p className="text-sm text-gray-500 font-medium">
-              {mikroModu ? (t ? 'Bu cariye ait fatura hareketi yok.' : 'No invoice entries for this account.') : (t ? 'Açık alacak yok.' : 'No open receivables.')}
+              {mikroModu ? (t ? 'Bu cariye ait hesap hareketi yok.' : 'No entries for this account.') : (t ? 'Açık alacak yok.' : 'No open receivables.')}
             </p>
           </div>
         ) : (

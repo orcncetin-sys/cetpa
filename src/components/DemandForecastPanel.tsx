@@ -78,12 +78,17 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
     setLoading(true); setError(null); setForecast(null);
 
     try {
-      // ── 1. Fetch last 90 days of orders ─────────────────────────────────
+      // ── 1. Fetch last 90 days of orders & mikroFaturalar ────────────────
       const since90 = Timestamp.fromDate(new Date(Date.now() - 90 * 86_400_000));
+      const since90Iso = new Date(Date.now() - 90 * 86_400_000).toISOString();
+      
       const ordersQ  = query(collection(db, 'orders'), where('syncedAt', '>=', since90));
-      const [ordersSnap, invSnap] = await Promise.all([
+      const mFaturaQ = query(collection(db, 'mikroFaturalar'), where('cha_tarihi', '>=', since90Iso));
+      
+      const [ordersSnap, invSnap, mFaturaSnap] = await Promise.all([
         getDocs(ordersQ),
         getDocs(collection(db, 'inventory')),
+        getDocs(mFaturaQ),
       ]);
 
       type RawOrder = {
@@ -95,9 +100,10 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
 
       const orders   = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawOrder));
       const inventory = invSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawInv));
+      const mikroFaturalar = mFaturaSnap.docs.map(d => d.data());
 
-      if (orders.length === 0) {
-        setError(tr ? 'Son 90 günde sipariş bulunamadı. Önce bazı siparişler oluşturun.' : 'No orders found in the last 90 days.');
+      if (orders.length === 0 && mikroFaturalar.length === 0) {
+        setError(tr ? 'Son 90 günde veri bulunamadı. Önce kayıt oluşturun.' : 'No orders or invoices found in the last 90 days.');
         return;
       }
 
@@ -116,6 +122,17 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
           productMap[name].units   += item.quantity;
           productMap[name].revenue += item.quantity * item.price;
           productMap[name].byMonth[mon] = (productMap[name].byMonth[mon] ?? 0) + item.quantity;
+        }
+      }
+
+      // Add Mikro sales invoices (cha_tip === 0) to revenue projection
+      for (const f of mikroFaturalar) {
+        if (Number(f.cha_tip) === 0 && Number(f.cha_iptal ?? 0) === 0) {
+          const dStr = String(f.cha_tarihi || '');
+          if (dStr.length >= 7) {
+            const mon = dStr.slice(0, 7); // 'YYYY-MM'
+            monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + (Number(f.cha_meblag) || 0);
+          }
         }
       }
 
@@ -182,7 +199,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
               {tr ? 'AI Talep Tahmini & Nakit Akışı' : 'AI Demand Forecast & Cash Flow'}
             </h3>
             <p className="text-[11px] text-gray-400">
-              {tr ? 'Gemini · son 90 gün sipariş verisi' : 'Gemini · last 90 days of order data'}
+              {tr ? 'Gemini · son 90 gün sipariş ve Mikro fatura verisi' : 'Gemini · last 90 days of order & Mikro invoice data'}
             </p>
           </div>
         </div>

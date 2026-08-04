@@ -29,6 +29,7 @@ const LogisticsMap = LogisticsMapLazy;
 import type { Lead, Order, OrderLineItem, Employee, InventoryItem, RouteStop, Shipment, Warehouse, Vehicle, LocationStock } from '../types';
 import LocationQRModal from '../components/LocationQRModal';
 import TransferScanPanel from '../components/TransferScanPanel';
+import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
 import LocationStockReport from '../components/LocationStockReport';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -198,6 +199,25 @@ export default function OrdersPage({
   const [recurringForm, setRecurringForm] = useState({ templateName: '', customerName: '', totalPrice: 0, frequency: 'monthly' as 'weekly' | 'monthly' | 'quarterly', nextDue: '' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [dragIndex, setDragIndex] = useState<number|null>(null);
+
+  // ── MİKRO ENTEGRASYONU ──
+  const [orderSourceTab, setOrderSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
+  const mikroSiparisler = useMikroSiparisler(true);
+  const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
+    id: ms.id,
+    orderNumber: ms.evrakNo,
+    customerName: ms.cariKodu,
+    totalPrice: ms.tutar,
+    status: 'Pending',
+    createdAt: ms.tarih,
+    syncedAt: ms.tarih,
+    mikroBelgeNo: ms.belgeNo,
+    notes: ms.satirAciklamasi,
+    lineItems: []
+  })) as Order[];
+  
+  const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
+
   const [p513Selected, setP513Selected] = useState<string|null>(null);
   const [p554Bins] = useState<Array<{ id: string; warehouseId: string; warehouseName?: string; binCode: string; productSku: string; productName: string; quantity: number; minQty: number; lastCounted?: string; notes?: string }>>([]);
   const [p554AddForm, setP554AddForm] = useState(false);
@@ -369,9 +389,9 @@ export default function OrdersPage({
                 context="orders"
                 currentLanguage={currentLanguage}
                 data={{
-                  pendingOrderCount: orders.filter(o=>o.status==='Pending').length,
-                  topRisk: orders.filter(o=>o.status==='Processing').length > 5
-                    ? (currentLanguage==='tr' ? `${orders.filter(o=>o.status==='Processing').length} sipariş işlemde bekliyor` : `${orders.filter(o=>o.status==='Processing').length} orders stuck in processing`)
+                  pendingOrderCount: activeOrders.filter(o=>o.status==='Pending').length,
+                  topRisk: activeOrders.filter(o=>o.status==='Processing').length > 5
+                    ? (currentLanguage==='tr' ? `${activeOrders.filter(o=>o.status==='Processing').length} sipariş işlemde bekliyor` : `${activeOrders.filter(o=>o.status==='Processing').length} orders stuck in processing`)
                     : undefined
                 }}
                 onAction={() => {}}
@@ -395,7 +415,7 @@ export default function OrdersPage({
                     {/* Phase 93: Export filtered orders to CSV */}
                     <button
                       onClick={() => {
-                        const filtered = orders.filter(o =>
+                        const filtered = activeOrders.filter(o =>
                           (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                           (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                           (o.shopifyOrderId ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
@@ -414,7 +434,7 @@ export default function OrdersPage({
                     >
                       <Download className="w-3.5 h-3.5" />
                       {orderStatusFilter !== 'All'
-                        ? `CSV (${orders.filter(o => o.status === orderStatusFilter).length})`
+                        ? `CSV (${activeOrders.filter(o => o.status === orderStatusFilter).length})`
                         : 'CSV'}
                     </button>
                     <button onClick={() => { setSelectedLead(null); setIsAddingOrder(true); }}
@@ -424,15 +444,31 @@ export default function OrdersPage({
                   </div>
                 }
               />
+              <div className="flex gap-2 mb-4 bg-gray-100/50 p-1 rounded-xl w-fit">
+                <button
+                  onClick={() => setOrderSourceTab('cetpa')}
+                  className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'cetpa' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                >
+                  <Package className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Cetpa Siparişleri' : 'Cetpa Orders'}
+                </button>
+                <button
+                  onClick={() => setOrderSourceTab('mikro')}
+                  className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'mikro' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {currentLanguage === 'tr' ? 'Mikro Siparişleri' : 'Mikro Orders'}
+                </button>
+              </div>
 
               {/* ── Phase 522: Order Fulfillment Rate KPI strip ── */}
-              {orders.length >= 3 && (() => {
-                const total522 = orders.filter(o => o.status !== 'Cancelled').length;
-                const delivered522 = orders.filter(o => o.status === 'Delivered').length;
-                const pending522 = orders.filter(o => o.status === 'Pending').length;
-                const inProgress522 = orders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length;
+              {activeOrders.length >= 3 && (() => {
+                const total522 = activeOrders.filter(o => o.status !== 'Cancelled').length;
+                const delivered522 = activeOrders.filter(o => o.status === 'Delivered').length;
+                const pending522 = activeOrders.filter(o => o.status === 'Pending').length;
+                const inProgress522 = activeOrders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length;
                 const fulfillRate = total522 > 0 ? Math.round((delivered522 / total522) * 100) : 0;
-                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                const unpaidOrders = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled');
                 const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -455,7 +491,7 @@ export default function OrdersPage({
 
               {/* ── Phase 521: Invoice Aging Alert ── */}
               {(() => {
-                const unpaid521 = orders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt));
+                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt));
                 if (unpaid521.length === 0) return null;
                 const now521 = Date.now();
                 const buckets521 = [
@@ -551,7 +587,7 @@ export default function OrdersPage({
                       confirmLabel: currentLanguage === 'tr' ? '✓ Ödendi Yap' : '✓ Mark Paid',
                       onConfirm: async () => {
                         setBulkActionLoading(true);
-                        const sel = orders.filter(o => selectedOrderIds.has(o.id));
+                        const sel = activeOrders.filter(o => selectedOrderIds.has(o.id));
                         for (const o of sel) {
                           if (!o.paid) await handleToggleOrderPaid(o);
                         }
@@ -574,7 +610,7 @@ export default function OrdersPage({
                   <button
                     onClick={() => {
                       // Bulk PDF export: generate one PDF with all selected orders
-                      const sel = orders.filter(o => selectedOrderIds.has(o.id));
+                      const sel = activeOrders.filter(o => selectedOrderIds.has(o.id));
                       import('jspdf').then(({ jsPDF }) => {
                         import('jspdf-autotable').then(({ default: autoTable }) => {
                           const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -730,7 +766,7 @@ export default function OrdersPage({
               {/* ── Phase 55: Status Filter Chips ── */}
               <div className="flex flex-wrap gap-1.5">
                 {(['All', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const).map(s => {
-                  const count = s === 'All' ? orders.length : orders.filter(o => o.status === s).length;
+                  const count = s === 'All' ? activeOrders.length : activeOrders.filter(o => o.status === s).length;
                   const isActive = orderStatusFilter === s;
                   const chipColors: Record<string, string> = {
                     All:        'bg-gray-900 text-white',
@@ -817,7 +853,7 @@ export default function OrdersPage({
               {(() => {
                 const now = Date.now();
                 const THREE_DAYS = 3 * 86400000;
-                const stuckOrders = orders.filter(o => {
+                const stuckOrders = activeOrders.filter(o => {
                   if (o.status !== 'Pending' && o.status !== 'Processing') return false;
                   const raw = o.createdAt ?? o.syncedAt;
                   if (!raw) return false;
@@ -869,14 +905,14 @@ export default function OrdersPage({
                             type="checkbox"
                             className="rounded accent-brand cursor-pointer"
                             checked={selectedOrderIds.size > 0 && (() => {
-                              const filtered = orders.filter(o =>
+                              const filtered = activeOrders.filter(o =>
                                 o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                                 o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
                               );
                               return filtered.every(o => selectedOrderIds.has(o.id));
                             })()}
                             onChange={e => {
-                              const filtered = orders.filter(o =>
+                              const filtered = activeOrders.filter(o =>
                                 o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                                 o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
                               );
@@ -909,7 +945,7 @@ export default function OrdersPage({
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {(() => {
-                        const filtered = orders.filter(o => {
+                        const filtered = activeOrders.filter(o => {
                           if (orderStatusFilter === '__starred__' && !starredOrders.has(o.id)) return false;
                           if (orderStatusFilter !== 'All' && orderStatusFilter !== '__starred__' && o.status !== orderStatusFilter) return false;
                           // Phase 523: customer filter
@@ -1234,7 +1270,7 @@ export default function OrdersPage({
 
               {/* Mobile Card View */}
               <div className="md:hidden space-y-4">
-                {sortData(orders.filter(o =>
+                {sortData(activeOrders.filter(o =>
                   (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                   (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
                   o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||

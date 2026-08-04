@@ -27,6 +27,7 @@ import ConfirmModal from './ConfirmModal';
 import { cn } from '../lib/utils';
 import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
+import { useMikroPersonel } from '../hooks/useMikroPersonel';
 
 // İzin türü → Mikro pit_izin_tipi kodu eşlemesi
 const MIKRO_IZIN_TIPI: Record<string, number> = {
@@ -183,6 +184,59 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const { data: mikroPersoneller, loading: mikroLoading, refetch: fetchMikroPersonel } = useMikroPersonel();
+
+  const handleSyncMikro = async () => {
+    if (!mikroPersoneller || mikroPersoneller.length === 0) {
+      await fetchMikroPersonel();
+    }
+    // After fetch (or if already fetched), we match employees
+    let synced = 0;
+    let created = 0;
+    for (const mPer of (mikroPersoneller || [])) {
+      if (!mPer.mikroPersKod) continue;
+      // Match by TC ID or email or name
+      const existing = employees.find(e => 
+        (e.tcId && e.tcId === mPer.tcId) || 
+        (e.email && e.email === mPer.email) ||
+        (e.mikroPersKod && e.mikroPersKod === mPer.mikroPersKod) ||
+        (e.name.toLowerCase() === (mPer.name + ' ' + mPer.surname).toLowerCase())
+      );
+      
+      const fullName = (mPer.name + ' ' + mPer.surname).trim();
+      
+      if (existing) {
+        // Update if mikroPersKod is missing or different
+        if (existing.mikroPersKod !== mPer.mikroPersKod) {
+          await updateDoc(doc(db, 'employees', existing.id), {
+            mikroPersKod: mPer.mikroPersKod
+          });
+          synced++;
+        }
+      } else {
+        // Create new employee
+        await addDoc(collection(db, 'employees'), {
+          name: fullName,
+          email: mPer.email || '',
+          phone: mPer.phone || '',
+          department: mPer.department || '',
+          position: mPer.position || '',
+          salary: mPer.salary || 0,
+          salaryCurrency: 'TRY',
+          startDate: mPer.startDate || format(new Date(), 'yyyy-MM-dd'),
+          status: mPer.status === 'Pasif' ? 'Ayrıldı' : 'Aktif',
+          tcId: mPer.tcId || '',
+          mikroPersKod: mPer.mikroPersKod,
+          role: 'Employee',
+          city: 'İstanbul',
+          createdAt: serverTimestamp()
+        });
+        created++;
+      }
+    }
+    showToast(currentLanguage === 'tr' ? \`\${synced} güncellendi, \${created} eklendi.\` : \`\${synced} updated, \${created} created.\`);
   };
 
   const t = {
@@ -476,12 +530,21 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   className="apple-input w-full pl-10 pr-4 py-2.5"
                 />
               </div>
-              <button 
-                onClick={() => setShowEmployeeModal(true)}
-                className="apple-button-primary"
-              >
-                <Plus size={18} /> {t.add}
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleSyncMikro}
+                  disabled={mikroLoading}
+                  className="apple-button-secondary bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+                >
+                  {mikroLoading ? '...' : (currentLanguage === 'tr' ? "Mikro'dan Senkronize Et" : 'Sync from Mikro')}
+                </button>
+                <button 
+                  onClick={() => setShowEmployeeModal(true)}
+                  className="apple-button-primary"
+                >
+                  <Plus size={18} /> {t.add}
+                </button>
+              </div>
             </div>
 
             <div className="apple-card overflow-hidden">

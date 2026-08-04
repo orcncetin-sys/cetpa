@@ -15,6 +15,7 @@ import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
 import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
+import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -68,6 +69,24 @@ interface PurchasingModuleProps {
 export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory = [], onNavigate, exchangeRates, prefillProduct, onPrefillConsumed }: PurchasingModuleProps) {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
+
+  // ── MİKRO ENTEGRASYONU (Alış Siparişleri) ──
+  const [poSourceTab, setPoSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
+  const mikroSiparisler = useMikroSiparisler(true);
+  const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 1).map(ms => ({
+    id: ms.id,
+    orderNumber: ms.evrakNo,
+    supplier: ms.cariKodu,
+    status: 'Sipariş Edildi' as const,
+    items: [], // Detay eklenecekse burası doldurulmalı
+    totalAmount: ms.tutar,
+    createdAt: ms.tarih,
+    expectedDate: ms.tarih,
+    notes: ms.satirAciklamasi
+  })) as PurchaseOrder[];
+  
+  const activePurchaseOrders = poSourceTab === 'cetpa' ? purchaseOrders : mappedMikroSiparisler;
+
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
   const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -435,7 +454,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     setSortConfig({ key, direction });
   };
 
-  const filteredOrders = purchaseOrders.filter(order => {
+  const filteredOrders = activePurchaseOrders.filter(order => {
     const matchesSearch = order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           order.supplier.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
@@ -528,27 +547,45 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
         subtitle={t.subtitle}
         icon={ShoppingCart}
         actionButton={
-          <button
-            onClick={() => setIsAddingOrder(true)}
-            className="apple-button-primary flex items-center gap-2 justify-center"
-          >
-            <Plus className="w-4 h-4" />
-            {t.newOrder}
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <div className="flex bg-gray-100/50 p-1 rounded-xl">
+              <button
+                onClick={() => setPoSourceTab('cetpa')}
+                className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", poSourceTab === 'cetpa' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+              >
+                <Package className="w-4 h-4" />
+                {currentLanguage === 'tr' ? 'Cetpa' : 'Cetpa'}
+              </button>
+              <button
+                onClick={() => setPoSourceTab('mikro')}
+                className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", poSourceTab === 'mikro' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+              >
+                <DollarSign className="w-4 h-4" />
+                {currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}
+              </button>
+            </div>
+            <button
+              onClick={() => setIsAddingOrder(true)}
+              className="apple-button-primary flex items-center gap-2 justify-center"
+            >
+              <Plus className="w-4 h-4" />
+              {t.newOrder}
+            </button>
+          </div>
         }
       />
 
       {/* Stats */}
       {(() => {
-        const totalTRY = purchaseOrders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
+        const totalTRY = activePurchaseOrders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
         const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
         const convertedTotal = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
         const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: t.pending, value: purchaseOrders.filter(o => o.status === 'Beklemede').length, icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50', status: 'Beklemede' },
-              { label: t.inTransit, value: purchaseOrders.filter(o => o.status === 'Sipariş Edildi').length, icon: Truck, color: 'text-blue-600', bg: 'bg-blue-50', status: 'Sipariş Edildi' },
+              { label: t.pending, value: activePurchaseOrders.filter(o => o.status === 'Beklemede').length, icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50', status: 'Beklemede' },
+              { label: t.inTransit, value: activePurchaseOrders.filter(o => o.status === 'Sipariş Edildi').length, icon: Truck, color: 'text-blue-600', bg: 'bg-blue-50', status: 'Sipariş Edildi' },
               { label: t.criticalStock, value: inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', tab: 'inventory' },
             ].map((stat, i) => (
               <button

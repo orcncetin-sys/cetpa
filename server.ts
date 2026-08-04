@@ -1111,6 +1111,8 @@ async function initMikroTables(): Promise<void> {
     kaynak text,
     veri jsonb, veri_hash text UNIQUE, guncelleme timestamptz NOT NULL DEFAULT now()
   );
+  ALTER TABLE mikro_cari_hesap_hareketleri ADD COLUMN IF NOT EXISTS cha_kasa_hizkod text;
+  ALTER TABLE mikro_cari_hesap_hareketleri ADD COLUMN IF NOT EXISTS cha_kasa_hizmet int;
   CREATE INDEX IF NOT EXISTS idx_mikro_cha_kod ON mikro_cari_hesap_hareketleri (cha_kod);
   CREATE TABLE IF NOT EXISTS mikro_stok_hareketleri (
     id bigserial PRIMARY KEY,
@@ -1394,6 +1396,8 @@ const CHA_COLS: Record<string, (r: Record<string, unknown>) => unknown> = {
   cha_evrakno_sira: r => strOrNull(r.cha_evrakno_sira),
   cha_belge_no: r => strOrNull(r.cha_belge_no),
   cha_ebelge_turu: r => numOrNull(r.cha_ebelge_turu),
+  cha_kasa_hizkod: r => strOrNull(r.cha_kasa_hizkod),
+  cha_kasa_hizmet: r => numOrNull(r.cha_kasa_hizmet),
   kaynak: r => strOrNull(r.__kaynak ?? 'mikro'),
 };
 
@@ -5796,7 +5800,7 @@ async function startServer() {
     tablo: 'CARI_HESAP_HAREKETLERI',
     secim: 'cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, ' +
            'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, ' +
-           'cha_ebelge_turu, cha_belge_no',
+           'cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet',
     siralama: 'cha_tarihi DESC, cha_Guid',
     ekKosul: 'cha_iptal = 0',
     tarihKolonu: 'cha_tarihi',
@@ -6642,7 +6646,7 @@ async function startServer() {
     try {
       const sql =
         "SELECT TOP 2000 cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, " +
-        "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, cha_ebelge_turu, cha_belge_no " +
+        "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_vergi, cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet " +
         "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_iptal = 0 ORDER BY cha_tarihi DESC";
       const { ok, data, status } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sql });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
@@ -7081,7 +7085,20 @@ async function startServer() {
   // Yeni yol: SqlVeriOkuV2 (SELECT-only SQL kapısı) ile TEK sorguda tüm cari
   // bakiyeleri. cha_tip 0 = borç (satış), 1 = alacak — bakiye = borç - alacak.
   // N çağrı yerine 1 çağrı; ayrıca 100'lük limit gereksiz kalıyor.
-  app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  
+// --- TEMPORARY ENDPOINT FOR PERSONEL ---
+app.post('/api/mikro/test-personel', async (req, res) => {
+  try {
+    const { mikroSql } = require('./src/services/mikroSql');
+    const result = await mikroSql("SELECT TOP 5 * FROM PERSONEL_TANIMLARI");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+// --- END TEMPORARY ---
+
+app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -7417,6 +7434,56 @@ async function startServer() {
     } catch (err) {
       console.error('[pull/kdv]', err);
       res.status(500).json({ success: false, error: 'KDV özeti çekimi başarısız. taxSummary değişmedi.' });
+    }
+  });
+
+  // ── Personel ───────────────────────────────────────────────────────────
+  app.post('/api/mikro/pull/personel', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+
+    try {
+      const perSql = `
+        SELECT
+          per_kodu as mikroPersKod,
+          per_adi as name,
+          per_soyadi as surname,
+          per_eposta as email,
+          per_ceptel as phone,
+          per_departmani as department,
+          per_gorevi as position,
+          per_maas as salary,
+          per_isegiristarihi as startDate,
+          per_durumu as status,
+          per_tckimlikno as tcId
+        FROM PERSONEL_TANIMLARI
+      `;
+      const personeller = await mikroSql(perSql);
+      res.json({ success: true, data: personeller });
+    } catch (err: any) {
+      console.error('[pull/personel]', err);
+      res.status(500).json({ success: false, error: 'Personel çekimi başarısız.' });
+    }
+  });
+
+  // ── Uretim Receteleri (BOM) ────────────────────────────────────────────────
+  app.post('/api/mikro/pull/uretim-receteleri', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    
+    try {
+      const cols = await mikroKolonlar('STOK_URETIM_RECETELERI');
+      if (!cols.length) {
+        return res.status(502).json({ success: false, error: 'STOK_URETIM_RECETELERI tablosu okunamadı veya SqlVeriOkuV2 izni yok.' });
+      }
+
+      // We select all BOM definitions.
+      const sql = 'SELECT * FROM STOK_URETIM_RECETELERI ORDER BY rec_create_date DESC OFFSET 0 ROWS FETCH NEXT 5000 ROWS ONLY';
+      const { rows, hata } = await mikroSql(sql);
+      if (hata) return res.status(502).json({ success: false, error: hata });
+
+      res.json({ success: true, data: rows });
+    } catch (err) {
+      console.error('[pull/uretim-receteleri]', err);
+      res.status(500).json({ success: false, error: 'Reçete çekimi başarısız.' });
     }
   });
 

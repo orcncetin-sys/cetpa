@@ -256,6 +256,7 @@ export interface ApprovalRequest {
 export interface Employee {
   id: string;
   employeeId?: string;
+  mikroPersKod?: string;
   tcId?: string;
   name: string;
   position: string;

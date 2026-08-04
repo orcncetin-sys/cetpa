@@ -24,6 +24,7 @@ import { sortByCreatedAt } from '../utils/fsSort';
 import ConfirmModal from './ConfirmModal';
 import MikroPushButton from './MikroPushButton';
 import { recetePayload } from '../services/mikroEvrak';
+import { useMikroUretimReceteleri } from '../hooks/useMikroUretimReceteleri';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,22 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
   // ── State ──────────────────────────────────────────────────────────────────
   const [boms,      setBoms]      = useState<BOM[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  
+  // ── MİKRO ENTEGRASYONU ──
+  const [bomSourceTab, setBomSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
+  const { receteler: mikroReceteler } = useMikroUretimReceteleri();
+  
+  const mikroBoms: BOM[] = mikroReceteler.map(r => ({
+    id: r.rec_kod,
+    productName: r.rec_isim || r.rec_kod,
+    productSku: r.rec_ana_stok_kod || r.rec_kod,
+    unit: 'adet',
+    description: `Mikro Reçete: ${r.rec_kod} (Oluşturulma: ${r.rec_create_date?.split('T')[0] || '-'})`,
+    components: []
+  }));
+  
+  const activeBoms = bomSourceTab === 'cetpa' ? boms : mikroBoms;
+
   const [search,    setSearch]    = useState('');
   const [loading,   setLoading]   = useState(true);
 
@@ -172,7 +189,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
   };
 
   // ── Filtered list ──────────────────────────────────────────────────────────
-  const filtered = boms.filter(b =>
+  const filtered = activeBoms.filter(b =>
     b.productName.toLowerCase().includes(search.toLowerCase()) ||
     b.productSku.toLowerCase().includes(search.toLowerCase())
   );
@@ -201,10 +218,30 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
             </p>
           </div>
         </div>
-        <button onClick={openNew} className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors">
-          <Plus className="w-3.5 h-3.5" />
-          {tr ? 'Yeni Reçete' : 'New BOM'}
-        </button>
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="flex bg-indigo-100/50 p-1 rounded-xl">
+            <button
+              onClick={() => setBomSourceTab('cetpa')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${bomSourceTab === 'cetpa' ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-indigo-700"}`}
+            >
+              <Package className="w-4 h-4" />
+              {tr ? 'Cetpa' : 'Cetpa'}
+            </button>
+            <button
+              onClick={() => setBomSourceTab('mikro')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${bomSourceTab === 'mikro' ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-indigo-700"}`}
+            >
+              <Factory className="w-4 h-4" />
+              {tr ? 'Mikro' : 'Mikro'}
+            </button>
+          </div>
+          {bomSourceTab === 'cetpa' && (
+            <button onClick={openNew} className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors">
+              <Plus className="w-3.5 h-3.5" />
+              {tr ? 'Yeni Reçete' : 'New BOM'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── MRP redirect banner ── */}
@@ -285,12 +322,16 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                       })}
                     />
                   )}
-                  <button onClick={() => openEdit(bom)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => handleDelete(bom.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {bomSourceTab === 'cetpa' && (
+                    <>
+                      <button onClick={() => openEdit(bom)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDelete(bom.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => setExpanded(e => ({ ...e, [bom.id]: !e[bom.id] }))}
                     className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"

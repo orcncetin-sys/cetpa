@@ -18,6 +18,8 @@ import DashboardAnalysis from '../components/DashboardAnalysis';
 import DateRangePicker from '../components/DateRangePicker';
 import SonSenkronRozeti from '../components/SonSenkronRozeti';
 import type { Order, Lead, InventoryItem, Shipment } from '../types';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
+import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 
 const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
 
@@ -111,6 +113,36 @@ export default function DashboardPage(props: Props) {
     setSelectedLead, setCrmTab, setSelectedOrder, setShowOverduePanel, setGlobalSearchOpen,
   } = props;
 
+  // ── MİKRO ENTEGRASYONU: Fatura ve Siparişler ──
+  const mikroFaturalar = useMikroFaturalar(true);
+  const mikroSiparisler = useMikroSiparisler(true);
+
+  // Giden (satış) faturalarını tarih aralığına göre filtrele
+  const filteredMikroFaturalar = mikroFaturalar.filter(f => {
+    if (f.yon !== 'giden') return false;
+    const start = new Date(dateRange.startDate);
+    const end = new Date(dateRange.endDate);
+    const d = new Date(f.tarih);
+    return d >= start && d <= end;
+  });
+
+  const totalMikroRevenue = filteredMikroFaturalar.reduce((sum, f) => sum + (f.tutar || 0), 0);
+  const totalNativeRevenue = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
+  const combinedRevenue = totalNativeRevenue + totalMikroRevenue;
+
+  // Mikro siparişlerini Order formatına uyarlayıp grafiklerde kullanmak için birleştir
+  const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
+    id: ms.id,
+    orderNumber: ms.evrakNo,
+    customerName: ms.cariKodu,
+    totalPrice: ms.tutar,
+    status: 'Pending', // Mikro'daki açık siparişler
+    createdAt: ms.tarih,
+    syncedAt: ms.tarih,
+  })) as Order[];
+  
+  const combinedOrders = [...orders, ...mappedMikroSiparisler];
+
   return (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
               {/* Welcome */}
@@ -128,10 +160,10 @@ export default function DashboardPage(props: Props) {
                         burada görünür. Tıklayınca ERP Hub'a gider. */}
                     <SonSenkronRozeti currentLanguage={currentLanguage} onNavigate={() => setActiveTab('settings')} />
                     <DashboardAnalysis data={{
-                      orders: filteredOrders,
+                      orders: filteredOrders, // Analiz modülü için native veriler yeterli olabilir, ancak gerekirse combinedOrders verilir.
                       leads: filteredLeads,
                       inventory: inventory,
-                      revenue: filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0)
+                      revenue: combinedRevenue
                     }} />
                     <DateRangePicker
                       startDate={dateRange.startDate}
@@ -154,8 +186,8 @@ export default function DashboardPage(props: Props) {
                 const now528 = Date.now();
                 const alerts: { id: string; color: string; icon: string; msg: string }[] = [];
 
-                // Orders stuck in Pending > 3 days
-                const stuckPending = orders.filter(o => {
+                // Orders stuck in Pending > 3 days (native + mikro)
+                const stuckPending = combinedOrders.filter(o => {
                   if (o.status !== 'Pending') return false;
                   const raw = o.createdAt ?? o.syncedAt;
                   if (!raw) return false;
@@ -255,9 +287,8 @@ export default function DashboardPage(props: Props) {
                 ))}
                 {/* Revenue KPI with currency toggle + delta */}
                 {(() => {
-                  const totalTRY = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
                   const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                  const converted = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
+                  const converted = kpiCurrency === 'TRY' ? combinedRevenue : combinedRevenue / rate;
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                   const revDelta = summaryData?.revenue?.delta;
                   return (
@@ -292,11 +323,21 @@ export default function DashboardPage(props: Props) {
                         const days = Array.from({ length: 7 }, (_, i) => {
                           const d = new Date(); d.setDate(d.getDate() - (6 - i));
                           const dayStr = d.toDateString();
-                          const rev = orders.filter(o => {
+                          
+                          // Native revenue for this day
+                          const revNative = orders.filter(o => {
                             const od = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? (o.createdAt ? new Date(o.createdAt as string | number) : null);
                             return od?.toDateString() === dayStr;
                           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                          return { day: d.getDate(), rev };
+                          
+                          // Mikro revenue for this day
+                          const revMikro = mikroFaturalar.filter(f => {
+                            if (f.yon !== 'giden') return false;
+                            const fd = new Date(f.tarih);
+                            return fd.toDateString() === dayStr;
+                          }).reduce((s, f) => s + (f.tutar || 0), 0);
+
+                          return { day: d.getDate(), rev: revNative + revMikro };
                         });
                         const maxRev = Math.max(...days.map(d => d.rev), 1);
                         return (
@@ -325,7 +366,7 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Insight strip: revenue trend + alerts + search CTA ── */}
               {(() => {
-                const pendingCount   = orders.filter(o => o.status === 'Pending').length;
+                const pendingCount   = combinedOrders.filter(o => o.status === 'Pending').length;
                 const lowStockCount  = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length;
                 const shippedToday   = orders.filter(o => {
                   const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
