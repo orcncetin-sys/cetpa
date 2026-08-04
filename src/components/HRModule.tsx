@@ -236,7 +236,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         created++;
       }
     }
-    showToast(currentLanguage === 'tr' ? \`\${synced} güncellendi, \${created} eklendi.\` : \`\${synced} updated, \${created} created.\`);
+    showToast(currentLanguage === 'tr' ? `${synced} güncellendi, ${created} eklendi.` : `${synced} updated, ${created} created.`);
   };
 
   const t = {
