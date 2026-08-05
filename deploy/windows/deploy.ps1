@@ -27,8 +27,12 @@ git reset --hard "origin/$Branch"
 Info 'Stopping cetpa service (releases node_modules file locks before npm ci)'
 Stop-Service cetpa -Force -ErrorAction SilentlyContinue
 
-
 Start-Sleep 2
+
+Info 'Cleaning up logs to free disk space (deleting all files in C:\cetpa\logs)...'
+if (Test-Path "C:\cetpa\logs") {
+    Get-ChildItem -Path "C:\cetpa\logs" -File -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+}
 
 Info 'npm ci --legacy-peer-deps'
 npm ci --legacy-peer-deps
