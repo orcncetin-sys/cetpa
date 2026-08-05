@@ -27,10 +27,6 @@ git reset --hard "origin/$Branch"
 Info 'Stopping cetpa service (releases node_modules file locks before npm ci)'
 Stop-Service cetpa -Force -ErrorAction SilentlyContinue
 
-# If the user has a manual Node console open, it will also lock files.
-# Terminate any non-service Node processes running in this directory.
-Info 'Terminating any manual node processes...'
-Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
 
 Start-Sleep 2
 
