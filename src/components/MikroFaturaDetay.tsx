@@ -133,9 +133,9 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           {satir(tr ? 'Müşteri / Cari' : 'Customer', fatura.musteri)}
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
           {satir(tr ? 'Tarih' : 'Date', fatura.tarih || '—')}
-          {satir(tr ? 'Matrah' : 'Base', fatura.matrah ? tl(fatura.matrah) : '—')}
-          {satir(tr ? 'KDV' : 'VAT', fatura.kdv ? `${tl(fatura.kdv)}${fatura.oran !== null ? ` (%${fatura.oran})` : ''}` : '—')}
-          {satir(tr ? 'Toplam' : 'Total', tl(fatura.tutar))}
+          {satir(tr ? 'Matrah' : 'Base', typeof fatura.matrah === 'number' ? tl(fatura.matrah) : '—')}
+          {satir(tr ? 'KDV' : 'VAT', typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oran !== null ? ` (%${fatura.oran})` : ''}` : '—')}
+          {satir(tr ? 'Toplam' : 'Total', typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
 
           {hata && (
             <div className="mt-3 flex items-start gap-2 text-xs text-red-700 bg-red-50 rounded-xl px-3 py-2">

@@ -5748,7 +5748,7 @@ async function startServer() {
             // kullanabiliyor (seri boş). evraktip'i de anahtara katmazsak
             // bir satış faturasına alış satırının KDV'si bağlanabilir.
             'AND sat.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END',
-    secim: 'cha.*, ISNULL(sat.kdv, 0) AS kdvTutari, ISNULL(sat.matrah, 0) AS matrah, sat.vergiPntr',
+    secim: 'cha.*, ISNULL(sat.kdv, ISNULL(cha.cha_meblag - cha.cha_aratoplam, 0)) AS kdvTutari, ISNULL(sat.matrah, ISNULL(cha.cha_aratoplam, 0)) AS matrah, sat.vergiPntr',
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',
@@ -7425,9 +7425,12 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       const kdvOzet = `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)`;
       await writeSyncLog('SQL:STOK_HAREKETLERI(KDV)', 'taxSummary', kdvOzet, true, null, null, Date.now() - t0, reqActor(req));
       await writeAuditLog(reqActor(req), 'Mikro KDV Özeti Çekme', kdvOzet);
+      const kdvMatrahiSatis = kirilim.filter(k => k.yon === 'satis').reduce((acc, k) => acc + (k.matrah || 0), 0);
       res.json({ success: true, period, kdvHesaplanan, kdvIndirilecek,
                  kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
                  oranKirilimi: kirilim,
+                 kdvMatrahi: kdvMatrahiSatis,
+                 hesaplananKdv: kdvHesaplanan,
                  uyari: 'Türetilmiş özet — tevkifat/iade/devreden kapsam dışı. Beyan öncesi Mikro KDV raporuyla karşılaştırın.',
                  duration: Date.now() - t0 });
     } catch (err) {
