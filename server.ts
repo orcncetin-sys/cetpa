@@ -5799,7 +5799,7 @@ async function startServer() {
     tablo: 'CARI_HESAP_HAREKETLERI',
     secim: 'cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, ' +
            'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, ' +
-           'cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet',
+           'cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet, cha_ettn',
     siralama: 'cha_tarihi DESC, cha_Guid',
     ekKosul: 'cha_iptal = 0',
     tarihKolonu: 'cha_tarihi',

@@ -17,6 +17,7 @@ import {
 import { db } from '../firebase';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
+import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ interface AgingRow {
   status: string;
   createdAt: string | null;
   leadId?: string;
+  raw?: Record<string, unknown>; // raw document data
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -153,6 +155,7 @@ export default function CariEkstrePanel({
   const [filter, setFilter]   = useState<'all' | 'overdue'>('all');
   const [sortCol, setSortCol] = useState<'ageD' | 'amount' | 'customerName'>('ageD');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  const [selectedInvoice, setSelectedInvoice] = useState<MikroFaturaDetayVerisi | null>(null);
 
   const mikroModu = !!cariKod;
 
@@ -205,6 +208,7 @@ export default function CariEkstrePanel({
           // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
           status: `${tipEtiket} · ${yon}${finalAciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
           createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
+          raw: x,
         });
       });
       setBuckets(newBuckets);
@@ -406,8 +410,35 @@ export default function CariEkstrePanel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {displayed.map(row => (
-                  <tr key={row.id} className="hover:bg-gray-50/50 transition-colors">
+                {displayed.map(row => {
+                  const isFatura = row.raw && Number(row.raw.cha_evrak_tip) === 63;
+                  return (
+                  <tr
+                    key={row.id}
+                    onClick={() => {
+                      if (!isFatura || !row.raw) return;
+                      const x = row.raw;
+                      const seri = String(x.cha_evrakno_seri ?? '').trim();
+                      const sira = x.cha_evrakno_sira;
+                      const tutar = Number(x.cha_meblag ?? 0) || 0;
+                      const matrah = Number(x.cha_aratoplam ?? 0) || 0;
+                      setSelectedInvoice({
+                        id: row.id,
+                        faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+                        musteri: customerName ?? '—',
+                        cariKod: cariKod ?? '—',
+                        tarih: row.createdAt ?? '—',
+                        tutar,
+                        matrah,
+                        kdv: tutar - matrah,
+                        oran: null,
+                        yon: Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden',
+                        uuid: String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
+                      });
+                    }}
+                    className={`hover:bg-gray-50/50 transition-colors ${isFatura ? 'cursor-pointer' : ''}`}
+                    title={isFatura ? (t ? 'Fatura detayını görüntüle' : 'View invoice details') : undefined}
+                  >
                     {!leadId && (
                       <td className="px-4 py-2.5 font-medium text-gray-800 max-w-[160px] truncate">{row.customerName}</td>
                     )}
@@ -429,12 +460,20 @@ export default function CariEkstrePanel({
                           : <CheckCircle2 className="w-4 h-4 text-green-400 mx-auto" />}
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {selectedInvoice && (
+        <MikroFaturaDetay
+          fatura={selectedInvoice}
+          currentLanguage={currentLanguage}
+          onClose={() => setSelectedInvoice(null)}
+        />
+      )}
     </div>
   );
 }
