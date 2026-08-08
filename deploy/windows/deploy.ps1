@@ -30,8 +30,15 @@ Stop-Service cetpa -Force -ErrorAction SilentlyContinue
 Start-Sleep 2
 
 Info 'Cleaning up logs to free disk space (deleting all files in C:\cetpa\logs)...'
-if (Test-Path "C:\cetpa\logs") {
-    Get-ChildItem -Path "C:\cetpa\logs" -File -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+# Wrapped in try/catch: with $ErrorActionPreference='Stop' a Get-ChildItem list
+# error would otherwise abort the whole deploy. Log cleanup must NEVER break deploy.
+try {
+    if (Test-Path "C:\cetpa\logs") {
+        Get-ChildItem -Path "C:\cetpa\logs" -File -Recurse -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    Write-Host "    Log cleanup skipped: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 Info 'npm ci --legacy-peer-deps'
