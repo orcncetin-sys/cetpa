@@ -502,6 +502,22 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
+  // Cari bakiyeleri (cariBalances) — Müşteri/Tedarikçi OLMAYAN ama bakiyesi olan
+  // cariler ("gider/diğer", ör. 7 Mehmet) rozetlensin. pull/bakiye doldurur.
+  const [cariBalanceKodSet, setCariBalanceKodSet] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isAuthenticated || !userRole) return;
+    const unsub = onSnapshot(collection(db, 'cariBalances'), s => {
+      const set = new Set<string>();
+      s.docs.forEach(d => {
+        const x = d.data() as Record<string, unknown>;
+        const kod = String(x.cariKod ?? d.id).trim();
+        if (kod && Number(x.bakiye ?? 0) !== 0) set.add(kod);
+      });
+      setCariBalanceKodSet(set);
+    }, (error) => logFirestoreError(error, OperationType.LIST, 'cariBalances'));
+    return () => unsub();
+  }, [isAuthenticated, userRole]);
   // İşletme sermayesi — editlenebilir kalemler (settings/workingCapital'da saklanır)
   type WCField = 'kasaBanka' | 'ticariAlacaklar' | 'stoklar' | 'ticariBorclar' | 'vergiSgk' | 'krediler';
   const [workingCapital, setWorkingCapital] = useState<Record<WCField, number>>({
@@ -1835,6 +1851,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (m && td) return { label: currentLanguage === 'tr' ? 'Müşteri + Tedarikçi' : 'Customer + Supplier', cls: 'bg-purple-100 text-purple-700' };
     if (td)      return { label: currentLanguage === 'tr' ? 'Tedarikçi' : 'Supplier', cls: 'bg-amber-100 text-amber-700' };
     if (m)       return { label: currentLanguage === 'tr' ? 'Müşteri' : 'Customer', cls: 'bg-teal-100 text-teal-700' };
+    // Satış/alış faturası YOK ama bakiyesi VAR → gider/diğer cari (7 Mehmet gibi).
+    // "Gider" demiyoruz (personel/banka/vergi carisi de olabilir) — dürüst etiket "Diğer".
+    if (!!kod && cariBalanceKodSet.has(kod)) return { label: currentLanguage === 'tr' ? 'Diğer' : 'Other', cls: 'bg-gray-100 text-gray-600' };
     return null;
   };
   const mikroTedarikcileri: Supplier[] = customers

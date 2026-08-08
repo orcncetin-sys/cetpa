@@ -5856,6 +5856,18 @@ async function startServer() {
         sql: 'SELECT dep_no, dep_adi FROM DEPOLAR ORDER BY dep_no' },
       { ad: 'stokDepoKoduDagilimi',
         sql: "SELECT sto_yer_kod, COUNT(*) AS adet FROM STOKLAR GROUP BY sto_yer_kod ORDER BY COUNT(*) DESC" },
+      // code-review #7 DOGRULAMA: STOK_HAREKETLERI'nden per-depo stok (aday tek SQL).
+      // Bu ciktinin stok-miktar import'unun depoBreakdown'iyla (GenelAmacliMaliyet
+      // polling) ESLESMESI halinde, agir per-SKU-per-depo polling yerine tek grup-SQL'e
+      // gecilir. Once sema burada dogrulanmadan import DEGISTIRILMEZ (envanter riski).
+      { ad: 'sthDepoKolonOrnegi',
+        sql: 'SELECT TOP 5 sth_stok_kod, sth_tip, sth_miktar, sth_giris_depo_no, sth_cikis_depo_no, sth_iptal FROM STOK_HAREKETLERI ORDER BY sth_tarih DESC' },
+      { ad: 'perDepoStokAday',
+        sql: 'SELECT TOP 40 sth_stok_kod, depo, SUM(net) AS bakiye FROM (' +
+             'SELECT sth_stok_kod, sth_giris_depo_no AS depo, sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 0 AND ISNULL(sth_iptal, 0) = 0 ' +
+             'UNION ALL ' +
+             'SELECT sth_stok_kod, sth_cikis_depo_no AS depo, -sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 1 AND ISNULL(sth_iptal, 0) = 0' +
+             ') t GROUP BY sth_stok_kod, depo HAVING SUM(net) <> 0 ORDER BY sth_stok_kod' },
       // Gelen (alış) fatura doğrulaması: cha_tip 1 başlığı ile sth_evraktip 3
       // satırı aynı evrak numarasında buluşuyor mu, toplamlar tutuyor mu?
       { ad: 'alisFaturaBasliklari',
