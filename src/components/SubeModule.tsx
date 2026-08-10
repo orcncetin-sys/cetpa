@@ -5,6 +5,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
   MapPin, Phone, Mail, User, CheckCircle, Package
@@ -61,6 +62,9 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
 
   type PLOrder = { subeAdi?: string; totalPrice?: number; costTotal?: number; status?: string; createdAt?: unknown };
   const [plOrders, setPlOrders] = useState<PLOrder[]>([]);
+  // Mikro satış faturaları — şube P&L'i orders'tan (boş) geliyordu; Mikro GİDEN
+  // satışı cha_subeno ile şubeye eşlenip gelire additive eklenir (aşağıda computedPL).
+  const mikroFaturalar = useMikroFaturalar(isAuthenticated);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -153,12 +157,22 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
     try { return new Date(v as string); } catch { return null; }
   }
 
+  // Mikro GİDEN (satış) faturaları — şube bazlı ay eşleşmesi 'YYYY-MM' önekiyle.
+  // Şube eşleşmesi: cha_subeno == subeKodu (sayısal). Eşleşmezse o şubeye Mikro
+  // geliri EKLENMEZ (yanlış şubeye yazmaktansa görünür boşluk). Maliyet Mikro
+  // faturasında YOK → maliyet yalnız Cetpa siparişinden (Mikro geliri maliyetsiz).
+  const buAyYM    = `${tmYear}-${String(tmMonth + 1).padStart(2, '0')}`;
+  const gecenAyYM = `${lmYear}-${String(lmMonth + 1).padStart(2, '0')}`;
+  const mikroGiden = mikroFaturalar.filter(f => f.yon === 'giden');
   const computedPL = subeler.map(s => {
     const bOrders = plOrders.filter(o => o.subeAdi === s.subeAdi && o.status !== 'Cancelled');
     const tmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === tmYear && d.getMonth() === tmMonth; });
     const lmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === lmYear && d.getMonth() === lmMonth; });
-    const buAyGelir     = tmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
-    const gecenAyGelir  = lmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+    const subeNoNum = Number(s.subeKodu);
+    const mikroBu    = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(buAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;
+    const mikroGecen = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(gecenAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;
+    const buAyGelir     = tmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0) + mikroBu;
+    const gecenAyGelir  = lmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0) + mikroGecen;
     const buAyMaliyet   = tmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
     const gecenAyMaliyet = lmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
     return { subeAdi: s.subeAdi, buAyGelir, buAyMaliyet, gecenAyGelir, gecenAyMaliyet };

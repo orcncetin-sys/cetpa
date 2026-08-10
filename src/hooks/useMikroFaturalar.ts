@@ -18,6 +18,7 @@ export interface MikroFatura {
   yon: 'gelen' | 'giden';        // cha_tip 1=gelen(alış), 0=giden(satış)
   uuid?: string;                 // GİB belge kimliği (e-belge XML/PDF)
   ebelgeTuru: number;            // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye; -1=bilinmiyor
+  subeNo: number;                // cha_subeno — şube bazlı P&L eşleşmesi için
 }
 
 const VERGI_PNTR_ORAN: Record<string, number> = { '1': 0, '2': 1, '3': 10, '4': 20 };
@@ -38,6 +39,7 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
     ebelgeTuru: Number(x.cha_ebelge_turu ?? -1),
     yon:      Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden',
+    subeNo:   Number(x.cha_subeno ?? 0) || 0,
   };
 }
 

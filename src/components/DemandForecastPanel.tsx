@@ -16,7 +16,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { collection, getDocs, query, where, Timestamp } from '../lib/dbClient';
+import { collection, getDocs, query, where, limit, Timestamp } from '../lib/dbClient';
 import { auth, db } from '../firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,10 +85,14 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
       const ordersQ  = query(collection(db, 'orders'), where('syncedAt', '>=', since90));
       const mFaturaQ = query(collection(db, 'mikroFaturalar'), where('cha_tarihi', '>=', since90Iso));
       
-      const [ordersSnap, invSnap, mFaturaSnap] = await Promise.all([
+      // Mikro stok ÇIKIŞLARI (sth_tip=1=satış) — ürün-bazlı talep için (fatura
+      // başlığında satır yok, per-ürün STOK_HAREKETLERI'nden gelir).
+      const mHareketQ = query(collection(db, 'inventoryMovements'), where('sth_tip', '==', 1), limit(10000));
+      const [ordersSnap, invSnap, mFaturaSnap, mHareketSnap] = await Promise.all([
         getDocs(ordersQ),
         getDocs(collection(db, 'inventory')),
         getDocs(mFaturaQ),
+        getDocs(mHareketQ),
       ]);
 
       type RawOrder = {
@@ -101,8 +105,9 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
       const orders   = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawOrder));
       const inventory = invSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawInv));
       const mikroFaturalar = mFaturaSnap.docs.map(d => d.data());
+      const mikroHareketler = mHareketSnap.docs.map(d => d.data());
 
-      if (orders.length === 0 && mikroFaturalar.length === 0) {
+      if (orders.length === 0 && mikroFaturalar.length === 0 && mikroHareketler.length === 0) {
         setError(tr ? 'Son 90 günde veri bulunamadı. Önce kayıt oluşturun.' : 'No orders or invoices found in the last 90 days.');
         return;
       }
@@ -134,6 +139,25 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
             monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + (Number(f.cha_meblag) || 0);
           }
         }
+      }
+
+      // Mikro stok çıkışları (satış) → ürün-bazlı talep. Son 90 gün; ad inventory'den
+      // (sth_stok_kod → sku), çözülemezse kod. Revenue EKLENMEZ (mikroFaturalar'da var,
+      // çift sayım olmasın) — yalnız units (talep) sinyali.
+      const cutoff90 = Date.now() - 90 * 86_400_000;
+      for (const m of mikroHareketler) {
+        const raw = m as Record<string, unknown>;
+        const sku = String(raw.sth_stok_kod ?? '');
+        if (!sku) continue;
+        const dt = new Date(String(raw.sth_tarih ?? ''));
+        if (!(dt.getTime() >= cutoff90)) continue;
+        const qty = Math.abs(Number(raw.sth_miktar) || 0);
+        if (!qty) continue;
+        const name = inventory.find(p => p.sku === sku)?.name ?? sku;
+        const mon = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+        productMap[name] ??= { units: 0, revenue: 0, byMonth: {} };
+        productMap[name].units += qty;
+        productMap[name].byMonth[mon] = (productMap[name].byMonth[mon] ?? 0) + qty;
       }
 
       const topProducts = Object.entries(productMap)
