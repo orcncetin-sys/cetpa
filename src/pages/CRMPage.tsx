@@ -3423,11 +3423,17 @@ export default function CRMPage({
 
                   {/* ── Cari Ekstre (AR aging for this customer) ── */}
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <CariEkstrePanel
-                      currentLanguage={currentLanguage}
-                      leadId={selectedLead.id}
-                      customerName={selectedLead.name}
-                    />
+                    {(() => {
+                      // Mikro carisi ise (mikroCariKod var) MİKRO MODU: cari'nin gerçek
+                      // hareketleri (mikroCariHareketler). Yoksa eski orders modu. Müşteri
+                      // Adayları detayı hep leadId (orders=boş) veriyordu → ekstre boştu.
+                      const cariKod = (selectedLead as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+                        || (selectedLead as unknown as { code?: string }).code
+                        || (selectedLead as unknown as { taxNo?: string }).taxNo || '';
+                      return cariKod
+                        ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} balance={(selectedLead as unknown as { balance?: number }).balance || 0} customerName={selectedLead.name} />
+                        : <CariEkstrePanel currentLanguage={currentLanguage} leadId={selectedLead.id} customerName={selectedLead.name} />;
+                    })()}
                   </div>
 
                   {/* ── Mutabakat Mektubu ── */}

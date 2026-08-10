@@ -8,7 +8,7 @@
  * Props olarak aldığı veriler App.tsx'teki onSnapshot aboneliklerinden gelir.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { logAudit } from '../services/auditLog';
 import MikroPushButton from './MikroPushButton';
 import { stokHareketPayload } from '../services/mikroEvrak';
@@ -19,7 +19,7 @@ import {
   X, Edit2, Trash2, Package,
 } from 'lucide-react';
 import {
-  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs, incrementField,
+  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs, incrementField, query, where,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
@@ -114,36 +114,58 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   // düşüyor (sth_stok_kod / sth_miktar / sth_tip / sth_tarih) — panel ise
   // Cetpa şeması bekliyor (productName / quantity / type / timestamp). Eşleşme
   // olmadığı için tablo "ÇIKIŞ · Mikro · —" diye boş görünüyordu (2026-08-01).
-  // Burada ham satırlar normalize edilir; sth_tip semantiği server'da sabit:
-  // 0 = giriş (alış), 1 = çıkış (satış) — bkz. server.ts ~7194.
+  // Ortak normalleştirici — hem global liste hem ÜRÜN DETAY getirimi kullanır.
+  // sth_tip semantiği server'da sabit: 0 = giriş (alış), 1 = çıkış (satış).
+  const normalizeHareket = useCallback((m: InventoryMovement): InventoryMovement => {
+    const raw = m as unknown as Record<string, unknown>;
+    const sku = raw.sth_stok_kod;
+    if (m.type || typeof sku !== 'string' || !sku) return m; // zaten normalize (Cetpa)
+    const prod = inventory.find(p => p.sku === sku);
+    const miktar = Math.abs(Number(raw.sth_miktar) || 0);
+    // sth_tutar = KDV HARİÇ satır matrahı. Birim fiyat = tutar / miktar (KDV hariç).
+    const tutar = Math.abs(Number(raw.sth_tutar) || 0);
+    return {
+      ...m,
+      productId: prod?.id ?? sku,
+      productName: prod?.name ?? sku,
+      sku,
+      quantity: miktar,
+      type: Number(raw.sth_tip) === 0 ? 'in' : 'out',
+      timestamp: (raw.sth_tarih as string) ?? m.timestamp,
+      tutar,
+      birimFiyat: miktar > 0 ? tutar / miktar : 0,
+      // Hangi cariye giriş/çıkış. Mikro sth_cari_kodu taşır; ad çözülemezse kod.
+      cariKod: (raw.sth_cari_kodu as string) ?? (raw.sth_cari_kod as string) ?? '',
+    } as InventoryMovement;
+  }, [inventory]);
+
   useEffect(() => {
-    const norm = inventoryMovements.map(m => {
-      const raw = m as unknown as Record<string, unknown>;
-      const sku = raw.sth_stok_kod;
-      // Zaten normalize (Cetpa hareketi) ise dokunma.
-      if (m.type || typeof sku !== 'string' || !sku) return m;
-      const prod = inventory.find(p => p.sku === sku);
-      const miktar = Math.abs(Number(raw.sth_miktar) || 0);
-      // sth_tutar = KDV HARİÇ satır matrahı (fatura JOIN'inde de matrah bu).
-      // Birim fiyat = tutar / miktar → satış/alış birim fiyatı (KDV hariç).
-      const tutar = Math.abs(Number(raw.sth_tutar) || 0);
-      return {
-        ...m,
-        productId: prod?.id ?? sku,
-        productName: prod?.name ?? sku,
-        sku,
-        quantity: miktar,
-        type: Number(raw.sth_tip) === 0 ? 'in' : 'out',
-        timestamp: (raw.sth_tarih as string) ?? m.timestamp,
-        tutar,
-        birimFiyat: miktar > 0 ? tutar / miktar : 0,
-        // Hangi cariye giriş/çıkış (kullanıcı isteği 2026-08-02). Mikro
-        // stok hareketi sth_cari_kodu taşır; ad çözülemezse kod gösterilir.
-        cariKod: (raw.sth_cari_kodu as string) ?? (raw.sth_cari_kod as string) ?? '',
-      } as typeof m;
-    });
-    setMovements(norm);
-  }, [inventoryMovements, inventory]);
+    setMovements(inventoryMovements.map(normalizeHareket));
+  }, [inventoryMovements, normalizeHareket]);
+
+  // ÜRÜN DETAYI: seçili ürünün TÜM hareketleri — global inventoryMovements
+  // limit(200)'e takılı (App.tsx), o yüzden bir ürünün eski hareketleri detayda
+  // BOŞ görünüyordu. Burada ürüne özel sorgulanır (200 sınırı yok): Cetpa hareketi
+  // sku ile, Mikro hareketi sth_stok_kod ile eşleşir → iki sorgu, birleştir, normalize.
+  const [detailMovements, setDetailMovements] = useState<InventoryMovement[]>([]);
+  useEffect(() => {
+    const sku = selectedProduct?.sku;
+    if (!sku) { setDetailMovements([]); return; }
+    let iptal = false;
+    (async () => {
+      try {
+        const [mikroSnap, cetpaSnap] = await Promise.all([
+          getDocs(query(collection(db, 'inventoryMovements'), where('sth_stok_kod', '==', sku))),
+          getDocs(query(collection(db, 'inventoryMovements'), where('sku', '==', sku))),
+        ]);
+        if (iptal) return;
+        const buf = new Map<string, InventoryMovement>();
+        [...mikroSnap.docs, ...cetpaSnap.docs].forEach(d => buf.set(d.id, { id: d.id, ...(d.data() as object) } as InventoryMovement));
+        setDetailMovements([...buf.values()].map(normalizeHareket));
+      } catch { if (!iptal) setDetailMovements([]); }
+    })();
+    return () => { iptal = true; };
+  }, [selectedProduct, normalizeHareket]);
 
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
@@ -739,7 +761,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         existingCategories={categories}
         exchangeRates={exchangeRates ?? undefined}
       />
-      {selectedProduct && <ProductDetail product={selectedProduct} movements={movements as never} onClose={() => setSelectedProduct(null)} />}
+      {selectedProduct && <ProductDetail product={selectedProduct} movements={(detailMovements.length ? detailMovements : movements) as never} onClose={() => setSelectedProduct(null)} />}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 space-y-6">
