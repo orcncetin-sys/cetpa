@@ -2178,6 +2178,34 @@ function mikroStokMiktari(s: Record<string, unknown>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** StokListesiV2 satırından satış fiyatları → `inventory.prices` kademeleri.
+ *
+ *  İki olası kaynak (kurulumdan kurulmuşa değişiyor):
+ *    1. `satis_fiyatlari[]` — STOK_SATIS_FIYAT_LISTELERI satırları
+ *       (sfiyat_listesirano 1=Retail 2=B2B Standard 3=B2B Premium 4=Dealer)
+ *    2. Kart üzerindeki düz alanlar `sto_satis_fiyat1..4`
+ *
+ *  0 ve boş "fiyat YOK" sayılır ve DÖNMEZ: Mikro tanımsız kademeyi 0 döndürüyor,
+ *  0 yazmak ekranda yine "0 TL" gösterir ve elle girilmiş fiyatı ezerdi. Çağıran
+ *  boş nesne görürse `prices`e HİÇ DOKUNMAMALIDIR (bkz. stockLevel/vatRate deseni).
+ *
+ *  2026-08-11: cron import'u fiyatı hiç yazmıyordu (yalnız manuel import yazıyordu);
+ *  iki yol ayrışmasın diye mantık burada TEK yerde toplandı.
+ */
+function mikroSatisFiyatlari(s: Record<string, unknown>): Record<string, number> {
+  const TIERS = ['Retail', 'B2B Standard', 'B2B Premium', 'Dealer'] as const;
+  const prices: Record<string, number> = {};
+  const ekle = (tier: string, ham: unknown) => {
+    if (prices[tier]) return;              // ilk geçerli kaynak kazanır
+    const n = Number(ham);
+    if (ham != null && ham !== '' && Number.isFinite(n) && n > 0) prices[tier] = n;
+  };
+  const liste = (s.satis_fiyatlari as Record<string, unknown>[]) || [];
+  TIERS.forEach((tier, i) => ekle(tier, liste[i]?.sfiyat_fiyati));
+  TIERS.forEach((tier, i) => ekle(tier, s[`sto_satis_fiyat${i + 1}`]));
+  return prices;
+}
+
 function mikroBugun(): string {
   return new Intl.DateTimeFormat('en-CA', {
     ...(MIKRO_LOCAL_MODE ? {} : { timeZone: 'Europe/Istanbul' }),
@@ -2599,12 +2627,17 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       void mirrorMikroStoklar(stoklar);
       const vergiTablosu = await mikroVergiOranlari(); // döngü öncesi bir kez
       const invSnap = await adminDb.collection('inventory').get();
-      const invBySku = new Map<string, { ref: PgDocRef; stockLevel: number; name: string }>();
+      const invBySku = new Map<string, { ref: PgDocRef; stockLevel: number; name: string; prices: Record<string, number> }>();
       for (const d of invSnap.docs) {
         const data = d.data();
         const sku = (data.sku as string)?.trim();
         if (sku && !invBySku.has(sku)) {
-          invBySku.set(sku, { ref: d.ref, stockLevel: Number(data.stockLevel) || 0, name: (data.name as string) || sku });
+          invBySku.set(sku, {
+            ref: d.ref, stockLevel: Number(data.stockLevel) || 0, name: (data.name as string) || sku,
+            // Mevcut fiyatlar: Mikro fiyatı gelmeyen kademeler KORUNSUN diye
+            // (elle girilmiş fiyat senkronla silinmemeli — bkz. aşağıdaki merge).
+            prices: (data.prices as Record<string, number>) || {},
+          });
         }
       }
       let stokYeni = 0, stokGuncel = 0;
@@ -2617,6 +2650,12 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         seenSku.add(sku);
         const mikroQty = mikroStokMiktari(s);
         const kdvOran = vergiOraniCoz(s.sto_perakende_vergi, vergiTablosu);
+
+        // Satış fiyatları — cron import'u bunu HİÇ yazmıyordu (yalnız manuel import
+        // yazıyordu), o yüzden cron'la oluşan ürünler ekranda "0 TL" kalıyordu.
+        const mikroPrices = mikroSatisFiyatlari(s);
+        const fiyatVar = Object.keys(mikroPrices).length > 0;
+
         const fields = {
           name: (s.sto_isim as string) || sku,
           unit: (s.sto_birim1_ad as string) || 'ADET',
@@ -2648,12 +2687,20 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
             });
             ops++; // ayri bir batch islemi - ops sayacina ayrica ekle
           }
-          batch.update(existing.ref, fields); stokGuncel++;
+          // Fiyat MERGE: Mikro'dan gelmeyen kademe mevcut değeriyle kalır
+          // (elle girilmiş fiyat senkronla silinmez).
+          batch.update(existing.ref, fiyatVar
+            ? { ...fields, prices: { ...existing.prices, ...mikroPrices } }
+            : fields);
+          stokGuncel++;
         }
         else {
           batch.set(adminDb.collection('inventory').doc(), {
             ...fields, sku, category: 'Genel',
-            lowStockThreshold: 5, prices: {}, price: 0,
+            lowStockThreshold: 5,
+            prices: mikroPrices,
+            // Eski tek-fiyat alanı, Retail ile hizalı tutulur (bazı ekranlar okuyor).
+            price: mikroPrices.Retail ?? 0,
             source: 'mikro_cron', createdAt: pgServerTimestamp(),
           });
           stokYeni++;
@@ -5110,6 +5157,8 @@ async function startServer() {
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
     let skippedRecords = 0;
+    /** Mikro'dan en az bir satış fiyatı gelen ürün sayısı (özet raporlanır). */
+    let fiyatliUrun = 0;
 
     try {
       // Prefetch ALL inventory docs → Map<sku, ref>. Deliberately NOT filtered
@@ -5204,18 +5253,10 @@ async function startServer() {
           if (!sku) continue;
 
           try {
-            // Map Mikro fields → Cetpa InventoryItem shape
-            const prices: Record<string, number> = {};
-            const fiyatlar = (s.satis_fiyatlari as Record<string, unknown>[]) || [];
-            if (fiyatlar[0]) prices['Retail']       = Number(fiyatlar[0].sfiyat_fiyati) || 0;
-            if (fiyatlar[1]) prices['B2B Standard'] = Number(fiyatlar[1].sfiyat_fiyati) || 0;
-            if (fiyatlar[2]) prices['B2B Premium']  = Number(fiyatlar[2].sfiyat_fiyati) || 0;
-            if (fiyatlar[3]) prices['Dealer']        = Number(fiyatlar[3].sfiyat_fiyati) || 0;
-            // Fallback: some responses use flat price fields
-            if (!prices['Retail'] && s.sto_satis_fiyat1)       prices['Retail']       = Number(s.sto_satis_fiyat1);
-            if (!prices['B2B Standard'] && s.sto_satis_fiyat2)  prices['B2B Standard'] = Number(s.sto_satis_fiyat2);
-            if (!prices['B2B Premium'] && s.sto_satis_fiyat3)   prices['B2B Premium']  = Number(s.sto_satis_fiyat3);
-            if (!prices['Dealer'] && s.sto_satis_fiyat4)        prices['Dealer']       = Number(s.sto_satis_fiyat4);
+            // Map Mikro fields → Cetpa InventoryItem shape.
+            // Fiyat mantığı ortak yardımcıda (cron import'u ile ayrışmasın).
+            const prices = mikroSatisFiyatlari(s);
+            if (Object.keys(prices).length) fiyatliUrun++;
 
             // Miktar alanı yoksa null — mevcut kaydın stockLevel'i EZİLMEZ
             // (bkz. mikroStokMiktari). Yeni kayıtta 0 ile açılır, miktar
@@ -5232,8 +5273,11 @@ async function startServer() {
               ...(kdvOran !== null ? { vatRate: kdvOran } : {}),
               ...(qty !== null ? { stockLevel: qty } : {}),
               lowStockThreshold: 5,
-              prices,
-              price:            prices['Retail'] || 0,
+              // Fiyat gelmediyse `prices`e DOKUNMA. Eskiden koşulsuz `prices` (boş
+              // olabilen nesne) yazılıyordu: Mikro fiyat döndürmediği her senkronda
+              // elle girilmiş fiyatlar `{}` ile eziliyordu — stockLevel/vatRate'te
+              // düzeltilen sessiz-sıfır arıza sınıfının aynısı.
+              ...(Object.keys(prices).length ? { prices, price: prices['Retail'] ?? 0 } : {}),
               mikroStoKod:      sku,
               mikroSynced:      true,
               source:           'mikro_import',
@@ -5339,9 +5383,13 @@ async function startServer() {
       }
 
       const duration = Date.now() - t0;
-      await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, reqActor(req));
-      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, skippedRecords, duration });
+      // Fiyat kapsamı GÖRÜNÜR olmalı: import "2367 güncellendi" deyip fiyatların
+      // hiç gelmediğini gizliyordu (kullanıcı ekranda 0 TL görünce fark etti).
+      // fiyatliUrun = 0 ise sorun Cetpa'da değil, Mikro kartlarında fiyat yok demektir.
+      const fiyatNot = `${fiyatliUrun}/${created + updated} üründe satış fiyatı bulundu`;
+      await writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel — ${fiyatNot}${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, reqActor(req));
+      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, ${fiyatNot}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
+      res.json({ success: true, created, updated, errors, skippedRecords, fiyatliUrun, duration });
 
     } catch (err) {
       const duration = Date.now() - t0;
@@ -5959,6 +6007,23 @@ async function startServer() {
       // 2'si eksik kaldı — YPR-4160 (327 vs 527) ve VITRA-800-2030 (63 vs 95). İkisi de
       // aynı yönde (dağılım < toplam) → stok var ama bir depoya yazılmamış. Hipotez:
       // depo no NULL/0 ya da sth_tip 0/1 dışında. Bu iki sorgu onu ÖLÇER (tahmin değil).
+      // FİYAT KAYNAĞI (2026-08-11): 2367 ürünün tamamı ekranda "0 TL" görünüyor.
+      // Import iki kaynağı deniyor (satis_fiyatlari[] ve sto_satis_fiyat1..4);
+      // bu kurulumda hangisi DOLU, ölçelim — tahminle fiyat yazılmaz.
+      { ad: 'fiyatListesiOzet',
+        sql: 'SELECT COUNT(*) AS satir, COUNT(DISTINCT sfiyat_stokkod) AS urun, ' +
+             'MIN(sfiyat_listesirano) AS minListe, MAX(sfiyat_listesirano) AS maxListe ' +
+             'FROM STOK_SATIS_FIYAT_LISTELERI' },
+      { ad: 'fiyatListesiOrnek',
+        sql: 'SELECT TOP 10 sfiyat_stokkod, sfiyat_listesirano, sfiyat_fiyati ' +
+             'FROM STOK_SATIS_FIYAT_LISTELERI WHERE sfiyat_fiyati > 0 ORDER BY sfiyat_stokkod' },
+      { ad: 'stokKartiFiyatDolulugu',
+        sql: 'SELECT COUNT(*) AS toplamUrun, ' +
+             'SUM(CASE WHEN ISNULL(sto_satis_fiyat1,0) > 0 THEN 1 ELSE 0 END) AS fiyat1Dolu, ' +
+             'SUM(CASE WHEN ISNULL(sto_satis_fiyat2,0) > 0 THEN 1 ELSE 0 END) AS fiyat2Dolu, ' +
+             'SUM(CASE WHEN ISNULL(sto_satis_fiyat3,0) > 0 THEN 1 ELSE 0 END) AS fiyat3Dolu, ' +
+             'SUM(CASE WHEN ISNULL(sto_satis_fiyat4,0) > 0 THEN 1 ELSE 0 END) AS fiyat4Dolu ' +
+             'FROM STOKLAR' },
       { ad: 'artikDepoNoDagilimi',
         sql: "SELECT sth_tip, ISNULL(CAST(sth_giris_depo_no AS VARCHAR(10)),'NULL') AS giris, " +
              "ISNULL(CAST(sth_cikis_depo_no AS VARCHAR(10)),'NULL') AS cikis, COUNT(*) AS adet, SUM(sth_miktar) AS miktar " +

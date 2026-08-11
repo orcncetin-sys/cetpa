@@ -251,6 +251,9 @@ export interface MikroImportResult extends MikroSyncResult {
   updated: number;
   errors:  number;
   duration?: number;
+  /** Stok import'u: Mikro'dan en az bir satış fiyatı gelen ürün sayısı.
+   *  0 ise sorun Cetpa'da değil — Mikro stok kartlarında fiyat tanımlı değildir. */
+  fiyatliUrun?: number;
 }
 
 /**

@@ -995,6 +995,21 @@ function ImportCard({
                 {result.errors > 0 && <span>⚠️ {t ? 'Hata' : 'Errors'}: <b>{result.errors}</b></span>}
                 {result.duration && <span>⏱ {Math.round(result.duration / 1000)}s</span>}
               </div>
+              {/* Fiyat kapsamı: import "2367 güncellendi" deyip fiyatların hiç
+                  gelmediğini gizliyordu (ekranda 0 TL olarak fark edildi). */}
+              {result.fiyatliUrun != null && (
+                result.fiyatliUrun === 0 ? (
+                  <div className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5 mt-1">
+                    ⚠ {t ? 'Hiçbir üründe satış fiyatı yok — Mikro stok kartlarında fiyat tanımlı değil. Ürünler "0 TL" görünür.'
+                         : 'No sale prices found — Mikro stock cards have no price defined.'}
+                  </div>
+                ) : (
+                  <div className="text-[11px] mt-1">
+                    💰 {t ? 'Fiyatlı ürün' : 'With price'}: <b>{result.fiyatliUrun}</b>
+                    <span className="text-gray-400"> / {result.created + result.updated}</span>
+                  </div>
+                )
+              )}
             </>
           ) : (
             <div className="flex items-center gap-1">
