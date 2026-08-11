@@ -177,3 +177,5 @@ Ajanlar yalnız açıkça istenince çalıştırılır (soğuk başlarlar, pahal
 
 ## Token kullanımı — neden yüksek, ne yapıldı
 POST/Mikro API çağrıları Claude token'ı YEMEZ (ayrı sistem). Asıl kaynaklar: çok uzun tek oturum (her turda tüm konuşma geçmişi + CLAUDE.md + MEMORY.md + görev listesi yeniden işleniyor), büyük dosyaların (server.ts ~7.5k satır) tekrar tekrar okunması, ekran görüntüleri, uzun grep/diff çıktıları. Bu dosya + `/compact` veya yeni oturum önerilir. Bundan sonra dosya okumaları satır-aralıklı (cerrahi) yapılacak, tekrar okuma yapılmayacak.
+
+<!-- deploy hizli yol dogrulama kosusu: 2026-08-11 -->
