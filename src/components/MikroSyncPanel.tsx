@@ -393,6 +393,11 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     // yani düğmesi hiç görünmedi ve kullanıcı "çekmemişsin" dedi. Haklıydı.
     { key: 'depo',         route: '/api/mikro/import/depo',           title: t ? 'Depo Tanımları' : 'Warehouses',        desc: t ? 'Mikro depo tanımlarını çek (Depo Tanımları ekranını doldurur).' : 'Pull warehouse definitions from Mikro.' },
     { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan',     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
+    // Bu iki uç 2026-08-11'e kadar SUNUCUDA VARDI ama hiçbir istemci çağırmıyordu
+    // ve veriyi hiçbir koleksiyona yazmıyorlardı — İK ve Üretim ekranları bu
+    // yüzden hep boştu. Artık employees / bom koleksiyonlarına yazıyorlar.
+    { key: 'personel',     route: '/api/mikro/pull/personel',         title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
+    { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
   ];
 
   // ── Dummy ürün temizliği (kaynaksız seed kayıtları) ─────────────────────────

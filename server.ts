@@ -6007,6 +6007,25 @@ async function startServer() {
       // 2'si eksik kaldı — YPR-4160 (327 vs 527) ve VITRA-800-2030 (63 vs 95). İkisi de
       // aynı yönde (dağılım < toplam) → stok var ama bir depoya yazılmamış. Hipotez:
       // depo no NULL/0 ya da sth_tip 0/1 dışında. Bu iki sorgu onu ÖLÇER (tahmin değil).
+      // SABİT KIYMET + MALİYET MERKEZİ tablo KEŞFİ (2026-08-11).
+      // Bu iki modül için hiç import yok; kullanıcı "ileride kullanacağım" dedi.
+      // Tablo adlarını TAHMİN ETMEK yerine INFORMATION_SCHEMA'ya sordurulur —
+      // yanlış tablo adı "Invalid object name" ile sorguyu öldürür (cha_vergi /
+      // cha_ettn arıza sınıfının tablo sürümü). Çıktı gelince import yazılacak.
+      { ad: 'sabitKiymetTabloAdaylari',
+        sql: "SELECT TABLE_NAME, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c " +
+             "WHERE c.TABLE_NAME = t.TABLE_NAME) AS kolonSayisi " +
+             'FROM INFORMATION_SCHEMA.TABLES t WHERE ' +
+             "t.TABLE_NAME LIKE '%DEMIRBAS%' OR t.TABLE_NAME LIKE '%SABIT%' OR " +
+             "t.TABLE_NAME LIKE '%AMORTISMAN%' OR t.TABLE_NAME LIKE '%KIYMET%' " +
+             'ORDER BY TABLE_NAME' },
+      { ad: 'maliyetMerkeziTabloAdaylari',
+        sql: "SELECT TABLE_NAME, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c " +
+             "WHERE c.TABLE_NAME = t.TABLE_NAME) AS kolonSayisi " +
+             'FROM INFORMATION_SCHEMA.TABLES t WHERE ' +
+             "t.TABLE_NAME LIKE '%MASRAF%' OR t.TABLE_NAME LIKE '%MALIYET%' OR " +
+             "t.TABLE_NAME LIKE '%MERKEZ%' OR t.TABLE_NAME LIKE '%PROJE%' " +
+             'ORDER BY TABLE_NAME' },
       // FİYAT KAYNAĞI (2026-08-11): 2367 ürünün tamamı ekranda "0 TL" görünüyor.
       // Import iki kaynağı deniyor (satis_fiyatlari[] ve sto_satis_fiyat1..4);
       // bu kurulumda hangisi DOLU, ölçelim — tahminle fiyat yazılmaz.
@@ -7682,24 +7701,91 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     try {
-      const perSql = `
-        SELECT
-          per_kodu as mikroPersKod,
-          per_adi as name,
-          per_soyadi as surname,
-          per_eposta as email,
-          per_ceptel as phone,
-          per_departmani as department,
-          per_gorevi as position,
-          per_maas as salary,
-          per_isegiristarihi as startDate,
-          per_durumu as status,
-          per_tckimlikno as tcId
-        FROM PERSONEL_TANIMLARI
-      `;
-      const personeller = await mikroSql(perSql);
-      res.json({ success: true, data: personeller });
-    } catch (err: any) {
+      // Kolon adları TAHMİN EDİLMEZ — şemadan çözülür. Bu SELECT eskiden
+      // per_kodu/per_adi/... adlarını sabit yazıyordu; Mikro'da bunlardan biri
+      // farklıysa "Invalid column name" ile TÜM sorgu ölürdü (cha_vergi ve
+      // cha_ettn ile iki kez yaşanan arıza sınıfı). Bulunamayan alan sessizce
+      // atlanır, hangileri çözüldüğü yanıtta bildirilir.
+      const perCols = await mikroKolonlar('PERSONEL_TANIMLARI');
+      if (!perCols.length) {
+        return res.status(502).json({ success: false, error: 'PERSONEL_TANIMLARI okunamadı veya SqlVeriOkuV2 izni yok.' });
+      }
+      const perAlan: Array<[string, RegExp]> = [
+        ['mikroPersKod', /^per_(kodu|kod)$/i],
+        ['name',         /^per_(adi|ad)$/i],
+        ['surname',      /^per_soyadi$/i],
+        ['email',        /^per_(eposta|email|mail)$/i],
+        ['phone',        /^per_(ceptel|tel|telefon)$/i],
+        ['department',   /^per_departman/i],
+        ['position',     /^per_(gorevi|gorev|unvan)$/i],
+        ['salary',       /^per_(maas|ucret)$/i],
+        ['startDate',    /^per_isegiris/i],
+        ['status',       /^per_(durumu|durum|aktif)$/i],
+        ['tcId',         /^per_tc/i],
+      ];
+      const perSecim: string[] = [];
+      const cozulen: string[] = [];
+      const eksik: string[] = [];
+      for (const [alias, re] of perAlan) {
+        const k = kolonBul(perCols, re);
+        if (k) { perSecim.push(`${k} AS ${alias}`); cozulen.push(alias); }
+        else eksik.push(alias);
+      }
+      if (!cozulen.includes('mikroPersKod')) {
+        return res.status(502).json({
+          success: false,
+          error: `PERSONEL_TANIMLARI'nda personel kodu kolonu bulunamadi. Mevcut kolonlar: ${perCols.slice(0, 25).join(', ')}`,
+        });
+      }
+      const perSql = `SELECT ${perSecim.join(', ')} FROM PERSONEL_TANIMLARI`;
+      // mikroSql `{ rows, hata }` döner — DİZİ DEĞİL. Eskiden dönen nesne olduğu
+      // gibi `data`ya konuyordu (istemci dizi bekler) ve `hata` HİÇ kontrol
+      // edilmiyordu: SQL patlasa bile `success: true` dönüyordu. Bugün kapatılan
+      // sessiz-sıfır arıza sınıfının aynısı (kardeş uç pull/uretim-receteleri
+      // bunu doğru yapıyordu — iki uç ayrışmıştı).
+      const { rows, hata } = await mikroSql(perSql);
+      if (hata) return res.status(502).json({ success: false, error: hata });
+
+      // Veriyi KOLEKSİYONA YAZ. Eskiden yalnız istemciye döndürülüyordu ve hiçbir
+      // istemci bu ucu çağırmıyordu — yani uç ölü koddu, İK ekranı (`employees`)
+      // hep boş kalıyordu. doc id `mikro-<per_kodu>`: tekrar çekimde çoğaltmaz.
+      if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+      const companyId = await reqCompanyId(req);
+      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      for (const r of rows) {
+        const kod = String(r.mikroPersKod ?? '').trim();
+        if (!kod) continue;
+        const ad   = String(r.name ?? '').trim();
+        const soy  = String(r.surname ?? '').trim();
+        // Mikro durum kodu bilinmiyorsa 'Aktif' UYDURMA yerine gelen değeri
+        // koru; yalnız kesin bilinen eşleşme çevrilir.
+        const durum = String(r.status ?? '').trim();
+        batch.set(adminDb.collection('employees').doc(`mikro-${kod.replace(/[/\\]/g, '_')}`), {
+          companyId,
+          mikroPersKod: kod,
+          name: [ad, soy].filter(Boolean).join(' ') || kod,
+          tcId:       String(r.tcId ?? '').trim() || null,
+          email:      String(r.email ?? '').trim(),
+          phone:      String(r.phone ?? '').trim(),
+          department: String(r.department ?? '').trim(),
+          position:   String(r.position ?? '').trim(),
+          salary:     Number(r.salary) || 0,
+          startDate:  String(r.startDate ?? '').slice(0, 10),
+          status:     durum === '0' || durum.toLowerCase() === 'aktif' ? 'Aktif' : durum || 'Aktif',
+          source: 'mikro_import',
+          mikroSyncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        yazilan++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+
+      const ozet = `${yazilan} personel employees koleksiyonuna yazıldı` +
+        (eksik.length ? ` — şemada bulunamayan alanlar atlandı: ${eksik.join(', ')}` : '');
+      await writeSyncLog('SQL:PERSONEL_TANIMLARI', 'employees', ozet, true, null, null, 0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Personel', ozet);
+      res.json({ success: true, total: rows.length, note: ozet, written: yazilan, cozulenAlanlar: cozulen, eksikAlanlar: eksik });
+    } catch (err) {
       console.error('[pull/personel]', err);
       res.status(500).json({ success: false, error: 'Personel çekimi başarısız.' });
     }
@@ -7720,7 +7806,50 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       const { rows, hata } = await mikroSql(sql);
       if (hata) return res.status(502).json({ success: false, error: hata });
 
-      res.json({ success: true, data: rows });
+      // Veriyi KOLEKSİYONA YAZ. Eskiden yalnız istemciye döndürülüyordu ve hiçbir
+      // istemci bu ucu çağırmıyordu → uç ölü koddu, Üretim/BOM ekranı (`bom`)
+      // hep boş kalıyordu.
+      //
+      // rec_* kolon adları TAHMİN EDİLMEZ, şemadan (cols) çözülür. Çözülemeyen
+      // alan yazılmaz; ham satır `mikroHam` altında saklanır ki veri kaybolmasın
+      // ve eşleme sonradan kolon adı öğrenilince düzeltilebilsin.
+      if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+      const anaKod  = kolonBul(cols, /^rec_(ana_)?stok_kod$/i) || kolonBul(cols, /ana.*stok.*kod/i);
+      const altKod  = kolonBul(cols, /^rec_(alt_)?stok_kod$/i) || kolonBul(cols, /(alt|bilesen).*stok.*kod/i);
+      const miktarK = kolonBul(cols, /^rec_miktar$/i) || kolonBul(cols, /miktar/i);
+      const birimK  = kolonBul(cols, /birim/i);
+      const guidK   = kolonBul(cols, /_Guid$/i);
+
+      const companyId = await reqCompanyId(req);
+      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      for (const r of rows) {
+        const docId = guidK && r[guidK] ? `mikro-${String(r[guidK])}` : adminDb.collection('bom').doc().id;
+        batch.set(adminDb.collection('bom').doc(docId), {
+          companyId,
+          productSku:   anaKod  ? String(r[anaKod]  ?? '').trim() : '',
+          componentSku: altKod  ? String(r[altKod]  ?? '').trim() : '',
+          quantity:     miktarK ? Number(r[miktarK]) || 0 : 0,
+          unit:         birimK  ? String(r[birimK] ?? '').trim() : '',
+          mikroHam: r,                       // eşleme eksikse veri yine de durur
+          source: 'mikro_import',
+          mikroSyncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        yazilan++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+
+      const cozulemeyen = [
+        !anaKod  ? 'productSku'   : null,
+        !altKod  ? 'componentSku' : null,
+        !miktarK ? 'quantity'     : null,
+        !birimK  ? 'unit'         : null,
+      ].filter(Boolean);
+      const ozet = `${yazilan} reçete satırı bom koleksiyonuna yazıldı` +
+        (cozulemeyen.length ? ` — kolonu çözülemeyen alanlar: ${cozulemeyen.join(', ')} (ham veri mikroHam'da)` : '');
+      await writeSyncLog('SQL:STOK_URETIM_RECETELERI', 'bom', ozet, true, null, null, 0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Üretim Reçeteleri', ozet);
+      res.json({ success: true, total: rows.length, note: ozet, written: yazilan, cozulemeyenAlanlar: cozulemeyen });
     } catch (err) {
       console.error('[pull/uretim-receteleri]', err);
       res.status(500).json({ success: false, error: 'Reçete çekimi başarısız.' });
