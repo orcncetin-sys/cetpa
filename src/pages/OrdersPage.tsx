@@ -2563,12 +2563,20 @@ export default function OrdersPage({
                         </div>
                         <div className="flex gap-2">
                           <button onClick={async ()=>{
-                            if(!p593Draft.plate) return;
+                            // Plaka boşken eskiden SESSİZCE return ediliyordu: düğme hiçbir
+                            // şey yapmıyor, mesaj da çıkmıyordu → "araç ekle çalışmıyor".
+                            if(!p593Draft.plate.trim()){ toast(tr593?'Plaka zorunlu.':'Plate is required.','error'); return; }
                             try {
-                              await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate,driver:p593Draft.driver||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',km:Number(p593Draft.km)||0,fuel:p593Draft.fuel,createdAt:serverTimestamp()});
+                              await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate.trim(),driver:p593Draft.driver||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',km:Number(p593Draft.km)||0,fuel:p593Draft.fuel,createdAt:serverTimestamp()});
                               setP593Draft({plate:'',driver:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
                               setP593ShowForm(false);
-                            } catch(e){ console.error('[vehicle add]',e); toast(tr593?'Araç kaydedilemedi.':'Failed to save vehicle.','error'); }
+                            } catch(e){
+                              // Sunucunun gerçek mesajını göster (örn. yetki reddi) — genel
+                              // metin, RBAC 403'ünü "bilinmeyen hata" gibi gösteriyordu.
+                              console.error('[vehicle add]',e);
+                              const msg = e instanceof Error && e.message ? e.message : (tr593?'Araç kaydedilemedi.':'Failed to save vehicle.');
+                              toast(msg,'error');
+                            }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{tr593?'Kaydet':'Save'}</button>
                           <button onClick={()=>setP593ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr593?'İptal':'Cancel'}</button>
                         </div>

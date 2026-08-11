@@ -74,6 +74,41 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   bom: { read: ['Admin', 'Manager', 'Logistics', 'Purchasing'], write: ['Admin', 'Manager', 'Logistics', 'Purchasing'] },
   capacityLines: { read: ['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality'], write: ['Admin', 'Manager', 'Logistics'] },
 
+  // ── Kuralı OLMAYAN koleksiyonlar (2026-08-11'de eklendi) ───────────────────
+  // Bunların hepsinde ekranda ÇALIŞAN bir istemci yazma akışı vardı ama
+  // COLLECTION_PERMISSIONS'ta tanımlı değillerdi → isAllowed() Zero-Trust
+  // yedeğine düşüp personel rollerine SALT OKUMA veriyordu. Sonuç: Admin
+  // dışındaki kullanıcıda düğme "çalışmıyor" gibi görünüyordu (yazma 403,
+  // ekranda tek satır genel hata). Araç Ekle bu şekilde bulundu; aynı boşlukta
+  // olan diğerleri de sahibi olan role göre burada tanımlandı.
+  vehicles: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  locationStocks: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  stockCountSessions: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  stockDiscrepancies: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  stockBatches: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
+  exportShipments: { read: ['Admin', 'Manager', 'Logistics', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Logistics'] },
+  consignments: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Sales'] },
+  productionMetrics: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
+  qualityChecklist: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Quality'] },
+
+  salesReturns: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
+  serviceRequests: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'Quality'] },
+  helpdeskTickets: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales'] },
+  campaignMetrics: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales'] },
+  pricingRules: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales'] },
+
+  rfqQuotes: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
+  purchaseBudgets: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing', 'Accounting'] },
+  supplierRisks: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
+  supplierConsignments: { read: ['Admin', 'Manager', 'Purchasing', 'Logistics'], write: ['Admin', 'Manager', 'Purchasing', 'Logistics'] },
+
+  revExpBudgets: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
+  autoInvoiceSchedules: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting'] },
+  bankReportPresets: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting'] },
+  bankMatchRuns: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting'] },
+  // Bordro çalıştırması maaş verisidir — okuma da dar tutuldu (payrolls ile aynı).
+  payrollRuns: { read: ['Admin', 'Manager', 'HR', 'Accounting'], write: ['Admin', 'HR', 'Accounting'] },
+
   // Satın Alma (Purchasing)
   suppliers: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
   purchaseOrders: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting', 'Logistics'], write: ['Admin', 'Manager', 'Purchasing'] },
