@@ -19,7 +19,7 @@ import {
   X, Edit2, Trash2, Package,
 } from 'lucide-react';
 import {
-  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs, incrementField, query, where,
+  collection, updateDoc, deleteDoc, doc, serverTimestamp, addDoc, getDocs, incrementField, query, where, onSnapshot,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { logFirestoreError, OperationType } from '../utils/firebase';
@@ -81,6 +81,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   setSelectedCategory,
   currentT,
   currentLanguage,
+  isAuthenticated = false,
   inventoryMovements = [],
   warehouses = [],
   onPrintLabels,
@@ -94,6 +95,68 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   const [editingProduct, setEditingProduct] = useState<InventoryItem | null>(null);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // ── Gerçek depo dağılımı ───────────────────────────────────────────────────
+  // DEPO sütunu `item.location || 'Ana Depo'` yazıyordu. Mikro ürünlerinde
+  // `location` HİÇ dolu değil (sema-kesif: 2367 ürünün tamamında sto_yer_kod
+  // boş), dolayısıyla tüm katalog UYDURMA "Ana Depo" gösteriyordu — bu projede
+  // defalarca düzeltilen "bilinmiyorsa uydurma" sınıfı.
+  //
+  // Gerçek konum warehouseItems.depoBreakdown'da (doc id `mikro-<sku>`), stok
+  // miktar import'unun hareket defterinden türetip mutabakattan geçirdiği veri.
+  const [depoDagilim, setDepoDagilim] = useState<Record<string, Record<string, number>>>({});
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const unsub = onSnapshot(
+      collection(db, 'warehouseItems'),
+      (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+        const map: Record<string, Record<string, number>> = {};
+        for (const d of snap.docs) {
+          const bd = d.data().depoBreakdown as Record<string, number> | null | undefined;
+          if (!bd || !Object.keys(bd).length) continue;
+          // doc id kalıbı: `mikro-<sku>` (SKU'daki / ve \ karakterleri _ olmuş)
+          const id = String(d.id);
+          if (id.startsWith('mikro-')) map[id.slice('mikro-'.length)] = bd;
+        }
+        setDepoDagilim(map);
+      },
+      () => setDepoDagilim({}),
+    );
+    return () => unsub();
+  }, [isAuthenticated]);
+
+  /** Ürünün depo etiketi. Bilinmiyorsa UYDURMAZ — '—' döner. */
+  const depoEtiketi = useCallback((item: { sku?: string; location?: string }): string => {
+    const sku = (item.sku || '').replace(/[/\\]/g, '_');
+    const bd = depoDagilim[sku];
+    if (bd) {
+      const girdiler = Object.entries(bd).sort((a, b) => Number(b[1]) - Number(a[1]));
+      const ad = (depo: string) => depo === '__devir'
+        ? 'Devir (depo bilinmiyor)'
+        : warehouses.find(w => w.id === `mikro-depo-${depo}`)?.name || `Depo ${depo}`;
+      // Tek depo → adı; birden fazla → en büyüğü + kalan sayısı (tam liste title'da)
+      return girdiler.length === 1
+        ? ad(girdiler[0][0])
+        : `${ad(girdiler[0][0])} +${girdiler.length - 1}`;
+    }
+    return item.location || '—';
+  }, [depoDagilim, warehouses]);
+
+  /** Depo dağılımının tam metni — hücre title'ında gösterilir. */
+  const depoEtiketiTam = useCallback((item: { sku?: string; location?: string }): string => {
+    const sku = (item.sku || '').replace(/[/\\]/g, '_');
+    const bd = depoDagilim[sku];
+    if (!bd) return item.location || 'Depo bilgisi yok';
+    return Object.entries(bd)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .map(([depo, q]) => {
+        const ad = depo === '__devir'
+          ? 'Devir (depo bilinmiyor)'
+          : warehouses.find(w => w.id === `mikro-depo-${depo}`)?.name || `Depo ${depo}`;
+        return `${ad}: ${Number(q).toLocaleString('tr-TR')}`;
+      })
+      .join(' · ');
+  }, [depoDagilim, warehouses]);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{
@@ -840,8 +903,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           {item.category || currentT.unspecified}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-xs font-medium text-gray-600">
-                        {(item as unknown as { location?: string }).location || currentT.main_warehouse}
+                      <td className="px-6 py-4 text-xs font-medium text-gray-600" title={depoEtiketiTam(item)}>
+                        {depoEtiketi(item)}
                       </td>
                       <td className="px-6 py-4">
                         {/* Phase 33: Stock mini-gauge */}
@@ -855,11 +918,16 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           const barColor = isCrit ? 'bg-red-500' : isLow ? 'bg-amber-400' : 'bg-emerald-400';
                           return (
                             <div className="space-y-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className={cn('text-sm font-bold', isCrit ? 'text-red-500' : isLow ? 'text-amber-600' : 'text-gray-900')}>
-                                  {stock}
+                              <div className="flex items-baseline gap-1.5">
+                                {/* Binlik ayraçlı (15.826) + birim — 5 haneli sayılar
+                                    ayraçsız okunmuyordu, birim de hiç yazmıyordu. */}
+                                <span className={cn('text-sm font-bold tabular-nums', isCrit ? 'text-red-500' : isLow ? 'text-amber-600' : 'text-gray-900')}>
+                                  {stock.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                                 </span>
-                                {(isCrit || isLow) && <AlertTriangle className={`w-3 h-3 ${isCrit ? 'text-red-500' : 'text-amber-500'}`} />}
+                                <span className="text-[10px] text-gray-400 font-medium uppercase">
+                                  {(item as unknown as { unit?: string }).unit || 'ADET'}
+                                </span>
+                                {(isCrit || isLow) && <AlertTriangle className={`w-3 h-3 self-center ${isCrit ? 'text-red-500' : 'text-amber-500'}`} />}
                               </div>
                               <div className="w-16 h-1 bg-gray-100 rounded-full overflow-hidden">
                                 <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${pct * 100}%` }} />
@@ -1083,7 +1151,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.stock}</p>
                     {/* Phase 39: Mobile stock gauge */}
-                    <p className="text-sm font-bold">{item.stockLevel}</p>
+                    <p className="text-sm font-bold tabular-nums">
+                      {(item.stockLevel ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                      <span className="text-[10px] text-gray-400 font-medium uppercase ml-1">
+                        {(item as unknown as { unit?: string }).unit || 'ADET'}
+                      </span>
+                    </p>
                     <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
                       <div className={`h-full rounded-full transition-all ${(item.stockLevel ?? 0) === 0 ? 'bg-red-500' : (item.stockLevel ?? 0) <= (item.lowStockThreshold ?? 5) ? 'bg-amber-400' : 'bg-emerald-400'}`}
                         style={{ width: `${Math.min(((item.stockLevel ?? 0) / Math.max((item.lowStockThreshold ?? 5) * 4, 1)) * 100, 100)}%` }} />
@@ -1099,7 +1172,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.warehouse}</p>
-                    <p className="text-xs font-medium">{(item as unknown as { location?: string }).location || currentT.main_warehouse}</p>
+                    <p className="text-xs font-medium" title={depoEtiketiTam(item)}>{depoEtiketi(item)}</p>
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100">
