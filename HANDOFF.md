@@ -42,6 +42,47 @@
 - `2b29f2b` — Cariler listesinde müşteri/tedarikçi olmayan ama bakiyesi olan cariler (7 Mehmet gibi) "Diğer" rozetiyle işaretleniyor. code-review #7 (per-depo tek-SQL) için `sema-kesif`'e read-only doğrulama sorguları eklendi (working polling'e dokunulmadı).
 - `dd398d9` — Şube P&L'e Mikro satış geliri (cha_subeno↔subeKodu) eklendi. Talep Tahmini ürün-bazlı talebe Mikro stok çıkışları (satış) eklendi.
 
+## 2026-08-11 oturumu (`8172145..cf3b3b3`, ikisi de canlıda doğrulandı)
+
+**`416a64c` — Mikro bağlantıları + kopya temizliği**
+- **Kolon adı tahmin etme sınıfı KAPATILDI:** `makeMikroSqlImport`'a `secimKolonlari?: string[]`
+  eklendi → SELECT listesi çalışma anında `mikroKolonlar()` ile şemaya karşı süzülür, olmayan
+  ad import'u öldürmez, düşenler özete yazılır. (`cha_ettn` bu arızanın 3.'südü; `cha_vergi`
+  ve `sth_satir_no`/`sto_isim` aynı sınıf.) Fatura import'u `cha.*` kullandığı için hiç
+  etkilenmemişti — o yüzden 600 fatura gelirken cari-hareket sıfır çekiyordu.
+- **e-belge PDF/XML:** Mikro `IsError=false` + boş `Data` dönebiliyor; sunucu artık yakalayıp
+  gerçek sebebi söylüyor (SRV kullanıcısında GİB e-fatura yetkisi yok). Eskiden istemci
+  "Yanıt beklenen biçimde değil" diyordu.
+- **Satışlar sekmesi ₺0,00 sorunu:** sekme, FATURALAR sekmesinin `faturaYon`/`faturaYil`/
+  `invoiceTypeFilter` durumunu sessizce miras alıyordu → kapsam dışında her şey sıfır.
+  Kendi bağımsız zinciri + GÖRÜNÜR `satisYil` seçicisi verildi.
+- **Tahsilat & Vade Mikro'ya bağlandı:** `useMikroTahsilat` — `mikroCariHareketler`'den FIFO
+  mahsuplaşma ile açık alacak. Mikro satırları SALT OKUNUR (MİKRO rozeti).
+- **Fatura kalemleri:** `POST /api/mikro/fatura/kalemler` — satırlar `STOK_HAREKETLERI`'nden,
+  evrak seri+sıra + yön (satış=4 / alış=3) ile. Kolon adları yine şemadan süzülür.
+- Kopyalar: e-belge indirme 2 kopya → `src/services/ebelgeIndir.ts`; "Stok Miktarları (Depo)"
+  kartı `Stok Miktarlarını Çek` ile AYNI uçtu (üstelik arka plan işini "bitti" sanıyordu) →
+  kaldırıldı; Muhasebe nav şeridi App.tsx'te 2 kopya → `MuhasebeGroupNav.tsx`.
+
+**`cf3b3b3` — RBAC Zero-Trust boşluğu (SİSTEMİK)**
+- `isAllowed()` yedeği: `COLLECTION_PERMISSIONS`'ta tanımsız koleksiyonda personel rolleri
+  yalnız `read` alır. `Admin` en başta `true` döndüğü için **Admin'de görünmez** — kusur
+  Lojistik/Sales/HR rollerinde "düğme çalışmıyor" olarak ortaya çıkar.
+- Tarama: 162 TENANT koleksiyonun 28'inde yazma kuralı yoktu; **22'sinde ekranda çalışan
+  istemci yazma akışı vardı** (vehicles, salesReturns, helpdeskTickets, payrollRuns,
+  stockCountSessions, …). Hepsi sahibi olan role göre tanımlandı → boşluk 28'den 5'e indi.
+- Kalan 5 (`cariBalances`, `syncJobs`, `mikroDepolar/Bankalar/Kasalar`) BİLEREK salt-okunur:
+  sunucu Mikro import'larıyla `adminDb` üzerinden yazar (adminDb RBAC'ı baypas eder).
+- Araç Ekle'nin 2. nedeni: Kaydet, plaka boşken **sessizce return** ediyordu (mesaj yok).
+- **KURAL:** yeni koleksiyon = 3 yer birden → `TENANT_COLLECTIONS` + `COLLECTION_PERMISSIONS`
+  + `useDataSync`/`dataStore` listener'ı.
+
+**Açık kalanlar:**
+- Tahsilat'ta ÇİFT SAYIM riski: elle girilen `tahsilatKayitlari` ile Mikro kalemi aynı
+  faturaysa ikisi de sayılır (ayırt edecek anahtar yok). Kullanıcıya soruldu, yanıt bekleniyor.
+- `perDepoStokAday` ham sorgu çıktısı hiç görülmedi; per-depo doğruluğu yalnız kullanıcı
+  beyanına dayanıyor (`8172145` Antigravity'nin tek-SQL optimizasyonu canlıda).
+
 ## Mimari notlar (tekrar keşfetme, buradan oku)
 - **`useMikroFaturalar(enabled)`** (`src/hooks/useMikroFaturalar.ts`) — `mikroFaturalar` koleksiyonunun TEK normalize kaynağı. `useCariAdMap(leads)` da burada. AccountingModule/MuhasebePage/RaporlarPage/SubeModule hepsi bunu kullanıyor.
 - **Koleksiyonlar:** `mikroFaturalar` (yalnız fatura, cha_evrak_tip=63/cinsi=6), `mikroCariHareketler` (TÜM cari hareket, evrak_tip filtresiz), `cariBalances` (doc id=cariKod, `/api/mikro/pull/bakiye` doldurur), `warehouseItems.depoBreakdown` (per-depo dağıtık stok).
