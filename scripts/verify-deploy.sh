@@ -28,8 +28,13 @@ if [ "$PHASE" = pre ]; then
   # 2) .ps1 salt-ASCII (PowerShell 5.1 + Windows-1252: em-dash/Türkçe karakter parse'ı kırar)
   PS1_FILES=$(printf '%s\n' "$CHANGED" | grep '\.ps1$' | sort -u)
   if [ -n "$PS1_FILES" ]; then
+    # NOT: burada `grep -nP` vardı. -P (PCRE) macOS/BSD grep'te YOK; komut
+    # "invalid option -- P" ile hata verip BOŞ çıktı üretiyordu, yani kontrol
+    # geliştirici makinesinde HER ZAMAN "PASS" diyordu ve ASCII dışı karakteri
+    # asla yakalamazdı (2026-08-11'de bulundu). Bracket ifadesi taşınabilir:
+    # BSD ve GNU grep'te aynı çalışır.
     NONASCII=$(printf '%s\n' "$PS1_FILES" | while read -r f; do
-      [ -f "$f" ] && LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" /dev/null
+      [ -f "$f" ] && LC_ALL=C grep -n '[^ -~	]' "$f" /dev/null
     done)
     if [ -z "$NONASCII" ]; then pass "ps1 salt-ASCII"; else fail "ps1 ASCII dışı karakter:
 $NONASCII"; fi

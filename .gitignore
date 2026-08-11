@@ -14,3 +14,6 @@ firebase-service-account*.json
 
 # Kullanıcı yüklemeleri (tahsilat makbuzları vb.) - sunucu diski, repo dışı
 uploads/
+dist.new/
+dist.old/
+.deploy-state/

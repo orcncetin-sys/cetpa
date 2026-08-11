@@ -19,16 +19,6 @@ Info "git fetch + reset --hard origin/$Branch"
 git fetch origin $Branch --quiet
 git reset --hard "origin/$Branch"
 
-# Stop the service BEFORE npm ci: the running "cetpa" process (tsx, which uses
-# esbuild internally) holds a lock on node_modules/@esbuild/win32-x64/esbuild.exe.
-# npm ci tries to unlink/replace it while installing and fails with EPERM if the
-# service is still running, which then cascades into a broken build and a
-# service that fails to restart. Stop first so the file handle is released.
-Info 'Stopping cetpa service (releases node_modules file locks before npm ci)'
-Stop-Service cetpa -Force -ErrorAction SilentlyContinue
-
-Start-Sleep 2
-
 Info 'Cleaning up logs to free disk space (deleting all files in C:\cetpa\logs)...'
 # Wrapped in try/catch: with $ErrorActionPreference='Stop' a Get-ChildItem list
 # error would otherwise abort the whole deploy. Log cleanup must NEVER break deploy.
@@ -41,14 +31,76 @@ try {
     Write-Host "    Log cleanup skipped: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
-Info 'npm ci --legacy-peer-deps'
-npm ci --legacy-peer-deps
+# ---- Near-zero-downtime deploy ---------------------------------------------
+# Old behaviour stopped the service FIRST and only then ran npm ci + build, so
+# the site returned 502 for 1-2 minutes on EVERY deploy (2026-08-11: the user
+# hit this repeatedly - "Failed to fetch", a stuck "Aktariliyor..." import and
+# finally a plain 502 page).
+#
+# npm ci still REQUIRES a stopped service: the running process (tsx -> esbuild)
+# holds a handle on node_modules\@esbuild\win32-x64\esbuild.exe and npm ci fails
+# with EPERM while it is up. But dependencies change rarely.
+#
+# So: if package-lock.json is unchanged since the last SUCCESSFUL deploy, take
+# the fast path - build into dist.new while the old process keeps serving, then
+# stop, rename the directory (instant on the same volume) and start again.
+# Downtime drops from minutes to the service restart alone.
+#
+# Bonus: on the fast path a FAILED build never stops the service, so a broken
+# commit no longer takes the site down - it only fails the deploy.
+$stateDir  = Join-Path $AppDir '.deploy-state'
+$stampFile = Join-Path $stateDir 'lock.hash'
+if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+$lockFile = Join-Path $AppDir 'package-lock.json'
+$lockHash = if (Test-Path $lockFile) { (Get-FileHash $lockFile -Algorithm SHA256).Hash } else { 'NOLOCK' }
+$prevHash = if (Test-Path $stampFile) { (Get-Content $stampFile -Raw).Trim() } else { '' }
+$depsChanged = ($lockHash -ne $prevHash)
 
-Info 'npm run build'
-npm run build
+$distPath = Join-Path $AppDir 'dist'
+$distNew  = Join-Path $AppDir 'dist.new'
+$distOld  = Join-Path $AppDir 'dist.old'
+# Leftovers from an interrupted run would break the rename below.
+if (Test-Path $distNew) { Remove-Item $distNew -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $distOld) { Remove-Item $distOld -Recurse -Force -ErrorAction SilentlyContinue }
 
-Info 'Starting cetpa service'
-Restart-Service cetpa -Force
+if ($depsChanged) {
+    # SLOW PATH - unavoidable downtime. Also taken on the very first run under
+    # this script (no stamp yet), which guarantees node_modules matches the lock.
+    Info 'package-lock.json changed -> full path (service stops for npm ci)'
+    Stop-Service cetpa -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Info 'npm ci --legacy-peer-deps'
+    npm ci --legacy-peer-deps
+    Info 'npm run build'
+    npm run build
+    Info 'Starting cetpa service'
+    Restart-Service cetpa -Force
+} else {
+    Info 'Dependencies unchanged -> fast path (build first, service stays up)'
+    Info 'npm run build -> dist.new (current build keeps serving meanwhile)'
+    npm run build -- --outDir dist.new --emptyOutDir
+    if (-not (Test-Path (Join-Path $distNew 'index.html'))) {
+        Write-Error 'Build produced no dist.new\index.html - aborting WITHOUT touching the running service.'
+        exit 1
+    }
+    Info 'Swapping dist (service is down only for the swap + restart)'
+    Stop-Service cetpa -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    if (Test-Path $distPath) { Rename-Item $distPath 'dist.old' -Force }
+    # If the old dist could not be moved (open handle), renaming dist.new over it
+    # fails too and the service would silently come back on the PREVIOUS build
+    # while the health check still passes - a green deploy serving old code.
+    # Fail loudly instead, after putting the service back up.
+    if (Test-Path $distPath) {
+        Restart-Service cetpa -Force
+        Write-Error 'Could not move the old dist aside - service restarted on the PREVIOUS build. Deploy failed.'
+        exit 1
+    }
+    Rename-Item $distNew 'dist' -Force
+    Info 'Starting cetpa service'
+    Restart-Service cetpa -Force
+    Remove-Item $distOld -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # Off-server backup scheduled task - idempotent, registered on every deploy so it
 # self-heals if it was never set up or got removed. Runs backup-db-offsite.mjs
@@ -157,6 +209,14 @@ foreach ($i in 1..10) {
     Write-Host "    health attempt $i/10..."
 }
 if ($ok) {
+    # Record the lock hash ONLY after a healthy deploy. If this deploy failed we
+    # must NOT remember it: the next run has to take the slow path and re-run
+    # npm ci, otherwise a half-installed node_modules would be skipped forever.
+    try {
+        Set-Content -Path $stampFile -Value $lockHash -Encoding ASCII
+    } catch {
+        Write-Host "    Could not write lock stamp (next deploy just runs npm ci): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
     Info 'Health OK (HTTP 200). Deploy succeeded.'
     exit 0
 } else {

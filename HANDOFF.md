@@ -77,11 +77,65 @@
 - **KURAL:** yeni koleksiyon = 3 yer birden → `TENANT_COLLECTIONS` + `COLLECTION_PERMISSIONS`
   + `useDataSync`/`dataStore` listener'ı.
 
-**Açık kalanlar:**
+**`bf641f3` — SSE ilk yükleme kaybı + 2 konsol hatası**
+- `connect()` yeni bağlantı açarken mevcut `EventSource`'u kapatıyordu. Init 3,5 MB /
+  ~27 sn'ye çıkınca ölümcül oldu: indirme sürerken tembel yüklenen sayfa yeni koleksiyona
+  abone olunca inen HER ŞEY çöpe gidip baştan başlıyordu (kullanıcının Network sekmesi:
+  3 bağlantı, sonuncusu 3.591 kB). Artık init uçuştayken yeniden bağlanma ERTELENİYOR
+  (`initPending` + 60 sn guard + `retryLater`/`reset` temizliği).
+- `/api/reports/summary` 401: `useEffect` bağımlılığı `[]` idi → token hazır olmadan
+  istek, girişten sonra bir daha denenmiyor, hata yutuluyordu. `[user]` yapıldı.
+- Uydurma giriş konumu: CSP `ipapi.co`'yu engelliyor, `catch` sabit `'Antalya, TR'`
+  yazıyordu → giriş kayıtlarında ÖLÇÜLMEMİŞ konum. Çağrı kaldırıldı, `'Bilinmiyor'`.
+
+**`7e791a9` — Fiyat 0 TL (iki ayrı kusur)**
+- Cron stok import'u fiyatı HİÇ yazmıyordu (eşleme belgeliydi, kablolanmamıştı).
+- Manuel import boş `prices` ile mevcut fiyatı EZİYORDU (sessiz-sıfır sınıfı).
+- Mantık `mikroSatisFiyatlari()` yardımcısında toplandı; 0/boş "fiyat YOK" sayılır.
+- Ölçüm: import özeti + panel "N/2367 üründe satış fiyatı bulundu" gösteriyor.
+  sema-kesif'e `fiyatListesiOzet` / `fiyatListesiOrnek` / `stokKartiFiyatDolulugu` eklendi.
+
+**`f98b63b` — Devir kovası + kontrolün GERÇEK kapsamı**
+- Kullanıcının sema-kesif çıktısı: semantik DOĞRU (551-224=327 birebir), ama KAYNAK eksik.
+  `satirEvrakTipleri` = 602 satış + 486 alış + 2 = 1090 → STOK_HAREKETLERI yalnız FATURA
+  satırlarını taşıyor, açılış/devir stoğu YOK. Farklar tam devir tutarı (200 ve 32).
+- `__devir` kovası eklendi: otoriter toplam − defter toplamı. Dağılım toplamı artık
+  gerçek stoğa eşit; "Devir (depo bilinmiyor): 200" diye görünür.
+- **Önceki raporlamam YANILTICIYDI:** "2365/2367 tuttu" demiştim; doğrusu 2365 ürün HİÇ
+  KONTROL EDİLMEDİ (hareketi olmayan ürün atlanıyor). Panel artık önce KAPSAM yazıyor.
+
+**`0e80788` — Kurulum rehberi / AI düğmesi çakışması**
+- İkisi de `bottom-6 right-6`; OnboardingChecklist z-[250] AIChat z-50'yi örtüp düğmeyi
+  TIKLANAMAZ yapıyordu. Köşe şeritlere ayrıldı: `right-6` AI, `right-24` rehber.
+
+**`b3262b4` — Envanter: uydurma "Ana Depo" + stok biçimi**
+- DEPO sütunu `item.location || 'Ana Depo'` yazıyordu; sema-kesif kanıtladı ki 2367 ürünün
+  TAMAMINDA `sto_yer_kod` boş → tüm katalog uydurma depo gösteriyordu. Artık gerçek kaynak
+  (`warehouseItems.depoBreakdown`) okunuyor, bilinmiyorsa `—` yazılıyor.
+- Stok "15826" → "15.826" (tr-TR) + birim rozeti (`inventory.unit`, zaten vardı ama
+  hiç gösterilmiyordu).
+
+## sema-kesif ile DOĞRULANANLAR (2026-08-11, artık tahmin değil)
+- **`cha_ebelge_turu` DOLU ve tutarlı:** satış 200×tür0 / 5×tür1, alış 91×tür0 / 58×tür1.
+  0=e-Fatura, 1=e-Arşiv varsayımıyla uyumlu. (Bekleyen kullanıcı görevi kapandı.)
+- **`sto_yer_kod` 2367 ürünün TAMAMINDA boş** — "güvenilmez" notu kanıtlandı.
+- **Depolar:** 1 HAVALIMANI, 2 ESKI SANAYI, 3 `34 CGC 119`, 4 `07 AGU 291`, 5 `07 ACR 832`
+  → üçü ARAÇ PLAKASI. Araç filosunu Mikro depolarından türetmek mümkün.
+- **STOK_HAREKETLERI yalnız fatura satırı** (1090 = 602+486+2) — devir/sayım/üretim YOK.
+- **Kritik stok kusur DEĞİL:** eşik 5, ürünlerin çoğunun stoğu gerçekten ≤5 (kullanıcı teyit etti).
+
+## Açık kalanlar
+- **Ölçüm bekleyen:** (a) "Miktarları Çek" → devir kovası sonucu + depo sütunu,
+  (b) sema-kesif `fiyatListesiOzet`/`stokKartiFiyatDolulugu` → Mikro fiyat gönderiyor mu?
+  Fiyat kablolaması yapıldı ama Mikro fiyat vermiyorsa boşa çalışır.
 - Tahsilat'ta ÇİFT SAYIM riski: elle girilen `tahsilatKayitlari` ile Mikro kalemi aynı
-  faturaysa ikisi de sayılır (ayırt edecek anahtar yok). Kullanıcıya soruldu, yanıt bekleniyor.
-- `perDepoStokAday` ham sorgu çıktısı hiç görülmedi; per-depo doğruluğu yalnız kullanıcı
-  beyanına dayanıyor (`8172145` Antigravity'nin tek-SQL optimizasyonu canlıda).
+  faturaysa ikisi de sayılır (ayırt edecek anahtar yok). Kullanıcıya soruldu, yanıt yok.
+- **Deploy kesintisi:** `deploy.ps1` build'i servis DURDUKTAN sonra yapıyor → her deploy
+  ~1-2 dk 502. Kullanıcı bugün buna birkaç kez denk geldi ("Failed to fetch", takılı
+  "Aktarılıyor...", 502). Kalıcı çözüm blue-green ya da build-önce-restart-sonra; deploy
+  zinciri riskli, ayrı iş olarak ele alınmalı.
+- Birkaç modülün toast'ı `bottom-6 right-6` (z-100..300) → göründüğü sürece AI düğmesini
+  örtüyor. Geçici, dokunulmadı.
 
 ## Mimari notlar (tekrar keşfetme, buradan oku)
 - **`useMikroFaturalar(enabled)`** (`src/hooks/useMikroFaturalar.ts`) — `mikroFaturalar` koleksiyonunun TEK normalize kaynağı. `useCariAdMap(leads)` da burada. AccountingModule/MuhasebePage/RaporlarPage/SubeModule hepsi bunu kullanıyor.
@@ -93,9 +147,11 @@
 
 ## Kalan işler
 **Senin tarafın (kod değil):**
-1. Import'ları çalıştır: Cari Hareketler (Tümü), Carileri İçeri Al, Stok Miktarları (Depo), Stok Hareketleri, Depo Tanımları, Bakiye.
+1. ~~Import'ları çalıştır~~ ✅ 2026-08-11'de çalıştırıldı (Cari Hareketler 905, stok 2367,
+   cari 203, fatura 600, stok hareket 1090, barkod 946, depo 5). Siparişler/Ödeme Planları
+   0 — Mikro'da veri yok, kod doğru.
 2. Mikro'da SRV kullanıcısına GİB e-fatura yetkisi ver (e-belge 400 hatalarının nedeni).
-3. `cha_ebelge_turu` doluluk + 0/1 semantiğini canlıda doğrula.
+3. ~~`cha_ebelge_turu` doğrula~~ ✅ sema-kesif ile doğrulandı (aşağıya bak).
 4. Token rotasyonu: `OPS_SUMMARY_TOKEN` + Mikro `ApiKey` (sohbete düşmüştü).
 
 **Kod tarafı:**
