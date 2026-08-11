@@ -6388,6 +6388,9 @@ async function startServer() {
     (async () => {
       const t0 = Date.now();
       let processed = 0, updated = 0, failed = 0;
+      // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
+      let depoUyusmazlik = 0;
+      const uyusmazlikOrnek: { sku: string; toplam: number; beklenen: number }[] = [];
       try {
         const invSnap = await adminDb!.collection('inventory').where('source', '==', 'mikro_import').get();
         const items = invSnap.docs
@@ -6436,7 +6439,8 @@ async function startServer() {
         for (let i = 0; i < items.length; i += CONCURRENCY) {
           const slice = items.slice(i, i + CONCURRENCY);
           const results = await Promise.all(slice.map(async (it) => {
-            const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null };
+            const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null,
+                          uyusmazlik: null as { sku: string; toplam: number; beklenen: number } | null };
             try {
               // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
@@ -6455,20 +6459,39 @@ async function startServer() {
 
               // 2) Per-depo: stok GERÇEKTE nerede? code-review #7 ile tek bir SQL'de
               // STOK_HAREKETLERI'nden toplu çekildi (ağır polling yerine O(1) maliyet).
+              //
+              // MUTABAKAT KONTROLÜ (2026-08-11): bu SQL'in semantiği (sth_tip 0=giriş /
+              // 1=çıkış, transferin İKİ ayrı satır olması) canlı veriyle hiç doğrulanmadı.
+              // Yanlışsa dağılım sessizce hatalı yazılırdı. Artık kendini denetliyor:
+              // dağılımın TOPLAMI, otoriter toplam (EldekiMiktar) ile tutmalı. Tutmuyorsa
+              // o SKU'nun dağılımı YAZILMAZ (yanlış dağılım göstermektense hiç gösterme)
+              // ve sayılır — iş özetinde raporlanır. 0 uyuşmazlık = semantik doğrulandı.
               let depoQtys: Record<string, number> | null = null;
+              let uyusmazlik: { sku: string; toplam: number; beklenen: number } | null = null;
               if (qty > 0) {
-                 const fromMap = depoMap.get(it.sku);
-                 if (fromMap && Object.keys(fromMap).length > 0) {
-                     depoQtys = fromMap;
-                 }
+                const fromMap = depoMap.get(it.sku);
+                if (fromMap && Object.keys(fromMap).length > 0) {
+                  const toplam = Object.values(fromMap).reduce((a, b) => a + b, 0);
+                  // Tolerans: kesirli miktarlarda kayan nokta + Mikro yuvarlaması.
+                  if (Math.abs(toplam - qty) <= Math.max(0.01, Math.abs(qty) * 0.001)) {
+                    depoQtys = fromMap;
+                  } else {
+                    uyusmazlik = { sku: it.sku, toplam, beklenen: qty };
+                  }
+                }
               }
-              
-              return { it, qty, cost, depoQtys };
+
+              return { it, qty, cost, depoQtys, uyusmazlik };
             } catch { return bos; }
           }));
 
           for (const r of results) {
             processed++;
+            if (r.uyusmazlik) {
+              depoUyusmazlik++;
+              // İlk birkaç örneği sakla — teşhis için (hepsini tutmak gereksiz).
+              if (uyusmazlikOrnek.length < 5) uyusmazlikOrnek.push(r.uyusmazlik);
+            }
             if (r.qty === null) { failed++; continue; }
             batch.update(r.it.ref, {
               stockLevel: r.qty,
@@ -6498,11 +6521,20 @@ async function startServer() {
         }
         await commitBatch();
         const duration = Date.now() - t0;
-        await jobRef.set({ running: false, processed, updated, failed, finishedAt: pgServerTimestamp(), durationMs: duration }, { merge: true });
-        const miktarOzet = `${updated} ürünün miktarı güncellendi, ${failed} hata (${Math.round(duration / 1000)}sn)`;
+        await jobRef.set({
+          running: false, processed, updated, failed,
+          // Panel bunu gösterir: 0 = per-depo SQL semantiği tüm katalogda doğrulandı.
+          depoUyusmazlik, uyusmazlikOrnek,
+          finishedAt: pgServerTimestamp(), durationMs: duration,
+        }, { merge: true });
+        const depoNot = depoUyusmazlik > 0
+          ? `, ${depoUyusmazlik} üründe depo dağılımı toplamı tutmadı (dağılım yazılmadı)`
+          : '';
+        const miktarOzet = `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot} (${Math.round(duration / 1000)}sn)`;
         await writeSyncLog('GenelAmacliMaliyetListesiV2', 'inventory', miktarOzet, failed === 0, null, failed ? `${failed} SKU okunamadı` : null, duration, actor);
         await writeAuditLog(actor, 'Mikro Stok Miktarları', miktarOzet);
-        console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, ${duration}ms`);
+        console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, depo uyuşmazlık ${depoUyusmazlik}, ${duration}ms`);
+        if (uyusmazlikOrnek.length) console.warn('Depo dağılımı uyuşmazlık örnekleri:', uyusmazlikOrnek);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await jobRef.set({ running: false, error: msg, finishedAt: pgServerTimestamp() }, { merge: true }).catch(() => {});
