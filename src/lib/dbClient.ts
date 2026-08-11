@@ -308,6 +308,19 @@ class StreamManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private retryDelay = 1000;
   private connectedColls = '';
+  // ── İlk yükleme koruması ───────────────────────────────────────────────────
+  // connect() yeni bağlantı açarken mevcut EventSource'u KAPATIR. İlk init
+  // büyüdükçe (2367 stok + 946 barkod + 905 cari hareket ≈ 3,5 MB / ~27 sn) bu
+  // ölümcül hale geldi: indirme sürerken tembel yüklenen bir sayfa yeni bir
+  // koleksiyona abone olunca o ana kadar inen her şey ÇÖPE gidip baştan
+  // başlıyordu (kullanıcının Network sekmesinde 3 bağlantı, sonuncusu 3,5 MB).
+  // Çözüm: init uçuştayken zorunlu olmayan yeniden bağlanmayı ERTELE; init
+  // bitince tek seferde bağlan — o zaman yalnız YENİ koleksiyonlar istenir.
+  private initPending = new Set<string>();
+  private pendingReconnect = false;
+  private initGuardTimer: ReturnType<typeof setTimeout> | null = null;
+  /** init olayı hiç gelmezse ertelemeyi sonsuza kilitlemeyecek emniyet süresi. */
+  private static readonly INIT_GUARD_MS = 60_000;
 
   getDocs(coll: string): Array<{ id: string; data: Record<string, unknown> }> {
     const m = this.cache.get(coll);
@@ -333,6 +346,10 @@ class StreamManager {
 
   /** Reconnect the SSE channel when the subscribed-collection set changed. */
   private scheduleReconnect(force: boolean): void {
+    // İlk yükleme uçuştaysa bağlantıyı YIKMA — inen veriyi çöpe atar (bkz.
+    // initPending). Yeni abonelikler init bitince tek seferde eklenir.
+    // force (hata sonrası kurtarma) bu korumayı aşar: orada zaten bağlantı ölü.
+    if (!force && this.initPending.size > 0) { this.pendingReconnect = true; return; }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     // 400ms debounce: uygulama açılışında ~33 koleksiyon dinleyicisi kademeli
     // kaydoluyor; kısa debounce SSE'yi 2-3 kez açıp kapatıp geçici 503'lere
@@ -396,6 +413,18 @@ class StreamManager {
       try { token = await getToken(); } catch { this.retryLater(); return; }
       url += `&token=${encodeURIComponent(token)}`;
     }
+    // Bu bağlantıda init BEKLENEN koleksiyonlar — hepsi gelene kadar bağlantı
+    // yıkılmaz (scheduleReconnect erteler). Emniyet süresi, init olayı hiç
+    // gelmezse ertelemeyi kilitli bırakmasın diye.
+    this.initPending = new Set(need);
+    if (this.initGuardTimer) clearTimeout(this.initGuardTimer);
+    if (this.initPending.size > 0) {
+      this.initGuardTimer = setTimeout(() => {
+        this.initPending.clear();
+        this.flushPendingReconnect();
+      }, StreamManager.INIT_GUARD_MS);
+    }
+
     const es = new EventSource(url, { withCredentials: true });
     this.es = es;
     es.addEventListener('init', ev => {
@@ -405,6 +434,11 @@ class StreamManager {
       for (const d of docs) m.set(d.id, reviveTimestamps(d.data) as Record<string, unknown>);
       this.cache.set(coll, m);
       this.ready.add(coll);
+      // Beklenen init geldi. Hepsi tamamlandıysa ertelenen yeniden bağlanmayı işle.
+      if (this.initPending.delete(coll) && this.initPending.size === 0) {
+        if (this.initGuardTimer) { clearTimeout(this.initGuardTimer); this.initGuardTimer = null; }
+        this.flushPendingReconnect();
+      }
       this.notify(coll);
     });
     es.addEventListener('change', ev => {
@@ -423,7 +457,19 @@ class StreamManager {
     };
   }
 
+  /** init tamamlandı — bu sırada biriken abonelik değişimi varsa şimdi bağlan. */
+  private flushPendingReconnect(): void {
+    if (!this.pendingReconnect) return;
+    this.pendingReconnect = false;
+    this.scheduleReconnect(false);
+  }
+
   private retryLater(): void {
+    // Bağlantı öldü: bekleyen init'ler asla gelmeyecek, koruma temizlenmeli —
+    // yoksa scheduleReconnect sonsuza kadar erteler ve veri hiç gelmez.
+    this.initPending.clear();
+    this.pendingReconnect = false;
+    if (this.initGuardTimer) { clearTimeout(this.initGuardTimer); this.initGuardTimer = null; }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => void this.connect(true), this.retryDelay);
     this.retryDelay = Math.min(this.retryDelay * 2, 30000);
@@ -447,6 +493,11 @@ class StreamManager {
   reset(): void {
     try { this.es?.close(); } catch { /* ignore */ }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    // İlk yükleme koruması da sıfırlanmalı — kalırsa yeni oturumda
+    // scheduleReconnect sonsuza kadar erteler ve hiç veri gelmez.
+    if (this.initGuardTimer) { clearTimeout(this.initGuardTimer); this.initGuardTimer = null; }
+    this.initPending.clear();
+    this.pendingReconnect = false;
     this.es = null;
     this.connectedColls = '';
     this.sessionReady = false;

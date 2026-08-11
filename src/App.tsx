@@ -630,12 +630,17 @@ function AppContent() {
     delivered: number;
   } | null>(null);
 
+  // Panel KPI özeti. Bağımlılık `user` ŞART: eskiden `[]` idi, yani istek uygulama
+  // açılır açılmaz — Firebase oturum token'ı hazır olmadan — gidiyor ve 401 alıyordu.
+  // Boş dizi yüzünden giriş tamamlandıktan sonra BİR DAHA denenmiyordu; hata da
+  // yutulduğu için özet sessizce hiç yüklenmiyordu (konsolda 401 olarak görünür).
   useEffect(() => {
+    if (!user) return;
     authFetch('/api/reports/summary')
       .then(r => r.ok ? r.json() : null)
       .then((d: typeof summaryData) => { if (d) setSummaryData(d); })
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   // ── System health state ────────────────────────────────────────────────────
   const [healthData, setHealthData] = useState<{
@@ -2127,18 +2132,14 @@ function AppContent() {
         // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
         resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
 
-        const fetchLocation = async () => {
-          try {
-            // 3sn timeout — 3. parti geolocation auth boot'unu süresiz bloke etmesin.
-            const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(3000) });
-            const data = await res.json();
-            return `${data.city}, ${data.country_name}`;
-          } catch {
-            return 'Antalya, TR';
-          }
-        };
-
-        const location = await fetchLocation();
+        // Giriş konumu ARTIK TAHMİN EDİLMİYOR (2026-08-11).
+        // Eskiden her girişte ipapi.co'ya IP ile konum sorulur, CSP bunu engellediği
+        // için `catch` bloğu sabit 'Antalya, TR' yazardı. Sonuç: giriş kayıtlarında
+        // HİÇ ÖLÇÜLMEMİŞ bir konum gerçekmiş gibi duruyordu — güvenlik incelemesinde
+        // "kullanıcı Antalya'dan giriş yaptı" diye okunan bu kayıt uydurmaydı.
+        // Ayrıca her girişte kullanıcının IP'si 3. partiye gidiyordu.
+        // Konum bilinmiyorsa bilinmiyor yazılır; uydurma veri kayıttan iyidir.
+        const location = 'Bilinmiyor';
         const userData = {
           name: u.displayName || 'Anonymous',
           email: u.email || '',

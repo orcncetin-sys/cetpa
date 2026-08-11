@@ -5955,6 +5955,19 @@ async function startServer() {
       // gecilir. Once sema burada dogrulanmadan import DEGISTIRILMEZ (envanter riski).
       { ad: 'sthDepoKolonOrnegi',
         sql: 'SELECT TOP 5 sth_stok_kod, sth_tip, sth_miktar, sth_giris_depo_no, sth_cikis_depo_no, sth_iptal FROM STOK_HAREKETLERI ORDER BY sth_tarih DESC' },
+      // 2026-08-11 MUTABAKAT ARTIĞI: 2367 üründen 2365'i tuttu (semantik DOĞRULANDI),
+      // 2'si eksik kaldı — YPR-4160 (327 vs 527) ve VITRA-800-2030 (63 vs 95). İkisi de
+      // aynı yönde (dağılım < toplam) → stok var ama bir depoya yazılmamış. Hipotez:
+      // depo no NULL/0 ya da sth_tip 0/1 dışında. Bu iki sorgu onu ÖLÇER (tahmin değil).
+      { ad: 'artikDepoNoDagilimi',
+        sql: "SELECT sth_tip, ISNULL(CAST(sth_giris_depo_no AS VARCHAR(10)),'NULL') AS giris, " +
+             "ISNULL(CAST(sth_cikis_depo_no AS VARCHAR(10)),'NULL') AS cikis, COUNT(*) AS adet, SUM(sth_miktar) AS miktar " +
+             "FROM STOK_HAREKETLERI WHERE sth_stok_kod IN ('YPR-4160','VITRA-800-2030') AND ISNULL(sth_iptal,0)=0 " +
+             'GROUP BY sth_tip, sth_giris_depo_no, sth_cikis_depo_no ORDER BY sth_tip' },
+      { ad: 'artikTipDagilimi',
+        sql: 'SELECT sth_stok_kod, sth_tip, COUNT(*) AS adet, SUM(sth_miktar) AS miktar ' +
+             "FROM STOK_HAREKETLERI WHERE sth_stok_kod IN ('YPR-4160','VITRA-800-2030') AND ISNULL(sth_iptal,0)=0 " +
+             'GROUP BY sth_stok_kod, sth_tip ORDER BY sth_stok_kod, sth_tip' },
       { ad: 'perDepoStokAday',
         sql: 'SELECT TOP 40 sth_stok_kod, depo, SUM(net) AS bakiye FROM (' +
              'SELECT sth_stok_kod, sth_giris_depo_no AS depo, sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 0 AND ISNULL(sth_iptal, 0) = 0 ' +
