@@ -6468,6 +6468,10 @@ async function startServer() {
       let processed = 0, updated = 0, failed = 0;
       // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
       let depoUyusmazlik = 0;
+      /** Dağılımı yazılan ürün sayısı — hareketi olmayan ürün hiç kontrol edilmez. */
+      let depoDagilimliUrun = 0;
+      /** Dağılımına `__devir` kovası eklenen ürün sayısı (açılış stoğu defterde yok). */
+      let depoDevirli = 0;
       const uyusmazlikOrnek: { sku: string; toplam: number; beklenen: number }[] = [];
       try {
         const invSnap = await adminDb!.collection('inventory').where('source', '==', 'mikro_import').get();
@@ -6518,7 +6522,8 @@ async function startServer() {
           const slice = items.slice(i, i + CONCURRENCY);
           const results = await Promise.all(slice.map(async (it) => {
             const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null,
-                          uyusmazlik: null as { sku: string; toplam: number; beklenen: number } | null };
+                          uyusmazlik: null as { sku: string; toplam: number; beklenen: number } | null,
+                          devirli: false };
             try {
               // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
@@ -6538,28 +6543,44 @@ async function startServer() {
               // 2) Per-depo: stok GERÇEKTE nerede? code-review #7 ile tek bir SQL'de
               // STOK_HAREKETLERI'nden toplu çekildi (ağır polling yerine O(1) maliyet).
               //
-              // MUTABAKAT KONTROLÜ (2026-08-11): bu SQL'in semantiği (sth_tip 0=giriş /
-              // 1=çıkış, transferin İKİ ayrı satır olması) canlı veriyle hiç doğrulanmadı.
-              // Yanlışsa dağılım sessizce hatalı yazılırdı. Artık kendini denetliyor:
-              // dağılımın TOPLAMI, otoriter toplam (EldekiMiktar) ile tutmalı. Tutmuyorsa
-              // o SKU'nun dağılımı YAZILMAZ (yanlış dağılım göstermektense hiç gösterme)
-              // ve sayılır — iş özetinde raporlanır. 0 uyuşmazlık = semantik doğrulandı.
+              // MUTABAKAT + DEVİR KOVASI (2026-08-11)
+              //
+              // Semantik canlı veriyle DOĞRULANDI: hareketi olan ürünlerde dağılımın
+              // toplamı otoriter toplama oturuyor. Ama kaynak EKSİK: STOK_HAREKETLERI
+              // yalnız FATURA satırlarını taşıyor (1090 satır = 602 satış + 486 alış + 2),
+              // açılış/devir stoğu bu tabloda YOK. Devri olan üründe hareket defterinden
+              // türetilen dağılım sistematik olarak eksik kalıyor
+              // (YPR-4160: 551-224=327 ama Mikro 527 → 200 devir).
+              //
+              // Ürünü tamamen gizlemek yerine farkı DÜRÜSTÇE ayrı kovada gösteriyoruz:
+              // `__devir` = otoriter toplam - hareket defteri toplamı. Böylece dağılım
+              // toplamı her zaman gerçek stoğa eşit olur ve kullanıcı stoğun nerede
+              // OLMADIĞINI değil, neresinin BİLİNMEDİĞİNİ görür.
+              //
+              // Ters yön (defter gerçek stoktan FAZLA diyorsa) devirle açıklanamaz —
+              // orada hâlâ hiç dağılım yazılmaz ve uyuşmazlık olarak raporlanır.
               let depoQtys: Record<string, number> | null = null;
               let uyusmazlik: { sku: string; toplam: number; beklenen: number } | null = null;
+              let devirli = false;
               if (qty > 0) {
                 const fromMap = depoMap.get(it.sku);
                 if (fromMap && Object.keys(fromMap).length > 0) {
                   const toplam = Object.values(fromMap).reduce((a, b) => a + b, 0);
                   // Tolerans: kesirli miktarlarda kayan nokta + Mikro yuvarlaması.
-                  if (Math.abs(toplam - qty) <= Math.max(0.01, Math.abs(qty) * 0.001)) {
-                    depoQtys = fromMap;
+                  const tolerans = Math.max(0.01, Math.abs(qty) * 0.001);
+                  const fark = qty - toplam;
+                  if (Math.abs(fark) <= tolerans) {
+                    depoQtys = fromMap;                       // birebir tutuyor
+                  } else if (fark > 0) {
+                    depoQtys = { ...fromMap, __devir: fark }; // eksik kısım = devir
+                    devirli = true;
                   } else {
                     uyusmazlik = { sku: it.sku, toplam, beklenen: qty };
                   }
                 }
               }
 
-              return { it, qty, cost, depoQtys, uyusmazlik };
+              return { it, qty, cost, depoQtys, uyusmazlik, devirli };
             } catch { return bos; }
           }));
 
@@ -6570,6 +6591,11 @@ async function startServer() {
               // İlk birkaç örneği sakla — teşhis için (hepsini tutmak gereksiz).
               if (uyusmazlikOrnek.length < 5) uyusmazlikOrnek.push(r.uyusmazlik);
             }
+            if (r.devirli) depoDevirli++;
+            // Dağılımı OLAN ürün sayısı: "2365 doğrulandı" yanılgısını önler —
+            // hareket kaydı olmayan ürün kontrol EDİLMEZ, atlanır (1090 hareket
+            // satırı 2367 ürüne yayılıyor, çoğunun hiç hareketi yok).
+            if (r.depoQtys) depoDagilimliUrun++;
             if (r.qty === null) { failed++; continue; }
             batch.update(r.it.ref, {
               stockLevel: r.qty,
@@ -6601,13 +6627,16 @@ async function startServer() {
         const duration = Date.now() - t0;
         await jobRef.set({
           running: false, processed, updated, failed,
-          // Panel bunu gösterir: 0 = per-depo SQL semantiği tüm katalogda doğrulandı.
-          depoUyusmazlik, uyusmazlikOrnek,
+          // Panel bunu gösterir. depoDagilimliUrun ŞART: hareketi olmayan ürün hiç
+          // kontrol edilmediği için "uyuşmazlık 0" tek başına "hepsi doğrulandı"
+          // ANLAMINA GELMEZ — kapsamı da göstermeliyiz.
+          depoUyusmazlik, depoDagilimliUrun, depoDevirli, uyusmazlikOrnek,
           finishedAt: pgServerTimestamp(), durationMs: duration,
         }, { merge: true });
-        const depoNot = depoUyusmazlik > 0
-          ? `, ${depoUyusmazlik} üründe depo dağılımı toplamı tutmadı (dağılım yazılmadı)`
-          : '';
+        const depoNot =
+          `, ${depoDagilimliUrun} üründe depo dağılımı yazıldı` +
+          (depoDevirli > 0 ? ` (${depoDevirli}'inde devir kovası)` : '') +
+          (depoUyusmazlik > 0 ? `, ${depoUyusmazlik} üründe toplam tutmadı (dağılım yazılmadı)` : '');
         const miktarOzet = `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot} (${Math.round(duration / 1000)}sn)`;
         await writeSyncLog('GenelAmacliMaliyetListesiV2', 'inventory', miktarOzet, failed === 0, null, failed ? `${failed} SKU okunamadı` : null, duration, actor);
         await writeAuditLog(actor, 'Mikro Stok Miktarları', miktarOzet);

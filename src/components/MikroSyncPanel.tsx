@@ -109,8 +109,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   // Stok miktar işi (jobs/stokMiktarImport canlı izlenir)
   const [miktarJob, setMiktarJob] = useState<{
     running?: boolean; processed?: number; updated?: number; failed?: number; total?: number; error?: string | null;
-    /** Depo dağılımı toplamı otoriter miktarla tutmayan SKU sayısı (0 = semantik doğrulandı). */
+    /** Depo dağılımı toplamı otoriter miktarla tutmayan SKU sayısı. */
     depoUyusmazlik?: number;
+    /** Dağılımı YAZILAN ürün sayısı = kontrolün gerçek kapsamı.
+     *  Hareket kaydı olmayan ürün hiç kontrol edilmez, o yüzden "uyuşmazlık 0"
+     *  tek başına "hepsi doğrulandı" anlamına GELMEZ. */
+    depoDagilimliUrun?: number;
+    /** Açılış/devir stoğu hareket defterinde olmadığı için `__devir` kovası eklenen ürün. */
+    depoDevirli?: number;
     uyusmazlikOrnek?: { sku: string; toplam: number; beklenen: number }[];
   } | null>(null);
   const [miktarStarting, setMiktarStarting] = useState(false);
@@ -583,25 +589,39 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             {/* Depo dağılımı mutabakatı: dağılımın toplamı otoriter miktarla tutuyor mu?
                 Bu, per-depo SQL semantiğinin (sth_tip 0=giriş/1=çıkış) TÜM katalogdaki
                 kanıtıdır — örnek satıra bakmak yerine her SKU'da kontrol edilir. */}
-            {!miktarJob.running && miktarJob.depoUyusmazlik != null && (
-              miktarJob.depoUyusmazlik === 0 ? (
-                <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2">
-                  ✓ {t ? 'Depo dağılımı doğrulandı — her üründe dağılım toplamı Mikro toplamıyla birebir tutuyor.'
-                       : 'Depot breakdown verified — per-product sums match Mikro totals.'}
+            {!miktarJob.running && miktarJob.depoDagilimliUrun != null && (
+              <div className="text-[11px] rounded-xl px-3 py-2 space-y-1 bg-gray-50 text-gray-700">
+                {/* KAPSAM önce yazılır: hareket kaydı olmayan ürün hiç kontrol
+                    edilmez, o yüzden "uyuşmazlık 0" tek başına yanıltıcıdır. */}
+                <p>
+                  📦 {t ? 'Depo dağılımı yazılan ürün' : 'Products with breakdown'}:{' '}
+                  <b>{miktarJob.depoDagilimliUrun}</b>
+                  <span className="text-gray-400"> / {miktarJob.total ?? '?'}</span>
+                  <span className="text-gray-400">
+                    {' '}— {t ? 'kalanların stok hareketi yok, kontrol edilmedi'
+                            : 'the rest have no stock movements'}
+                  </span>
                 </p>
-              ) : (
-                <div className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2 space-y-1">
-                  <p className="font-semibold">
-                    ⚠ {miktarJob.depoUyusmazlik} {t ? 'üründe depo dağılımı toplamı tutmadı — o ürünlerin dağılımı YAZILMADI (yanlış dağılım göstermek yerine).'
-                                                     : 'products: breakdown sum mismatch — their breakdown was NOT written.'}
+                {(miktarJob.depoDevirli ?? 0) > 0 && (
+                  <p className="text-blue-700">
+                    ↪ {miktarJob.depoDevirli} {t ? 'üründe açılış/devir stoğu hareket defterinde yok — "Devir (depo bilinmiyor)" olarak ayrıldı.'
+                                                 : 'products have opening stock outside the ledger — shown as "Devir".'}
                   </p>
-                  {miktarJob.uyusmazlikOrnek?.slice(0, 3).map(o => (
-                    <p key={o.sku} className="font-mono text-[10px]">
-                      {o.sku}: {t ? 'dağılım' : 'sum'} {o.toplam} ≠ {t ? 'Mikro' : 'Mikro'} {o.beklenen}
+                )}
+                {(miktarJob.depoUyusmazlik ?? 0) > 0 && (
+                  <div className="text-amber-800">
+                    <p className="font-semibold">
+                      ⚠ {miktarJob.depoUyusmazlik} {t ? 'üründe defter gerçek stoktan FAZLA — dağılım yazılmadı.'
+                                                       : 'products: ledger exceeds real stock — breakdown not written.'}
                     </p>
-                  ))}
-                </div>
-              )
+                    {miktarJob.uyusmazlikOrnek?.slice(0, 3).map(o => (
+                      <p key={o.sku} className="font-mono text-[10px]">
+                        {o.sku}: {t ? 'defter' : 'ledger'} {o.toplam} ≠ Mikro {o.beklenen}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ) : null}

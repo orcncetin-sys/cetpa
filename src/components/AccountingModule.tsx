@@ -1954,6 +1954,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Bir depoda görünecek kalemler + O DEPODAKİ miktar. Mikro ürünleri (doc id
   // 'mikro-' ile başlar) TEK depoya toplanmaz — depoBreakdown ile stoğu olan HER
   // depoda kendi miktarıyla görünür (kullanıcı isteği). Manuel ürünler tek warehouseId.
+  // depoBreakdown'daki özel kova: hareket defterinde (STOK_HAREKETLERI) karşılığı
+  // olmayan, yani hangi depoda olduğu BİLİNMEYEN açılış/devir stoğu. Gerçek bir
+  // depo değildir — depo listelerinde kalem olarak GÖSTERİLMEZ, yalnız dağılım
+  // etiketinde ayrı ad ile görünür ki toplamlar tutsun ve eksik gizlenmesin.
+  const DEVIR_KOVA = '__devir';
+
   const depoKalemleriIcin = (whId: string): Array<WarehouseItem & { quantity: number }> => {
     const depoNo = whId.startsWith('mikro-depo-') ? whId.slice('mikro-depo-'.length) : null;
     const out: Array<WarehouseItem & { quantity: number }> = [];
@@ -1976,7 +1982,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (bd && Object.keys(bd).length) {
       return Object.entries(bd)
         .sort((a, b) => Number(b[1]) - Number(a[1]))
-        .map(([depo, q]) => `${warehouses.find(w => w.id === `mikro-depo-${depo}`)?.name || `Depo ${depo}`}: ${Number(q).toLocaleString('tr-TR')}`)
+        .map(([depo, q]) => {
+          const ad = depo === DEVIR_KOVA
+            ? 'Devir (depo bilinmiyor)'
+            : warehouses.find(w => w.id === `mikro-depo-${depo}`)?.name || `Depo ${depo}`;
+          return `${ad}: ${Number(q).toLocaleString('tr-TR')}`;
+        })
         .join(' · ');
     }
     return warehouses.find(wh => wh.id === wi.warehouseId)?.name || wi.location || '—';
