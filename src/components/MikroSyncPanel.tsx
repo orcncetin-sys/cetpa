@@ -346,9 +346,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     const adimlar: { ad: string; calistir: () => Promise<void> }[] = [
       { ad: t ? 'Stok kartları' : 'Stock cards',   calistir: handleImportStok },
       { ad: t ? 'Cariler' : 'Customers',           calistir: handleImportCari },
-      ...extraPullDefs
-        .filter(d => d.key !== 'stok-miktar')
-        .map(d => ({ ad: d.title, calistir: () => handleExtraPull(d.key, d.route) })),
+      ...extraPullDefs.map(d => ({ ad: d.title, calistir: () => handleExtraPull(d.key, d.route) })),
       { ad: t ? 'Cari bakiyeler' : 'Balances',     calistir: handlePullBakiye },
       { ad: t ? 'Mizan' : 'Trial balance',         calistir: handlePullMizan },
       { ad: t ? 'KDV özeti' : 'VAT summary',       calistir: handlePullKdv },
@@ -367,8 +365,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     setTumuOzet({ ok, hata, bitti: true });
   }
 
+  // NOT: 'stok-miktar' bilerek BURADA YOK. Aynı uç yukarıdaki "Stok Miktarlarını
+  // Çek" kartında ilerleme çubuğuyla sunuluyor. Jenerik kart olarak da listelenince
+  // aynı iş iki düğmede görünüyordu ve jenerik olan YANILTICIYDI: uç arka plan işi
+  // başlatıp hemen döndüğü için kart işi "bitti" sanıyordu. (Zaten "Tümünü Çek"
+  // de bu girdiyi eleyip ilerleme çubuklu olanı çağırıyordu.)
   const extraPullDefs: { key: string; route: string; title: string; desc: string }[] = [
-    { key: 'stok-miktar',  route: '/api/mikro/import/stok-miktar',    title: t ? 'Stok Miktarları (Depo)' : 'Stock Quantities (Depot)', desc: t ? 'Depo bazlı anlık miktarları çek; envanter ve depo kayıtlarını güncelle.' : 'Pull per-depot quantities; update inventory and warehouse records.' },
     { key: 'siparis',      route: '/api/mikro/import/siparis',        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
     { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
     { key: 'cari-hareket', route: '/api/mikro/import/cari-hareket',   title: t ? 'Cari Hareketler (Tümü)' : 'Account Movements (All)', desc: t ? 'TÜM cari hareketleri çek (fatura + masraf + dekont + tahsilat + virman). Cari Ekstre bunu okur; fatura-olmayan hareketleri de gösterir.' : 'Pull ALL account movements (invoice + expense + note + collection + transfer). Feeds the Account Statement.' },

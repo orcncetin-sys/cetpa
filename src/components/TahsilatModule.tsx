@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   DollarSign, AlertTriangle, Clock, CheckCircle, Plus, Search, Download,
@@ -12,6 +12,8 @@ import {
   query, serverTimestamp
 } from '../lib/dbClient';
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
+import { useMikroTahsilat } from '../hooks/useMikroTahsilat';
+import { useCariAdMap } from '../hooks/useMikroFaturalar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -293,9 +295,10 @@ function SortHeader({
 export default function TahsilatModule({ currentLanguage, isAuthenticated }: TahsilatModuleProps) {
   const t = T[currentLanguage] as typeof T['tr'];
 
-  // Data
-  const [kayitlar, setKayitlar] = useState<TahsilatKaydi[]>([]);
+  // Data — elle girilen kayıtlar (Cetpa'nın kendi defteri)
+  const [kayitlarLocal, setKayitlar] = useState<TahsilatKaydi[]>([]);
   const [odemeler, setOdemeler] = useState<TahsilatOdeme[]>([]);
+  const [leads, setLeads] = useState<Record<string, unknown>[]>([]);
 
   // UI State
   const [search, setSearch] = useState('');
@@ -383,6 +386,53 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
       unsub2?.();
     };
   }, []);
+
+  // ── Mikro açık alacakları ────────────────────────────────────────────────────
+  //
+  // Bu ekran 2026-08-11'e kadar YALNIZ elle girilen `tahsilatKayitlari`'nı
+  // okuyordu; Mikro'daki gerçek borç/alacak hareketleri hiç düşmediği için
+  // KPI'lar ve yaşlandırma sıfır görünüyordu. Mikro kalemleri FIFO mahsuplaşma
+  // ile türetilip (useMikroTahsilat) aşağıdaki TÜM hesaplara katılır.
+  //
+  // Mikro kalemleri SALT OKUNURDUR: kaynak Mikro'dur, buradan düzenlenip
+  // silinemez (yoksa Cetpa ile Mikro sessizce ayrışır). id'leri `mikro-` ile
+  // başlar; satır aksiyonları bu öneke bakarak gizlenir.
+  const { acikAlacaklar } = useMikroTahsilat(isAuthenticated);
+  const cariAd = useCariAdMap(leads);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const unsub = onSnapshot(
+      collection(db, 'leads'),
+      (snap: { docs: Array<{ data: () => Record<string, unknown> }> }) =>
+        setLeads(snap.docs.map(d => d.data())),
+      () => setLeads([]),
+    );
+    return () => unsub();
+  }, [isAuthenticated]);
+
+  const mikroKayitlar = useMemo<TahsilatKaydi[]>(() => acikAlacaklar.map(a => ({
+    id: `mikro-${a.id}`,
+    musteriAdi: cariAd.get(a.cariKod) || a.cariKod,
+    belgeTipi: 'Fatura',
+    belgeNo: a.belgeNo || a.aciklama || '—',
+    toplamTutar: a.tutar,
+    tahsilEdilen: a.tahsilEdilen,
+    vadeTarihi: a.vade,
+    faturaTarihi: a.tarih,
+    durum: a.gecikmeGun > 0 ? 'Gecikmiş' : a.tahsilEdilen > 0 ? 'Kısmi Tahsilat' : 'Bekliyor',
+    notlar: a.aciklama,
+    faizOrani: 0,          // Mikro vade farkı oranını taşımıyor — uydurma faiz YAZILMAZ
+    currency: 'TRY',       // Mikro hareketleri TL bazında tutuluyor
+  })), [acikAlacaklar, cariAd]);
+
+  const kayitlar = useMemo(
+    () => [...kayitlarLocal, ...mikroKayitlar],
+    [kayitlarLocal, mikroKayitlar],
+  );
+
+  /** Kayıt Mikro'dan mı geldi? (salt okunur → düzenle/sil/tahsilat gizlenir) */
+  const mikroKaydiMi = (k: TahsilatKaydi) => k.id.startsWith('mikro-');
 
   // ── Toast helper ─────────────────────────────────────────────────────────────
 
@@ -877,32 +927,42 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
-                        {isAuthenticated && k.durum !== 'Tahsil Edildi' && (
-                          <button
-                            onClick={() => openPaymentForm(k)}
-                            className="p-1.5 rounded-lg hover:bg-green-100 text-green-600 transition-colors"
-                            title={t.tahsilatEkle}
-                          >
-                            <CreditCard className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {isAuthenticated && (
-                          <button
-                            onClick={() => openEditForm(k)}
-                            className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors"
-                            title={t.kayitDuzenle}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {isAuthenticated && (
-                          <button
-                            onClick={() => setDeleteTarget(k)}
-                            className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
-                            title={t.sil}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Mikro kaynaklı satırlar salt okunur — kaynağı Mikro'dur,
+                            buradan düzenlenirse Cetpa ile Mikro sessizce ayrışır. */}
+                        {mikroKaydiMi(k) ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
+                            MİKRO
+                          </span>
+                        ) : (
+                          <>
+                            {isAuthenticated && k.durum !== 'Tahsil Edildi' && (
+                              <button
+                                onClick={() => openPaymentForm(k)}
+                                className="p-1.5 rounded-lg hover:bg-green-100 text-green-600 transition-colors"
+                                title={t.tahsilatEkle}
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isAuthenticated && (
+                              <button
+                                onClick={() => openEditForm(k)}
+                                className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors"
+                                title={t.kayitDuzenle}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isAuthenticated && (
+                              <button
+                                onClick={() => setDeleteTarget(k)}
+                                className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
+                                title={t.sil}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>

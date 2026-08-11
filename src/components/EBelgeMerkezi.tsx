@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
+import { eBelgeIndir } from '../services/ebelgeIndir';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
@@ -157,58 +158,24 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
   };
 
   /** Belgenin RESMİ PDF'ini Mikro'dan al ve indir.
-   *  Uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu gerçek olanıdır. */
+   *  Uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu gerçek olanıdır.
+   *  İndirme mantığı ortak serviste (MikroFaturaDetay de aynısını kullanır). */
   const indirPdf = async (belge: EBelge) => {
-    try {
-      const r = await authFetch('/api/mikro/ebelge/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(belge.uuid ? { uuid: belge.uuid } : { faturaGuid: belge.id }),
-      });
-      const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
-      if (!r.ok || !d.success) { showToast(d.error || 'PDF alınamadı.', 'error'); return; }
-      // Mikro PDF'i base64 döner; alan adı sürüme göre değişebildiği için ara.
-      const alan = Object.values(d.data ?? {}).find(v => typeof v === 'string' && v.length > 500);
-      if (typeof alan !== 'string') { showToast('PDF yanıtı beklenen biçimde değil.', 'error'); return; }
-      const bin = atob(alan.replace(/^data:.*?;base64,/, ''));
-      const buf = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url; a.download = `${belge.belgeNo || belge.id}.pdf`; a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      showToast('PDF indirilemedi.', 'error');
-    }
+    const hata = await eBelgeIndir({
+      tur: 'pdf', uuid: belge.uuid, faturaGuid: belge.id,
+      dosyaAdi: belge.belgeNo || belge.id,
+    }, true);
+    if (hata) showToast(hata, 'error');
   };
 
   /** Belgenin XML'ini (UBL) indir — e-belgenin YASAL aslı budur; PDF yalnız
    *  görüntüsüdür. Mali müşavire gönderim ve arşiv için gereken bu. */
   const indirXml = async (belge: EBelge) => {
-    if (!belge.uuid) { showToast('Bu belgede UUID yok — XML çekilemez.', 'error'); return; }
-    try {
-      const r = await authFetch('/api/mikro/ebelge/xml', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uuid: belge.uuid, tur: belge.tur, yon: belge.yon }),
-      });
-      const d = await r.json() as { success?: boolean; error?: string; data?: Record<string, unknown> };
-      if (!r.ok || !d.success) { showToast(d.error || 'XML alınamadı.', 'error'); return; }
-      // Alan adı sürüme göre değişebildiği için en uzun string alanı ara.
-      const alan = Object.values(d.data ?? {}).find(v => typeof v === 'string' && v.length > 200);
-      if (typeof alan !== 'string') { showToast('XML yanıtı beklenen biçimde değil.', 'error'); return; }
-      // Base64 olabilir de olmayabilir — '<' ile başlıyorsa düz XML'dir.
-      const metin = alan.trimStart().startsWith('<') ? alan : (() => {
-        try { return decodeURIComponent(escape(atob(alan.replace(/^data:.*?;base64,/, '')))); }
-        catch { return alan; }
-      })();
-      const url = URL.createObjectURL(new Blob([metin], { type: 'application/xml;charset=utf-8' }));
-      const a = document.createElement('a');
-      a.href = url; a.download = `${belge.belgeNo || belge.uuid}.xml`; a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      showToast('XML indirilemedi.', 'error');
-    }
+    const hata = await eBelgeIndir({
+      tur: 'xml', uuid: belge.uuid, belgeTuru: belge.tur, yon: belge.yon,
+      dosyaAdi: belge.belgeNo || belge.uuid || belge.id,
+    }, true);
+    if (hata) showToast(hata, 'error');
   };
 
   // GIB connection — live from Firestore settings/gib

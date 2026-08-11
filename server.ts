@@ -5531,6 +5531,11 @@ async function startServer() {
     ekKosul?:     string;
     /** SELECT listesi (varsayılan '*'). JOIN'li sorgularda "t.*, x AS y" gibi. */
     secim?:       string;
+    /** İstenen kolon adları — çalışma anında INFORMATION_SCHEMA'ya karşı süzülür;
+     *  şemada OLMAYAN kolonlar düşürülür, import patlamaz. `secim` yerine kullanılır.
+     *  Neden: elle yazılan tek bir yanlış kolon adı ("Invalid column name") TÜM
+     *  import'u öldürüyordu — cha_vergi ve cha_ettn ile iki kez yaşandı. */
+    secimKolonlari?: string[];
     /** FROM'a eklenecek JOIN ifadesi. Kod içinde SABİT — istemciden gelmez. */
     fromEk?:      string;
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
@@ -5553,13 +5558,31 @@ async function startServer() {
     if (opts.tarihKolonu) kosullar.push(`${opts.tarihKolonu} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
     const where = kosullar.length ? ` WHERE ${kosullar.join(' AND ')}` : '';
 
+    // SELECT listesi. secimKolonlari verilmişse GERÇEK şemaya karşı süzülür:
+    // Mikro sürümleri arasında kolon adları değişiyor ve elle yazılmış tek bir
+    // yanlış ad ("Invalid column name 'cha_ettn'") tüm import'u öldürüyordu.
+    // Artık olmayan kolon sessizce düşer — o alan eksik gelir, veri akmaya devam eder.
+    let secim = opts.secim ?? '*';
+    let dusenKolonlar: string[] = [];
+    if (opts.secimKolonlari?.length) {
+      const anaTablo = opts.tablo.trim().split(/\s+/)[0];
+      const gercek = await mikroKolonlar(anaTablo);
+      if (gercek.length) {
+        const gercekSet = new Set(gercek.map(c => c.toLowerCase()));
+        const kalan = opts.secimKolonlari.filter(c => gercekSet.has(c.toLowerCase()));
+        dusenKolonlar   = opts.secimKolonlari.filter(c => !gercekSet.has(c.toLowerCase()));
+        secim = kalan.length ? kalan.join(', ') : '*';
+      }
+      // Şema okunamadıysa '*' ile devam — daraltılmış liste uydurmaktan güvenli.
+    }
+
     const allRows: Record<string, unknown>[] = [];
     let sayfa = 0, total = 0, tavanaCarpti = false;
     try {
       while (sayfa < MAKS_SAYFA) {
         const offset = sayfa * SAYFA;
         const { rows, hata } = await mikroSql(
-          `SELECT ${opts.secim ?? '*'} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
+          `SELECT ${secim} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
           `ORDER BY ${opts.siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
         );
         if (hata) {
@@ -5593,7 +5616,9 @@ async function startServer() {
       if (opts.postProcess && allRows.length > 0) postNote = await opts.postProcess(allRows, companyId);
 
       const duration = Date.now() - t0;
-      const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}${postNote ? ` — ${postNote}` : ''}`;
+      const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}` +
+        `${dusenKolonlar.length ? ` — şemada olmayan kolonlar atlandı: ${dusenKolonlar.join(', ')}` : ''}` +
+        `${postNote ? ` — ${postNote}` : ''}`;
       // Senkronizasyon Geçmişi bu koleksiyonu okur — import'lar 2026-07-31'e
       // kadar buraya HİÇ yazmıyordu, panel bu yüzden boş görünüyordu.
       await writeSyncLog(`SQL:${opts.tablo}`, opts.collection, ozet, true, null, null, duration, actor);
@@ -5797,9 +5822,17 @@ async function startServer() {
   makeMikroSqlImport({
     route: '/api/mikro/import/cari-hareket',
     tablo: 'CARI_HESAP_HAREKETLERI',
-    secim: 'cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, ' +
-           'cha_evrak_tip, cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, ' +
-           'cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet, cha_ettn',
+    // Kolon adları çalışma anında şemaya karşı süzülür (secimKolonlari) — Mikro
+    // kurulumunda olmayan bir ad artık import'u öldürmez, yalnız o alan gelmez.
+    // cha_ettn (e-belge GİB kimliği) bu kurulumda YOK; listede kalması zararsız,
+    // başka kurulumda varsa otomatik gelir.
+    secimKolonlari: ['cha_Guid', 'cha_evrakno_seri', 'cha_evrakno_sira', 'cha_tarihi',
+                     'cha_tip', 'cha_cinsi', 'cha_evrak_tip', 'cha_kod', 'cha_aciklama',
+                     'cha_meblag', 'cha_aratoplam', 'cha_ebelge_turu', 'cha_belge_no',
+                     'cha_kasa_hizkod', 'cha_kasa_hizmet', 'cha_ettn', 'cha_uuid',
+                     // Vade: Tahsilat & Vade Takibi ekranı gecikme hesabı için kullanır.
+                     // Yoksa istemci fatura tarihine düşer (uydurma vade YAZILMAZ).
+                     'cha_vade_tarihi'],
     siralama: 'cha_tarihi DESC, cha_Guid',
     ekKosul: 'cha_iptal = 0',
     tarihKolonu: 'cha_tarihi',
@@ -5824,6 +5857,66 @@ async function startServer() {
       const qtyKey = findKey(sample, /miktar/i);
       return `alanlar: sku=${skuKey ?? '?'}, miktar=${qtyKey ?? '?'}`;
     },
+  });
+
+  /** POST /api/mikro/fatura/kalemler — bir faturanın SATIRLARI (kalemleri).
+   *  Body: { seri?: string, sira: number|string, yon: 'gelen'|'giden' }
+   *
+   *  Mikro Jump'ta fatura açılınca kalemler görülüyor; uygulamada yalnız başlık
+   *  vardı (matrah/KDV/toplam). Satırlar STOK_HAREKETLERI'nde; birleştirme
+   *  anahtarı fatura import'unda canlıda DOĞRULANMIŞTIR:
+   *    sth_evraktip = 4 (satış satırı) / 3 (alış satırı) — yön eşleşmesi ŞART,
+   *    çünkü seri boş olduğunda satış ve alış aynı evrak numarasını kullanabiliyor.
+   *
+   *  Kolon adları çalışma anında şemadan süzülür (mikroKolonlar) — elle yazılan
+   *  yanlış bir ad tüm sorguyu öldürmesin (cha_vergi/cha_ettn arıza sınıfı).
+   */
+  app.post('/api/mikro/fatura/kalemler', requireAuth, mikroLimiter, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+
+    const sira = String(req.body?.sira ?? '').trim();
+    if (!/^\d{1,12}$/.test(sira)) return res.status(400).json({ success: false, error: 'Geçerli bir evrak sıra no gerekli.' });
+    // Seri harf/rakam olabilir; SQL'e girdiği için katı süz (enjeksiyon yüzeyi yok).
+    const seri = String(req.body?.seri ?? '').trim();
+    if (seri && !/^[A-Za-z0-9]{0,20}$/.test(seri)) return res.status(400).json({ success: false, error: 'Geçersiz evrak seri.' });
+    const evrakTip = req.body?.yon === 'gelen' ? 3 : 4;
+
+    // İstenen kolonlar — şemada olmayanlar düşürülür (ad TAHMİN EDİLMEZ).
+    const istenen = ['sth_stok_kod', 'sth_miktar', 'sth_birim_pntr', 'sth_tutar',
+                     'sth_vergi', 'sth_vergi_pntr', 'sth_iskonto1', 'sth_aciklama',
+                     'sth_evrakno_seri', 'sth_evrakno_sira', 'sth_tarih', 'sth_satir_no'];
+    const sthCols = await mikroKolonlar('STOK_HAREKETLERI');
+    const sthSet  = new Set(sthCols.map(c => c.toLowerCase()));
+    const secim = sthCols.length ? istenen.filter(c => sthSet.has(c.toLowerCase())) : istenen;
+    if (!secim.length) return res.status(502).json({ success: false, error: 'STOK_HAREKETLERI şeması okunamadı.' });
+
+    // Satır sırası: sth_satir_no varsa gerçek kalem sırası; yoksa sth_Guid ile
+    // en azından DETERMİNİSTİK sırala (sayfa yenilendikçe sıra değişmesin).
+    const siralama = sthSet.has('sth_satir_no') ? 'sth.sth_satir_no'
+                   : sthSet.has('sth_guid')     ? 'sth.sth_Guid' : 'sth.sth_stok_kod';
+
+    // Ürün adı ayrı tabloda (STOKLAR). Kolon yoksa JOIN'siz devam et — kalemler
+    // ürün adı olmadan da gösterilir, sorgunun tamamı ölmesin.
+    const stoCols  = await mikroKolonlar('STOKLAR');
+    const stoSet   = new Set(stoCols.map(c => c.toLowerCase()));
+    const adVar    = stoSet.has('sto_isim') && stoSet.has('sto_kod');
+
+    try {
+      const { rows, hata } = await mikroSql(
+        `SELECT ${secim.map(c => `sth.${c}`).join(', ')}` +
+        (adVar ? ', sto.sto_isim AS urunAdi' : '') + ' ' +
+        'FROM STOK_HAREKETLERI sth ' +
+        (adVar ? 'LEFT JOIN STOKLAR sto ON sto.sto_kod = sth.sth_stok_kod ' : '') +
+        `WHERE sth.sth_evraktip = ${evrakTip} AND sth.sth_evrakno_sira = ${sira} ` +
+        `AND ISNULL(sth.sth_evrakno_seri, '') = '${seri}' ` +
+        `ORDER BY ${siralama}`,
+      );
+      if (hata) return res.status(502).json({ success: false, error: hata });
+      res.json({ success: true, kalemler: rows, total: rows.length });
+    } catch (err) {
+      console.error('[fatura/kalemler]', err);
+      res.status(500).json({ success: false, error: 'Fatura kalemleri alınamadı.' });
+    }
   });
 
   /** GET /api/mikro/sema-kesif — Mikro şemasını keşfetmek için SABİT sorgular.
@@ -7737,6 +7830,28 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     }
   });
 
+  /** Mikro e-belge yanıtından belge gövdesini (base64 PDF / UBL XML) çıkar.
+   *  Alan adı Mikro sürümüne göre değiştiği için en uzun string alan aranır. */
+  const ebelgeGovdesi = (data: unknown, minUzunluk: number): string | null => {
+    if (typeof data === 'string') return data.length > minUzunluk ? data : null;
+    if (data && typeof data === 'object') {
+      for (const v of Object.values(data)) {
+        if (typeof v === 'string' && v.length > minUzunluk) return v;
+      }
+    }
+    return null;
+  };
+
+  /** Mikro "başarılı ama BOŞ" dönebiliyor: IsError=false, Data={} — istek kabul
+   *  edilmiş ama belge gelmemiştir. Bunu success:true olarak geçirirsek istemci
+   *  "Yanıt beklenen biçimde değil" gibi anlamsız bir hata gösteriyor. Gerçek
+   *  sebebi burada, tek yerde söylüyoruz (iki uç da aynı metni kullanır). */
+  const EBELGE_BOS_HATA =
+    'Mikro isteği kabul etti ama belge içeriği dönmedi. En olası neden: Mikro SRV ' +
+    'kullanıcısında GİB e-fatura yetkisi yok (aynı kök neden e-belge uçlarındaki ' +
+    '400 hatalarını da açıklıyor). Mikro tarafında SRV kullanıcısına e-belge ' +
+    'yetkisi verildikten sonra tekrar deneyin.';
+
   /** POST /api/mikro/ebelge/pdf — belgenin RESMİ PDF'i (base64)
    *  Body: { uuid?: string, faturaGuid?: string }
    *  uuid → GelenFaturaPdfV2 (gelen), faturaGuid → FaturaPdfV2 (giden).
@@ -7755,7 +7870,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         : await mikroPost('FaturaPdfV2', { Fatura_Guid: guid }, true);
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
-      res.json({ success: true, data: r0.Data ?? {} });
+      if (!ebelgeGovdesi(r0.Data, 500)) return res.status(502).json({ success: false, error: EBELGE_BOS_HATA });
+      res.json({ success: true, data: r0.Data });
     } catch (err) {
       console.error('[ebelge/pdf]', err);
       res.status(500).json({ success: false, error: 'PDF alınamadı.' });
@@ -7784,7 +7900,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       }, true);
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
-      res.json({ success: true, data: r0.Data ?? {} });
+      if (!ebelgeGovdesi(r0.Data, 200)) return res.status(502).json({ success: false, error: EBELGE_BOS_HATA });
+      res.json({ success: true, data: r0.Data });
     } catch (err) {
       console.error('[ebelge/xml]', err);
       res.status(500).json({ success: false, error: 'XML alınamadı.' });

@@ -496,6 +496,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Aslında cha_cinsi=6 doğru; 2026 alışı 12,8M (portal 13,9M ✓). Varsayılan
   // cari yıl; 'hepsi' ile tüm zamanlar.
   const [faturaYil, setFaturaYil] = useState<string>(String(new Date().getFullYear()));
+  // Satışlar sekmesinin KENDİ yıl kapsamı — Faturalar sekmesinden bağımsız.
+  // Varsayılan cari yıl: tüm yılları toplamak all-time balon ciro gösterir.
+  const [satisYil, setSatisYil] = useState<string>(String(new Date().getFullYear()));
   /** Fatura detay penceresi (XML/PDF indirme) — 2026-08-01 kullanıcı isteği. */
   const [faturaDetay, setFaturaDetay] = useState<MikroFaturaDetayVerisi | null>(null);
   const [mikroSuppliers, setMikroSuppliers] = useState<Supplier[]>([]);
@@ -1764,7 +1767,28 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       : a.tarih.localeCompare(b.tarih)
     ));
   // Satışlar sekmesi: yalnız giden (satış) faturaları.
-  const mikroSatisSatirlari = mikroFaturaSatirlari.filter(f => f.yon === 'giden');
+  //
+  // BAĞIMSIZ ZİNCİR (2026-08-11 düzeltmesi): eskiden bu liste `mikroFaturaSatirlari`
+  // üzerinden türetiliyordu, yani FATURALAR sekmesinin filtrelerini (faturaYon,
+  // faturaYil, invoiceTypeFilter) sessizce miras alıyordu. Faturalar'da "gelen"
+  // seçiliyse `.filter(yon==='giden')` boş küme veriyor, yıl uyuşmazsa da öyle →
+  // Satışlar sekmesi "Mikro (0)" ve tüm KPI'lar ₺0,00 görünüyordu. Satışlar'ın
+  // kendi yıl seçicisi (satisYil) var; başka sekmenin durumuna bağlı DEĞİL.
+  const mikroSatisSatirlari = mikroFaturalar
+    .filter(f => f.yon === 'giden')
+    .filter(f => satisYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(satisYil)))
+    // Cetpa'dan Mikro'ya gönderilmiş faturayı iki kez sayma.
+    .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
+    .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
+    .filter(f => {
+      const q = satisSearch.toLowerCase();
+      return !q || f.musteri.toLowerCase().includes(q) || String(f.tutar).includes(q) || f.faturaNo.toLowerCase().includes(q);
+    })
+    .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
+      satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
+      : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
+      : a.tarih.localeCompare(b.tarih)
+    ));
   const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
   const mikroSatisKdvToplam = mikroSatisSatirlari.reduce((t, f) => t + (f.kdv || 0), 0);
   // Mikro satış faturaları tanım gereği FATURALI. Satışlar KPI'larına additive
@@ -3849,6 +3873,17 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20"
                 />
               </div>
+              {/* Yıl kapsamı — GÖRÜNÜR olmalı. Eskiden bu sekme Faturalar sekmesinin
+                  yıl/yön filtresini sessizce miras alıyordu ve kapsam dışı kalınca
+                  her şey ₺0,00 görünüyordu. */}
+              <select value={satisYil} onChange={e => setSatisYil(e.target.value)}
+                className="px-2.5 py-1.5 bg-gray-50 rounded-xl text-xs font-medium border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20">
+                {(() => {
+                  const buYil = new Date().getFullYear();
+                  return [...Array(6)].map((_, i) => String(buYil - i));
+                })().map(y => <option key={y} value={y}>{y}</option>)}
+                <option value="hepsi">{currentLanguage === 'tr' ? 'Tüm yıllar' : 'All years'}</option>
+              </select>
               {/* Kaynak seçici — varsayılan 'cetpa', yani ekran eskisi gibi davranır.
                   Mikro faturalarını görmek opt-in (2026-07-31 talebi). */}
               <div className="flex gap-1 p-0.5 bg-gray-100 rounded-lg">

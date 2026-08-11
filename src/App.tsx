@@ -2,6 +2,7 @@ import DashboardAnalysis from './components/DashboardAnalysis';
 import KpiCurrencyToggle from './components/KpiCurrencyToggle';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
+import MuhasebeGroupNav from './components/MuhasebeGroupNav';
 import AIInlineNudge from './components/AIInlineNudge';
 const InventoryViewComponent = React.lazy(() => import('./components/InventoryView'));
 const PriceIntelPanel        = React.lazy(() => import('./components/PriceIntelPanel'));
@@ -5794,23 +5795,7 @@ function AppContent() {
               {!canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
                 <>
                   {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  {/* ── Muhasebe Group Nav ── */}
-                  <div className="overflow-x-auto scrollbar-none">
-                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
-                      <button onClick={() => setActiveTab('muhasebe')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
-                      </button>
-                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
-                        <FileText className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
-                      </button>
-                      <button onClick={() => setActiveTab('vergi')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <Receipt className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
-                      </button>
-                    </div>
-                  </div>
+                  <MuhasebeGroupNav aktif="ebelge" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
                     subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
@@ -6123,23 +6108,7 @@ function AppContent() {
               {!canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
                 <>
                   {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  {/* ── Muhasebe Group Nav ── */}
-                  <div className="overflow-x-auto scrollbar-none">
-                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
-                      <button onClick={() => setActiveTab('muhasebe')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
-                      </button>
-                      <button onClick={() => setActiveTab('ebelge')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <FileText className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
-                      </button>
-                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
-                        <Receipt className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
-                      </button>
-                    </div>
-                  </div>
+                  <MuhasebeGroupNav aktif="vergi" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
                   <ModuleHeader
                     title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
                     subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}

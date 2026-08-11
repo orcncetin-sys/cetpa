@@ -12,8 +12,9 @@
  * gönderilmemiş (ya da kağıt fatura) olabilir. O durumda düğmeler yerine
  * sebebi yazılır — sessizce boş buton göstermek yanıltıcı olur.
  */
-import { useState } from 'react';
-import { X, Download, FileCode, Loader2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Download, FileCode, Loader2, AlertTriangle, Package } from 'lucide-react';
+import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 
 export interface MikroFaturaDetayVerisi {
@@ -44,66 +45,62 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
   const [indiriliyor, setIndiriliyor] = useState<'xml' | 'pdf' | null>(null);
   const [hata, setHata] = useState<string | null>(null);
 
-  /** Yanıttaki base64/metin alanını bul — alan adı Mikro sürümüne göre değişir. */
-  const uzunAlan = (d: unknown, minUzunluk: number) => {
-    if (typeof d === 'string') return d.length > minUzunluk ? d : undefined;
-    if (d && typeof d === 'object') {
-      const vals = Object.values(d);
-      for (const v of vals) {
-        if (typeof v === 'string' && v.length > minUzunluk) return v;
+  /** Fatura KALEMLERİ (satırları) — Mikro Jump'ta fatura açılınca görülenin karşılığı.
+   *  Başlık CARI_HESAP_HAREKETLERI'nde, satırlar STOK_HAREKETLERI'nde durur; sunucu
+   *  evrak seri+sıra ve yön (satış=4 / alış=3) ile eşleştirir. */
+  // faturaNo 'SERİ-SIRA' biçiminde birleştirilmişti; sıra son parçadır.
+  const { seri, sira } = useMemo(() => {
+    const p = (fatura.faturaNo || '').split('-');
+    return { sira: p.at(-1) ?? '', seri: p.length > 1 ? p.slice(0, -1).join('-') : '' };
+  }, [fatura.faturaNo]);
+  const evrakOkunabilir = /^\d+$/.test(sira);
+
+  const [kalemler, setKalemler] = useState<Record<string, unknown>[] | null>(null);
+  const [cekimDurum, setCekimDurum] = useState<'yukleniyor' | 'hazir' | 'hata'>('yukleniyor');
+  const [cekimHata, setCekimHata] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!evrakOkunabilir) return;   // durum türetilir, effect'te setState yok
+    let iptal = false;
+    (async () => {
+      try {
+        const r = await authFetch('/api/mikro/fatura/kalemler', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seri, sira, yon: fatura.yon }),
+        });
+        const d = await r.json() as { success?: boolean; error?: string; kalemler?: Record<string, unknown>[] };
+        if (iptal) return;
+        if (!r.ok || !d.success) { setCekimDurum('hata'); setCekimHata(d.error || (tr ? 'Kalemler alınamadı.' : 'Failed to load lines.')); return; }
+        setKalemler(d.kalemler ?? []);
+        setCekimDurum('hazir');
+      } catch {
+        if (!iptal) { setCekimDurum('hata'); setCekimHata(tr ? 'Sunucuya ulaşılamadı.' : 'Server unreachable.'); }
       }
-    }
-    return undefined;
-  };
+    })();
+    return () => { iptal = true; };
+  }, [seri, sira, evrakOkunabilir, fatura.yon, tr]);
+
+  // Okunamayan evrak no bir RENDER durumudur, effect yan etkisi değil.
+  const kalemDurum = evrakOkunabilir ? cekimDurum : 'hata';
+  const kalemHata = evrakOkunabilir
+    ? cekimHata
+    : (tr ? 'Evrak numarası okunamadı — kalemler getirilemiyor.' : 'Unreadable document number.');
 
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;
     setIndiriliyor(tur);
     setHata(null);
-    try {
-      const url = tur === 'xml' ? '/api/mikro/ebelge/xml' : '/api/mikro/ebelge/pdf';
-      const govde = tur === 'xml'
-        ? { uuid: fatura.uuid, tur: 'e-fatura', yon: fatura.yon }
-        : (fatura.uuid ? { uuid: fatura.uuid } : { faturaGuid: fatura.id });
-      // authFetch ŞART: /api/mikro/ebelge/* requireAuth arkasında. Düz fetch +
-      // credentials:'same-origin' yetmiyor — oturum çerezle değil Firebase ID
-      // token'ıyla taşınıyor, o yüzden "Missing Authorization header" dönüyordu.
-      const r = await authFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(govde),
-      });
-      const d = await r.json() as { success?: boolean; error?: string; data?: unknown };
-      if (!r.ok || !d.success) { setHata(d.error || (tr ? 'Belge alınamadı.' : 'Failed to fetch.')); return; }
-
-      const alan = uzunAlan(d.data, tur === 'xml' ? 200 : 500);
-      if (!alan) { setHata(tr ? 'Yanıt beklenen biçimde değil.' : 'Unexpected response shape.'); return; }
-
-      let blob: Blob;
-      if (tur === 'xml') {
-        // Base64 de olabilir düz XML de — '<' ile başlıyorsa düzdür.
-        const metin = alan.trimStart().startsWith('<') ? alan : (() => {
-          try { return decodeURIComponent(escape(atob(alan.replace(/^data:.*?;base64,/, '')))); }
-          catch { return alan; }
-        })();
-        blob = new Blob([metin], { type: 'application/xml;charset=utf-8' });
-      } else {
-        const bin = atob(alan.replace(/^data:.*?;base64,/, ''));
-        const buf = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        blob = new Blob([buf], { type: 'application/pdf' });
-      }
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = href;
-      a.download = `${fatura.faturaNo || fatura.id}.${tur}`;
-      a.click();
-      URL.revokeObjectURL(href);
-    } catch {
-      setHata(tr ? 'İndirme başarısız — sunucuya ulaşılamadı.' : 'Download failed.');
-    } finally {
-      setIndiriliyor(null);
-    }
+    // İndirme mantığı ortak serviste (EBelgeMerkezi de aynısını kullanır).
+    setHata(await eBelgeIndir({
+      tur,
+      uuid: fatura.uuid,
+      faturaGuid: fatura.id,
+      belgeTuru: 'e-fatura',
+      yon: fatura.yon,
+      dosyaAdi: fatura.faturaNo || fatura.id,
+    }, tr));
+    setIndiriliyor(null);
   };
 
   const satir = (etiket: string, deger: string) => (
@@ -115,7 +112,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+      {/* Kalem tablosu eklendiği için genişletildi; uzun faturada gövde kaydırılır. */}
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between p-5 border-b border-gray-100">
           <div>
             <h3 className="font-bold text-[#1D1D1F]">
@@ -129,13 +127,81 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
         </div>
 
-        <div className="p-5">
+        <div className="p-5 overflow-y-auto flex-1 min-h-0">
           {satir(tr ? 'Müşteri / Cari' : 'Customer', fatura.musteri)}
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
           {satir(tr ? 'Tarih' : 'Date', fatura.tarih || '—')}
           {satir(tr ? 'Matrah' : 'Base', typeof fatura.matrah === 'number' ? tl(fatura.matrah) : '—')}
           {satir(tr ? 'KDV' : 'VAT', typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oran !== null ? ` (%${fatura.oran})` : ''}` : '—')}
           {satir(tr ? 'Toplam' : 'Total', typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
+
+          {/* ── Fatura kalemleri ── */}
+          <div className="mt-4">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Package size={13} className="text-gray-400" />
+              <span className="text-xs font-bold text-gray-600">
+                {tr ? 'Kalemler' : 'Line items'}
+                {kalemler?.length ? <span className="text-gray-400 font-normal"> · {kalemler.length}</span> : null}
+              </span>
+            </div>
+
+            {kalemDurum === 'yukleniyor' && (
+              <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+                <Loader2 size={13} className="animate-spin" />{tr ? 'Kalemler yükleniyor…' : 'Loading lines…'}
+              </div>
+            )}
+
+            {kalemDurum === 'hata' && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
+                <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{kalemHata}
+              </div>
+            )}
+
+            {kalemDurum === 'hazir' && kalemler?.length === 0 && (
+              <p className="text-xs text-gray-400 py-2">
+                {tr
+                  ? 'Bu faturanın stok satırı yok — hizmet/masraf faturası olabilir.'
+                  : 'No stock lines — may be a service/expense invoice.'}
+              </p>
+            )}
+
+            {kalemDurum === 'hazir' && !!kalemler?.length && (
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-400 border-b border-gray-100">
+                      <th className="text-left font-semibold py-1.5 px-1">{tr ? 'Ürün' : 'Product'}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Miktar' : 'Qty'}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Tutar' : 'Amount'}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'KDV' : 'VAT'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kalemler.map((k, i) => {
+                      const sku    = String(k.sth_stok_kod ?? '');
+                      const ad     = String(k.urunAdi ?? '') || sku || '—';
+                      const miktar = Number(k.sth_miktar ?? 0) || 0;
+                      const tutar  = Number(k.sth_tutar ?? 0) || 0;
+                      const kdv    = Number(k.sth_vergi ?? 0) || 0;
+                      return (
+                        <tr key={`${sku}-${i}`} className="border-b border-gray-50 last:border-0">
+                          <td className="py-1.5 px-1 text-[#1D1D1F]">
+                            <span className="font-medium">{ad}</span>
+                            {sku && ad !== sku && <span className="block text-[10px] text-gray-400 font-mono">{sku}</span>}
+                          </td>
+                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-600">
+                            {miktar.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-[#1D1D1F]">{tl(tutar)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{tl(kdv)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {hata && (
             <div className="mt-3 flex items-start gap-2 text-xs text-red-700 bg-red-50 rounded-xl px-3 py-2">
@@ -152,7 +218,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 p-5 border-t border-gray-100">
+        <div className="flex items-center justify-end gap-2 p-5 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'Kapat' : 'Close'}</button>
           <button
             onClick={() => void indir('pdf')}
