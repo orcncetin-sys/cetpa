@@ -96,7 +96,13 @@ export default function OnboardingChecklist({
   if (loading || dismissed) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[250] flex flex-col items-end gap-2">
+    // KÖŞE ŞERİTLERİ — sağ alt köşeyi AIChat ile PAYLAŞIYORUZ, çakışmasın:
+    //   right-6  (en sağ) → AIChat yüzen düğmesi (bottom-6) ve paneli (bottom-24)
+    //   right-24 (solu)   → bu kurulum rehberi
+    // Eskiden ikisi de `bottom-6 right-6` idi; bu bileşenin z-[250]'si AIChat'in
+    // z-50'sini örtüyor ve yapay zeka düğmesi TIKLANAMIYORDU (2026-08-11).
+    // Dikey kaydırmak çözmez: AI paneli açılınca zaten bottom-24'e geliyor.
+    <div className="fixed bottom-6 right-24 z-[250] flex flex-col items-end gap-2">
       <AnimatePresence>
         {isExpanded && (
           <motion.div
