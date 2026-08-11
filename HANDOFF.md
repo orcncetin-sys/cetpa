@@ -130,10 +130,14 @@
   Fiyat kablolaması yapıldı ama Mikro fiyat vermiyorsa boşa çalışır.
 - Tahsilat'ta ÇİFT SAYIM riski: elle girilen `tahsilatKayitlari` ile Mikro kalemi aynı
   faturaysa ikisi de sayılır (ayırt edecek anahtar yok). Kullanıcıya soruldu, yanıt yok.
-- **Deploy kesintisi:** `deploy.ps1` build'i servis DURDUKTAN sonra yapıyor → her deploy
-  ~1-2 dk 502. Kullanıcı bugün buna birkaç kez denk geldi ("Failed to fetch", takılı
-  "Aktarılıyor...", 502). Kalıcı çözüm blue-green ya da build-önce-restart-sonra; deploy
-  zinciri riskli, ayrı iş olarak ele alınmalı.
+- ~~**Deploy kesintisi**~~ ✅ ÇÖZÜLDÜ (`eb5a668`): `deploy.ps1` artık iki yollu.
+  package-lock değişmediyse (olağan durum) build `dist.new`'e yapılır, eski süreç bu
+  sırada servis vermeye devam eder, sonra durdur → dizini yeniden adlandır → başlat.
+  Kesinti = yalnız restart. Lock değiştiyse eski yol (npm ci esbuild kilidi yüzünden
+  servisin durmasını zorunlu kılıyor). Damga `.deploy-state\lock.hash`'e YALNIZ sağlık
+  kontrolü geçince yazılır. Hızlı yolda build başarısız olursa servise HİÇ dokunulmaz.
+  **Not:** `deploy.ps1` değişikliği bir SONRAKİ deploy'da etkir; `eb5a668` hâlâ eskisini
+  kullandı, yeni yol ilk kez ondan sonraki koşuda çalıştı.
 - Birkaç modülün toast'ı `bottom-6 right-6` (z-100..300) → göründüğü sürece AI düğmesini
   örtüyor. Geçici, dokunulmadı.
 
