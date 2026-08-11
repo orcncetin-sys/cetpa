@@ -6312,6 +6312,27 @@ async function startServer() {
         // bulgusu). Union: bilinen 1-5 + warehouses'taki ek depolar. Olmayan depo
         // sorgusu 0 döner (zararsız).
         const depoNos = Array.from(new Set([...fetchedDepoNos, '1', '2', '3', '4', '5']));
+        
+        // code-review #7: per-depo stok miktarını tek bir SQL ile toptan çek (polling engelle)
+        // Her SKU için ayrı ayrı GenelAmacliMaliyetListesiV2 çağırmak O(SKU * Depo) maliyetliydi.
+        const sqlPerDepo = 'SELECT sth_stok_kod, depo, SUM(net) AS bakiye FROM (' +
+             'SELECT sth_stok_kod, sth_giris_depo_no AS depo, sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 0 AND ISNULL(sth_iptal, 0) = 0 ' +
+             'UNION ALL ' +
+             'SELECT sth_stok_kod, sth_cikis_depo_no AS depo, -sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 1 AND ISNULL(sth_iptal, 0) = 0' +
+             ') t GROUP BY sth_stok_kod, depo HAVING SUM(net) <> 0';
+        const { rows: perDepoRows, hata: sqlHata } = await mikroSql(sqlPerDepo);
+        const depoMap = new Map<string, Record<string, number>>();
+        if (!sqlHata && perDepoRows) {
+            for (const row of perDepoRows) {
+                const sku = String(row.sth_stok_kod ?? '').trim();
+                const depoNo = String(row.depo ?? '');
+                const bakiye = Number(row.bakiye ?? 0);
+                if (!sku || !depoNo || bakiye === 0) continue;
+                if (!depoMap.has(sku)) depoMap.set(sku, {});
+                depoMap.get(sku)![depoNo] = bakiye;
+            }
+        }
+        
         await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
 
         const sonTarih = mikroBugun();
@@ -6339,43 +6360,16 @@ async function startServer() {
               const totalCost = Number(d.MaliyetBedeli ?? 0);
               const cost = qty > 0 ? totalCost / qty : null;
 
-              // 2) Per-depo: stok GERÇEKTE nerede? Kart sto_yer_kod hepsini HAVALIMANI
-              //    gösteriyor (varsayılan alan). Yalnız stoğu olan (qty>0) ürünlerde
-              //    depo depo sorgula. Ürün TEK birincil depoya TOPLANMAZ — stoğu olan
-              //    HER depoda kendi miktarıyla tutulur (kullanıcı isteği); dağılım
-              //    depoBreakdown'a yazılır, ekran her depoyu ayrı gösterir.
+              // 2) Per-depo: stok GERÇEKTE nerede? code-review #7 ile tek bir SQL'de
+              // STOK_HAREKETLERI'nden toplu çekildi (ağır polling yerine O(1) maliyet).
               let depoQtys: Record<string, number> | null = null;
-              if (qty > 0 && depoNos.length > 1) {
-                // Per-depo sorgular PARALEL (seri değil) — iş süresini depo sayısı
-                // kadar uzatmaz (code-review efficiency bulgusu).
-                const perDepo = await Promise.all(depoNos.map(async (depo) => {
-                  try {
-                    const { ok: dok, data: dd } = await mikroPost('GenelAmacliMaliyetListesiV2', {
-                      StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: depo,
-                    });
-                    const dr0 = ((dd as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-                    const dData = (dr0?.Data ?? {}) as Record<string, unknown>;
-                    return { depo, dok, dqty: Number(dData.EldekiMiktar ?? NaN) };
-                  } catch { return { depo, dok: false, dqty: NaN }; }
-                }));
-                depoQtys = {};
-                // GUARD (code-review correctness bulgusu): GenelAmacliMaliyetListesiV2
-                // tek-depo Depolar'ı YOK SAYIP her çağrıda toplam miktarı dönerse, her
-                // depo aggregate'e eşit çıkar. Bir ürün aynı anda İKİ depoda tam stokta
-                // olamaz → 2+ depo aggregate'e eşitse metod Depolar'ı filtrelemiyordur.
-                // O zaman dağılım güvenilmez → depoBreakdown YAZMA (ürün hiçbir depoda
-                // görünmez; yanlış/şişik dağılım göstermekten iyidir). Kullanıcı canlıda
-                // Depolar'ın farklı yanıt döndüğünü doğruladı → pratikte tetiklenmez.
-                let aggEsit = 0;
-                for (const p of perDepo) {
-                  if (!p.dok || !Number.isFinite(p.dqty)) continue;
-                  if (p.dqty !== 0) depoQtys[p.depo] = p.dqty;
-                  if (Math.abs(p.dqty - qty) < 1e-6) aggEsit++;
-                }
-                if (aggEsit >= 2 || Object.keys(depoQtys).length === 0) {
-                  depoQtys = null;              // Depolar yok sayılıyor / okunamadı — güvenilmez
-                }
+              if (qty > 0) {
+                 const fromMap = depoMap.get(it.sku);
+                 if (fromMap && Object.keys(fromMap).length > 0) {
+                     depoQtys = fromMap;
+                 }
               }
+              
               return { it, qty, cost, depoQtys };
             } catch { return bos; }
           }));
