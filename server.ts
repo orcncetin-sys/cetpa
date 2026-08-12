@@ -6563,28 +6563,32 @@ async function startServer() {
   makeMikroSqlImport({
     route: '/api/mikro/import/demirbas',
     tablo: 'DEMIRBASLAR',
-    siralama: 'dbs_Guid',
+    siralama: 'dem_Guid',
     collection: 'mikroDemirbaslar',
     label: 'Mikro Demirbaş Listesi',
     postProcess: async (rows, companyId) => {
       if (!adminDb || !rows.length) return null;
-      // 135 kolonluk tabloda GEVŞEK desen yanlış kolon seçer (ör. /kod/i önce
-      // 'dbs_grup_kodu'ya denk gelebilir). Sabitlenmiş, spesifikten genele sıralı.
+      // 2026-08-11: gerçek önek 'dbs_' DEĞİL 'dem_' çıktı — bu, sema-kesif'in
+      // "kod kolonu bulunamadı" güvenli hata yolunun CANLIDA doğrulanmış kanıtı
+      // (dbs_ tahmini yanlıştı ama import veri BOZMADI, açık hata verdi).
+      // Kesin bilinen: dem_Guid, dem_kod, dem_isim, dem_aciklama, dem_firmano,
+      // dem_subeno (canlı hata mesajından). alış tarihi/bedeli/ömür/grup 135
+      // kolonun görünmeyen kısmında — adları HÂLÂ bilinmiyor, tahmin edilmez;
+      // bulunamazsa alan boş kalır (mikroHam'da ham veri durur, veri kaybolmaz).
       const cols  = Object.keys(rows[0]);
-      const kod   = kolonSec(cols, [/^dbs_kodu$/i, /^dbs_kod$/i, /^dbs_demirbas_kodu$/i, /^dbs_.*kodu$/i]);
-      const ad    = kolonSec(cols, [/^dbs_adi$/i, /^dbs_isim$/i, /^dbs_.*(isim|adi)$/i]);
-      const tarih = kolonSec(cols, [/^dbs_alis_tarihi$/i, /alis_tarihi$/i, /giris_tarihi$/i]);
-      const bedel = kolonSec(cols, [/^dbs_alis_bedeli$/i, /alis_(bedeli|tutari|fiyati)$/i]);
-      const omur  = kolonSec(cols, [/^dbs_faydali_omur$/i, /faydali_omur$/i, /omur$/i]);
-      const grup  = kolonSec(cols, [/^dbs_grup_kodu$/i, /grup_kodu$/i]);
+      const kod   = kolonSec(cols, [/^dem_kod$/i, /^dem_kodu$/i, /^dem_demirbas_kodu$/i, /^dem_.*kodu$/i]);
+      const ad    = kolonSec(cols, [/^dem_isim$/i, /^dem_adi$/i, /^dem_.*(isim|adi)$/i]);
+      const aciklama = kolonSec(cols, [/^dem_aciklama$/i]);
+      const tarih = kolonSec(cols, [/^dem_alis_tarihi$/i, /^dem_.*alis_tarihi$/i, /^dem_.*giris_tarihi$/i]);
+      const bedel = kolonSec(cols, [/^dem_alis_bedeli$/i, /^dem_.*(alis_bedeli|alis_tutari|alis_fiyati)$/i]);
+      const omur  = kolonSec(cols, [/^dem_faydali_omur$/i, /^dem_.*faydali_omur$/i]);
+      const grup  = kolonSec(cols, [/^dem_grup_kodu$/i, /^dem_.*grup_kodu$/i]);
       if (!kod) return `demirbaş kodu kolonu bulunamadı — mevcut: ${cols.slice(0, 30).join(', ')}`;
-      // ÇAKIŞMA GUARD'I: 135 kolonlu tabloda gerçek şema hiç görülmedi (yalnız
-      // tablo adı + kolon SAYISI biliniyor, kolon ADLARI değil). `kod`'un en geniş
-      // yedek deseni (/^dbs_.*kodu$/i) tam kolon bulunamazsa 'dbs_grup_kodu' gibi
-      // BAŞKA bir alanı yakalayabilir — kanıtlandı (bkz. commit mesajı). `kod`
-      // DOKÜMAN ID'sidir; başka bir alanla çakışırsa aynı gruptaki TÜM demirbaşlar
-      // AYNI docId'ye düşüp birbirini SESSİZCE ezer. Çakışırsa import DURDURULUR.
-      if ([ad, tarih, bedel, omur, grup].includes(kod)) {
+      // ÇAKIŞMA GUARD'I: 135 kolonun 105'i hâlâ görülmedi (yalnız hata mesajından
+      // sızan ilk 30'u bilinen). `kod`'un yedek deseni (/^dem_.*kodu$/i) başka bir
+      // alanı yakalayabilir. `kod` DOKÜMAN ID'sidir; çakışırsa aynı gruptaki TÜM
+      // demirbaşlar AYNI docId'ye düşüp birbirini SESSİZCE ezer — import DURDURULUR.
+      if ([ad, aciklama, tarih, bedel, omur, grup].includes(kod)) {
         return `demirbaş kodu kolonu ('${kod}') başka bir alanla çakışıyor — eşleme güvenilmez, veri yazılmadı. Mevcut kolonlar: ${cols.slice(0, 30).join(', ')}`;
       }
 
