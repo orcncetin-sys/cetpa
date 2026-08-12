@@ -510,6 +510,18 @@ class StreamManager {
 
 const stream = new StreamManager();
 
+/** Bir koleksiyonun İLK SSE anlık görüntüsü tam geldi mi? (StreamManager.ready).
+ *  `onSnapshot` abone olur olmaz callback'i BOŞ diziyle bile tetikler — akış
+ *  büyük bir koleksiyonu (yüzlerce/binlerce doküman) kademeli akıtırken bu
+ *  arada okunan TOPLAM/SAYIM gibi türetilmiş değerler yanlış-ama-sessiz bir
+ *  ARA DEĞER olur (2026-08-11'de Panel'deki "Toplam Gelir" kartının her
+ *  bakışta farklı rakam göstermesiyle bulundu — SSE hâlâ akarken toplanıyordu).
+ *  KPI/toplam gösteren bileşenler bunu kullanıp veri tam gelene kadar
+ *  yükleniyor durumu göstermeli, kısmi toplamı nihai sonuç gibi sunmamalı. */
+export function isCollectionReady(coll: string): boolean {
+  return stream.isReady(coll);
+}
+
 /** Oturum kapanışında SSE bağlantısını kapatır ve önbelleği temizler. */
 export function resetStream(): void { stream.reset(); }
 

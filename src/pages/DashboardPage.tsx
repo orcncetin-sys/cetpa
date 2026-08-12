@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { YAxis, XAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { db, auth } from '../firebase';
-import { doc, collection, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp } from '../lib/dbClient';
+import { doc, collection, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, isCollectionReady } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
 import { confirmDelete } from '../lib/confirm';
@@ -129,6 +129,17 @@ export default function DashboardPage(props: Props) {
   const totalMikroRevenue = filteredMikroFaturalar.reduce((sum, f) => sum + (f.tutar || 0), 0);
   const totalNativeRevenue = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
   const combinedRevenue = totalNativeRevenue + totalMikroRevenue;
+  // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
+  // fatura olabiliyor). onSnapshot abone olur olmaz boş diziyle bile tetiklenir;
+  // ilk anlık görüntü tam gelene kadar burada okunan toplam bir ARA DEĞERdir.
+  // Bu yüzden kart "her bakışta farklı rakam" gösteriyordu — kısmi toplam
+  // sessizce nihai sonuç gibi sunuluyordu. Tam gelene kadar yükleniyor gösterilir.
+  const revenueReady = isCollectionReady('orders') && isCollectionReady('mikroFaturalar');
+  // Aynı arıza sınıfı bu satırdaki diğer 3 karta da (Sipariş/Müşteri Adayı/Envanter)
+  // uygulanıyor — hepsi ayni canlı koleksiyonlardan SSE ile besleniyor.
+  const ordersCountReady = isCollectionReady('orders');
+  const leadsCountReady = isCollectionReady('leads');
+  const inventoryCountReady = isCollectionReady('inventory');
 
   // Mikro siparişlerini Order formatına uyarlayıp grafiklerde kullanmak için birleştir
   const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
@@ -265,9 +276,9 @@ export default function DashboardPage(props: Props) {
                 return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: dashT.total_orders, value: filteredOrders.length, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta },
-                  { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
-                  { label: dashT.inventory_label, value: inventory.length, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
+                  { label: dashT.total_orders, value: filteredOrders.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta },
+                  { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, ready: leadsCountReady, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
+                  { label: dashT.inventory_label, value: inventory.length, ready: inventoryCountReady, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
                 ].map((kpi, i) => (
                   <button key={i} onClick={() => setActiveTab(kpi.tab)}
                     className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 cursor-pointer group flex flex-col min-h-[130px]">
@@ -277,7 +288,14 @@ export default function DashboardPage(props: Props) {
                       </div>
                       <DeltaBadge delta={kpi.delta} />
                     </div>
-                    <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{kpi.value}</p>
+                    {/* SSE kademeli akarken (özellikle buyuk koleksiyonlarda) bu sayim
+                        yukselen bir ARA DEGERdir — tam anlik goruntu gelene kadar
+                        yukleniyor gosterilir (bkz. revenueReady yorumu). */}
+                    {kpi.ready ? (
+                      <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{kpi.value}</p>
+                    ) : (
+                      <p className="text-2xl font-bold mt-auto text-gray-300 animate-pulse">···</p>
+                    )}
                     <p className="text-xs font-semibold text-gray-500 mt-1">{kpi.label}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5">{kpi.sub}</p>
                     <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
@@ -313,7 +331,11 @@ export default function DashboardPage(props: Props) {
                           </div>
                         </div>
                       </div>
-                      <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                      {revenueReady ? (
+                        <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                      ) : (
+                        <p className="text-2xl font-bold mt-auto text-gray-300 animate-pulse" title={currentLanguage === 'tr' ? 'Veri yükleniyor…' : 'Loading…'}>{symbol}···</p>
+                      )}
                       <p className="text-xs font-semibold text-gray-500 mt-1">{dashT.total_revenue}</p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
                         {summaryData ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days') : dashT.all_time}
