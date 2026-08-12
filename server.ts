@@ -5013,6 +5013,10 @@ async function startServer() {
 
       // ── Upsert: eşleşen güncellenir, eşleşmeyen OLUŞTURULUR ──
       const companyId = await reqCompanyId(req);
+      // KİRACI SINIRI: VKN (vergi no) eşleşmesi özellikle riskli — iki FARKLI
+      // kiracının aynı gerçek firmayla müşteri ilişkisi olması gayet olası.
+      // Filtre yoksa Kiracı A'nın senkronu Kiracı B'nin cari kaydını sessizce
+      // ele geçirirdi (stok import'unda bugün bulunan sınıfın aynısı).
       const leadSnap = await adminDb.collection('leads').get();
       const leadByKod = new Map<string, PgDocRef>();
       const leadByVkn = new Map<string, PgDocRef>();
@@ -5020,6 +5024,8 @@ async function startServer() {
       const vknNorm = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
         const data = d.data();
+        const dc = (data.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
         const kod = (data.mikroCariKod as string)?.trim();
         if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
         const vkn = vknNorm((data.taxId as string) || (data.taxNo as string));
@@ -5161,13 +5167,21 @@ async function startServer() {
     let fiyatliUrun = 0;
 
     try {
-      // Prefetch ALL inventory docs → Map<sku, ref>. Deliberately NOT filtered
-      // by companyId: legacy docs imported before companyId existed must match
-      // by SKU and get healed (updated with companyId) instead of duplicated.
+      // Prefetch ALL inventory docs → Map<sku, ref>. ETİKETSİZ (companyId boş)
+      // eski kayıtlar bilerek dahil — SKU ile eşleşip iyileştirilir (companyId
+      // yazılır), çoğaltılmaz. Ama BAŞKA kiracıya ait (companyId DOLU ve farklı)
+      // kayıt haritaya HİÇ girmez: aşağıdaki `batch.update(existingRef, item)`
+      // item.companyId'yi KOŞULSUZ yazıyor — filtre olmasa eşleşen yabancı doküman
+      // bu kiracıya SESSİZCE devredilirdi (2026-08-11'de bulundu; en sık kullanılan
+      // "Stokları İçeri Al" düğmesi). Yabancı SKU haritada yoksa YENİ doküman
+      // açılır — kiracı başına ayrı kayıt, doğru multi-tenant davranışı.
       const existingSnap = await adminDb.collection('inventory').get();
       const existingBySku = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
-        const sku = (docSnap.data().sku as string)?.trim();
+        const veri = docSnap.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
+        const sku = (veri.sku as string)?.trim();
         if (sku && !existingBySku.has(sku)) existingBySku.set(sku, docSnap.ref);
       }
 
@@ -5415,11 +5429,13 @@ async function startServer() {
     let hasMore = true;
 
     try {
-      // Prefetch ALL leads → Map<mikroCariKod, ref> + Map<VKN, ref> + Map<isim, ref>
-      // (companyId filtresiz: eski kayıtlar cari koduyla eşleşip companyId ile
-      // iyileştirilir). VKN/isim fallback'i sart: manuel olusturulmus (CRM/
-      // Muhasebe/B2B formlari) bir lead'in hic mikroCariKod'u olmaz - sadece
-      // kod'a bakan eski mantik bu importta onu ikinci kez olusturuyordu.
+      // Prefetch ALL leads → Map<mikroCariKod, ref> + Map<VKN, ref> + Map<isim, ref>.
+      // ETİKETSİZ (companyId boş) eski kayıtlar bilerek dahil — cari koduyla
+      // eşleşip iyileştirilir. VKN/isim fallback'i şart: manuel oluşturulmuş
+      // (CRM/Muhasebe/B2B formları) bir lead'in hiç mikroCariKod'u olmaz.
+      // KİRACI SINIRI: BAŞKA kiracıya ait (companyId DOLU ve farklı) kayıt
+      // haritaya girmez — VKN eşleşmesi özellikle riskli, iki farklı kiracının
+      // aynı gerçek firmayla müşteri ilişkisi olması olası (2026-08-11'de bulundu).
       const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
       const existingSnap = await adminDb.collection('leads').get();
       const existingByKod = new Map<string, PgDocRef>();
@@ -5427,6 +5443,8 @@ async function startServer() {
       const existingByName = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
         const data = docSnap.data();
+        const dc = (data.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
         const kod = (data.mikroCariKod as string)?.trim();
         if (kod && !existingByKod.has(kod)) existingByKod.set(kod, docSnap.ref);
         const vkn = normalizeVkn((data.taxId as string) || (data.taxNo as string));
@@ -6401,16 +6419,22 @@ async function startServer() {
   makeMikroSqlImport({
     route: '/api/mikro/import/barkod', tablo: 'BARKOD_TANIMLARI', siralama: 'bar_Guid',
     collection: 'barkodlar', label: 'Mikro Barkod Listesi',
-    postProcess: async (rows, _companyId) => {
+    postProcess: async (rows, companyId) => {
       if (!adminDb) return null;
       const sample = rows[0];
       const skuKey = findKey(sample, /sto_?kod|stok_?kod/i);
       const barKey = findKey(sample, /bar_?kod(?!u_)|barkod/i);
       if (!skuKey || !barKey) return `eşleme alanları bulunamadı (sku=${skuKey}, barkod=${barKey})`;
+      // KİRACI SINIRI (fiyat/BOM import'unda bugün bulunan sınıfın aynısı, burada
+      // da vardı): companyId filtresi YOKTU — Tenant A'nın barkod senkronu Tenant
+      // B'nin aynı SKU'lu ürününün barcode alanını sessizce ezebilirdi.
       const invSnap = await adminDb.collection('inventory').get();
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
-        const sku = ((d.data().sku as string) || '').trim();
+        const veri = d.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
+        const sku = ((veri.sku as string) || '').trim();
         if (sku) bySku.set(sku, d.ref);
       }
       let batch = adminDb.batch(); let ops = 0; let matched = 0;
@@ -6554,6 +6578,15 @@ async function startServer() {
       const omur  = kolonSec(cols, [/^dbs_faydali_omur$/i, /faydali_omur$/i, /omur$/i]);
       const grup  = kolonSec(cols, [/^dbs_grup_kodu$/i, /grup_kodu$/i]);
       if (!kod) return `demirbaş kodu kolonu bulunamadı — mevcut: ${cols.slice(0, 30).join(', ')}`;
+      // ÇAKIŞMA GUARD'I: 135 kolonlu tabloda gerçek şema hiç görülmedi (yalnız
+      // tablo adı + kolon SAYISI biliniyor, kolon ADLARI değil). `kod`'un en geniş
+      // yedek deseni (/^dbs_.*kodu$/i) tam kolon bulunamazsa 'dbs_grup_kodu' gibi
+      // BAŞKA bir alanı yakalayabilir — kanıtlandı (bkz. commit mesajı). `kod`
+      // DOKÜMAN ID'sidir; başka bir alanla çakışırsa aynı gruptaki TÜM demirbaşlar
+      // AYNI docId'ye düşüp birbirini SESSİZCE ezer. Çakışırsa import DURDURULUR.
+      if ([ad, tarih, bedel, omur, grup].includes(kod)) {
+        return `demirbaş kodu kolonu ('${kod}') başka bir alanla çakışıyor — eşleme güvenilmez, veri yazılmadı. Mevcut kolonlar: ${cols.slice(0, 30).join(', ')}`;
+      }
 
       // SabitKiymetModule.tsx sözlük araması yapıyor — fallback YOK:
       //   KATEGORI_CFG[kategori].icon (satır 262), DURUM_CFG[durum].bg (satır 272)
@@ -6627,6 +6660,14 @@ async function startServer() {
       const kod  = kolonSec(cols, [/^som_kodu$/i, /^som_kod$/i, /^som_.*kodu$/i, /kodu$/i]);
       const ad   = kolonSec(cols, [/^som_adi$/i, /^som_isim$/i, /^som_.*(isim|adi)$/i, /(isim|adi)$/i]);
       if (!kod) return `maliyet merkezi kodu kolonu bulunamadı — mevcut: ${cols.slice(0, 30).join(', ')}`;
+      // ÇAKIŞMA GUARD'I: SORUMLULUK_MERKEZLERI'nin 35 kolonunun GERÇEK adları hiç
+      // görülmedi; `kod`/`ad`'ın en geniş yedekleri (/kodu$/i, /(isim|adi)$/i) aynı
+      // kolona ya da birbirine yanlışlıkla bağlanabilir. `kod` DOKÜMAN ID'sidir —
+      // çakışırsa farklı maliyet merkezleri AYNI docId'ye düşüp birbirini SESSİZCE
+      // ezer (demirbaş import'unda kanıtlanan sınıfın aynısı). Çakışırsa DURDURULUR.
+      if (kod === ad) {
+        return `maliyet merkezi kodu kolonu ('${kod}') ad alanıyla çakışıyor — eşleme güvenilmez, veri yazılmadı. Mevcut kolonlar: ${cols.slice(0, 30).join(', ')}`;
+      }
 
       let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
       for (const r of rows) {
@@ -8700,6 +8741,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     const t0 = Date.now();
     try {
       const contacts = await parasutGetAll(creds, 'contacts');
+      // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
       const leadSnap = await adminDb.collection('leads').get();
       const byParasutId = new Map<string, PgDocRef>();
       const byVkn = new Map<string, PgDocRef>();
@@ -8707,6 +8749,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       const normalizeVknP = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
         const data = d.data();
+        const dc = (data.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
         const pid = (data.parasutId as string) || '';
         if (pid) byParasutId.set(pid, d.ref);
         const vkn = normalizeVknP((data.taxId as string) || (data.taxNo as string));
@@ -8765,10 +8809,18 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     const t0 = Date.now();
     try {
       const products = await parasutGetAll(creds, 'products');
+      // KİRACI SINIRI: fiyat/barkod/BOM import'unda bulunan sınıfın aynısı —
+      // filtre yoktu. EAN barkod gibi SKU'lar farklı kiracılar arasında DOĞAL
+      // olarak çakışabilir (aynı fiziksel ürünü satan iki toptancı); bu uç ise
+      // name/unit/vatRate/stockLevel/price/prices'ın HEPSİNİ güncelliyordu —
+      // barkod/fiyattan daha geniş bir etki alanı.
       const invSnap = await adminDb.collection('inventory').get();
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
-        const sku = ((d.data().sku as string) || '').trim();
+        const veri = d.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
+        const sku = ((veri.sku as string) || '').trim();
         if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
       }
       let created = 0, updated = 0;
@@ -11040,10 +11092,16 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const t0 = Date.now();
     try {
       const items = await dynamicsGetAll(token, 'items');
+      // KİRACI SINIRI: "Mikro/Paraşüt deseni" yorumu doğru — o desendeki aynı
+      // eksik filtre buraya da kopyalanmış. GTIN/barkod gibi SKU'lar kiracılar
+      // arasında çakışabilir; düzeltme Paraşüt/barkod/fiyat ile aynı.
       const invSnap = await adminDb.collection('inventory').get();
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
-        const sku = ((d.data().sku as string) || '').trim();
+        const veri = d.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
+        const sku = ((veri.sku as string) || '').trim();
         if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
       }
       let created = 0, updated = 0;
@@ -11093,6 +11151,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const t0 = Date.now();
     try {
       const customers = await dynamicsGetAll(token, 'customers');
+      // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
       const leadSnap = await adminDb.collection('leads').get();
       const byDynId = new Map<string, PgDocRef>();
       const byVkn = new Map<string, PgDocRef>();
@@ -11100,6 +11159,8 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       const normVkn = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
         const data = d.data();
+        const dc = (data.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
         const did = (data.dynamicsId as string) || '';
         if (did) byDynId.set(did, d.ref);
         const vkn = normVkn((data.taxId as string) || (data.taxNo as string));
