@@ -1,4 +1,3 @@
-import DashboardAnalysis from './components/DashboardAnalysis';
 import KpiCurrencyToggle from './components/KpiCurrencyToggle';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
@@ -168,7 +167,6 @@ import { koleksiyonAktif, resetLazyCollections } from './lib/lazyCollections';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import DataImportWizard from './components/DataImportWizard';
 import GlobalSearch from './components/GlobalSearch';
-import BarcodeScanner from './components/BarcodeScanner';
 import DateRangePicker from './components/DateRangePicker';
 import LabelSheetModal, { type LabelItem } from './components/LabelSheetModal';
 import { ToastProvider, useToast } from './components/Toast';
