@@ -258,21 +258,25 @@ function t(key: LabelKey, lang: string): string {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function KategoriBadge({ kategori }: { kategori: Kategori }) {
-  const cfg = KATEGORI_CFG[kategori];
+  // Savunma katmanı: kategori dışarıdan (Mikro import, eski kayıt) geldiği için
+  // KATEGORI_CFG anahtarlarından biri olacağı GARANTİ değil — fallback'siz erişim
+  // undefined.icon ile TypeError verirdi (2026-08-11'de bulundu).
+  const cfg = KATEGORI_CFG[kategori] ?? KATEGORI_CFG['Diğer'];
   const Icon = cfg.icon;
   return (
     <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border', cfg.bg, cfg.text, cfg.border)}>
-      <Icon className="w-3 h-3" />{kategori}
+      <Icon className="w-3 h-3" />{kategori || 'Diğer'}
     </span>
   );
 }
 
 function DurumBadge({ durum }: { durum: VarlikDurum }) {
-  const cfg = DURUM_CFG[durum];
+  // Aynı savunma — durum dışarıdan geldiği için DURUM_CFG'de olmayabilir.
+  const cfg = DURUM_CFG[durum] ?? DURUM_CFG['Aktif'];
   return (
     <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium', cfg.bg, cfg.text)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />
-      {durum}
+      {durum || 'Aktif'}
     </span>
   );
 }
@@ -456,7 +460,9 @@ export default function SabitKiymetModule({
   // ── Filtering & sorting (Varlıklar) ───────────────────────────────────────
   const filtered = varliklar.filter(v => {
     const q = search.toLowerCase();
-    if (q && !v.ad.toLowerCase().includes(q) && !v.demirbasNo.toLowerCase().includes(q) && !v.departman.toLowerCase().includes(q)) return false;
+    // departman dışarıdan (Mikro import) geldiği için boş/undefined olabilir —
+    // fallback'siz .toLowerCase() arama kutusuna yazılınca TypeError verirdi.
+    if (q && !(v.ad || '').toLowerCase().includes(q) && !(v.demirbasNo || '').toLowerCase().includes(q) && !(v.departman || '').toLowerCase().includes(q)) return false;
     if (filterKat && v.kategori !== filterKat) return false;
     if (filterDurum && v.durum !== filterDurum) return false;
     return true;

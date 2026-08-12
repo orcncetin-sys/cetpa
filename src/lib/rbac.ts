@@ -164,6 +164,16 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   payrollEntries: { read: ['Admin', 'Manager', 'Accounting', 'HR'], write: ['Admin', 'Manager', 'Accounting', 'HR'] },
   mikroFaturalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   mikroCariHareketler: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
+  // Ham Mikro fiyat listesi aynasi; asil kullanim inventory.prices uzerinden.
+  // Fiyat aynası inventory ile aynı geniş kapsamda (satışçının fiyat görmesi
+  // zaten gerekli). Demirbaş/maliyet merkezi aynaları ise DAR TUTULUR — kürasyonlu
+  // ekranları (sabitKiymetler/maliyetMerkezleri) Accounting'e kapalıyken ham
+  // ayna [...STAFF_ROLES] ile herkese açık olsaydı (Sales/Logistics/HR/Purchasing/
+  // Legal/Corporate/Quality) demirbaş alış bedeli/sigorta gibi hassas finansal
+  // veriyi kürasyonlu ekrandan DAHA GENİŞ görünür kılardı (2026-08-11'de bulundu).
+  mikroFiyatListeleri: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Accounting'] },
+  mikroDemirbaslar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
+  mikroMaliyetMerkezleri: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   revenueSchedules: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   dunningInvoices: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   dunningPolicies: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },

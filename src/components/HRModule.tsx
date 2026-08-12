@@ -562,10 +562,13 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {sortData(employees.filter(e => 
-                      e.name.toLowerCase().includes(employeesSearch.toLowerCase()) || 
-                      e.position.toLowerCase().includes(employeesSearch.toLowerCase()) ||
-                      e.department.toLowerCase().includes(employeesSearch.toLowerCase())
+                    {/* position/department dışarıdan (Mikro import) geldiği için boş/undefined
+                        olabilir — fallback'siz .toLowerCase() arama kutusuna yazılınca TypeError
+                        verirdi (2026-08-11'de BOM/Sabit Kıymet'te bulunan sınıfın aynısı). */}
+                    {sortData(employees.filter(e =>
+                      (e.name || '').toLowerCase().includes(employeesSearch.toLowerCase()) ||
+                      (e.position || '').toLowerCase().includes(employeesSearch.toLowerCase()) ||
+                      (e.department || '').toLowerCase().includes(employeesSearch.toLowerCase())
                     ), employeesSort.key, employeesSort.dir).map(emp => (
                       <tr key={emp.id} className="hover:bg-gray-50 transition-all group">
                         <td className="py-3 px-5">

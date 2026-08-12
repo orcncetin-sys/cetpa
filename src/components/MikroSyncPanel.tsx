@@ -396,6 +396,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     // Bu iki uç 2026-08-11'e kadar SUNUCUDA VARDI ama hiçbir istemci çağırmıyordu
     // ve veriyi hiçbir koleksiyona yazmıyorlardı — İK ve Üretim ekranları bu
     // yüzden hep boştu. Artık employees / bom koleksiyonlarına yazıyorlar.
+    // Fiyat DOĞRU kaynaktan: stok kartında `sto_satis_fiyat*` kolonu bu kurulumda
+    // YOK (sema-kesif: "Invalid column name"), fiyatlar STOK_SATIS_FIYAT_LISTELERI'nde
+    // ve 2075 üründe dolu. Ürünlerin "0 TL" görünmesinin nedeni buydu.
+    { key: 'fiyat',        route: '/api/mikro/import/fiyat',          title: t ? 'Satış Fiyatları' : 'Sale Prices',      desc: t ? 'Fiyat listesinden satış fiyatlarını çek ve ürünlere işle (0 TL sorununu çözer).' : 'Pull sale prices from the price list into products.' },
+    { key: 'demirbas',     route: '/api/mikro/import/demirbas',       title: t ? 'Demirbaşlar' : 'Fixed Assets',         desc: t ? 'Mikro demirbaş kartlarını çek (Sabit Kıymetler ekranını doldurur).' : 'Pull fixed asset records.' },
+    { key: 'maliyet-mrk',  route: '/api/mikro/import/maliyet-merkezi', title: t ? 'Maliyet Merkezleri' : 'Cost Centers', desc: t ? 'Mikro sorumluluk/maliyet merkezlerini çek.' : 'Pull responsibility/cost centers.' },
     { key: 'personel',     route: '/api/mikro/pull/personel',         title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
     { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
   ];

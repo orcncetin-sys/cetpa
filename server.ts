@@ -5549,6 +5549,28 @@ async function startServer() {
     return null;
   }
 
+  /** Kolon seç: desenleri SIRAYLA dener, ilk eşleşeni döndürür. En SPESİFİK desen
+   *  başa yazılır.
+   *
+   *  Neden gerekli: `findKey` tek bir gevşek desenle ilk eşleşen kolonu döndürür ve
+   *  bu sessizce YANLIŞ kolonu seçebilir. Gerçek örnek (2026-08-11'de yakalandı):
+   *      findKey(row, /sfiyat_fiyati|fiyat/i)  ->  'sfiyat_Guid'
+   *  çünkü "s·fiyat·_Guid" de "fiyat" içeriyor ve Guid ilk kolon. Sonuç:
+   *  Number(guid) = NaN -> her satır elenir -> HİÇ fiyat yazılmaz ama iş "başarılı"
+   *  görünür. Tam olarak bu projede tekrarlayan sessiz-sıfır arıza sınıfı.
+   *
+   *  Ek koruma: değer alanı ararken `*_Guid` kolonları atlanır (kimlik alanı asla
+   *  tutar/ad/kod değildir). `guidDahil` ile bilinçli olarak açılabilir.
+   */
+  function kolonSec(cols: string[], desenler: RegExp[], guidDahil = false): string | null {
+    const aday = guidDahil ? cols : cols.filter(c => !/_guid$/i.test(c));
+    for (const re of desenler) {
+      const k = aday.find(c => re.test(c));
+      if (k) return k;
+    }
+    return null;
+  }
+
   /** SqlVeriOkuV2 tabanlı liste import — V17'de karşılığı OLMAYAN liste
    *  metotlarının yerine geçer.
    *
@@ -5624,6 +5646,24 @@ async function startServer() {
       // Şema okunamadıysa '*' ile devam — daraltılmış liste uydurmaktan güvenli.
     }
 
+    // ORDER BY kolonu da şemaya karşı doğrulanır: OFFSET/FETCH için ZORUNLU
+    // olduğundan yanlış tek bir ad ("Invalid column name 'dbs_Guid'") ilk sayfayı,
+    // dolayısıyla TÜM import'u öldürür — SELECT tarafında az önce kapatılan arıza
+    // sınıfının aynısı (demirbas/maliyet-merkezi import'larının dbs_Guid/som_Guid
+    // sıralaması hiç doğrulanmamıştı). Yalnız SADE tanımlayıcılar denetlenir;
+    // "cha_tarihi DESC, cha_Guid" gibi bileşik ifadeler dokunulmadan geçer.
+    let siralama = opts.siralama;
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(siralama)) {
+      const anaTablo2 = opts.tablo.trim().split(/\s+/)[0];
+      const semaCols = await mikroKolonlar(anaTablo2);   // 10 dk önbellekli, ek maliyet yok
+      if (semaCols.length && !semaCols.some(c => c.toLowerCase() === siralama.toLowerCase())) {
+        const yedek = semaCols.find(c => /_Guid$/i.test(c)) ?? semaCols[0];
+        console.warn(`[sqlImport ${anaTablo2}] sıralama kolonu '${siralama}' şemada yok → '${yedek}' kullanılıyor`);
+        siralama = yedek;
+      }
+      // Şema okunamadıysa yazılan adla devam — uydurma kolon seçmekten güvenli.
+    }
+
     const allRows: Record<string, unknown>[] = [];
     let sayfa = 0, total = 0, tavanaCarpti = false;
     try {
@@ -5631,7 +5671,7 @@ async function startServer() {
         const offset = sayfa * SAYFA;
         const { rows, hata } = await mikroSql(
           `SELECT ${secim} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
-          `ORDER BY ${opts.siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
+          `ORDER BY ${siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
         );
         if (hata) {
           // Başarısızsa hiçbir şey yazma — yarım/boş veri gerçek veriyi ezmesin.
@@ -5666,6 +5706,7 @@ async function startServer() {
       const duration = Date.now() - t0;
       const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}` +
         `${dusenKolonlar.length ? ` — şemada olmayan kolonlar atlandı: ${dusenKolonlar.join(', ')}` : ''}` +
+        `${siralama !== opts.siralama ? ` — sıralama kolonu '${opts.siralama}' bulunamadı, '${siralama}' kullanıldı` : ''}` +
         `${postNote ? ` — ${postNote}` : ''}`;
       // Senkronizasyon Geçmişi bu koleksiyonu okur — import'lar 2026-07-31'e
       // kadar buraya HİÇ yazmıyordu, panel bu yüzden boş görünüyordu.
@@ -6383,6 +6424,228 @@ async function startServer() {
       }
       if (ops > 0) await batch.commit();
       return `${matched} ürüne barkod yazıldı`;
+    },
+  });
+
+  // 8. Satış fiyatları → inventory.prices  (DOĞRU KAYNAK, 2026-08-11)
+  //
+  // Ürünler ekranda "0 TL" görünüyordu. Hem cron hem manuel stok import'u fiyatı
+  // stok KARTINDAN (`sto_satis_fiyat1..4`) okumaya çalışıyordu — ama sema-kesif
+  // kanıtladı ki bu kurulumda o kolon HİÇ YOK:
+  //     stokKartiFiyatDolulugu -> "Invalid column name 'sto_satis_fiyat1'"
+  // Fiyatlar ayrı tabloda ve DOLU:
+  //     fiyatListesiOzet -> 2075 satır / 2075 ürün, listesirano 1..1
+  // Yani tek fiyat listesi (Retail) var; 2/3/4 kademeleri bu kurulumda tanımsız.
+  //
+  // Bu import fiyatı asıl kaynağından çeker ve inventory.prices'a işler.
+  makeMikroSqlImport({
+    route: '/api/mikro/import/fiyat',
+    tablo: 'STOK_SATIS_FIYAT_LISTELERI',
+    siralama: 'sfiyat_stokkod',
+    collection: 'mikroFiyatListeleri',
+    label: 'Mikro Satış Fiyat Listeleri',
+    // Kolon adları çalışma anında şemaya karşı süzülür (olmayan ad import'u öldürmez).
+    // Her iki döviz adı adayı da istenir ('sfiyat_doviz' repo'nun geri kalanında
+    // kullandığı ad — PG ayna DDL'i, StokKaydetV2 push payload'u; 'sfiyat_doviz_cinsi'
+    // yedek — süzgeç olmayanı zaten düşürür).
+    secimKolonlari: ['sfiyat_Guid', 'sfiyat_stokkod', 'sfiyat_listesirano', 'sfiyat_fiyati',
+                     'sfiyat_doviz', 'sfiyat_doviz_cinsi', 'sfiyat_deposu', 'sfiyat_iskonto1'],
+    postProcess: async (rows, companyId) => {
+      if (!adminDb) return null;
+      // Desenler SABİTLENMİŞ ve en spesifikten başlar. Gevşek /fiyat/i kullanılamaz:
+      // 'sfiyat_Guid' ve 'sfiyat_stokkod' de "fiyat" içerir ve yanlış kolon seçilirse
+      // Number(...) NaN olur, tüm satırlar elenir ve HİÇ fiyat yazılmadan iş başarılı
+      // görünür (2026-08-11'de bu şekilde yakalandı).
+      const cols    = Object.keys(rows[0]);
+      const skuKey  = kolonSec(cols, [/^sfiyat_stokkod$/i, /stok_?kodu?$/i]);
+      const listKey = kolonSec(cols, [/^sfiyat_listesirano$/i, /listesi_?rano$/i]);
+      const fiyKey  = kolonSec(cols, [/^sfiyat_fiyati$/i, /_fiyati$/i, /fiyat$/i]);
+      // Döviz cinsi: satır TL DIŞINDA bir birimde yazılıysa (0=TL varsayımı;
+      // bkz. StokKaydetV2 push payload'u `sfiyat_doviz: 0`) fiyatı okuyup
+      // doğrudan TL sanmak ~kur kadar (onlarca kat) yanlış tutar demektir. Kolon
+      // çözülemezse hepsi TL sayılır — bu, tahmin değil, dosyanın kendi kabul
+      // ettiği en iyi bilgi; sonuç panelde açıkça "UYARI" ile bildirilir.
+      const dovKey  = kolonSec(cols, [/^sfiyat_doviz$/i, /^sfiyat_doviz_cinsi$/i, /doviz/i]);
+      if (!skuKey || !fiyKey) {
+        return `eşleme alanları bulunamadı (sku=${skuKey}, fiyat=${fiyKey}) — kolonlar: ${cols.join(', ')}`;
+      }
+
+      // Mikro liste no -> Cetpa kademesi. Liste no yoksa tek liste varsayılır (Retail).
+      const TIER: Record<string, string> = { '1': 'Retail', '2': 'B2B Standard', '3': 'B2B Premium', '4': 'Dealer' };
+      const bySku = new Map<string, Record<string, number>>();
+      let atlananDoviz = 0;
+      for (const r of rows) {
+        const sku = String(r[skuKey] ?? '').trim();
+        const fiyat = Number(r[fiyKey]);
+        // 0 ve negatif "fiyat YOK" sayılır — yazılırsa ekranda yine 0 TL görünür
+        // ve elle girilmiş fiyatı ezer (bugün kapatılan sessiz-sıfır sınıfı).
+        if (!sku || !Number.isFinite(fiyat) || fiyat <= 0) continue;
+        const dov = dovKey ? Number(r[dovKey]) : 0;
+        if (dovKey && Number.isFinite(dov) && dov !== 0) { atlananDoviz++; continue; }
+        const tier = TIER[String(listKey ? r[listKey] ?? '1' : '1')] ?? 'Retail';
+        const cur = bySku.get(sku) ?? {};
+        // Aynı kademede birden çok satır varsa (depo/döviz kırılımı) İLKİ kalır.
+        if (cur[tier] == null) { cur[tier] = fiyat; bySku.set(sku, cur); }
+      }
+
+      // KİRACI SINIRI: PG shim'de .get() koleksiyonun TÜM kiracılarını döner
+      // (docs tablosunda kiracı kolonu yok, ayrım yalnız data.companyId'de ve
+      // aşağıda .where() YOKTU). companyId'si DOLU ve BAŞKA kiracıya ait ürüne
+      // DOKUNULMAZ — yoksa A kiracısının Mikro fiyatı B kiracısının elle girdiği
+      // fiyatı sessizce ezer (2026-08-11'de yakalandı). companyId'si BOŞ eski
+      // kayıtlar bilerek dahil (SKU ile iyileştirme, mevcut stok import deseniyle
+      // tutarlı).
+      const invSnap = await adminDb.collection('inventory').get();
+      let batch = adminDb.batch(); let ops = 0; let eslesen = 0; let yabanciAtlanan = 0;
+      for (const d of invSnap.docs) {
+        const veri = d.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) { yabanciAtlanan++; continue; }
+        const sku = ((veri.sku as string) || '').trim();
+        const yeni = sku ? bySku.get(sku) : undefined;
+        if (!yeni) continue;
+        // MERGE: Mikro'dan gelmeyen kademe mevcut değeriyle kalır (elle girilmiş
+        // fiyat senkronla silinmemeli).
+        const mevcut = (veri.prices as Record<string, number>) || {};
+        const birlesik = { ...mevcut, ...yeni };
+        batch.update(d.ref, {
+          prices: birlesik,
+          price: birlesik['Retail'] ?? mevcut['Retail'] ?? 0,
+          // Bu import yalnız TL fiyat yazar (döviz satırları atlanır) — kademe
+          // ne olursa olsun para birimi işaretini TL'ye SABİTLE. Aksi halde
+          // kullanıcının ProductForm'dan seçtiği eski priceCurrency (ör. USD)
+          // kalır ve ekran bu TL tutarı tekrar kurla çarpar (~kur katı yanlış).
+          priceCurrency: 'TRY',
+          mikroFiyatSyncedAt: pgServerTimestamp(),
+        });
+        eslesen++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${eslesen} ürünün fiyatı güncellendi (${bySku.size} SKU'da fiyat bulundu)` +
+        (atlananDoviz ? ` — ${atlananDoviz} satır TL dışı döviz olduğu için atlandı` : '') +
+        (dovKey ? '' : ' — UYARI: döviz kolonu çözülemedi, tüm tutarlar TL varsayıldı') +
+        (yabanciAtlanan ? ` — ${yabanciAtlanan} ürün başka kiracıya ait olduğu için atlandı` : '');
+    },
+  });
+
+  // 9. Sabit kıymetler (demirbaşlar) → sabitKiymetler
+  //
+  // Tablo adı TAHMİN EDİLMEDİ: sema-kesif `sabitKiymetTabloAdaylari` çıktısında
+  // DEMIRBASLAR (135 kolon) ana tablo olarak göründü (yanındaki *_CHOOSE_* Mikro'nun
+  // iç lookup görünümleri, DEMIRBAS_GRUPLARI grup tanımı, DEMIRBAS_MALIYIL_TANIMLARI
+  // mali yıl/amortisman detayı). Kolon adları da tahmin edilmez — 135 kolon içinden
+  // çalışma anında `kolonBul` ile çözülür, çözülemeyen alan yazılmaz ve raporlanır.
+  makeMikroSqlImport({
+    route: '/api/mikro/import/demirbas',
+    tablo: 'DEMIRBASLAR',
+    siralama: 'dbs_Guid',
+    collection: 'mikroDemirbaslar',
+    label: 'Mikro Demirbaş Listesi',
+    postProcess: async (rows, companyId) => {
+      if (!adminDb || !rows.length) return null;
+      // 135 kolonluk tabloda GEVŞEK desen yanlış kolon seçer (ör. /kod/i önce
+      // 'dbs_grup_kodu'ya denk gelebilir). Sabitlenmiş, spesifikten genele sıralı.
+      const cols  = Object.keys(rows[0]);
+      const kod   = kolonSec(cols, [/^dbs_kodu$/i, /^dbs_kod$/i, /^dbs_demirbas_kodu$/i, /^dbs_.*kodu$/i]);
+      const ad    = kolonSec(cols, [/^dbs_adi$/i, /^dbs_isim$/i, /^dbs_.*(isim|adi)$/i]);
+      const tarih = kolonSec(cols, [/^dbs_alis_tarihi$/i, /alis_tarihi$/i, /giris_tarihi$/i]);
+      const bedel = kolonSec(cols, [/^dbs_alis_bedeli$/i, /alis_(bedeli|tutari|fiyati)$/i]);
+      const omur  = kolonSec(cols, [/^dbs_faydali_omur$/i, /faydali_omur$/i, /omur$/i]);
+      const grup  = kolonSec(cols, [/^dbs_grup_kodu$/i, /grup_kodu$/i]);
+      if (!kod) return `demirbaş kodu kolonu bulunamadı — mevcut: ${cols.slice(0, 30).join(', ')}`;
+
+      // SabitKiymetModule.tsx sözlük araması yapıyor — fallback YOK:
+      //   KATEGORI_CFG[kategori].icon (satır 262), DURUM_CFG[durum].bg (satır 272)
+      // `kategori`/`durum` bu iki sabit kümenin DIŞINDA bir değerse (Mikro grup
+      // kodu ham metin, örn. "MK-01") ya da hiç yazılmazsa ekran ilk satırda
+      // TypeError ile çöker — tam da BOM'da `components` eksikliğinin yarattığı
+      // sınıf. Mikro grup kodu bu kümelerden biriyle BİREBİR eşleşmiyor (farklı
+      // sözlük), o yüzden UYDURULMAZ: geçerli değilse 'Diğer'/'Aktif'e düşer, ham
+      // Mikro değeri ayrı alanda (mikroGrupKodu) saklanır — veri kaybolmaz.
+      const KATEGORI_GECERLI = new Set(['Taşıt', 'Makine', 'Bilgisayar', 'Mobilya', 'Bina', 'Diğer']);
+
+      // Mevcut kayıtları bir kez oku: (a) YENİ dokümana zorunlu alanları varsayılanla
+      // yaz (ekran çökmesin), (b) VAR OLAN dokümanda kullanıcının elle girdiği
+      // durum/amortYontemi/departman gibi alanları EZME.
+      const mevcutSnap = await adminDb.collection('sabitKiymetler').get();
+      const mevcut = new Map(mevcutSnap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
+
+      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      for (const r of rows) {
+        const k = String(r[kod] ?? '').trim();
+        if (!k) continue;
+        const docId = `mikro-${k.replace(/[/\\]/g, '_')}`;
+        const eski = mevcut.get(docId);
+        const grupHam = grup ? String(r[grup] ?? '').trim() : '';
+        batch.set(adminDb.collection('sabitKiymetler').doc(docId), {
+          companyId,
+          demirbasNo: k,
+          ad:          ad    ? String(r[ad] ?? '').trim() || k : k,
+          kategori:    (eski?.kategori as string) || (KATEGORI_GECERLI.has(grupHam) ? grupHam : 'Diğer'),
+          mikroGrupKodu: grupHam,             // ham Mikro grup kodu — kategori eşleşmese de kaybolmasın
+          alisTarihi:  tarih ? String(r[tarih] ?? '').slice(0, 10) : '',
+          alisBedeli:  bedel ? Number(r[bedel]) || 0 : 0,
+          faydaliOmur: omur  ? Number(r[omur]) || 0 : 0,
+          // UI SÖZLÜK ANAHTARLARI — eksikse ekran çöker (KategoriBadge/DurumBadge
+          // fallback'siz). Yeni kayıtta varsayılan; mevcut kayıtta kullanıcı
+          // değeri korunur.
+          durum:           (eski?.durum as string) ?? 'Aktif',
+          amortYontemi:    (eski?.amortYontemi as string) ?? 'Doğrusal',
+          paraBirimi:      (eski?.paraBirimi as string) ?? 'TRY',
+          birikmisSalinma: Number(eski?.birikmisSalinma) || 0,
+          departman:       (eski?.departman as string) ?? '',
+          mikroHam: r,                        // eşleme eksikse veri yine de durur
+          source: 'mikro_import',
+          mikroSyncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        yazilan++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      const eksik = [!ad && 'ad', !tarih && 'alisTarihi', !bedel && 'alisBedeli', !omur && 'faydaliOmur', !grup && 'kategori']
+        .filter(Boolean).join(', ');
+      return `${yazilan} demirbaş sabitKiymetler'e yazıldı` + (eksik ? ` — kolonu çözülemeyen alanlar: ${eksik} (ham veri mikroHam'da)` : '');
+    },
+  });
+
+  // 10. Maliyet merkezleri → maliyetMerkezleri
+  //
+  // Mikro'da "maliyet merkezi" karşılığı SORUMLULUK_MERKEZLERI'dir (sema-kesif
+  // `maliyetMerkeziTabloAdaylari`: 35 kolon). Aynı listede IS_MERKEZLERI (üretim iş
+  // merkezi), MASRAF_HESAPLARI (masraf hesap planı) ve PROJELER de var — onlar farklı
+  // kavramlar, bilerek seçilmedi.
+  makeMikroSqlImport({
+    route: '/api/mikro/import/maliyet-merkezi',
+    tablo: 'SORUMLULUK_MERKEZLERI',
+    siralama: 'som_Guid',
+    collection: 'mikroMaliyetMerkezleri',
+    label: 'Mikro Maliyet Merkezleri',
+    postProcess: async (rows, companyId) => {
+      if (!adminDb || !rows.length) return null;
+      const cols = Object.keys(rows[0]);
+      const kod  = kolonSec(cols, [/^som_kodu$/i, /^som_kod$/i, /^som_.*kodu$/i, /kodu$/i]);
+      const ad   = kolonSec(cols, [/^som_adi$/i, /^som_isim$/i, /^som_.*(isim|adi)$/i, /(isim|adi)$/i]);
+      if (!kod) return `maliyet merkezi kodu kolonu bulunamadı — mevcut: ${cols.slice(0, 30).join(', ')}`;
+
+      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      for (const r of rows) {
+        const k = String(r[kod] ?? '').trim();
+        if (!k) continue;
+        batch.set(adminDb.collection('maliyetMerkezleri').doc(`mikro-${k.replace(/[/\\]/g, '_')}`), {
+          companyId,
+          kod: k,
+          ad: ad ? String(r[ad] ?? '').trim() || k : k,
+          aktif: true,
+          mikroHam: r,
+          source: 'mikro_import',
+          mikroSyncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        yazilan++;
+        if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+      return `${yazilan} maliyet merkezi maliyetMerkezleri'ne yazıldı` + (ad ? '' : ' — ad kolonu çözülemedi (ham veri mikroHam\'da)');
     },
   });
 
@@ -7342,17 +7605,12 @@ async function startServer() {
   // bakiyeleri. cha_tip 0 = borç (satış), 1 = alacak — bakiye = borç - alacak.
   // N çağrı yerine 1 çağrı; ayrıca 100'lük limit gereksiz kalıyor.
   
-// --- TEMPORARY ENDPOINT FOR PERSONEL ---
-app.post('/api/mikro/test-personel', async (req, res) => {
-  try {
-    const { mikroSql } = require('./src/services/mikroSql');
-    const result = await mikroSql("SELECT TOP 5 * FROM PERSONEL_TANIMLARI");
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-// --- END TEMPORARY ---
+// KALDIRILDI (2026-08-11): /api/mikro/test-personel geçici hata ayıklama ucu.
+// `requireAuth` YOKTU ve PERSONEL_TANIMLARI'nı ham dökmeye çalışıyordu — yani TC
+// kimlik no, maaş, telefon, e-posta. Bugün 500 veriyordu çünkü import ettiği
+// `./src/services/mikroSql` modülü hiç yok; o modül bir gün oluşturulsaydı uç
+// anında KİMLİKSİZ bir PII sızıntısına dönüşecekti. Kalıcı karşılığı zaten var:
+// POST /api/mikro/pull/personel (requireAuth + requireMfaVerified).
 
 app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
@@ -7751,6 +8009,14 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       // hep boş kalıyordu. doc id `mikro-<per_kodu>`: tekrar çekimde çoğaltmaz.
       if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
       const companyId = await reqCompanyId(req);
+      // HRModule.tsx arama filtresi `e.position.toLowerCase()` / `e.department.toLowerCase()`
+      // çağırıyor (fallback yok) — YENİ bir personel Mikro'da bu alanları boş
+      // bırakmışsa alan hiç yazılmaz (yukarıdaki guard), doküman `undefined` ile
+      // oluşur ve arama kutusuna yazılınca TypeError ile çöker (BOM'daki
+      // `components` çökmesiyle aynı sınıf). Yalnız YENİ kayıtta '' varsayılanı
+      // yaz; var olan kayda dokunma (mevcut değeri ezmeyelim).
+      const mevcutEmpSnap = await adminDb.collection('employees').get();
+      const mevcutEmpIds = new Set(mevcutEmpSnap.docs.map(d => d.id));
       let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
       for (const r of rows) {
         const kod = String(r.mikroPersKod ?? '').trim();
@@ -7760,17 +8026,31 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         // Mikro durum kodu bilinmiyorsa 'Aktif' UYDURMA yerine gelen değeri
         // koru; yalnız kesin bilinen eşleşme çevrilir.
         const durum = String(r.status ?? '').trim();
-        batch.set(adminDb.collection('employees').doc(`mikro-${kod.replace(/[/\\]/g, '_')}`), {
+        // SATIR BAZLI BOŞALTMA guard'ı: eskiden email/phone/department/... KOŞULSUZ
+        // yazılıyordu. Kolon şemada bulunsa bile o PERSONELİN Mikro kaydında alan
+        // boşsa (çok normal — herkes e-posta/departman girmemiş olabilir),
+        // `String(undefined ?? '').trim()` boş string üretip HR'ın Cetpa'da elle
+        // girdiği değeri her senkronda sessizce siliyordu. Artık Mikro'da değer
+        // VARSA yazılır, yoksa alana hiç dokunulmaz (merge:true mevcut değeri korur).
+        const email = String(r.email ?? '').trim();
+        const phone = String(r.phone ?? '').trim();
+        const dept  = String(r.department ?? '').trim();
+        const pos   = String(r.position ?? '').trim();
+        const sal   = Number(r.salary);
+        const start = String(r.startDate ?? '').trim();
+        const docId = `mikro-${kod.replace(/[/\\]/g, '_')}`;
+        const yeniKayit = !mevcutEmpIds.has(docId);
+        batch.set(adminDb.collection('employees').doc(docId), {
           companyId,
           mikroPersKod: kod,
           name: [ad, soy].filter(Boolean).join(' ') || kod,
-          tcId:       String(r.tcId ?? '').trim() || null,
-          email:      String(r.email ?? '').trim(),
-          phone:      String(r.phone ?? '').trim(),
-          department: String(r.department ?? '').trim(),
-          position:   String(r.position ?? '').trim(),
-          salary:     Number(r.salary) || 0,
-          startDate:  String(r.startDate ?? '').slice(0, 10),
+          tcId: String(r.tcId ?? '').trim() || null,
+          ...(email ? { email } : (yeniKayit ? { email: '' } : {})),
+          ...(phone ? { phone } : (yeniKayit ? { phone: '' } : {})),
+          ...(dept  ? { department: dept } : (yeniKayit ? { department: '' } : {})),
+          ...(pos   ? { position: pos } : (yeniKayit ? { position: '' } : {})),
+          ...(Number.isFinite(sal) && sal > 0 ? { salary: sal } : (yeniKayit ? { salary: 0 } : {})),
+          ...(start ? { startDate: start.slice(0, 10) } : (yeniKayit ? { startDate: '' } : {})),
           status:     durum === '0' || durum.toLowerCase() === 'aktif' ? 'Aktif' : durum || 'Aktif',
           source: 'mikro_import',
           mikroSyncedAt: pgServerTimestamp(),
@@ -7814,23 +8094,75 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       // alan yazılmaz; ham satır `mikroHam` altında saklanır ki veri kaybolmasın
       // ve eşleme sonradan kolon adı öğrenilince düzeltilebilsin.
       if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-      const anaKod  = kolonBul(cols, /^rec_(ana_)?stok_kod$/i) || kolonBul(cols, /ana.*stok.*kod/i);
-      const altKod  = kolonBul(cols, /^rec_(alt_)?stok_kod$/i) || kolonBul(cols, /(alt|bilesen).*stok.*kod/i);
-      const miktarK = kolonBul(cols, /^rec_miktar$/i) || kolonBul(cols, /miktar/i);
-      const birimK  = kolonBul(cols, /birim/i);
+      // Desenler AYRIŞIK olmalı: eski hâlde /^rec_(ana_)?stok_kod$/ ve
+      // /^rec_(alt_)?stok_kod$/ İKİSİ de 'rec_stok_kod'u eşliyordu. Tabloda o kolon
+      // varsa ana ve alt AYNI kolona bağlanır ve her reçete "X, X içerir" olur —
+      // sessizce çöp veri. Artık ayrı desenler + eşitlik guard'ı.
+      let anaKod  = kolonSec(cols, [/^rec_ana_stok_kod$/i, /^rec_ust_stok_kod$/i, /ana_stok_kod$/i]);
+      let altKod  = kolonSec(cols, [/^rec_alt_stok_kod$/i, /^rec_bilesen_stok_kod$/i, /(alt|bilesen)_stok_kod$/i]);
+      const miktarK = kolonSec(cols, [/^rec_miktar$/i, /_miktari?$/i, /miktar$/i]);
+      const birimK  = kolonSec(cols, [/^rec_birim$/i, /_birimi?$/i, /birim$/i]);
+      // Aynı kolona düştülerse eşleme GÜVENİLMEZ — ikisini de çöz(e)medik say.
+      // Yanlış reçete göstermektense hiç gösterme (ham veri mikroHam'da durur).
+      if (anaKod && anaKod === altKod) { anaKod = null; altKod = null; }
       const guidK   = kolonBul(cols, /_Guid$/i);
 
-      const companyId = await reqCompanyId(req);
-      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      // ŞEKİL DÜZELTME (2026-08-11, ilk sürüm hiç canlıda çalıştırılmadan yakalandı):
+      // `bom` koleksiyonunun tek tüketicisi BOMPanel.tsx TEK doküman/ürün + içinde
+      // `components: BOMComponent[]` dizisi bekliyor (satır 39-47). İlk sürüm her
+      // (ana, bileşen) satırını AYRI düz doküman yazıyordu — `components` hiç
+      // yoktu. BOMPanel `bom.components.length` okuyunca (satır 304) undefined
+      // üzerinde patlardı: ekranı doldurmak için yazılan uç, ekranı çökertiyordu.
+      //
+      // Doğru şekil: Mikro satırları ÖNCE ana ürüne göre grupla, sonra ürün başına
+      // TEK doküman yaz. docId artık guid değil `mikro-<productSku>` — guid
+      // satır bazlıydı (rastgele üretimi tetikliyordu, her senkron reçeteyi
+      // çoğaltırdı); productSku ürün bazlı ve KARARLI, tekrar senkron ÜZERİNE yazar.
+      const gruplar = new Map<string, Array<{ sku: string; quantity: number; unit: string }>>();
       for (const r of rows) {
-        const docId = guidK && r[guidK] ? `mikro-${String(r[guidK])}` : adminDb.collection('bom').doc().id;
-        batch.set(adminDb.collection('bom').doc(docId), {
+        const ana = anaKod ? String(r[anaKod] ?? '').trim() : '';
+        const alt = altKod ? String(r[altKod] ?? '').trim() : '';
+        if (!ana || !alt) continue;   // eşleme çözülemediyse reçete satırı anlamsız
+        const liste = gruplar.get(ana) ?? [];
+        liste.push({
+          sku: alt,
+          quantity: miktarK ? Number(r[miktarK]) || 0 : 0,
+          unit: birimK ? String(r[birimK] ?? '').trim() : '',
+        });
+        gruplar.set(ana, liste);
+      }
+
+      // Bileşen adı/inventoryId için envanterden eşle (BOMComponent.name/inventoryId
+      // BOMPanel'in UI'da göstermesi için ZORUNLU değil ama boşsa "—" görünür).
+      // Kiracı sınırı: fiyat import'unda yakalanan sızıntının aynısı — companyId'si
+      // DOLU ve BAŞKA kiracıya ait kayıt eşlemede kullanılmaz.
+      const companyId = await reqCompanyId(req);
+      const invSnap = await adminDb.collection('inventory').get();
+      const invBySku = new Map<string, { id: string; name: string }>();
+      for (const d of invSnap.docs) {
+        const veri = d.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) continue;
+        const sku = ((veri.sku as string) || '').trim();
+        if (sku && !invBySku.has(sku)) invBySku.set(sku, { id: d.id, name: (veri.name as string) || sku });
+      }
+
+      let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
+      for (const [productSku, bilesenler] of gruplar) {
+        const urun = invBySku.get(productSku);
+        batch.set(adminDb.collection('bom').doc(`mikro-${productSku.replace(/[/\\]/g, '_')}`), {
           companyId,
-          productSku:   anaKod  ? String(r[anaKod]  ?? '').trim() : '',
-          componentSku: altKod  ? String(r[altKod]  ?? '').trim() : '',
-          quantity:     miktarK ? Number(r[miktarK]) || 0 : 0,
-          unit:         birimK  ? String(r[birimK] ?? '').trim() : '',
-          mikroHam: r,                       // eşleme eksikse veri yine de durur
+          productName: urun?.name || productSku,
+          productSku,
+          unit: '',
+          description: '',
+          components: bilesenler.map(b => ({
+            inventoryId: invBySku.get(b.sku)?.id || '',
+            name: invBySku.get(b.sku)?.name || b.sku,
+            sku: b.sku,
+            quantity: b.quantity,
+            unit: b.unit,
+          })),
           source: 'mikro_import',
           mikroSyncedAt: pgServerTimestamp(),
         }, { merge: true });
@@ -7838,6 +8170,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         if (++ops >= 400) { await batch.commit(); batch = adminDb.batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
+      void guidK; // artık satır bazlı guid kullanılmıyor — ürün bazlı sku id yeterli
 
       const cozulemeyen = [
         !anaKod  ? 'productSku'   : null,
@@ -7845,8 +8178,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         !miktarK ? 'quantity'     : null,
         !birimK  ? 'unit'         : null,
       ].filter(Boolean);
-      const ozet = `${yazilan} reçete satırı bom koleksiyonuna yazıldı` +
-        (cozulemeyen.length ? ` — kolonu çözülemeyen alanlar: ${cozulemeyen.join(', ')} (ham veri mikroHam'da)` : '');
+      const ozet = `${yazilan} ürün reçetesi (${rows.length} satırdan) bom koleksiyonuna yazıldı` +
+        (cozulemeyen.length ? ` — kolonu çözülemeyen alanlar: ${cozulemeyen.join(', ')} (ham veri satır düzeyinde kaybolmuş olabilir)` : '');
       await writeSyncLog('SQL:STOK_URETIM_RECETELERI', 'bom', ozet, true, null, null, 0, reqActor(req));
       await writeAuditLog(reqActor(req), 'Mikro Üretim Reçeteleri', ozet);
       res.json({ success: true, total: rows.length, note: ozet, written: yazilan, cozulemeyenAlanlar: cozulemeyen });
