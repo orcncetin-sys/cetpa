@@ -25,6 +25,16 @@ function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 type AdminTabId = 'overview' | 'users' | 'access' | 'auditlog' | 'system' | 'company' | 'evrak' | 'tenants';
 type AccessVal = '✅' | '👁' | '📊' | '❌';
 
+// Rol Simülatörü'nde İngilizce enum değeri (RBAC/Firestore'un kullandığı gerçek
+// değer) yerine Türkçe görünen ad — yalnız görünüm katmanı, setUserRole'e giden
+// değeri değiştirmez.
+const ROL_ADI_TR: Record<UserRole, string> = {
+  [UserRole.Admin]: 'Yönetici', [UserRole.Manager]: 'Müdür', [UserRole.Sales]: 'Satış',
+  [UserRole.Logistics]: 'Lojistik', [UserRole.Accounting]: 'Muhasebe', [UserRole.HR]: 'İK',
+  [UserRole.Purchasing]: 'Satın Alma', [UserRole.B2B]: 'B2B', [UserRole.Dealer]: 'Bayi',
+  [UserRole.Legal]: 'Hukuk', [UserRole.Corporate]: 'Kurumsal', [UserRole.Quality]: 'Kalite',
+};
+
 const ACCESS_VALUES = ['✅', '👁', '📊', '❌'] as const;
 const DEFAULT_ACCESS_MATRIX: { section: string; access: AccessVal[] }[] = [
   { section: 'Dashboard',         access: ['✅','✅','📊','📊','📊','📊','📊'] },
@@ -453,6 +463,10 @@ export default function AdminPage({
               <p className="text-xs text-gray-400">{currentLanguage==='tr'?'Farklı rollerin UI\'sini test edin':'Test the UI as different roles'}</p>
             </div>
           </div>
+          {/* Düğme metni role'ün TÜRKÇE karşılığı; setUserRole'e giden değer değişmedi
+              (RBAC/Firestore'daki role alanı İngilizce enum — bu yalnız görünüm katmanı).
+              Eskiden {role} ham enum değerini basıyordu ("Admin" yerine "Manager" gibi
+              çevirisiz İngilizce metin — Türkçe arayüzde göze batıyordu). */}
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {([UserRole.Admin, UserRole.Manager, UserRole.Sales, UserRole.Logistics, UserRole.Accounting, UserRole.HR, UserRole.Purchasing, UserRole.B2B, UserRole.Dealer] as UserRole[]).map(role => (
               <button key={role} onClick={() => setUserRole(role)}
@@ -462,7 +476,7 @@ export default function AdminPage({
                     ? 'bg-brand text-white border-brand shadow-sm'
                     : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-100'
                 )}>
-                {role}
+                {currentLanguage === 'tr' ? ROL_ADI_TR[role] ?? role : role}
               </button>
             ))}
           </div>

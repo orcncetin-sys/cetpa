@@ -3710,6 +3710,8 @@ function AppContent() {
     holding: currentLanguage === 'tr' ? 'Holding Yönetimi' : 'Holding', mobilewms: currentLanguage === 'tr' ? 'Mobil WMS' : 'Mobile WMS',
     mrp: 'MRP II', muhtasar: currentLanguage === 'tr' ? 'Muhtasar' : 'Withholding', performans: currentLanguage === 'tr' ? 'Performans' : 'Performance',
     territory: currentLanguage === 'tr' ? 'Satış Bölgeleri' : 'Territories',
+    analytics: currentLanguage === 'tr' ? 'Analitik' : 'Analytics',
+    'fiyat-istihbarat': currentLanguage === 'tr' ? 'Fiyat İstihbaratı' : 'Price Intel',
   } as Record<string, string>)[id] || id);
 
   return (
