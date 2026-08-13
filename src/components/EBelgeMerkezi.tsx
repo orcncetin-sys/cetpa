@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
-import { confirmDelete } from '../lib/confirm';
+import { confirmDelete, confirmAction } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Send, AlertTriangle, Clock, Plus, X, RefreshCw,
-  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload, FileCode
+  CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload, FileCode,
+  MapPin, PieChart, FileUp,
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { eBelgeIndir } from '../services/ebelgeIndir';
+import { formatCurrency } from '../utils/currency';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
 } from '../lib/dbClient';
+
+interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
+interface LucaKontor { remaining?: number; limit?: number; used?: number; }
+interface NativeInvoice { id: string; faturaNo?: string; date?: string; customerName?: string; taxId?: string; totalPrice?: number; status?: string; faturaTipi?: string; }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +48,10 @@ interface EBelge {
 interface EBelgeMerkeziProps {
   currentLanguage: string;
   isAuthenticated: boolean;
+  /** Muhasebe'deki "Faturalar" (fatura kayıtları/kesme) sekmesine geçiş — o ekran
+   *  Satışlar sekmesiyle paylaşılan Mikro-fatura hesaplamasına bağlı olduğundan
+   *  buraya taşınmadı (2026-08-13), yalnız hızlı geçiş linki eklendi. */
+  onGoToFaturalar?: () => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -116,13 +126,119 @@ function useToast() {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
+export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBelgeMerkeziProps) {
   const [activeTab, setActiveTab] = useState<BelgeTur>('e-fatura');
   const [belgeler, setBelgeler] = useState<EBelge[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const { toast, show: showToast } = useToast();
+
+  // ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar (2026-08-13) ──
+  // Muhasebe'deki eski "e-Fatura" sekmesinden buraya taşındı — iki ayrı ekran
+  // aynı "e-Fatura" işini gösteriyordu (kullanıcı bulgusu, kafa karıştırıcı).
+  // Bu bölüm Luca entegrasyonu (VKN sorgu + kontör) ve native `invoices`
+  // koleksiyonundan e-Fatura gönderimini kapsar — GİB/Mikro belge takibinden
+  // (yukarısı) AYRI bir kaynak, o yüzden ayrı bölüm olarak kaldı, silinmedi.
+  const [vknSearch, setVknSearch] = useState('');
+  const [vknResult, setVknResult] = useState<VknSonuc | null>(null);
+  const [vknLoading, setVknLoading] = useState(false);
+  const [lucaKontor, setLucaKontor] = useState<LucaKontor | null>(null);
+  const [lucaNotConfigured, setLucaNotConfigured] = useState(false);
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<NativeInvoice[]>([]);
+  const [lucaApiKey, setLucaApiKey] = useState('');
+  const [lucaCompanyId, setLucaCompanyId] = useState('');
+
+  useEffect(() => {
+    // Kasıtlı olarak isAuthenticated (=hasFullAccess('ebelge')) ile kapatılmadı —
+    // orijinali (AccountingModule'deki eski e-Fatura sekmesi) koşulsuzdu, salt-okunur
+    // kullanıcılar da bekleyen fatura listesini görebiliyordu (2026-08-13 code review
+    // bulgusu: taşırken yanlışlıkla kısıtlanmıştı).
+    const unsub = onSnapshot(query(collection(db, 'invoices')), snap => {
+      setInvoices(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<NativeInvoice, 'id'>) })));
+    });
+    return unsub;
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'luca'), snap => {
+      if (snap.exists()) {
+        const cfg = snap.data() as { apiKey?: string; companyId?: string };
+        setLucaApiKey(cfg.apiKey || '');
+        setLucaCompanyId(cfg.companyId || '');
+      }
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    authFetch('/api/luca/kontor')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) { setLucaKontor(data.data); setLucaNotConfigured(false); }
+        else if (data.notConfigured) setLucaNotConfigured(true);
+      })
+      .catch(console.error);
+  }, []);
+
+  const handleVknSorgula = async () => {
+    if (!vknSearch.trim() || vknSearch.trim().length < 10) {
+      showToast('Lütfen geçerli bir VKN veya TCKN girin', 'error');
+      return;
+    }
+    setVknLoading(true);
+    setVknResult(null);
+    try {
+      const res = await authFetch(`/api/gib/vkn/${vknSearch}`, {
+        headers: { 'x-gib-api-key': lucaApiKey, 'x-gib-integrator-vkn': lucaCompanyId },
+      });
+      const data = await res.json();
+      if (data.success) setVknResult(data.data);
+      else if (data.notConfigured) showToast('GİB API anahtarı yapılandırılmamış. Ayarlar → Entegrasyonlar bölümünden LUCA_API_KEY ekleyin.', 'error');
+      else showToast(data.error || 'Sorgulama başarısız', 'error');
+    } catch {
+      showToast('Sorgulama hatası', 'error');
+    } finally {
+      setVknLoading(false);
+    }
+  };
+
+  const handleeFaturaGonder = async (invId: string) => {
+    const inv = invoices.find(i => i.id === invId);
+    if (!inv) return;
+    const ok = await confirmAction({
+      title: 'e-Fatura Gönder',
+      message: `${inv.faturaNo} numaralı fatura Luca üzerinden e-Fatura olarak gönderilecektir. Devam etmek istiyor musunuz?`,
+      confirmLabel: 'Gönder',
+    });
+    if (!ok) return;
+    setSendingInvoiceId(invId);
+    try {
+      const res = await authFetch('/api/luca/fatura-gonder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId: invId, invoiceData: inv }),
+      });
+      const data = await res.json();
+      if (data.success && data.ettn) {
+        showToast(data.message, 'success');
+        await updateDoc(doc(db, 'invoices', invId), {
+          status: 'e-Fatura Gönderildi',
+          ettn: data.ettn,
+          eFaturaGonderimTarihi: new Date().toISOString(),
+        });
+      } else if (data.notConfigured) {
+        showToast('LUCA_API_KEY yapılandırılmamış. e-Fatura gönderilemedi.', 'error');
+      } else {
+        showToast(data.error || 'Gönderim başarısız', 'error');
+      }
+    } catch {
+      showToast('Gönderim hatası', 'error');
+    } finally {
+      setSendingInvoiceId(null);
+    }
+  };
 
   // ── Mikro'dan çekme (2026-07-30) ──────────────────────────────────────────
   // Bu ekran daha önce TAMAMEN elle giriliyordu; belgeler artık Mikro/GİB'den
@@ -345,6 +461,112 @@ export default function EBelgeMerkezi({ isAuthenticated }: EBelgeMerkeziProps) {
           </div>
         ))}
       </div>
+
+      {onGoToFaturalar && (
+        <button onClick={onGoToFaturalar} className="w-full flex items-center justify-between apple-card px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+          <span className="flex items-center gap-2 text-sm font-semibold text-gray-700"><FileText size={16} className="text-gray-400" /> Fatura kayıtlarını (kesme, Mikro+Cetpa listesi) Muhasebe → Faturalar'da görün</span>
+          <span className="text-xs font-bold text-brand">Git →</span>
+        </button>
+      )}
+
+      {/* ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar ──
+          (2026-08-13, Muhasebe'nin eski "e-Fatura" sekmesinden taşındı) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="apple-card p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 rounded-xl bg-brand/10 flex items-center justify-center text-brand"><Search size={18} /></div>
+            <div>
+              <h3 className="font-bold text-gray-900 text-sm">VKN Sorgulama</h3>
+              <p className="text-[11px] text-gray-500">GİB üzerinden e-Fatura mükellefi sorgulayın</p>
+            </div>
+          </div>
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text" placeholder="TCKN veya VKN giriniz" maxLength={11}
+              className="flex-1 apple-input px-3 py-2.5 text-sm"
+              value={vknSearch} onChange={e => setVknSearch(e.target.value)}
+            />
+            <button onClick={handleVknSorgula} disabled={vknLoading} className="apple-button-primary px-5 text-sm disabled:opacity-50">
+              {vknLoading ? 'Sorgulanıyor…' : 'Sorgula'}
+            </button>
+          </div>
+          {vknResult && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-bold text-brand px-2 py-1 bg-brand/10 rounded-lg uppercase">Durum: {vknResult.durum}</span>
+                <span className="text-xs text-gray-500 font-mono">{vknResult.vknTckn}</span>
+              </div>
+              <h4 className="font-bold text-gray-900 text-sm mb-1">{vknResult.unvan}</h4>
+              <div className="flex items-center gap-2 text-xs text-gray-500"><MapPin size={12} /><span>{vknResult.vergiDairesi} / {vknResult.il}</span></div>
+            </motion.div>
+          )}
+        </div>
+
+        <div className="apple-card p-5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600"><PieChart size={18} /></div>
+              <div>
+                <h3 className="font-bold text-gray-900 text-sm">Luca Kontör Bakiyesi</h3>
+                <p className="text-[11px] text-gray-500">e-Fatura gönderim kredileriniz</p>
+              </div>
+            </div>
+            {lucaKontor ? (
+              <div className="space-y-3">
+                <div className="flex justify-between items-end">
+                  <div><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Kalan Kontör</p><p className="text-3xl font-bold text-gray-900">{(lucaKontor.remaining ?? 0).toLocaleString('tr-TR')}</p></div>
+                  <div className="text-right"><p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Toplam</p><p className="text-sm font-bold text-gray-900">{(lucaKontor.limit ?? 0).toLocaleString('tr-TR')}</p></div>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${lucaKontor.limit ? ((lucaKontor.used ?? 0) / lucaKontor.limit) * 100 : 0}%` }} /></div>
+              </div>
+            ) : lucaNotConfigured ? (
+              <div className="flex flex-col items-center justify-center h-20 gap-1.5 text-center">
+                <p className="text-xs font-bold text-amber-600">e-Fatura entegrasyonu aktif değil</p>
+                <p className="text-[11px] text-gray-400">LUCA_API_KEY ortam değişkenini ayarlayın</p>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-20 text-sm text-gray-400">Yükleniyor…</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length > 0 && (
+        <div className="apple-card overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2"><FileUp size={18} className="text-gray-400" /><h3 className="font-bold text-gray-900 text-sm">Gönderim Bekleyen Faturalar</h3></div>
+            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full uppercase">
+              {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length} adet beklemede
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50/50">
+                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Tarih / No</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Müşteri</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Tutar</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase">İşlem</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').map(inv => (
+                  <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-5 py-3 whitespace-nowrap"><div className="font-semibold text-gray-900">{inv.faturaNo}</div><div className="text-xs text-gray-500">{inv.date}</div></td>
+                    <td className="px-5 py-3"><div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.customerName}</div><div className="text-xs text-gray-500 font-mono">{inv.taxId}</div></td>
+                    <td className="px-5 py-3 whitespace-nowrap font-bold text-gray-900">{formatCurrency(inv.totalPrice ?? 0)}</td>
+                    <td className="px-5 py-3 text-right">
+                      <button onClick={() => handleeFaturaGonder(inv.id)} disabled={sendingInvoiceId === inv.id} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 text-xs flex items-center gap-1.5 ml-auto">
+                        {sendingInvoiceId === inv.id ? (<><RefreshCw size={14} className="animate-spin" /> Gönderiliyor</>) : (<><FileUp size={14} /> e-Fatura Gönder</>)}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Sub-tabs + Actions */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

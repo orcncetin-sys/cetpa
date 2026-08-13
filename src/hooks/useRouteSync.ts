@@ -15,12 +15,18 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-// Top-level tabs that map 1-to-1 with URL path segments
+// Top-level tabs that map 1-to-1 with URL path segments.
+// 'finans' was a typo that never matched the real activeTab ('finance') — this
+// silently disabled URL sync (deep-link + back/forward) for the whole Holding
+// tab group (dunning/gelirtanima/finance/ebelge/vergi all missing too), which
+// is why switching those tabs left the URL path stuck on '/holding' with only
+// the unrelated hash changing (2026-08-13 kullanıcı bulgusu, app.cetpa.com.tr/holding#finance).
 const TOP_LEVEL_TABS = new Set([
   'dashboard', 'crm', 'orders', 'inventory', 'lojistik', 'muhasebe',
   'satin-alma', 'ik', 'hukuk', 'uretim', 'kalite', 'proje', 'servis',
-  'bakim', 'raporlar', 'finans', 'ayarlar', 'entegrasyonlar', 'b2b',
+  'bakim', 'raporlar', 'finance', 'ayarlar', 'entegrasyonlar', 'b2b',
   'holding', 'ihracat', 'sube', 'performans',
+  'dunning', 'gelirtanima', 'ebelge', 'vergi',
 ]);
 
 function tabToPath(tab: string): string {

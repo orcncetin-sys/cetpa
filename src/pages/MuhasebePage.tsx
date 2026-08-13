@@ -8,13 +8,14 @@ import {
   CheckCircle2, RefreshCw, Plus, AlertCircle, AlertTriangle, Filter,
   TrendingDown, Eye, X, Edit2, Trash2, Search, Download, Upload,
   ChevronDown, ChevronRight, Info, Clock, Calendar, ArrowUpRight, ArrowDownRight,
-  ShoppingCart, Truck, Percent, Hash, Landmark, PiggyBank, Scale, Repeat, Globe, Tag,
+  ShoppingCart, Truck, Percent, Hash, Landmark, PiggyBank, Scale, Repeat, Globe, Tag, Coins,
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
+import { authFetch } from '../services/authFetch';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
 import UnauthorizedView from '../components/UnauthorizedView';
@@ -44,7 +45,7 @@ const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v:
 
 type BudgetEntry = { dept: string; budgetTRY: number };
 
-type MuhasebeTab = 'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi';
+type MuhasebeTab = 'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'|'fiyat-karsilastirma';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -271,6 +272,53 @@ export default function MuhasebePage(props: Props) {
     }, () => setCariBalanceToplam({ ar: 0, ap: 0 }));
     return () => unsub();
   }, [userRole]);
+
+  // ── Fiyat Karşılaştırma (2026-08-13 kullanıcı isteği) ───────────────────────
+  // Mikro'da hazır olmayan bir rapor: stok bazında ortalama alım fiyatı vs
+  // ortalama satış fiyatı. Sunucuda /api/reports/stok-fiyat-karsilastirma
+  // STOK_HAREKETLERI kaynaklı inventoryMovements'ı SKU+yön bazında topluyor —
+  // bu tab yalnız o özeti çeker; SKU'ya tıklayınca ayrı bir uçtan işlem detayı gelir.
+  interface FiyatKarsilastirmaRow {
+    sku: string; ad: string;
+    alisOrtFiyat: number | null; alisMiktar: number; alisTutar: number; alisAdet: number;
+    satisOrtFiyat: number | null; satisMiktar: number; satisTutar: number; satisAdet: number;
+    marjTL: number | null; marjYuzde: number | null;
+  }
+  interface FiyatDetaySatiri {
+    tarih: string | null; yon: 'alis' | 'satis'; miktar: number; tutar: number;
+    birimFiyat: number; cariKod: string | null; evrakNo: string | null;
+  }
+  const [fkRows, setFkRows] = useState<FiyatKarsilastirmaRow[]>([]);
+  const [fkLoading, setFkLoading] = useState(false);
+  const [fkError, setFkError] = useState<string | null>(null);
+  const [fkSearch, setFkSearch] = useState('');
+  const [fkDetaySku, setFkDetaySku] = useState<string | null>(null);
+  const [fkDetaySatirlari, setFkDetaySatirlari] = useState<FiyatDetaySatiri[]>([]);
+  const [fkDetayLoading, setFkDetayLoading] = useState(false);
+
+  useEffect(() => {
+    if (muhasebeTab !== 'fiyat-karsilastirma' || !userRole) return;
+    let iptal = false;
+    setFkLoading(true); setFkError(null);
+    authFetch('/api/reports/stok-fiyat-karsilastirma')
+      .then(r => r.json())
+      .then(json => {
+        if (iptal) return;
+        if (json.success) setFkRows(json.rows);
+        else setFkError(json.error || (currentLanguage === 'tr' ? 'Veri alınamadı.' : 'Failed to load.'));
+      })
+      .catch(() => { if (!iptal) setFkError(currentLanguage === 'tr' ? 'Veri alınamadı.' : 'Failed to load.'); })
+      .finally(() => { if (!iptal) setFkLoading(false); });
+    return () => { iptal = true; };
+  }, [muhasebeTab, userRole, currentLanguage]);
+
+  const fkAcDetay = (sku: string) => {
+    setFkDetaySku(sku); setFkDetayLoading(true); setFkDetaySatirlari([]);
+    authFetch(`/api/reports/stok-fiyat-karsilastirma/${encodeURIComponent(sku)}/detay`)
+      .then(r => r.json())
+      .then(json => { if (json.success) setFkDetaySatirlari(json.satirlar); })
+      .finally(() => setFkDetayLoading(false));
+  };
 
   return (
             <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -1278,6 +1326,127 @@ export default function MuhasebePage(props: Props) {
                     </motion.div>
                   )}
 
+                  {/* ── Fiyat Karşılaştırma (2026-08-13) ── */}
+                  {muhasebeTab === 'fiyat-karsilastirma' && (() => {
+                    const trFk = currentLanguage === 'tr';
+                    // fmtKpi (props'tan gelen paylaşılan formatlayıcı) kullanılır — kendi
+                    // TL-sabit formatlayıcımızı yazmak kur değiştirme (kpiCurrency) desteğini
+                    // atlıyordu, kullanıcı USD/EUR'a geçince bu sekme yanlışlıkla TL göstermeye
+                    // devam ederdi (2026-08-13 code review bulgusu).
+                    const fmtF = (v: number | null) => v == null ? '—' : fmtKpi(v, 'full', 2);
+                    const filtered = fkRows.filter(r =>
+                      !fkSearch || r.sku.toLowerCase().includes(fkSearch.toLowerCase()) || r.ad.toLowerCase().includes(fkSearch.toLowerCase())
+                    );
+                    return (
+                      <motion.div key="muhasebe-fiyat-karsilastirma" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                        <ModuleHeader
+                          title={trFk ? 'Fiyat Karşılaştırma' : 'Price Comparison'}
+                          subtitle={trFk ? 'Stok bazında ortalama alım fiyatı ve satış fiyatı — Mikro hazır raporunda yok, stok hareketlerinden hesaplanır' : 'Average purchase vs. sale price per SKU — computed from stock movements'}
+                          icon={Coins}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Search size={14} className="text-gray-400" />
+                          <input value={fkSearch} onChange={e => setFkSearch(e.target.value)} placeholder={trFk ? 'SKU veya ürün adı ara...' : 'Search SKU or name...'} className="apple-input px-3 py-2 text-sm flex-1 max-w-xs" />
+                          {!fkLoading && <span className="text-xs text-gray-400">{filtered.length} {trFk ? 'ürün' : 'items'}</span>}
+                        </div>
+                        {fkLoading && <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Yükleniyor…' : 'Loading…'}</p>}
+                        {fkError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm text-red-700">{fkError}</div>}
+                        {!fkLoading && !fkError && filtered.length === 0 && (
+                          <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Mikro stok hareketi bulunamadı. "Stok Hareketleri" çekilmiş mi?' : 'No Mikro stock movements found.'}</p>
+                        )}
+                        {!fkLoading && !fkError && filtered.length > 0 && (
+                          <div className="apple-card overflow-hidden">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="bg-gray-50 border-b border-gray-100">
+                                    <th className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Ürün' : 'Product'}</th>
+                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-blue-500 uppercase">{trFk ? 'Ort. Alım Fiyatı' : 'Avg. Purchase'}</th>
+                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{trFk ? 'Alım Miktarı' : 'Purchase Qty'}</th>
+                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-emerald-600 uppercase">{trFk ? 'Ort. Satış Fiyatı' : 'Avg. Sale'}</th>
+                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{trFk ? 'Satış Miktarı' : 'Sale Qty'}</th>
+                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Marj' : 'Margin'}</th>
+                                    <th className="px-4 py-3"></th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {filtered.map(r => (
+                                    <tr key={r.sku} className="hover:bg-gray-50/50 transition-colors cursor-pointer" onClick={() => fkAcDetay(r.sku)}>
+                                      <td className="px-4 py-3">
+                                        <p className="font-semibold text-gray-800">{r.ad}</p>
+                                        <p className="text-[10px] text-gray-400 font-mono">{r.sku}</p>
+                                      </td>
+                                      <td className="px-4 py-3 text-right font-medium text-blue-600">{fmtF(r.alisOrtFiyat)}</td>
+                                      <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.alisMiktar.toLocaleString('tr-TR')}</td>
+                                      <td className="px-4 py-3 text-right font-medium text-emerald-600">{fmtF(r.satisOrtFiyat)}</td>
+                                      <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.satisMiktar.toLocaleString('tr-TR')}</td>
+                                      <td className={`px-4 py-3 text-right font-bold ${r.marjTL == null ? 'text-gray-300' : r.marjTL >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                        {r.marjTL == null ? '—' : `${fmtF(r.marjTL)}${r.marjYuzde != null ? ` (%${r.marjYuzde.toFixed(0)})` : ''}`}
+                                      </td>
+                                      <td className="px-4 py-3 text-right"><ChevronRight size={14} className="text-gray-300" /></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-gray-400 text-center">{trFk ? 'Fiyatlar KDV hariç, satır bazlı gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI) ağırlıklı ortalamadır.' : 'Prices are VAT-excluded, weighted averages from real Mikro stock movement lines.'}</p>
+
+                        {/* SKU detay modalı */}
+                        {fkDetaySku && (
+                          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setFkDetaySku(null)}>
+                            <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
+                                <div>
+                                  <h3 className="font-bold text-gray-800">{trFk ? 'İşlem Detayı' : 'Transaction Detail'}</h3>
+                                  <p className="text-xs text-gray-500 mt-0.5 font-mono">{fkDetaySku}</p>
+                                </div>
+                                <button onClick={() => setFkDetaySku(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+                              </div>
+                              <div className="overflow-y-auto flex-1 p-4">
+                                {fkDetayLoading && <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Yükleniyor…' : 'Loading…'}</p>}
+                                {!fkDetayLoading && fkDetaySatirlari.length === 0 && (
+                                  <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Hareket bulunamadı.' : 'No movements found.'}</p>
+                                )}
+                                {!fkDetayLoading && fkDetaySatirlari.length > 0 && (
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="border-b border-gray-100">
+                                        <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tarih' : 'Date'}</th>
+                                        <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Yön' : 'Direction'}</th>
+                                        <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Miktar' : 'Qty'}</th>
+                                        <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Birim Fiyat' : 'Unit Price'}</th>
+                                        <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tutar' : 'Amount'}</th>
+                                        <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{trFk ? 'Evrak' : 'Doc'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                      {fkDetaySatirlari.map((s, i) => (
+                                        <tr key={i} className="hover:bg-gray-50/50">
+                                          <td className="py-2 px-2 text-gray-600">{s.tarih ? String(s.tarih).slice(0, 10) : '—'}</td>
+                                          <td className="py-2 px-2">
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${s.yon === 'alis' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                              {s.yon === 'alis' ? (trFk ? 'Alış' : 'Purchase') : (trFk ? 'Satış' : 'Sale')}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 px-2 text-right text-gray-700">{s.miktar.toLocaleString('tr-TR')}</td>
+                                          <td className="py-2 px-2 text-right font-medium text-gray-800">{fmtF(s.birimFiyat)}</td>
+                                          <td className="py-2 px-2 text-right text-gray-600">{fmtF(s.tutar)}</td>
+                                          <td className="py-2 px-2 text-gray-400 hidden sm:table-cell">{s.evrakNo || '—'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })()}
+
                   {/* ── Phase 143: Profit & Loss Statement ── */}
                   {muhasebeTab === 'pnl' && (() => {
                     // ── Shared currency setup (used by entire PnL tab) ──────────
@@ -1621,13 +1790,26 @@ export default function MuhasebePage(props: Props) {
                     // — Aktif (Assets) —
                     const kasa547   = p547BankAccounts.filter(b => b.accountType === 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
                     const banka547  = p547BankAccounts.filter(b => b.accountType !== 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
-                    const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0);
+                    // Ticari Alacaklar/Borçlar: native (orders/apPurchaseOrders) bu caride
+                    // neredeyse boş — satışlar/alışlar Mikro'dan geliyor. cariBalanceToplam
+                    // (Finansal Oranlar'da zaten kullanılan, Mikro cariBalances'tan gerçek
+                    // net bakiye toplamı) additive eklendi — aynı desen KDV/Satışlar'da da var.
+                    const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0) + cariBalanceToplam.ar;
                     const stok547   = inventory.reduce((s,i) => s + (i.stockLevel||0) * ((i.prices?.['Retail']??i.price??0)), 0);
                     const duranVarlık547 = p547FixedAssets.reduce((s,fa) => s + Math.max(0, fa.cost - fa.depreciation), 0);
                     const toplamAktif547 = kasa547 + banka547 + ar547 + stok547 + duranVarlık547;
                     // — Pasif (Liabilities + Equity) —
-                    const ap547     = apPurchaseOrders.filter(po => !['Teslim Alındı','İptal Edildi'].includes(po.status)).reduce((s,po) => s + (po.totalAmount||0), 0);
-                    const kdvBorc547 = orders.filter(o => o.faturali && o.kdvTutari).reduce((s,o) => s + (o.kdvTutari||0), 0);
+                    const ap547     = apPurchaseOrders.filter(po => !['Teslim Alındı','İptal Edildi'].includes(po.status)).reduce((s,po) => s + (po.totalAmount||0), 0) + cariBalanceToplam.ap;
+                    // KDV borcu DÖNEMSEL bir kalemdir (aylık beyan/ödeme) — mikroFaturalar'ın
+                    // TAMAMINI toplamak (önceki hata, 2026-08-13 code review bulgusu) yıllarca
+                    // tahsil edilmiş ve zaten ödenmiş KDV'yi de borç gibi gösterip bilançoyu
+                    // şişiriyordu. Cari aya (henüz beyan edilmemiş varsayılan dönem) sınırlandı —
+                    // aynı kapsam KDV Analizi/KDV Mutabakat sekmelerinde de kullanılıyor.
+                    const guncelAy547 = new Date().toISOString().slice(0, 7);
+                    const mikroKdvBorc547 = mikroFaturalar
+                      .filter(f => f.tarih.startsWith(guncelAy547))
+                      .reduce((s,f) => s + (f.yon === 'giden' ? f.kdv : -f.kdv), 0);
+                    const kdvBorc547 = orders.filter(o => o.faturali && o.kdvTutari).reduce((s,o) => s + (o.kdvTutari||0), 0) + Math.max(0, mikroKdvBorc547);
                     const toplamBorç547 = ap547 + kdvBorc547;
                     const ozkaynak547 = toplamAktif547 - toplamBorç547;
                     const toplamPasif547 = toplamBorç547 + ozkaynak547;
@@ -1717,6 +1899,7 @@ export default function MuhasebePage(props: Props) {
                           </div>
                         </div>
                         <p className="text-[10px] text-gray-400 text-center">{tr547?'Veriler veritabanından anlık hesaplanmaktadır. Muhasebe yazılımı çıktısı olarak kullanmayınız.':'Data is calculated live from the database. Do not use as official accounting output.'}</p>
+                        <p className="text-[10px] text-gray-400 text-center">{tr547?'Kasa/Banka bakiyeleri elle girilen/CSV ile içe aktarılan kayıtlara dayanır — canlı Mikro banka senkronu yok.':'Cash/bank balances come from manually entered or CSV-imported records — there is no live Mikro banking sync.'}</p>
                       </motion.div>
                     );
                   })()}
@@ -2102,22 +2285,20 @@ export default function MuhasebePage(props: Props) {
                     const tr558 = currentLanguage === 'tr';
                     const yearNum = Number(p558Year);
 
-                    // Build monthly KDV collected from orders
+                    // KAYNAK: Mikro faturaları (giden=satış → tahsil edilen KDV, gelen=alış
+                    // → ödenen KDV). Önceki sürüm yalnız native orders'a bakıyordu — bu
+                    // carinin satışları Mikro'dan geldiği için orders.kdvTutari hep boş
+                    // kalıyor, ekran hep ₺0 gösteriyordu (KDV Mutabakat/Phase 617'de aynı
+                    // kök sebep zaten çözülmüştü, burada unutulmuştu). "Ödenen KDV" de
+                    // artık gerçek alış faturası KDV'si — eski %30-tahmin kaldırıldı.
+                    const yilFaturalari = mikroFaturalar.filter(f => f.tarih.startsWith(String(yearNum)));
+
                     const monthlyData = Array.from({length:12},(_,i) => {
                       const m = i + 1;
-                      const monthOrders = orders.filter(o => {
-                        const raw = o.createdAt ?? o.syncedAt;
-                        if (!raw || o.status === 'Cancelled') return false;
-                        const d = typeof (raw as {toDate?:()=>Date}).toDate === 'function'
-                          ? (raw as {toDate:()=>Date}).toDate()
-                          : new Date(raw as string);
-                        return d.getFullYear() === yearNum && d.getMonth() === i;
-                      });
-                      const collected = monthOrders.reduce((s,o) => s + (Number((o as unknown as Record<string,unknown>).kdvTutari) || 0), 0);
-                      // Estimate KDV paid: assume 18% KDV on 80% of order value (as purchases)
-                      const netSales = monthOrders.reduce((s,o) => s + (o.totalPrice || 0), 0);
-                      const paidEst = Math.round(netSales * 0.8 * 0.18 * 0.3); // rough 30% of sales go as purchases
-                      return { m, collected, paidEst, net: collected - paidEst };
+                      const monthKey = `${yearNum}-${String(m).padStart(2,'0')}`;
+                      const collected = yilFaturalari.filter(f => f.yon === 'giden' && f.tarih.startsWith(monthKey)).reduce((s,f) => s + f.kdv, 0);
+                      const paid = yilFaturalari.filter(f => f.yon === 'gelen' && f.tarih.startsWith(monthKey)).reduce((s,f) => s + f.kdv, 0);
+                      return { m, collected, paidEst: paid, net: collected - paid };
                     });
 
                     const totCol = monthlyData.reduce((s,d) => s+d.collected, 0);
@@ -2128,12 +2309,11 @@ export default function MuhasebePage(props: Props) {
                       : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                     const maxVal = Math.max(...monthlyData.map(d => d.collected), 1);
 
-                    // KDV by rate breakdown from orders
-                    const rateMap: Record<number,number> = {};
-                    orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-                      const rate = Number((o as unknown as Record<string,unknown>).kdvOran) || 18;
-                      const kdv = Number((o as unknown as Record<string,unknown>).kdvTutari) || 0;
-                      if (kdv > 0) rateMap[rate] = (rateMap[rate] || 0) + kdv;
+                    // KDV by rate breakdown — Mikro giden (satış) faturalarından, gerçek oran.
+                    const rateMap: Record<string,number> = {};
+                    yilFaturalari.filter(f => f.yon === 'giden' && f.kdv > 0).forEach(f => {
+                      const key = f.oran == null ? 'bilinmiyor' : String(f.oran);
+                      rateMap[key] = (rateMap[key] || 0) + f.kdv;
                     });
 
                     return (
@@ -2151,11 +2331,18 @@ export default function MuhasebePage(props: Props) {
                           </div>
                         </div>
 
+                        {yilFaturalari.length === 0 && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            {tr558 ? `${yearNum} yılında Mikro faturası bulunamadı. "Faturalar" çekilmiş mi?` : `No Mikro invoices found for ${yearNum}.`}
+                          </div>
+                        )}
+
                         {/* KPI bar */}
                         <div className="grid grid-cols-3 gap-3">
                           {[
                             { label: tr558?'Tahsil Edilen KDV':'KDV Collected', val: totCol, color:'text-emerald-700', bg:'bg-emerald-50' },
-                            { label: tr558?'Ödenen KDV (Tahmini)':'KDV Paid (Est)', val: totPaid, color:'text-red-600', bg:'bg-red-50' },
+                            { label: tr558?'Ödenen KDV':'KDV Paid', val: totPaid, color:'text-red-600', bg:'bg-red-50' },
                             { label: tr558?'Net KDV Borcu':'Net KDV Payable', val: totNet, color: totNet>0?'text-amber-700':'text-blue-700', bg: totNet>0?'bg-amber-50':'bg-blue-50' },
                           ].map(k => (
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -2184,7 +2371,7 @@ export default function MuhasebePage(props: Props) {
                           </div>
                           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-brand/70 inline-block" />{tr558?'Tahsil':'Collected'}</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-300/50 inline-block" />{tr558?'Ödenen (Tahmini)':'Paid (Est)'}</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-300/50 inline-block" />{tr558?'Ödenen':'Paid'}</span>
                           </div>
                         </div>
 
@@ -2195,7 +2382,7 @@ export default function MuhasebePage(props: Props) {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="border-b border-gray-100">
-                                  {[tr558?'Ay':'Month', tr558?'Tahsil Edilen KDV':'Collected', tr558?'Ödenen KDV (Tahmini)':'Paid (Est)', tr558?'Net KDV':'Net'].map(h => (
+                                  {[tr558?'Ay':'Month', tr558?'Tahsil Edilen KDV':'Collected', tr558?'Ödenen KDV':'Paid', tr558?'Net KDV':'Net'].map(h => (
                                     <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                   ))}
                                 </tr>
@@ -2224,18 +2411,18 @@ export default function MuhasebePage(props: Props) {
                           </div>
                           {Object.keys(rateMap).length > 0 && (
                             <div className="mt-4 pt-4 border-t border-gray-100">
-                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">{tr558 ? 'KDV Oranına Göre Dağılım (Tüm Zamanlar)' : 'Distribution by VAT Rate (All Time)'}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">{tr558 ? `KDV Oranına Göre Dağılım (${yearNum})` : `Distribution by VAT Rate (${yearNum})`}</p>
                               <div className="flex flex-wrap gap-3">
-                                {Object.entries(rateMap).sort((a,b) => Number(b[0])-Number(a[0])).map(([rate, total]) => (
+                                {Object.entries(rateMap).sort((a,b) => (Number(b[0])||-1)-(Number(a[0])||-1)).map(([rate, total]) => (
                                   <div key={rate} className="bg-gray-50 rounded-xl px-3 py-2">
-                                    <p className="text-[10px] text-gray-400">%{rate} KDV</p>
+                                    <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (tr558?'Oran yok':'No rate') : `%${rate} KDV`}</p>
                                     <p className="font-bold text-gray-800 text-sm">₺{total.toLocaleString('tr-TR')}</p>
                                   </div>
                                 ))}
                               </div>
                             </div>
                           )}
-                          <p className="text-[10px] text-gray-400 mt-3">* {tr558?'Ödenen KDV tahminidir. Gerçek değerler için alış faturalarını muhasebeye girin.':'Paid VAT is estimated. Enter purchase invoices for accurate values.'}</p>
+                          <p className="text-[10px] text-gray-400 mt-3">* {tr558?'Tahsil edilen ve ödenen KDV, Mikro\'dan çekilen satış ve alış faturalarının gerçek KDV tutarlarına dayanır (tahmin değildir).':'Collected and paid VAT are the real amounts from synced Mikro sales/purchase invoices (not estimated).'}</p>
                         </div>
                       </motion.div>
                     );

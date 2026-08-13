@@ -9,7 +9,7 @@ import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Trash2, Edit2, Download, Building2, BookOpen, TrendingUp, TrendingDown,
-  X, Save, RefreshCw, Link, Eye, Calculator, BarChart3, FileText, Briefcase,
+  X, Save, RefreshCw, Eye, Calculator, BarChart3, FileText, Briefcase,
   AlertCircle, CheckCircle, Info, ArrowUpDown, ShoppingCart, Users, Truck, Package,
   ArrowRightLeft, CreditCard, FileUp, FileDown, Search, Home, MapPin, User, PieChart,
   Wallet, Layers, Landmark, Palette, Settings, Upload} from 'lucide-react';
@@ -327,6 +327,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [detayDepo, setDetayDepo] = useState<Warehouse | null>(null);
   // Müşteriye tıklayınca cari ekstre/hareket detayını gösteren modal (2026-08-01).
   const [ekstreMusteri, setEkstreMusteri] = useState<Customer | null>(null);
+  // Tedarikçiye tıklayınca aynı ekstre/hareket detayı — Mikro'da tek cari havuzu
+  // olduğundan tedarikçinin mikroCariKod'u da mikroCariHareketler'de var (2026-08-13,
+  // kullanıcı bulgusu: Tedarikçiler'deki göz ikonu Düzenle ile aynı şeyi yapıyordu).
+  const [ekstreTedarikci, setEkstreTedarikci] = useState<Supplier | null>(null);
 
   const [showStockModal, setShowStockModal] = useState(false);
   const [stockForm, setStockForm] = useState({ productName: '', sku: '', quantity: 0, warehouseId: '', category: '', notes: '' });
@@ -546,105 +550,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [waybillType, setWaybillType] = useState<'giden' | 'gelen'>('giden');
 
   // e-Fatura States
-  const [vknSearch, setVknSearch] = useState('');
-  const [vknResult, setVknResult] = useState<any>(null);
-  const [vknLoading, setVknLoading] = useState(false);
-  const [lucaKontor, setLucaKontor] = useState<any>(null);
-  const [lucaNotConfigured, setLucaNotConfigured] = useState(false);
-  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
-
   // Mikro Bank Movements
   const [mikroBankMovements, setMikroBankMovements] = useState<any[]>([]);
   const [mikroBankLoading, setMikroBankLoading] = useState(false);
   const [mikroBankLastSync, setMikroBankLastSync] = useState<string | null>(null);
   const [showErpConfig, setShowErpConfig] = useState(false); // ERP bağlantı ayarları formu (Mikro/Luca kimlik)
   const [erpConfigSaving, setErpConfigSaving] = useState<'mikro' | 'luca' | null>(null);
-
-  useEffect(() => {
-    if (accountingTab === 'e-fatura') {
-      authFetch('/api/luca/kontor')
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            setLucaKontor(data.data);
-            setLucaNotConfigured(false);
-          } else if (data.notConfigured) {
-            setLucaNotConfigured(true);
-          }
-        })
-        .catch(console.error);
-    }
-  }, [accountingTab]);
-
-  const handleVknSorgula = async () => {
-    if (!vknSearch.trim() || vknSearch.trim().length < 10) {
-      showToast('Lütfen geçerli bir VKN veya TCKN girin', 'error');
-      return;
-    }
-    setVknLoading(true);
-    setVknResult(null);
-    try {
-      const res = await authFetch(`/api/gib/vkn/${vknSearch}`, {
-        headers: {
-          'x-gib-api-key': lucaApiKey,
-          'x-gib-integrator-vkn': lucaCompanyId
-        }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setVknResult(data.data);
-      } else if (data.notConfigured) {
-        showToast('GİB API anahtarı yapılandırılmamış. Lütfen Ayarlar → Entegrasyonlar bölümünden LUCA_API_KEY ekleyin.', 'error');
-      } else {
-        showToast(data.error || 'Sorgulama başarısız', 'error');
-      }
-    } catch (err) {
-      showToast('Sorgulama hatası', 'error');
-    } finally {
-      setVknLoading(false);
-    }
-  };
-
-  const handleeFaturaGonder = async (invId: string) => {
-    const inv = invoices.find(i => i.id === invId);
-    if (!inv) return;
-
-    setConfirmModal({
-      isOpen: true,
-      title: currentLanguage === 'tr' ? 'e-Fatura Gönder' : 'Send e-Invoice',
-      message: currentLanguage === 'tr' 
-        ? `${inv.faturaNo} numaralı fatura Luca üzerinden e-Fatura olarak gönderilecektir. Devam etmek istiyor musunuz?`
-        : `Invoice ${inv.faturaNo} will be sent as an e-Invoice via Luca. Do you want to continue?`,
-      onConfirm: async () => {
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        setSendingInvoiceId(invId);
-        try {
-          const res = await authFetch('/api/luca/fatura-gonder', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ invoiceId: invId, invoiceData: inv })
-          });
-          const data = await res.json();
-          if (data.success && data.ettn) {
-            showToast(data.message, 'success');
-            await updateDoc(doc(db, 'invoices', invId), {
-              status: 'e-Fatura Gönderildi',
-              ettn: data.ettn,
-              eFaturaGonderimTarihi: new Date().toISOString(),
-            });
-          } else if (data.notConfigured) {
-            showToast('LUCA_API_KEY yapılandırılmamış. e-Fatura gönderilemedi.', 'error');
-          } else {
-            showToast(data.error || 'Gönderim başarısız', 'error');
-          }
-        } catch (err) {
-          showToast('Gönderim hatası', 'error');
-        } finally {
-          setSendingInvoiceId(null);
-        }
-      }
-    });
-  };
 
   // Search states
   const [customerSearch, setCustomerSearch] = useState('');
@@ -2138,7 +2049,6 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const tabs = [
     { key: 'faturalar', label: currentLanguage === 'tr' ? 'Faturalar' : 'Invoices', icon: FileText },
-    { key: 'e-fatura', label: 'e-Fatura', icon: Link },
     { key: 'evrak_tasarimi', label: currentLanguage === 'tr' ? 'Evrak Tasarımı' : 'Doc Design', icon: Palette },
     { key: 'banka', label: t.bankAndCash, icon: Building2 },
     { key: 'yevmiye', label: t.journal, icon: BookOpen },
@@ -3596,159 +3506,6 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         </motion.div>
       )}
 
-      {accountingTab === 'e-fatura' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* VKN Sorgulama */}
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-2xl bg-[#ff4000]/10 flex items-center justify-center text-[#ff4000]">
-                  <Search className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 text-lg">VKN Sorgulama</h3>
-                  <p className="text-xs text-gray-500">GİB üzerinden e-Fatura mükellefi sorgulayın</p>
-                </div>
-              </div>
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  placeholder="TCKN veya VKN giriniz"
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-[#ff4000] text-sm"
-                  value={vknSearch}
-                  onChange={(e) => setVknSearch(e.target.value)}
-                  maxLength={11}
-                />
-                <button
-                  onClick={handleVknSorgula}
-                  disabled={vknLoading}
-                  className="bg-[#ff4000] text-white px-6 rounded-xl font-bold text-sm hover:bg-[#e63900] transition-colors whitespace-nowrap disabled:opacity-50"
-                >
-                  {vknLoading ? 'Sorgulanıyor...' : 'Sorgula'}
-                </button>
-              </div>
-              {vknResult && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-bold text-[#ff4000] px-2 py-1 bg-[#ff4000]/10 rounded-lg uppercase">Durum: {vknResult.durum}</span>
-                    <span className="text-xs text-gray-500 font-mono">{vknResult.vknTckn}</span>
-                  </div>
-                  <h4 className="font-bold text-gray-900 text-sm mb-1">{vknResult.unvan}</h4>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <MapPin className="w-3 h-3" />
-                    <span>{vknResult.vergiDairesi} / {vknResult.il}</span>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Luca Kontör */}
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
-                    <PieChart className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-900 text-lg">Luca Kontör Bakiyesi</h3>
-                    <p className="text-xs text-gray-500">e-Fatura gönderim kredileriniz</p>
-                  </div>
-                </div>
-                {lucaKontor ? (
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                      <div>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Kalan Kontör</p>
-                        <p className="text-4xl font-bold text-gray-900">{(lucaKontor.remaining ?? 0).toLocaleString('tr-TR')}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Toplam</p>
-                        <p className="text-sm font-bold text-gray-900">{(lucaKontor.limit ?? 0).toLocaleString('tr-TR')}</p>
-                      </div>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(lucaKontor.used / lucaKontor.limit) * 100}%` }} />
-                    </div>
-                    <p className="text-[10px] text-gray-400 flex items-center gap-1 justify-end">
-                      <RefreshCw className="w-3 h-3" /> Son güncelleme: {format(new Date(), 'HH:mm')}
-                    </p>
-                  </div>
-                ) : lucaNotConfigured ? (
-                  <div className="flex flex-col items-center justify-center h-24 gap-2 text-center">
-                    <p className="text-xs font-bold text-amber-600">e-Fatura entegrasyonu aktif değil</p>
-                    <p className="text-[11px] text-gray-400">LUCA_API_KEY ortam değişkenini ayarlayın</p>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center h-24 text-sm text-gray-400">Yükleniyor...</div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* e-Fatura Gönderimi Listesi */}
-          <div className="bg-white rounded-3xl p-0 shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileUp className="w-5 h-5 text-gray-400" />
-                <h3 className="font-bold text-gray-900">Gönderim Bekleyen Faturalar</h3>
-              </div>
-              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full uppercase">
-                {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length} adet beklemede
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="bg-gray-50/50">
-                    <th className="px-6 py-4 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tarih / No</th>
-                    <th className="px-6 py-4 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Müşteri</th>
-                    <th className="px-6 py-4 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tutar</th>
-                    <th className="px-6 py-4 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wider">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').map(inv => (
-                    <tr key={inv.id as string} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="font-semibold text-gray-900">{inv.faturaNo as string}</div>
-                        <div className="text-xs text-gray-500">{inv.date as string}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.customerName as string}</div>
-                        <div className="text-xs text-gray-500 font-mono">{inv.taxId as string}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900">
-                        {formatTRY(inv.totalPrice as number)}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => handleeFaturaGonder(inv.id as string)}
-                          disabled={sendingInvoiceId === inv.id}
-                          className="px-4 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 text-xs flex items-center gap-1.5 ml-auto"
-                        >
-                          {sendingInvoiceId === inv.id ? (
-                            <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Gönderiliyor</>
-                          ) : (
-                            <><FileUp className="w-3.5 h-3.5" /> e-Fatura Gönder</>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="px-6 py-12 text-center text-gray-400 text-sm">
-                        Gönderim bekleyen e-Fatura bulunmuyor.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
       {/* SATIŞLAR */}
       {accountingTab === 'evrak_tasarimi' && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="h-full">
@@ -4212,7 +3969,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{s.taxNo || '—'}</td>
                       <td className="py-2.5 px-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                          <button onClick={() => setEkstreTedarikci(s)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
                           <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                           <button onClick={() => deleteSupplier(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                         </div>
@@ -4223,6 +3980,31 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               </table>
             </div>
           </div>
+
+          {/* Cari ekstre / hareket detayı — tedarikçi adına/göze tıklayınca. Mikro'da
+              tek cari havuzu olduğundan aynı CariEkstrePanel (mikroCariHareketler,
+              cariKod ile) yeniden kullanılıyor — Cariler sekmesindeki desenin aynısı. */}
+          {ekstreTedarikci && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEkstreTedarikci(null)}>
+              <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
+                  <div>
+                    <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{ekstreTedarikci.name}</p>
+                  </div>
+                  <button onClick={() => setEkstreTedarikci(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+                </div>
+                <div className="overflow-y-auto flex-1 p-2 sm:p-4">
+                  {(() => {
+                    const cariKod = ekstreTedarikci.mikroCariKod || ekstreTedarikci.taxNo || '';
+                    return cariKod
+                      ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} customerName={ekstreTedarikci.name} />
+                      : <p className="text-center text-gray-400 text-sm py-8">{currentLanguage === 'tr' ? 'Bu tedarikçi bir Mikro cari koduna bağlı değil (elle eklenmiş).' : 'This supplier is not linked to a Mikro cari code (manually added).'}</p>;
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 

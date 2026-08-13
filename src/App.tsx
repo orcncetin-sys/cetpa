@@ -612,7 +612,7 @@ function AppContent() {
   const [crmTab, setCrmTab] = useState('leads');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'|'tenants'>('overview');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'|'fiyat-karsilastirma'>('genel');
   // Birleşik Muhasebe menüsü (2026-07-21): AccountingModule'ün hangi iç sekmesinde
   // olduğu App seviyesinde tutulur ki sidebar'dan doğrudan bir ERP sekmesi açılabilsin.
   const [muhasebeAccountingTab, setMuhasebeAccountingTab] = useState<string>('faturalar');
@@ -5644,14 +5644,20 @@ function AppContent() {
             </motion.div>
           )}
 
-          {/* ── Integrations / Entegrasyonlar ── */}
-          {/* ── Finance Panel ── */}
-          {activeTab === 'finance' && (
-            <motion.div key="finance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bkz. MuhasebeMenuBar. */}
+          {/* ── Holding grubu: Otomatik Hatırlatıcı / Holding / IFRS15 / Finans Paneli /
+              E-Belge / Vergi Takvimi — TEK motion.div + TEK key altında birleşti
+              (2026-08-13, kullanıcı bulgusu: aralarında geçiş "sayfa yenileniyor" gibi
+              hissettiriyordu). Kök neden: her biri AYRI activeTab + AnimatePresence
+              child'ıydı, geçişte tam exit→wait→enter animasyonu + üstteki büyük
+              Suspense fallback'i tetikleniyordu. activeTab DEĞERLERİ DEĞİŞMEDİ —
+              canAccess/RBAC, DashboardPage girişleri (setActiveTab('vergi'/'ebelge')),
+              MuhasebeGroupNav, useRouteSync TOP_LEVEL_TABS hepsi aynı kaldı; yalnız
+              JSX'te aynı gruba toplandı, iç içe activeTab kontrolüyle seçiliyor. */}
+          {(activeTab === 'finance' || activeTab === 'ebelge' || activeTab === 'dunning' || activeTab === 'holding' || activeTab === 'gelirtanima' || activeTab === 'vergi') && (
+            <motion.div key="holding-hub" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               <MuhasebeMenuBar
                 currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'finance'}
+                aktifMi={(tt) => tt.kind === 'app' && tt.tab === activeTab}
                 onSelect={(tt) => {
                   if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
                   setActiveTab('muhasebe');
@@ -5659,7 +5665,62 @@ function AppContent() {
                   else setMuhasebeTab(tt.tab as typeof muhasebeTab);
                 }}
               />
-              <FinancePanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} exchangeRates={exchangeRates} displayCurrency={kpiCurrency} />
+
+              {activeTab === 'finance' && (
+                <FinancePanel orders={orders} currentLanguage={currentLanguage as 'tr' | 'en'} exchangeRates={exchangeRates} displayCurrency={kpiCurrency} />
+              )}
+
+              {activeTab === 'ebelge' && (
+                !canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
+                  <>
+                    {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                    <MuhasebeGroupNav aktif="ebelge" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
+                    <ModuleHeader
+                      title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
+                      subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
+                      icon={FileText}
+                    />
+                    <EBelgeMerkezi
+                      currentLanguage={currentLanguage}
+                      isAuthenticated={!!user && hasFullAccess('ebelge')}
+                      onGoToFaturalar={() => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); setMuhasebeAccountingTab('faturalar'); }}
+                    />
+                  </>
+                )
+              )}
+
+              {activeTab === 'dunning' && (
+                <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                  <DunningModule currentLanguage={currentLanguage} isAuthenticated={!!user} orders={orders} />
+                </React.Suspense>
+              )}
+
+              {activeTab === 'holding' && (
+                <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                  <HoldingModule currentLanguage={currentLanguage} isAuthenticated={!!user} exchangeRates={exchangeRates} />
+                </React.Suspense>
+              )}
+
+              {activeTab === 'gelirtanima' && (
+                <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                  <GelirTanimaModule currentLanguage={currentLanguage} isAuthenticated={!!user} />
+                </React.Suspense>
+              )}
+
+              {activeTab === 'vergi' && (
+                !canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
+                  <>
+                    {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+                    <MuhasebeGroupNav aktif="vergi" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
+                    <ModuleHeader
+                      title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                      subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
+                      icon={Receipt}
+                    />
+                    <VergiTakvimi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('vergi')} orders={orders} />
+                  </>
+                )
+              )}
             </motion.div>
           )}
 
@@ -5775,36 +5836,6 @@ function AppContent() {
           {activeTab === 'b2b' && (
             <motion.div key="b2b" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <B2BPortal user={user} userRole={userRole} leads={leads} inventory={inventory} orders={orders} currentT={currentT} currentLanguage={currentLanguage} exchangeRates={exchangeRates} />
-            </motion.div>
-          )}
-
-          {/* ── E-Belge Merkezi ── */}
-          {activeTab === 'ebelge' && (
-            <motion.div key="ebelge" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bu sayfalar menüden
-                  açılıyor ama ayrı app sekmesi oldukları için bar kayboluyordu. */}
-              <MuhasebeMenuBar
-                currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'ebelge'}
-                onSelect={(tt) => {
-                  if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
-                  setActiveTab('muhasebe');
-                  if (tt.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(tt.tab); }
-                  else setMuhasebeTab(tt.tab as typeof muhasebeTab);
-                }}
-              />
-              {!canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
-                <>
-                  {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <MuhasebeGroupNav aktif="ebelge" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
-                  <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
-                    subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
-                    icon={FileText}
-                  />
-                  <EBelgeMerkezi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('ebelge')} />
-                </>
-              )}
             </motion.div>
           )}
 
@@ -5942,31 +5973,6 @@ function AppContent() {
             </motion.div>
           )}
 
-          {/* ── Dunning / Otomatik Tahsilat Hatırlatıcı ── */}
-          {activeTab === 'dunning' && (
-            <motion.div key="dunning" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bu sayfalar menüden
-                  açılıyor ama ayrı app sekmesi oldukları için bar kayboluyordu. */}
-              <MuhasebeMenuBar
-                currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'dunning'}
-                onSelect={(tt) => {
-                  if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
-                  setActiveTab('muhasebe');
-                  if (tt.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(tt.tab); }
-                  else setMuhasebeTab(tt.tab as typeof muhasebeTab);
-                }}
-              />
-              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
-                <DunningModule
-                  currentLanguage={currentLanguage}
-                  isAuthenticated={!!user}
-                  orders={orders}
-                />
-              </React.Suspense>
-            </motion.div>
-          )}
-
           {/* ── MRP II / Kapasite Planlama ── */}
           {activeTab === 'mrp' && (
             <motion.div key="mrp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -5977,31 +5983,6 @@ function AppContent() {
                   productionOrders={[]}
                   boms={[]}
                   inventory={inventory}
-                />
-              </React.Suspense>
-            </motion.div>
-          )}
-
-          {/* ── Holding / Çok Şirketli Konsolidasyon ── */}
-          {activeTab === 'holding' && (
-            <motion.div key="holding" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bu sayfalar menüden
-                  açılıyor ama ayrı app sekmesi oldukları için bar kayboluyordu. */}
-              <MuhasebeMenuBar
-                currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'holding'}
-                onSelect={(tt) => {
-                  if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
-                  setActiveTab('muhasebe');
-                  if (tt.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(tt.tab); }
-                  else setMuhasebeTab(tt.tab as typeof muhasebeTab);
-                }}
-              />
-              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
-                <HoldingModule
-                  currentLanguage={currentLanguage}
-                  isAuthenticated={!!user}
-                  exchangeRates={exchangeRates}
                 />
               </React.Suspense>
             </motion.div>
@@ -6028,30 +6009,6 @@ function AppContent() {
                   isAuthenticated={!!user}
                   inventory={inventory}
                   orders={orders}
-                />
-              </React.Suspense>
-            </motion.div>
-          )}
-
-          {/* ── IFRS 15 Gelir Tanıma ── */}
-          {activeTab === 'gelirtanima' && (
-            <motion.div key="gelirtanima" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bu sayfalar menüden
-                  açılıyor ama ayrı app sekmesi oldukları için bar kayboluyordu. */}
-              <MuhasebeMenuBar
-                currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'gelirtanima'}
-                onSelect={(tt) => {
-                  if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
-                  setActiveTab('muhasebe');
-                  if (tt.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(tt.tab); }
-                  else setMuhasebeTab(tt.tab as typeof muhasebeTab);
-                }}
-              />
-              <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
-                <GelirTanimaModule
-                  currentLanguage={currentLanguage}
-                  isAuthenticated={!!user}
                 />
               </React.Suspense>
             </motion.div>
@@ -6090,37 +6047,6 @@ function AppContent() {
               )}
             </motion.div>
           )}
-
-          {/* ── Vergi Takvimi ── */}
-          {activeTab === 'vergi' && (
-            <motion.div key="vergi" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {/* Muhasebe menüsü burada da görünsün — bu sayfalar menüden
-                  açılıyor ama ayrı app sekmesi oldukları için bar kayboluyordu. */}
-              <MuhasebeMenuBar
-                currentLanguage={currentLanguage}
-                aktifMi={(tt) => tt.kind === 'app' && tt.tab === 'vergi'}
-                onSelect={(tt) => {
-                  if (tt.kind === 'app') { setActiveTab(tt.tab); return; }
-                  setActiveTab('muhasebe');
-                  if (tt.kind === 'accounting') { setMuhasebeTab('genel'); setMuhasebeAccountingTab(tt.tab); }
-                  else setMuhasebeTab(tt.tab as typeof muhasebeTab);
-                }}
-              />
-              {!canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
-                <>
-                  {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <MuhasebeGroupNav aktif="vergi" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
-                  <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
-                    subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
-                    icon={Receipt}
-                  />
-                  <VergiTakvimi currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('vergi')} orders={orders} />
-                </>
-              )}
-            </motion.div>
-          )}
-
 
           {activeTab === 'lotseri' && (
             <motion.div key="lotseri" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">

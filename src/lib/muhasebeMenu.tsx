@@ -20,7 +20,7 @@ import {
   Landmark, CreditCard, Wallet, Calculator, BarChart3, ShoppingCart, Users,
   Truck, Package, Home, ArrowRightLeft, FileUp, FileDown, Layers, Briefcase,
   Scale, TrendingUp, Activity, Receipt, PieChart, RefreshCw, Percent, Bell,
-  Building, CalendarDays, GitCompare, Repeat, Network, LineChart, FileCheck2,
+  Building, CalendarDays, GitCompare, Repeat, Network, LineChart, FileCheck2, Coins,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -44,7 +44,9 @@ const P = (tab: string): MuhasebeTarget => ({ kind: 'app', tab });
 export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   // ── ERP kayıt / işlem ekranları (AccountingModule) ──────────────────────────
   { id: 'faturalar',        tr: 'Faturalar',           en: 'Invoices',        icon: FileText,      target: A('faturalar') },
-  { id: 'e-fatura',         tr: 'e-Fatura',            en: 'e-Invoice',       icon: LinkIcon,      target: A('e-fatura') },
+  // 'e-fatura' (AccountingModule iç sekmesi) KALDIRILDI (2026-08-13) — VKN
+  // sorgu/Luca kontör/e-Fatura gönderim içeriği E-Belge Merkezi'ne taşındı,
+  // aşağıdaki 'ebelge' (P) girdisi zaten aynı hedefi kapsıyor.
   { id: 'evrak_tasarimi',   tr: 'Evrak Tasarımı',      en: 'Doc Design',      icon: Palette,       target: A('evrak_tasarimi') },
   { id: 'yevmiye',          tr: 'Yevmiye',             en: 'Journal',         icon: BookOpen,      target: A('yevmiye') },
   { id: 'mizan',            tr: 'Mizan',               en: 'Trial Balance',   icon: ArrowUpDown,   target: A('mizan') },
@@ -84,6 +86,7 @@ export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   { id: 'babs',             tr: 'Ba/Bs Formu',         en: 'Ba/Bs Form',      icon: FileCheck2,    target: M('babs') },
   { id: 'fatura-takip',     tr: 'e-Fatura Takip',      en: 'e-Invoice Track', icon: LinkIcon,      target: M('fatura-takip') },
   { id: 'finansal-oranlar', tr: 'Finansal Oranlar',    en: 'Fin. Ratios',     icon: Activity,      target: M('finansal-oranlar') },
+  { id: 'fiyat-karsilastirma', tr: 'Fiyat Karşılaştırma', en: 'Price Comparison', icon: Coins,      target: M('fiyat-karsilastirma') },
   { id: 'fiyat-kural',      tr: 'Fiyat Kuralları',     en: 'Pricing Rules',   icon: Percent,       target: M('fiyat-kural') },
   { id: 'butce-gercek',     tr: 'Bütçe vs Gerçekleşen',en: 'Budget vs Actual',icon: BarChart3,     target: M('butce-gercek') },
   { id: 'oto-fatura',       tr: 'Oto. Fatura',         en: 'Auto-Invoice',    icon: Repeat,        target: M('oto-fatura') },

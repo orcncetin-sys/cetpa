@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves, Info } from 'lucide-react';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 
 interface Order {
   id?: string;
@@ -29,6 +30,11 @@ const toDate = (val: Order['syncedAt']): Date => {
 };
 
 const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguage, exchangeRates, displayCurrency: externalCurrency }) => {
+  // Component-scoped: yalnız bu panel mount olduğunda abone olur (App.tsx'te
+  // her oturum için hep-açık bir kopyası vardı, hem login öncesi tetiklenen
+  // yanlış bir kapıyla — `!!userRole` hiç falsy olmuyordu — hem MuhasebePage'in
+  // kendi aboneliğiyle çift; 2026-08-13 code review bulgusu, buraya taşındı).
+  const mikroFaturalar = useMikroFaturalar(true);
   const [sort, setSort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'date', dir: 'desc'});
   const [localCurrency, setLocalCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   const toggleSort = (key: string) => setSort(s => ({key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc'}));
@@ -39,9 +45,23 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   const sym      = currency === 'TRY' ? '₺' : currency === 'USD' ? '$' : '€';
   const cvt      = (v: number) => (currency === 'TRY' ? v : v / fxRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
 
+  // Native orders (bu caride Mikro-ağırlıklı satışlar orders'a değil mikroFaturalar'a
+  // düşüyor — orders tek başına kullanılınca panel hep ₺0 gösteriyordu, 2026-08-13).
   const totalRevenue = orders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
   const totalCost    = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
   const profit       = totalRevenue - totalCost;
+
+  // Mikro faturaları — giden(satış)/gelen(alış). KDV Mutabakat/Satışlar sekmeleriyle
+  // aynı desen: additive, native ile toplanır. "Toplam Maliyet" burada gerçek COGS
+  // değil, alış faturaları toplamıdır (Mikro fatura satırında ürün maliyeti yok —
+  // aynı kısıt Finansal Oranlar sekmesinde de var).
+  const mikroGiden = mikroFaturalar.filter(f => f.yon === 'giden');
+  const mikroGelen = mikroFaturalar.filter(f => f.yon === 'gelen');
+  const mikroCiro    = mikroGiden.reduce((s, f) => s + f.tutar, 0);
+  const mikroMaliyet = mikroGelen.reduce((s, f) => s + f.tutar, 0);
+  const combinedRevenue = totalRevenue + mikroCiro;
+  const combinedCost    = totalCost + mikroMaliyet;
+  const combinedProfit  = combinedRevenue - combinedCost;
 
   const recentOrders = [...orders]
     .sort((a, b) => {
@@ -78,9 +98,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   };
 
   const kpis = [
-    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: `${sym}${cvt(totalRevenue)}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: `${sym}${cvt(totalCost)}`,    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
-    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `${sym}${cvt(profit)}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
+    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: `${sym}${cvt(combinedRevenue)}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: `${sym}${cvt(combinedCost)}`,    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
+    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `${sym}${cvt(combinedProfit)}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
   ];
 
   // Phase 98: Unpaid revenue analytics
@@ -109,6 +129,14 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           <div>
             <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Finansal Sağlık Skoru' : 'Financial Health Score'}</h3>
             <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Tahsilat · Kâr Marjı · Teslimat' : 'Collection · Margin · Delivery'}</p>
+            {mikroGiden.length > 0 && (
+              <p className="text-[9px] text-gray-400 mt-1 flex items-center gap-1 max-w-xs">
+                <Info size={10} className="flex-shrink-0" />
+                {currentLanguage === 'tr'
+                  ? 'Bu skor ve aşağıdaki tahsilat/vade/nakit akış bölümleri yalnız native sipariş verisine dayanır — Mikro faturalarının ödeme durumu henüz senkronize edilmiyor.'
+                  : 'This score and the collection/aging/cash-flow sections below use native order data only — Mikro invoice payment status is not synced yet.'}
+              </p>
+            )}
           </div>
           <div className="text-right">
             <span className={`text-3xl font-black ${scoreColor}`}>{clampedScore}</span>
@@ -262,9 +290,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
       {/* Invoice / Order Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: currentLanguage === 'tr' ? 'Faturalı Sipariş' : 'Invoiced Orders',   value: orders.filter(o => o.hasInvoice).length,              icon: CheckCircle2, color: 'text-green-600' },
+          { label: currentLanguage === 'tr' ? 'Faturalı Sipariş' : 'Invoiced Orders',   value: orders.filter(o => o.hasInvoice).length + mikroGiden.length,  icon: CheckCircle2, color: 'text-green-600' },
           { label: currentLanguage === 'tr' ? 'Faturasız Sipariş' : 'Uninvoiced',        value: orders.filter(o => !o.hasInvoice).length,             icon: AlertCircle,  color: 'text-orange-500' },
-          { label: currentLanguage === 'tr' ? 'Toplam Sipariş' : 'Total Orders',          value: orders.length,                                         icon: FileText,     color: 'text-blue-600' },
+          { label: currentLanguage === 'tr' ? 'Toplam Sipariş' : 'Total Orders',          value: orders.length + mikroGiden.length,                    icon: FileText,     color: 'text-blue-600' },
         ].map((s, i) => {
           const Icon = s.icon;
           return (
