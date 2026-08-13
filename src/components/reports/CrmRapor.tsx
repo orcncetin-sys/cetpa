@@ -668,6 +668,27 @@ export default function CrmRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'crm' && orders.length >= 3 && inventory.length > 0 && (() => {
+        // Ortalama alış fiyatı — gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI,
+        // sth_tip=0 alış) SKU bazında ağırlıklı ortalama. inventory.costPrice (itemCostTRY)
+        // birçok kalemde 0/boş çıkıyordu (2026-08-13 kullanıcı bildirimi — bu yüzden
+        // her müşteri "%100 kâr" gösteriyordu, maliyet hiç düşülmüyordu). Aynı hesap
+        // yöntemi server.ts'teki /api/reports/stok-fiyat-karsilastirma ile tutarlı.
+        const avgAlisFiyatMap = new Map<string, number>();
+        {
+          const tut = new Map<string, number>(), mik = new Map<string, number>();
+          for (const m0 of inventoryMovements) {
+            const m = m0 as unknown as Record<string, unknown>;
+            const sku = String(m.sth_stok_kod ?? '').trim();
+            if (!sku || Number(m.sth_tip) !== 0) continue; // yalnız alış
+            if (m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1) continue;
+            const miktar = Math.abs(Number(m.sth_miktar) || 0);
+            const tutar = Math.abs(Number(m.sth_tutar) || 0);
+            if (miktar <= 0) continue;
+            tut.set(sku, (tut.get(sku) ?? 0) + tutar);
+            mik.set(sku, (mik.get(sku) ?? 0) + miktar);
+          }
+          for (const [sku, m] of mik) if (m > 0) avgAlisFiyatMap.set(sku, tut.get(sku)! / m);
+        }
         const custProfit: Record<string, { rev: number; cogs: number }> = {};
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
@@ -676,7 +697,10 @@ export default function CrmRapor(ctx: ReportsCtx) {
           custProfit[name].rev += o.totalPrice || 0;
           for (const li of (o.lineItems ?? [])) {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            custProfit[name].cogs += (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
+            const avgAlis = inv ? avgAlisFiyatMap.get(inv.sku) : undefined;
+            const storedCost = inv ? itemCostTRY(inv, exchangeRates) : 0;
+            const unitCost = avgAlis && avgAlis > 0 ? avgAlis : (storedCost > 0 ? storedCost : li.price * 0.6);
+            custProfit[name].cogs += unitCost * li.quantity;
           }
         }
         const profitList = Object.entries(custProfit)
