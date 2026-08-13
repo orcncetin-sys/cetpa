@@ -1399,12 +1399,62 @@ function AppContent() {
   // ── Phase 564: e-Fatura Takip ──────────────────────────────────────────────
   const [p564FaturaFilter, setP564FaturaFilter] = useState<'all'|'missing'|'synced'|'pending'>('missing');
   // ── Phase 567: Tedarikçi Değerlendirme Matrisi ────────────────────────────
+  // Önceden yalnız local state'ti, sayfa yenilenince kayboluyordu (2026-08-13
+  // KPI denetimi bulgusu). Artık supplierRatings koleksiyonundan canlı okunur;
+  // yazma saveSupplierRating ile (SatinAlmaPage'e prop olarak geçiliyor).
   const [p567Ratings, setP567Ratings] = useState<Record<string, Record<string,number>>>({});
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, 'supplierRatings'), snap => {
+      const next: Record<string, Record<string, number>> = {};
+      snap.docs.forEach(d => { next[d.id] = (d.data() as { ratings?: Record<string, number> }).ratings ?? {}; });
+      setP567Ratings(next);
+    }, () => {});
+    return unsub;
+  }, [user]);
+  const saveSupplierRating = (supplierId: string, criteriaKey: string, score: number) => {
+    setDoc(doc(db, 'supplierRatings', supplierId), {
+      ratings: { ...(p567Ratings[supplierId] || {}), [criteriaKey]: score },
+      companyId: storeCompanyId ?? user?.uid ?? null,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => {});
+  };
   // ── Phase 568: Ürün Maliyet Kartı ────────────────────────────────────────
   const [p568Overhead, setP568Overhead] = useState(15); // overhead %
   const [p568SortBy, setP568SortBy] = useState<'margin'|'cost'|'name'>('margin');
   // ── Phase 570: KPI Hedef Takibi ───────────────────────────────────────────
+  // Önceden yalnız local state'ti (2026-08-13 KPI denetimi bulgusu) — kullanıcının
+  // girdiği hedefler sayfa yenilenince varsayılana dönüyordu. reportTargets/kpiHedefleri
+  // dokümanından yüklenir — 'settings' koleksiyonu ADMIN_ONLY olduğundan (rbac.ts)
+  // KULLANILMADI, ayrı bir koleksiyon (Manager/Accounting de yazabilsin diye).
   const [p570Targets, setP570Targets] = useState({ revenue: 500000, orders: 100, avgOrderVal: 5000, leadConv: 30 });
+  const p570LoadedRef = useRef(false);
+  useEffect(() => {
+    // Sabit 'kpiHedefleri' doc ID'si TÜM kiracılar arasında paylaşılıyordu —
+    // ilk kaydeden firma companyId'yi damgalıyor, sonraki firmaların yazması
+    // sunucuda ownsDoc() 403'üyle SESSİZCE reddediliyordu (.catch(()=>{})),
+    // okuması da 404 dönüyordu (2026-08-13 code review bulgusu). Doc ID'yi
+    // companyId ile namespace'liyoruz — TENANT_COLLECTIONS deseni (companyId
+    // alanı) zaten var, eksik olan kiracı-başına-benzersiz doc ID'ydi.
+    const cid = storeCompanyId ?? user?.uid ?? null;
+    if (!cid) return;
+    const unsub = onSnapshot(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), snap => {
+      p570LoadedRef.current = true;
+      if (snap.exists()) setP570Targets(prev => ({ ...prev, ...(snap.data() as Partial<typeof prev>) }));
+    }, () => {});
+    return unsub;
+  }, [storeCompanyId, user]);
+  const p570SaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!p570LoadedRef.current) return; // ilk yükleme tamamlanmadan geri-yazma yapma
+    const cid = storeCompanyId ?? user?.uid ?? null;
+    if (!cid) return;
+    if (p570SaveTimer.current) clearTimeout(p570SaveTimer.current);
+    p570SaveTimer.current = setTimeout(() => {
+      setDoc(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), { ...p570Targets, companyId: cid, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+    }, 800);
+    return () => { if (p570SaveTimer.current) clearTimeout(p570SaveTimer.current); };
+  }, [p570Targets, storeCompanyId, user]);
   // ── Phase 571: Audit Trail Filter ────────────────────────────────────────
   // ── Phase 572: Employee Performance Scorecard ─────────────────────────────
   const [p572SelEmpId, setP572SelEmpId] = useState<string>('');
@@ -4788,7 +4838,7 @@ function AppContent() {
                 p551SelSupplier={p551SelSupplier}
                 setP551SelSupplier={setP551SelSupplier}
                 p567Ratings={p567Ratings}
-                setP567Ratings={setP567Ratings}
+                saveSupplierRating={saveSupplierRating}
                 p578Threshold={p578Threshold}
                 setP578Threshold={setP578Threshold}
                 p608SelProduct={p608SelProduct}

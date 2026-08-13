@@ -60,7 +60,7 @@ interface Props {
   p551SelSupplier: string;
   setP551SelSupplier: React.Dispatch<React.SetStateAction<string>>;
   p567Ratings: Record<string, Record<string, number>>;
-  setP567Ratings: React.Dispatch<React.SetStateAction<Record<string, Record<string, number>>>>;
+  saveSupplierRating: (supplierId: string, criteriaKey: string, score: number) => void;
   p578Threshold: number;
   setP578Threshold: React.Dispatch<React.SetStateAction<number>>;
 
@@ -101,7 +101,7 @@ export default function SatinAlmaPage(props: Props) {
     handleVknLookup, handleSaveSupplier, handleDeleteSupplier,
     quickPOProduct, setQuickPOProduct,
     p551SelSupplier, setP551SelSupplier,
-    p567Ratings, setP567Ratings,
+    p567Ratings, saveSupplierRating,
     p578Threshold, setP578Threshold,
     p608SelProduct, setP608SelProduct, p608Quotes, setP608Quotes, p608ShowForm, setP608ShowForm, p608Draft, setP608Draft,
     p612Budgets, setP612Budgets, p612ShowForm, setP612ShowForm, p612Draft, setP612Draft,
@@ -651,10 +651,7 @@ export default function SatinAlmaPage(props: Props) {
                                       <div className="flex items-center justify-center gap-0.5">
                                         {[1,2,3,4,5].map(star => (
                                           <button key={star}
-                                            onClick={() => setP567Ratings(prev => ({
-                                              ...prev,
-                                              [sup.id]: { ...(prev[sup.id]||{}), [c.key]: star }
-                                            }))}
+                                            onClick={() => saveSupplierRating(sup.id, c.key, star)}
                                             className={`text-sm transition-colors ${(sup.ratings[c.key]||0) >= star ? 'text-amber-400' : 'text-gray-200 hover:text-amber-300'}`}>
                                             ★
                                           </button>
@@ -674,7 +671,7 @@ export default function SatinAlmaPage(props: Props) {
                             </tbody>
                           </table>
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-3">{tr567?'Puanlar sadece bu oturumda saklanır. Kalıcı kayıt için veritabanı entegrasyonu gereklidir.':'Ratings are session-only. Database integration needed for persistent storage.'}</p>
+                        <p className="text-[10px] text-gray-400 mt-3">{tr567?'Puanlar kalıcı olarak kaydedilir.':'Ratings are saved permanently.'}</p>
                       </div>
                     );
                   })()}

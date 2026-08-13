@@ -1,23 +1,41 @@
 import { useState, useEffect, useRef } from 'react';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
-import MikroPushButton from './MikroPushButton';
 import DekontModal from './DekontModal';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
-import CariEkstrePanel from './CariEkstrePanel';
-import { depoTransferPayload, dekontPayload } from '../services/mikroEvrak';
+import CeklerTab from './accounting/CeklerTab';
+import CalisanlarTab from './accounting/CalisanlarTab';
+import ButceTab from './accounting/ButceTab';
+import IsletmeSermayesiTab from './accounting/IsletmeSermayesiTab';
+import UrunlerTab from './accounting/UrunlerTab';
+import WarehousesTab from './accounting/WarehousesTab';
+import DepoTab from './accounting/DepoTab';
+import TransferTab from './accounting/TransferTab';
+import YevmiyeTab from './accounting/YevmiyeTab';
+import MizanTab from './accounting/MizanTab';
+import GelirGiderTab from './accounting/GelirGiderTab';
+import KdvTab from './accounting/KdvTab';
+import TedarikcilerTab from './accounting/TedarikcilerTab';
+import MusterilerTab from './accounting/MusterilerTab';
+import SatislarTab from './accounting/SatislarTab';
+import BankaTab from './accounting/BankaTab';
+import GidenIrsaliyeTab from './accounting/GidenIrsaliyeTab';
+import GelenIrsaliyeTab from './accounting/GelenIrsaliyeTab';
+import BankaHareketleriTab from './accounting/BankaHareketleriTab';
+import GelirTablosuTab from './accounting/GelirTablosuTab';
+import FaturalarTab from './accounting/FaturalarTab';
+import { dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Plus, Trash2, Edit2, Download, Building2, BookOpen, TrendingUp, TrendingDown,
-  X, Save, RefreshCw, Eye, Calculator, BarChart3, FileText, Briefcase,
+  Plus, Download, Building2, BookOpen, TrendingUp,
+  X, Save, Calculator, BarChart3, FileText, Briefcase,
   AlertCircle, CheckCircle, Info, ArrowUpDown, ShoppingCart, Users, Truck, Package,
-  ArrowRightLeft, CreditCard, FileUp, FileDown, Search, Home, MapPin, User, PieChart,
-  Wallet, Layers, Landmark, Palette, Settings, Upload} from 'lucide-react';
+  ArrowRightLeft, CreditCard, FileUp, FileDown, Home,
+  Wallet, Layers, Landmark, Palette} from 'lucide-react';
 import TahsilatModule from './TahsilatModule';
 import KasaModule from './KasaModule';
 import MaliyetMerkeziModule from './MaliyetMerkeziModule';
 import SabitKiymetModule from './SabitKiymetModule';
-import { formatInCurrency } from '../utils/currency';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DocumentDesigner from './DocumentDesigner';
@@ -54,7 +72,7 @@ import ConfirmModal from './ConfirmModal';
 import { sortByCreatedAt } from '../utils/fsSort';
 
 // --- SortHeader Component ---
-const SortHeader = ({ 
+export const SortHeader = ({ 
   label, 
   sortKey, 
   currentSort, 
@@ -118,7 +136,7 @@ interface AccountingModuleProps {
   hideTabBar?: boolean;
 }
 
-const HESAP_PLANI = [
+export const HESAP_PLANI = [
   '100 - Kasa', '102 - Bankalar', '108 - Diğer Hazır Değerler',
   '120 - Alıcılar', '121 - Alacak Senetleri', '153 - Ticari Mallar',
   '191 - İndirilecek KDV', '195 - İş Avansları', '197 - Sayım ve Tesellüm Noksanları',
@@ -138,13 +156,13 @@ const HESAP_PLANI = [
   '690 - Dönem Kârı veya Zararı',
 ];
 
-const formatTRY = (n: number) =>
+export const formatTRY = (n: number) =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(n);
 
-const formatCurrency = (n: number, currency: string = 'TRY') =>
+export const formatCurrency = (n: number, currency: string = 'TRY') =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: currency.toUpperCase() }).format(n);
 
-const exportCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
+export const exportCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
   const bom = '\uFEFF';
   const csv = bom + [headers, ...rows]
     .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
@@ -159,7 +177,7 @@ const exportCSV = (filename: string, headers: string[], rows: (string | number)[
 const MONTHS_TR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const AT = {
+export const AT = {
   tr: {
     bankAndCash: 'Banka & Kasa', journal: 'Yevmiye', trialBalance: 'Mizan',
     incomeExpense: 'Gelir/Gider', vat: 'KDV', luca: 'Luca',
@@ -293,6 +311,8 @@ const AT = {
     completed2: 'Completed', cancelled2: 'Cancelled',
   },
 } as const;
+
+export type AccountingT = typeof AT[keyof typeof AT];
 
 export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange, hideTabBar }: AccountingModuleProps) {
   const t = AT[currentLanguage];
@@ -1598,8 +1618,28 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     });
 
   // Mizan computation
+  // journalEntries (Cetpa) bu Mikro-ağırlıklı caride boş kalıyordu (2026-08-13
+  // code review bulgusu: Mizan hâlâ yalnız journalEntries okuyordu, KDV/Satışlar'a
+  // yapılan Mikro-additive düzeltme buraya hiç uygulanmamıştı). mikroFaturalar'dan
+  // GERÇEK çift-taraflı (double-entry) satırlar sentezlenir — tahmini bir toplam
+  // değil, standart Türk hesap planına göre borç/alacak ayrımı:
+  //  giden (satış):  120-Alıcılar borç = tutar  ↔  600-Satışlar alacak = matrah + 391-Hesaplanan KDV alacak = kdv
+  //  gelen (alış):   153-Ticari Mallar borç = matrah + 191-İndirilecek KDV borç = kdv  ↔  320-Satıcılar alacak = tutar
+  // Alış, GİDER değil VARLIK (stok) hesabına (153) düşer — satır maliyeti bilinmediği
+  // için COGS'a (620) atanamaz; bu ayrım Finansal Oranlar'daki "COGS bilinmiyor"
+  // ilkesiyle tutarlı, yanlış bir gider rakamı üretmez.
+  const mikroMizanSatirlari: { debitHesap: string; alacakHesap: string; borc: number; alacak: number }[] = [];
+  mikroFaturalar.forEach(f => {
+    if (f.yon === 'giden') {
+      if (f.matrah) mikroMizanSatirlari.push({ debitHesap: '120 - Alıcılar', alacakHesap: '600 - Yurt İçi Satışlar', borc: f.matrah, alacak: f.matrah });
+      if (f.kdv)    mikroMizanSatirlari.push({ debitHesap: '120 - Alıcılar', alacakHesap: '391 - Hesaplanan KDV', borc: f.kdv, alacak: f.kdv });
+    } else {
+      if (f.matrah) mikroMizanSatirlari.push({ debitHesap: '153 - Ticari Mallar', alacakHesap: '320 - Satıcılar', borc: f.matrah, alacak: f.matrah });
+      if (f.kdv)    mikroMizanSatirlari.push({ debitHesap: '191 - İndirilecek KDV', alacakHesap: '320 - Satıcılar', borc: f.kdv, alacak: f.kdv });
+    }
+  });
   const mizanMap: Record<string, { borc: number; alacak: number }> = {};
-  journalEntries.forEach(e => {
+  [...journalEntries, ...mikroMizanSatirlari].forEach(e => {
     if (!mizanMap[e.debitHesap]) mizanMap[e.debitHesap] = { borc: 0, alacak: 0 };
     if (!mizanMap[e.alacakHesap]) mizanMap[e.alacakHesap] = { borc: 0, alacak: 0 };
     mizanMap[e.debitHesap].borc += e.borc;
@@ -1985,8 +2025,21 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   });
   const gelirEntries = filteredEntries.filter(e => e.alacakHesap.startsWith('6'));
   const giderEntries = filteredEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8'));
-  const toplamGelir = gelirEntries.reduce((s, e) => s + (e.alacak ?? e.borc), 0); // gelir = alacak (kredi)
-  const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);               // gider = borç (debit)
+  // Mikro GİDEN (satış) faturaları GELİR tarafına eklenir (KDV/Satışlar'daki
+  // additive desenin aynısı, 2026-08-13). Mikro GELEN (alış) faturaları
+  // GİDER'e EKLENMEZ — alış tutarı stok (153-Ticari Mallar) hesabına düşer,
+  // Gider'e ancak satış anında COGS (620) olarak yansır; Mikro fatura satırında
+  // maliyet bilgisi olmadığından bu ayrım yapılamaz (Finansal Oranlar'daki
+  // "COGS bilinmiyor" ilkesiyle tutarlı — yanlış bir gider rakamı üretmemek
+  // için alış kasıtlı olarak dışarıda bırakıldı).
+  const mikroDonemFiltresi = (tarih: string) => {
+    if (gelirUseRange && gelirDateFrom && gelirDateTo) return tarih >= gelirDateFrom && tarih <= gelirDateTo;
+    const d = new Date(tarih);
+    return d.getMonth() + 1 === gelirMonth && d.getFullYear() === gelirYear;
+  };
+  const mikroGelirTutar = mikroFaturalar.filter(f => f.yon === 'giden' && mikroDonemFiltresi(f.tarih)).reduce((s, f) => s + f.matrah, 0);
+  const toplamGelir = gelirEntries.reduce((s, e) => s + (e.alacak ?? e.borc), 0) + mikroGelirTutar; // gelir = alacak (kredi) + Mikro
+  const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);               // gider = borç (debit) — yalnız native, bkz. yukarıdaki not
   const netKar = toplamGelir - toplamGider;
 
   // Monthly chart data
@@ -1999,12 +2052,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     });
     const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + (e.alacak ?? e.borc), 0);
     const gider = mEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8')).reduce((s, e) => s + e.borc, 0);
-    return { month: m, gelir, gider };
+    const mikroGelirAy = mikroFaturalar
+      .filter(f => f.yon === 'giden' && (() => { const d = new Date(f.tarih); return d.getMonth() + 1 === month && d.getFullYear() === gelirYear; })())
+      .reduce((s, f) => s + f.matrah, 0);
+    return { month: m, gelir: gelir + mikroGelirAy, gider };
   });
   const maxChartVal = Math.max(...monthlyData.map(d => Math.max(d.gelir, d.gider)), 1);
 
   // Gelir breakdown by account
   const gelirBreakdown: Record<string, number> = {};
+  if (mikroGelirTutar > 0) gelirBreakdown['600 - Yurt İçi Satışlar (Mikro)'] = mikroGelirTutar;
   gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + (e.alacak ?? e.borc); });
   const giderBreakdown: Record<string, number> = {};
   giderEntries.forEach(e => { giderBreakdown[e.debitHesap] = (giderBreakdown[e.debitHesap] || 0) + e.borc; });
@@ -2119,1391 +2176,109 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
       {/* FATURALAR */}
       {accountingTab === 'faturalar' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          {/* Invoice creation modal */}
-          {showInvoiceModal && (
-            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
-                <div className="flex items-center justify-between mb-5">
-                  <h3 className="font-bold text-lg">{currentLanguage==='tr'?'Fatura Kes':'Create Invoice'}</h3>
-                  <button onClick={()=>setShowInvoiceModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-4 h-4"/></button>
-                </div>
-                {/* Invoice type */}
-                <div className="mb-4">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{currentLanguage==='tr'?'Fatura Türü':'Invoice Type'}</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {([
-                      { v:'e-fatura', l:'e-Fatura', d:currentLanguage==='tr'?'Kayıtlı mükellef':'Registered taxpayer' },
-                      { v:'e-arsiv', l:'e-Arşiv', d:currentLanguage==='tr'?'Bireysel / kayıtsız':'Individual / unregistered' },
-                      { v:'ihracat', l:currentLanguage==='tr'?'İhracat':'Export', d:currentLanguage==='tr'?'Yurt dışı':'International' },
-                    ] as const).map(tp => (
-                      <button key={tp.v} type="button" onClick={()=>setInvoiceForm(f=>({...f,faturaTipi:tp.v}))}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${invoiceForm.faturaTipi===tp.v?'border-[#ff4000] bg-[#ff4000]/5':'border-gray-200 hover:border-gray-300'}`}>
-                        <p className={`text-[11px] font-bold ${invoiceForm.faturaTipi===tp.v?'text-[#ff4000]':'text-gray-700'}`}>{tp.l}</p>
-                        <p className="text-[9px] text-gray-400 mt-0.5">{tp.d}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Fatura No':'Invoice No'}</label>
-                      <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.faturaNo} onChange={e=>setInvoiceForm(f=>({...f,faturaNo:e.target.value}))} placeholder="FTR-2026-001" /></div>
-                    <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Tarih':'Date'}</label>
-                      <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.date} onChange={e=>setInvoiceForm(f=>({...f,date:e.target.value}))} /></div>
-                  </div>
-                  <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Müşteri Adı':'Customer Name'}</label>
-                    <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.customerName} onChange={e=>setInvoiceForm(f=>({...f,customerName:e.target.value}))} /></div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Vergi No':'Tax ID'}</label>
-                      <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxId} onChange={e=>setInvoiceForm(f=>({...f,taxId:e.target.value}))} /></div>
-                    <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Vergi Dairesi':'Tax Office'}</label>
-                      <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxOffice} onChange={e=>setInvoiceForm(f=>({...f,taxOffice:e.target.value}))} /></div>
-                  </div>
-                  <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Adres':'Address'}</label>
-                    <textarea rows={2} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000] resize-none" value={invoiceForm.address} onChange={e=>setInvoiceForm(f=>({...f,address:e.target.value}))} /></div>
-                  <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">KDV %</label>
-                    <div className="flex gap-2">
-                      {[0,1,8,10,18,20].map(r => (
-                        <button key={r} type="button" onClick={()=>setInvoiceForm(f=>({...f,kdvOran:r}))}
-                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${invoiceForm.kdvOran===r?'bg-[#ff4000] text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>%{r}</button>
-                      ))}
-                    </div>
-                  </div>
-                  {invoiceSource && (
-                    <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1">
-                      <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Sipariş':'Order'}:</span><span className="font-semibold">#{(invoiceSource.id as string).slice(0,8)}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Matrah (KDV hariç)':'Net (excl. VAT)'}:</span><span className="font-semibold">₺{((invoiceSource.totalPrice as number||0)/(1+invoiceForm.kdvOran/100)).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-                      <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">₺{((invoiceSource.totalPrice as number||0)-(invoiceSource.totalPrice as number||0)/(1+invoiceForm.kdvOran/100)).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-                      <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{currentLanguage==='tr'?'Toplam':'Total'}:</span><span>₺{(invoiceSource.totalPrice as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2 mt-5">
-                  <button onClick={handleCreateInvoice} className="flex-1 bg-[#ff4000] hover:bg-[#cc3200] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">{currentLanguage==='tr'?'Faturayı Kes':'Create Invoice'}</button>
-                  <button onClick={()=>setShowInvoiceModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors">{currentLanguage==='tr'?'İptal':'Cancel'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* KPI + header */}
-          <div className="flex items-center justify-between">
-            <div className="grid grid-cols-3 gap-3 flex-1 mr-4">
-              {/* KPI'lar KAYNAK FİLTRESİNE UYAR — 320 Mikro faturası varken
-                  "Toplam Fatura 0" göstermek yanlıştı (2026-08-01).
-                  Cetpa sayıları invoices'tan, Mikro sayısı mikroSatisSatirlari'ndan. */}
-              {(() => {
-                const cetpaVar = faturaKaynak !== 'mikro';
-                const mikroVar = faturaKaynak !== 'cetpa';
-                const cetpaAdet = cetpaVar ? invoices.length : 0;
-                const mikroAdet = mikroVar ? mikroFaturaSatirlari.length : 0;
-                // YÖN KIRILIMI (2026-08-01): "Toplam Tutar" önce satış (giden) ve
-                // alış (gelen) faturalarının tutarlarını TOPLUYORDU → "Her Yön"de
-                // 148M gibi anlamsız bir birleşik rakam çıkıyordu (kullanıcı
-                // haklı olarak reddetti). Satış cirosu ile alış gideri toplanmaz.
-                // Cetpa + Mikro-giden = satış tarafı (doğrulanmış); Mikro-gelen =
-                // alış tarafı. ⚠️ Alış toplamı cha_cinsi=6 filtresine dayanıyor,
-                // henüz portal raporuyla tie-out edilmedi — o yüzden ayrı, satışa
-                // karıştırılmadan gösteriliyor.
-                const mikroGiden = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'giden') : [];
-                const mikroGelen = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'gelen') : [];
-                const cetpaToplam = cetpaVar ? invoices.reduce((a, i) => a + ((i.totalPrice as number) || 0), 0) : 0;
-                const satisToplam = cetpaToplam + mikroGiden.reduce((a, f) => a + f.tutar, 0);
-                const alisToplam  = mikroGelen.reduce((a, f) => a + f.tutar, 0);
-                const tutarLabel = faturaYon==='gelen'
-                  ? (currentLanguage==='tr'?'Alış Tutarı':'Purchases')
-                  : (currentLanguage==='tr'?'Satış Tutarı':'Sales');
-                const tutarValue = faturaYon==='gelen' ? formatTRY(alisToplam) : formatTRY(satisToplam);
-                const tutarAlt = faturaYon==='hepsi' && alisToplam > 0
-                  ? `${currentLanguage==='tr'?'Alış':'Purch.'} ${formatTRY(alisToplam)}`
-                  : null;
-                return [
-                  { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices',
-                    value: cetpaAdet + mikroAdet,
-                    alt: mikroAdet && cetpaAdet ? `${cetpaAdet} Cetpa · ${mikroAdet} Mikro`
-                      : (faturaYon==='hepsi' && mikroGiden.length && mikroGelen.length
-                          ? `${mikroGiden.length} ${currentLanguage==='tr'?'satış':'sales'} · ${mikroGelen.length} ${currentLanguage==='tr'?'alış':'purch.'}`
-                          : null),
-                    color: 'text-[#ff4000]' },
-                  { label: tutarLabel, value: tutarValue, alt: tutarAlt, color: 'text-green-600' },
-                  { label: 'e-Fatura / e-Arşiv',
-                    value: `${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-fatura').length : 0} / ${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-arsiv').length : 0}`,
-                    alt: currentLanguage==='tr'?'yalnız Cetpa':'Cetpa only', color: 'text-purple-600' },
-                ];
-              })().map((k,i)=>(
-                <div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-                  <p className="text-xs text-gray-500 mt-1">{k.label}</p>
-                  {k.alt && <p className="text-[10px] text-gray-400 mt-0.5">{k.alt}</p>}
-                </div>
-              ))}
-            </div>
-            {isAuthenticated && (
-              <button onClick={()=>{setInvoiceSource(null);setShowInvoiceModal(true);}} className="flex items-center gap-2 bg-[#ff4000] hover:bg-[#cc3200] text-white px-4 py-2.5 rounded-full text-sm font-bold transition-colors shadow-sm shrink-0">
-                <Plus className="w-4 h-4"/>{currentLanguage==='tr'?'Yeni Fatura':'New Invoice'}
-              </button>
-            )}
-          </div>
-
-          {/* Filter + Search */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"/>
-              <input className="pl-9 w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-[#ff4000]"
-                placeholder={currentLanguage==='tr'?'Fatura ara...':'Search invoices...'}
-                value={invoiceSearch} onChange={e=>setInvoiceSearch(e.target.value)} />
-            </div>
-            <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
-              {(['all','e-fatura','e-arsiv','ihracat'] as const).map(f => (
-                <button key={f} onClick={()=>setInvoiceTypeFilter(f)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${invoiceTypeFilter===f?'bg-[#ff4000] text-white':'text-gray-500 hover:text-gray-700'}`}>
-                  {f==='all'?(currentLanguage==='tr'?'Tümü':'All'):f==='ihracat'?(currentLanguage==='tr'?'İhracat':'Export'):f}
-                </button>
-              ))}
-            </div>
-            {/* Kaynak seçici — Cetpa'da kesilen faturalar mı, Mikro'dan çekilenler mi.
-                Varsayılan 'cetpa', yani ekran eskisi gibi davranır. */}
-            <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
-              {([
-                ['hepsi', currentLanguage==='tr'?'Tümü':'All'],
-                ['mikro', `Mikro (${mikroFaturaSatirlari.length})`],
-                ['cetpa', `Cetpa (${invoices.length})`],
-              ] as const).map(([k,l]) => (
-                <button key={k} onClick={()=>setFaturaKaynak(k)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaKaynak===k?'bg-blue-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
-                  {l}
-                </button>
-              ))}
-            </div>
-            {/* Yön — Mikro'da hem giden (satış) hem gelen (alış) fatura var.
-                Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */}
-            <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
-              {([
-                ['hepsi', currentLanguage==='tr'?'Her Yön':'Both'],
-                ['giden', currentLanguage==='tr'?'Giden':'Outgoing'],
-                ['gelen', currentLanguage==='tr'?'Gelen':'Incoming'],
-              ] as const).map(([k,l]) => (
-                <button key={k} onClick={()=>setFaturaYon(k)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaYon===k?'bg-teal-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
-                  {l}
-                </button>
-              ))}
-            </div>
-            {/* Yıl filtresi — import tüm yılları çekiyor; varsayılan cari yıl.
-                Yıllar mikroFaturalar tarihlerinden türetilir. */}
-            {(() => {
-              const yillar = Array.from(new Set(
-                mikroFaturalar.map(f => (typeof f.tarih === 'string' ? f.tarih.slice(0, 4) : '')).filter(y => /^\d{4}$/.test(y)),
-              )).sort((a, b) => b.localeCompare(a));
-              if (yillar.length === 0) return null;
-              return (
-                <select value={faturaYil} onChange={e => setFaturaYil(e.target.value)}
-                  className="px-3 py-1.5 rounded-2xl text-xs font-bold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#ff4000]">
-                  <option value="hepsi">{currentLanguage==='tr'?'Tüm Yıllar':'All Years'}</option>
-                  {yillar.map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              );
-            })()}
-          </div>
-
-          {/* Invoices table */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/60">
-                    <SortHeader label={currentLanguage==='tr'?'Fatura No':'Invoice No'} sortKey="faturaNo" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                    <SortHeader label={currentLanguage==='tr'?'Müşteri':'Customer'} sortKey="customerName" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                    <SortHeader label={currentLanguage==='tr'?'Tür':'Type'} sortKey="faturaTipi" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                    <SortHeader label={currentLanguage==='tr'?'Tarih':'Date'} sortKey="date" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="hidden md:table-cell" />
-                    <SortHeader label="KDV %" sortKey="kdvOran" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                    <SortHeader label={currentLanguage==='tr'?'Matrah':'Net'} sortKey="kdvHaric" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                    <SortHeader label={currentLanguage==='tr'?'Toplam':'Total'} sortKey="totalPrice" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                    <SortHeader label={currentLanguage==='tr'?'Durum':'Status'} sortKey="status" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                    {isAuthenticated && <th className="px-4 py-3"/>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices
-                    .filter(inv => invoiceTypeFilter==='all' || inv.faturaTipi===invoiceTypeFilter)
-                    .filter(inv => {
-                      const s = invoiceSearch.toLowerCase();
-                      return !s || (inv.customerName as string||'').toLowerCase().includes(s) || (inv.faturaNo as string||'').toLowerCase().includes(s);
-                    })
-                    .sort((a, b) => {
-                      const av = (a[invoiceSort.key as keyof typeof a] as string | number) ?? '';
-                      const bv = (b[invoiceSort.key as keyof typeof b] as string | number) ?? '';
-                      if (av < bv) return invoiceSort.direction === 'asc' ? -1 : 1;
-                      if (av > bv) return invoiceSort.direction === 'asc' ? 1 : -1;
-                      return 0;
-                    })
-                    .map(inv => {
-                      const tp = inv.faturaTipi as string;
-                      const typeColor = tp==='ihracat'?'bg-blue-100 text-blue-600':tp==='e-arsiv'?'bg-purple-100 text-purple-600':'bg-green-100 text-green-600';
-                      return (
-                        <tr key={inv.id as string} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
-                          <td className="px-4 py-3 font-mono font-semibold text-[#ff4000]">{inv.faturaNo as string || `#${(inv.id as string).slice(0,8)}`}</td>
-                          <td className="px-4 py-3">
-                            <p className="font-semibold text-[#1D1D1F]">{inv.customerName as string}</p>
-                            {inv.taxId && <p className="text-[10px] text-gray-400">VKN: {inv.taxId as string}</p>}
-                          </td>
-                          <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${typeColor}`}>{tp}</span></td>
-                          <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{inv.date as string}</td>
-                          <td className="px-4 py-3 text-right text-gray-600">%{inv.kdvOran as number}</td>
-                          <td className="px-4 py-3 text-right text-gray-600">₺{(inv.kdvHaric as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                          <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{(inv.totalPrice as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                          <td className="px-4 py-3"><span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{inv.status as string || 'Kesildi'}</span></td>
-                          {isAuthenticated && (
-                            <td className="px-4 py-3">
-                              <button onClick={() => setConfirmModal({ isOpen: true, title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice', message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.', onConfirm: async () => { await deleteDoc(doc(db,'invoices',inv.id as string)); setConfirmModal(prev => ({ ...prev, isOpen: false })); } })} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  {/* Mikro faturaları — Cetpa'da kesilenlerin YANINDA, MİKRO rozetiyle.
-                      Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
-                      `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
-                      Mevcut mantık değişmedi, kaynak seçici opt-in. */}
-                  {faturaKaynak !== 'cetpa' && mikroFaturaSatirlari.map(f => (
-                    <tr key={`mikro-fat-${f.id}`}
-                      onClick={() => setFaturaDetay({ ...f, uuid: f.uuid })}
-                      title={currentLanguage==='tr'?'Detay ve XML/PDF için tıklayın':'Click for detail and XML/PDF'}
-                      className="border-b border-gray-50 hover:bg-blue-50/60 bg-blue-50/20 transition-colors cursor-pointer">
-                      <td className="px-4 py-3 font-mono font-semibold text-blue-600 underline decoration-dotted underline-offset-2">{f.faturaNo || '—'}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-[#1D1D1F]">{f.musteri}</p>
-                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Cari: ' : 'Account: '}{f.cariKod}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span>
-                        <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
-                          {f.yon === 'gelen' ? (currentLanguage==='tr'?'GELEN':'IN') : (currentLanguage==='tr'?'GİDEN':'OUT')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{f.oran !== null ? `%${f.oran}` : '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
-                      <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{f.tutar.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                      <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>
-                      {isAuthenticated && <td className="px-4 py-3" />}
-                    </tr>
-                  ))}
-                  {invoices.length===0 && (faturaKaynak === 'cetpa' || mikroFaturaSatirlari.length === 0) && (
-                    <tr><td colSpan={9} className="text-center py-12 text-gray-400">
-                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-20"/>
-                      <p className="text-sm">{currentLanguage==='tr'?'Henüz fatura kesilmedi.':'No invoices yet.'}</p>
-                      <p className="text-xs mt-1">{currentLanguage==='tr'?'Siparişler listesinden "Fatura Kes" butonunu kullanın.':'Use the "Create Invoice" button from the orders list.'}</p>
-                      {mikroFaturaSatirlari.length > 0 && (
-                        <p className="text-xs mt-2 text-blue-600">
-                          {currentLanguage==='tr'
-                            ? `Mikro'da ${mikroFaturaSatirlari.length} fatura var — yukarıdaki "Mikro" seçeneğiyle görün.`
-                            : `${mikroFaturaSatirlari.length} invoices exist in Mikro — use the "Mikro" filter above.`}
-                        </p>
-                      )}
-                    </td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <FaturalarTab
+          currentLanguage={currentLanguage} isAuthenticated={isAuthenticated}
+          showInvoiceModal={showInvoiceModal} setShowInvoiceModal={setShowInvoiceModal}
+          invoiceForm={invoiceForm} setInvoiceForm={setInvoiceForm}
+          invoiceSource={invoiceSource} setInvoiceSource={setInvoiceSource} handleCreateInvoice={handleCreateInvoice}
+          faturaKaynak={faturaKaynak} setFaturaKaynak={setFaturaKaynak}
+          faturaYon={faturaYon} setFaturaYon={setFaturaYon} faturaYil={faturaYil} setFaturaYil={setFaturaYil}
+          mikroFaturalar={mikroFaturalar} mikroFaturaSatirlari={mikroFaturaSatirlari} invoices={invoices}
+          invoiceSearch={invoiceSearch} setInvoiceSearch={setInvoiceSearch}
+          invoiceTypeFilter={invoiceTypeFilter} setInvoiceTypeFilter={setInvoiceTypeFilter}
+          invoiceSort={invoiceSort} setInvoiceSort={setInvoiceSort}
+          setFaturaDetay={setFaturaDetay} setConfirmModal={setConfirmModal}
+        />
       )}
+
 
       {/* BANKA & KASA */}
       {accountingTab === 'banka' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              {
-                label: t.tryBalance, value: formatTRY(tryBalance), symbol: '₺', color: 'text-green-600',
-                onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance ?? 0) })), total: formatTRY(tryBalance) })
-              },
-              {
-                label: t.usdBalance, value: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '$', color: 'text-blue-600',
-                onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `$${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
-              },
-              {
-                label: t.eurBalance, value: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '€', color: 'text-purple-600',
-                onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `€${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
-              },
-              {
-                label: t.accountCount, value: String(bankAccounts.length), symbol: '#', color: 'text-[#ff4000]',
-                onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: a.currency === 'TRY' ? formatTRY(a.balance ?? 0) : a.currency === 'USD' ? `$${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `€${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` })) })
-              },
-            ].map((kpi, i) => (
-              <button key={i} onClick={kpi.onClick} className="apple-card p-4 text-left cursor-pointer group">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-gray-500 font-medium">{kpi.label}</span>
-                  <span className={`text-base font-black ${kpi.color} group-hover:scale-110 transition-transform`}>{kpi.symbol}</span>
-                </div>
-                <div className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</div>
-                <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-              </button>
-            ))}
-          </div>
-          <div className="apple-card p-4">
-            {/* Row 1: Title + actions */}
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.bankCashAccounts}</h3>
-              <div className="flex items-center gap-2">
-                <label className="apple-button-secondary py-1.5 px-3 text-xs cursor-pointer">
-                  <Download size={12} />
-                  {t.importStatement}
-                  <input type="file" accept=".csv,.pdf" className="hidden" onChange={handleBankFileImport} />
-                </label>
-                <button onClick={openAddBank} className="apple-button-primary py-1.5 px-3 text-xs">
-                  <Plus size={14} /> {t.addAccount}
-                </button>
-              </div>
-            </div>
-            {/* Row 2: Search bar */}
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder={t.searchAccounts}
-                value={bankSearch}
-                onChange={e => setBankSearch(e.target.value)}
-                className="apple-input w-full pl-9 py-2"
-              />
-            </div>
-            {bankImportStatus && (
-              <div className="mb-3 px-3 py-2 bg-green-50 text-green-700 text-xs rounded-xl font-medium flex items-center justify-between">
-                <span>{bankImportStatus}</span>
-                <button onClick={() => setBankImportStatus(null)} className="ml-2 text-green-500 hover:text-green-700"><X size={12} /></button>
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.bank} 
-                      sortKey="bankName" 
-                      currentSort={{ key: bankSortKey, direction: bankSortDir }} 
-                      onSort={(key) => toggleBankSort(key as keyof BankAccount)} 
-                    />
-                    <SortHeader 
-                      label={t.accountType} 
-                      sortKey="accountType" 
-                      currentSort={{ key: bankSortKey, direction: bankSortDir }} 
-                      onSort={(key) => toggleBankSort(key as keyof BankAccount)} 
-                    />
-                    <SortHeader 
-                      label={t.iban} 
-                      sortKey="iban" 
-                      currentSort={{ key: bankSortKey, direction: bankSortDir }} 
-                      onSort={(key) => toggleBankSort(key as keyof BankAccount)} 
-                      className="hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.balance} 
-                      sortKey="balance" 
-                      currentSort={{ key: bankSortKey, direction: bankSortDir }} 
-                      onSort={(key) => toggleBankSort(key as keyof BankAccount)} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.currency} 
-                      sortKey="currency" 
-                      currentSort={{ key: bankSortKey, direction: bankSortDir }} 
-                      onSort={(key) => toggleBankSort(key as keyof BankAccount)} 
-                      className="hidden sm:table-cell"
-                    />
-                    <th className="text-center py-2 px-3 text-gray-500 font-medium">{t.actions}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedAccounts.length === 0 && (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">{t.noAccounts}</td></tr>
-                  )}
-                  {displayedAccounts.map(acc => (
-                    <tr key={acc.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="font-medium text-gray-800">{acc.bankName}</div>
-                        <div className="text-xs text-gray-400">{acc.accountHolder}</div>
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-600">{acc.accountType}</td>
-                      <td className="py-2.5 px-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{acc.iban}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-gray-800">
-                        {acc.currency === 'TRY'
-                          ? formatTRY(acc.balance ?? 0)
-                          : acc.currency === 'USD'
-                            ? `$${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : `€${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        }
-                      </td>
-                      <td className="py-2.5 px-3 hidden sm:table-cell">
-                        <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-semibold">{acc.currency}</span>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => openEditBank(acc)} className="action-btn-view" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye size={14} /></button>
-                          <button onClick={() => openEditBank(acc)} className="action-btn-edit" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 size={14} /></button>
-                          <button onClick={() => deleteBank(acc.id)} className="action-btn-delete"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── Bank Transactions (Auto-Pull) ── */}
-          <div className="apple-card p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div>
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hareketleri' : 'Bank Transactions'}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {mikroEnabled && mikroConnected
-                    ? currentLanguage === 'tr' ? 'Mikro ERP üzerinden otomatik çekilir' : 'Auto-pulled via Mikro ERP'
-                    : currentLanguage === 'tr' ? 'Mikro entegrasyonu etkinleştirilerek otomatik çekilebilir' : 'Enable Mikro integration for auto-pull'}
-                  {bankTxLastPull && <span className="ml-2 text-gray-300">· {currentLanguage === 'tr' ? 'Son çekim' : 'Last pull'}: {bankTxLastPull}</span>}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Auto-sync toggle */}
-                <button
-                  onClick={() => setBankTxAutoSync(v => !v)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${bankTxAutoSync ? 'bg-green-50 border-green-200 text-green-700' : 'apple-button-secondary py-1.5 px-3 text-xs'}`}
-                  title={currentLanguage === 'tr' ? 'Otomatik Senkronizasyon' : 'Auto Sync'}
-                >
-                  <RefreshCw size={12} className={bankTxAutoSync ? 'animate-spin' : ''} />
-                  {currentLanguage === 'tr' ? 'Oto Sync' : 'Auto Sync'}
-                  {bankTxAutoSync && <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />}
-                </button>
-                <button
-                  onClick={pullBankTransactions}
-                  disabled={bankTxPulling || !mikroEnabled}
-                  className="apple-button-primary py-1.5 px-3 text-xs"
-                >
-                  <ArrowRightLeft size={12} className={bankTxPulling ? 'animate-spin' : ''} />
-                  {bankTxPulling
-                    ? (currentLanguage === 'tr' ? 'Çekiliyor...' : 'Pulling...')
-                    : (currentLanguage === 'tr' ? 'Şimdi Çek' : 'Pull Now')}
-                </button>
-              </div>
-            </div>
-
-            {/* Filter + Search */}
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <div className="relative flex-1 min-w-[160px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder={currentLanguage === 'tr' ? 'Hareket ara...' : 'Search transactions...'}
-                  value={bankTxSearch}
-                  onChange={e => setBankTxSearch(e.target.value)}
-                  className="apple-input w-full pl-8 py-2 text-xs"
-                />
-              </div>
-              <div className="flex gap-1">
-                {(['all', 'credit', 'debit'] as const).map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setBankTxFilter(f)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${bankTxFilter === f ? 'bg-brand text-white' : 'apple-button-secondary py-1.5'}`}
-                  >
-                    {f === 'all' ? (currentLanguage === 'tr' ? 'Tümü' : 'All') : f === 'credit' ? (currentLanguage === 'tr' ? '↓ Alacak' : '↓ Credit') : (currentLanguage === 'tr' ? '↑ Borç' : '↑ Debit')}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {!mikroEnabled && (
-              <div className="flex items-center gap-2 px-4 py-3 bg-orange-50 text-orange-700 text-xs rounded-xl mb-3">
-                <AlertCircle size={14} />
-                {currentLanguage === 'tr'
-                  ? 'Otomatik çekim için Entegrasyonlar → Mikro ERP sekmesinden bağlantı kurun.'
-                  : 'Connect via Integrations → Mikro ERP tab to enable auto-pull.'}
-              </div>
-            )}
-
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr>
-                    {([
-                      { key: 'date', label: currentLanguage === 'tr' ? 'Tarih' : 'Date' },
-                      { key: 'accountName', label: currentLanguage === 'tr' ? 'Hesap' : 'Account' },
-                      { key: 'description', label: currentLanguage === 'tr' ? 'Açıklama' : 'Description' },
-                      { key: 'type', label: currentLanguage === 'tr' ? 'Tür' : 'Type' },
-                      { key: 'amount', label: currentLanguage === 'tr' ? 'Tutar' : 'Amount', align: 'right' },
-                      { key: 'balance', label: currentLanguage === 'tr' ? 'Bakiye' : 'Balance', align: 'right' },
-                    ] as { key: keyof BankTransaction; label: string; align?: string }[]).map(col => (
-                      <th
-                        key={col.key}
-                        onClick={() => setBankTxSort(s => ({ key: col.key, dir: s.key === col.key && s.dir === 'asc' ? 'desc' : 'asc' }))}
-                        className={`cursor-pointer select-none px-4 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${col.align === 'right' ? 'text-right' : 'text-left'} ${bankTxSort.key === col.key ? 'text-brand' : 'text-gray-400 hover:text-gray-600'}`}
-                      >
-                        {col.label}{' '}
-                        <span className={bankTxSort.key === col.key ? 'opacity-100' : 'opacity-25'}>
-                          {bankTxSort.key === col.key ? (bankTxSort.dir === 'asc' ? '↑' : '↓') : '↕'}
-                        </span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const filtered = bankTransactions
-                      .filter(tx =>
-                        (bankTxFilter === 'all' || tx.type === bankTxFilter) &&
-                        (!bankTxSearch || tx.description.toLowerCase().includes(bankTxSearch.toLowerCase()) || tx.accountName.toLowerCase().includes(bankTxSearch.toLowerCase()) || (tx.reference ?? '').toLowerCase().includes(bankTxSearch.toLowerCase()))
-                      )
-                      .sort((a, b) => {
-                        const av = a[bankTxSort.key] ?? '';
-                        const bv = b[bankTxSort.key] ?? '';
-                        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-                        return bankTxSort.dir === 'asc' ? cmp : -cmp;
-                      });
-                    if (filtered.length === 0) return (
-                      <tr>
-                        <td colSpan={6} className="text-center py-10 text-gray-400 text-sm">
-                          <div className="flex flex-col items-center gap-2">
-                            <Landmark size={28} className="text-gray-300" />
-                            <span>
-                              {bankTransactions.length === 0
-                                ? (currentLanguage === 'tr' ? '"Şimdi Çek" ile Mikro\'dan hareketleri çekin.' : 'Use "Pull Now" to fetch transactions from Mikro.')
-                                : (currentLanguage === 'tr' ? 'Arama veya filtre sonucu yok.' : 'No results match filter.')}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                    return filtered.map(tx => (
-                      <tr key={tx.id} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
-                        <td className="px-4 py-3 text-sm font-mono text-gray-500 whitespace-nowrap">{tx.date}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{tx.accountName || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-800 max-w-[200px] truncate" title={tx.description}>{tx.description || '—'}</td>
-                        <td className="px-4 py-3">
-                          <span className={`apple-badge ${tx.type === 'credit' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                            {tx.type === 'credit' ? '↓ ' : '↑ '}
-                            {tx.type === 'credit' ? (currentLanguage === 'tr' ? 'Alacak' : 'Credit') : (currentLanguage === 'tr' ? 'Borç' : 'Debit')}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-3 text-sm font-semibold text-right whitespace-nowrap ${tx.type === 'credit' ? 'text-green-600' : 'text-red-500'}`}>
-                          {tx.type === 'debit' ? '−' : '+'}{tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.amount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600 whitespace-nowrap">
-                          {tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <BankaTab
+          t={t} currentLanguage={currentLanguage} bankAccounts={bankAccounts}
+          tryBalance={tryBalance} usdBalance={usdBalance} eurBalance={eurBalance} setDrillDown={setDrillDown}
+          handleBankFileImport={handleBankFileImport} openAddBank={openAddBank}
+          bankSearch={bankSearch} setBankSearch={setBankSearch}
+          bankImportStatus={bankImportStatus} setBankImportStatus={setBankImportStatus}
+          bankSortKey={bankSortKey} bankSortDir={bankSortDir} toggleBankSort={toggleBankSort}
+          displayedAccounts={displayedAccounts} openEditBank={openEditBank} deleteBank={deleteBank}
+          mikroEnabled={mikroEnabled} mikroConnected={mikroConnected}
+          bankTxLastPull={bankTxLastPull} bankTxAutoSync={bankTxAutoSync} setBankTxAutoSync={setBankTxAutoSync}
+          pullBankTransactions={pullBankTransactions} bankTxPulling={bankTxPulling}
+          bankTxSearch={bankTxSearch} setBankTxSearch={setBankTxSearch}
+          bankTxFilter={bankTxFilter} setBankTxFilter={setBankTxFilter}
+          bankTransactions={bankTransactions} bankTxSort={bankTxSort} setBankTxSort={setBankTxSort}
+          showBankModal={showBankModal} setShowBankModal={setShowBankModal} editingBank={editingBank}
+          bankForm={bankForm} setBankForm={setBankForm} saveBank={saveBank}
+        />
       )}
 
       {/* YEVMİYE */}
       {accountingTab === 'yevmiye' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="apple-card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-800">{t.journalBook}</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => exportCSV('yevmiye.csv',
-                    [t.date, t.receiptNo, t.description, t.debitAccount, t.creditAccount, t.debit, t.credit, t.vatRate, t.category],
-                    journalEntries.map(e => [e.date, e.fiş, e.aciklama, e.debitHesap, e.alacakHesap, e.borc, e.alacak, e.kdvOran ?? 0, e.kategori])
-                  )}
-                  className="apple-button-secondary py-2 px-4 text-sm"
-                >
-                  <Download size={14} /> CSV
-                </button>
-                <button onClick={() => setShowJournalModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.newEntry}
-                </button>
-              </div>
-            </div>
-            {/* Search bar */}
-            <div className="relative mb-3">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder={currentLanguage === 'en' ? 'Search entries...' : 'Kayıt ara...'}
-                value={journalSearch}
-                onChange={e => setJournalSearch(e.target.value)}
-                className="apple-input w-full pl-9 py-2"
-              />
-            </div>
-            {/* Yevmiye Currency Switcher */}
-            <div className="flex items-center gap-1 bg-gray-50 rounded-xl px-3 py-2 mb-3 w-fit">
-              <span className="text-xs text-gray-400 font-medium mr-1">{currentLanguage === 'tr' ? 'Para Birimi:' : 'Currency:'}</span>
-              {(['TRY', 'USD', 'EUR'] as const).map(cur => (
-                <button
-                  key={cur}
-                  onClick={() => setYevmiyeCurrency(cur)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${yevmiyeCurrency === cur ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:shadow-sm'}`}
-                >
-                  {cur === 'TRY' ? '₺ TRY' : cur === 'USD' ? '$ USD' : '€ EUR'}
-                </button>
-              ))}
-              {exchangeRates && yevmiyeCurrency !== 'TRY' && (
-                <span className="ml-2 text-[10px] text-gray-400 font-mono">
-                  {yevmiyeCurrency === 'USD' ? `1 USD = ₺${(exchangeRates.USD||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `1 EUR = ₺${(exchangeRates.EUR||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
-                </span>
-              )}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.date} 
-                      sortKey="date" 
-                      currentSort={{ key: journalSortKey, direction: journalSortDir }} 
-                      onSort={(key) => toggleJournalSort(key as keyof JournalEntry)} 
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.receiptNo}</th>
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.description}</th>
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.debitAccount}</th>
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.creditAccount}</th>
-                    <SortHeader 
-                      label={`Borç ${yevmiyeCurrency === 'TRY' ? '(₺)' : yevmiyeCurrency === 'USD' ? '($)' : '(€)'}`} 
-                      sortKey="borc" 
-                      currentSort={{ key: journalSortKey, direction: journalSortDir }} 
-                      onSort={(key) => toggleJournalSort(key as keyof JournalEntry)} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={`Alacak ${yevmiyeCurrency === 'TRY' ? '(₺)' : yevmiyeCurrency === 'USD' ? '($)' : '(€)'}`} 
-                      sortKey="alacak" 
-                      currentSort={{ key: journalSortKey, direction: journalSortDir }} 
-                      onSort={(key) => toggleJournalSort(key as keyof JournalEntry)} 
-                      className="text-right hidden sm:table-cell"
-                    />
-                    <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.vatRate}</th>
-                    <SortHeader 
-                      label={t.category} 
-                      sortKey="kategori" 
-                      currentSort={{ key: journalSortKey, direction: journalSortDir }} 
-                      onSort={(key) => toggleJournalSort(key as keyof JournalEntry)} 
-                      className="hidden lg:table-cell"
-                    />
-                    <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.delete}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedJournal.length === 0 && (
-                    <tr><td colSpan={10} className="text-center py-8 text-gray-400">{t.noEntries}</td></tr>
-                  )}
-                  {displayedJournal.map(e => (
-                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                      <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{e.date}</td>
-                      <td className="py-2.5 px-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{e.fiş}</td>
-                      <td className="py-2.5 px-3 text-gray-800 max-w-[160px] truncate">
-                        <div className="flex items-center gap-2">
-                          {e.aciklama}
-                          {e.isSynced && (
-                            <span className="bg-green-100 text-green-600 text-[8px] font-bold px-1 py-0.5 rounded uppercase tracking-tighter">LUCA</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-500 text-xs hidden md:table-cell max-w-[140px] truncate">{e.debitHesap}</td>
-                      <td className="py-2.5 px-3 text-gray-500 text-xs hidden md:table-cell max-w-[140px] truncate">{e.alacakHesap}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{formatInCurrency(e.borc, yevmiyeCurrency, exchangeRates)}</td>
-                      <td className="py-2.5 px-3 text-right text-gray-600 hidden sm:table-cell">{formatInCurrency(e.alacak, yevmiyeCurrency, exchangeRates)}</td>
-                      <td className="py-2.5 px-3 text-center hidden sm:table-cell">
-                        <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">%{e.kdvOran ?? 0}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-500 text-xs hidden lg:table-cell">{e.kategori}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => openEditJournal(e)} className="action-btn-view" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye size={13} /></button>
-                          <button onClick={() => openEditJournal(e)} className="action-btn-edit" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 size={13} /></button>
-                          <button onClick={() => deleteJournal(e.id)} className="action-btn-delete"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <YevmiyeTab
+          t={t} currentLanguage={currentLanguage} journalEntries={journalEntries} displayedJournal={displayedJournal}
+          journalSearch={journalSearch} setJournalSearch={setJournalSearch}
+          journalSortKey={journalSortKey} journalSortDir={journalSortDir} toggleJournalSort={toggleJournalSort}
+          yevmiyeCurrency={yevmiyeCurrency} setYevmiyeCurrency={setYevmiyeCurrency} exchangeRates={exchangeRates}
+          openEditJournal={openEditJournal} deleteJournal={deleteJournal}
+          showJournalModal={showJournalModal} setShowJournalModal={setShowJournalModal}
+          editingJournal={editingJournal} journalForm={journalForm} setJournalForm={setJournalForm} saveJournal={saveJournal}
+        />
       )}
 
       {/* MİZAN */}
       {accountingTab === 'mizan' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {/* Toplam Borç */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center">
-                  <TrendingDown size={15} className="text-red-600" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-red-600">{formatConv(mizanTotals.borc)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalDebit}</p>
-            </div>
-            {/* Toplam Alacak */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
-                  <TrendingUp size={15} className="text-green-600" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-green-600">{formatConv(mizanTotals.alacak)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalCredit}</p>
-            </div>
-            {/* Borç Bakiyesi */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center">
-                  <ArrowUpDown size={15} className="text-red-500" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-red-500">{formatConv(mizanTotals.borcBakiye)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.debitBalance}</p>
-            </div>
-            {/* Alacak Bakiyesi */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center">
-                  <Wallet size={15} className="text-green-500" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-green-500">{formatConv(mizanTotals.alacakBakiye)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.creditBalance}</p>
-            </div>
-          </div>
-          <div className="apple-card p-4">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-gray-800">{t.trialBalanceTitle}</h3>
-                <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${mizanDengeli ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                  {mizanDengeli ? <><CheckCircle size={12} /> {t.balanced}</> : <><AlertCircle size={12} /> {t.notBalanced}</>}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder={currentLanguage === 'en' ? 'Search accounts...' : 'Hesap ara...'}
-                    value={mizanSearch}
-                    onChange={e => setMizanSearch(e.target.value)}
-                    className="apple-input pl-7 pr-3 py-1.5 w-44"
-                  />
-                </div>
-                <button
-                  onClick={() => exportCSV('mizan.csv',
-                    ['Hesap', 'Borç Toplamı', 'Alacak Toplamı', 'Borç Bakiyesi', 'Alacak Bakiyesi'],
-                    mizanRows.map(r => [r.hesap, r.borc, r.alacak, r.borcBakiye, r.alacakBakiye])
-                  )}
-                  className="apple-button-secondary py-2 px-4 text-sm"
-                >
-                  <Download size={14} /> CSV
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.accountCode} 
-                      sortKey="hesap" 
-                      currentSort={{ key: mizanSortKey, direction: mizanSortDir }} 
-                      onSort={(key) => toggleMizanSort(key as 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye')} 
-                    />
-                    <SortHeader 
-                      label={t.totalDebit} 
-                      sortKey="borc" 
-                      currentSort={{ key: mizanSortKey, direction: mizanSortDir }} 
-                      onSort={(key) => toggleMizanSort(key as 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.totalCredit} 
-                      sortKey="alacak" 
-                      currentSort={{ key: mizanSortKey, direction: mizanSortDir }} 
-                      onSort={(key) => toggleMizanSort(key as 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.debitBalance} 
-                      sortKey="borcBakiye" 
-                      currentSort={{ key: mizanSortKey, direction: mizanSortDir }} 
-                      onSort={(key) => toggleMizanSort(key as 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye')} 
-                      className="text-right hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.creditBalance} 
-                      sortKey="alacakBakiye" 
-                      currentSort={{ key: mizanSortKey, direction: mizanSortDir }} 
-                      onSort={(key) => toggleMizanSort(key as 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye')} 
-                      className="text-right hidden sm:table-cell"
-                    />
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedMizan.length === 0 && (
-                    <tr><td colSpan={5} className="text-center py-8 text-gray-400">{t.noJournalEntries}</td></tr>
-                  )}
-                  {displayedMizan.map((r, i) => (
-                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                      <td className="py-2.5 px-3 text-gray-700 font-medium text-xs">{r.hesap}</td>
-                      <td className="py-2.5 px-3 text-right text-red-600 font-semibold">{formatTRY(r.borc)}</td>
-                      <td className="py-2.5 px-3 text-right text-green-600 font-semibold">{formatTRY(r.alacak)}</td>
-                      <td className="py-2.5 px-3 text-right text-red-500 hidden sm:table-cell">{r.borcBakiye > 0 ? formatTRY(r.borcBakiye) : '-'}</td>
-                      <td className="py-2.5 px-3 text-right text-green-500 hidden sm:table-cell">{r.alacakBakiye > 0 ? formatTRY(r.alacakBakiye) : '-'}</td>
-                    </tr>
-                  ))}
-                  {mizanRows.length > 0 && (
-                    <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                      <td className="py-2.5 px-3 text-gray-800">{t.total}</td>
-                      <td className="py-2.5 px-3 text-right text-red-700">{formatTRY(mizanTotals.borc)}</td>
-                      <td className="py-2.5 px-3 text-right text-green-700">{formatTRY(mizanTotals.alacak)}</td>
-                      <td className="py-2.5 px-3 text-right text-red-600 hidden sm:table-cell">{formatTRY(mizanTotals.borcBakiye)}</td>
-                      <td className="py-2.5 px-3 text-right text-green-600 hidden sm:table-cell">{formatTRY(mizanTotals.alacakBakiye)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <MizanTab
+          t={t} currentLanguage={currentLanguage} mizanRows={mizanRows} mizanTotals={mizanTotals}
+          mizanDengeli={mizanDengeli} hasMikroMizan={mikroMizanSatirlari.length > 0}
+          kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} formatConv={formatConv} setDrillDown={setDrillDown}
+          mizanSearch={mizanSearch} setMizanSearch={setMizanSearch}
+          mizanSortKey={mizanSortKey} mizanSortDir={mizanSortDir} toggleMizanSort={toggleMizanSort}
+          displayedMizan={displayedMizan}
+        />
       )}
 
       {/* GELİR/GİDER */}
       {accountingTab === 'gelir' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          {/* Filters */}
-          <div className="apple-card p-4 flex flex-wrap gap-3 items-center">
-            <span className="text-sm font-medium text-gray-600">{t.period}</span>
-            <select value={gelirMonth} onChange={e => { setGelirMonth(Number(e.target.value)); setGelirUseRange(false); }} className="apple-input py-2 px-3">
-              {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
-            <input type="number" value={gelirYear} onChange={e => { setGelirYear(Number(e.target.value)); setGelirUseRange(false); }} className="apple-input py-2 px-3 w-24" />
-            <span className="text-gray-300 text-sm">|</span>
-            <span className="text-sm font-medium text-gray-600">{currentLanguage === 'en' ? 'Or date range:' : 'Veya tarih aralığı:'}</span>
-            <input
-              type="date"
-              value={gelirDateFrom}
-              onChange={e => {
-                setGelirDateFrom(e.target.value);
-                if (e.target.value) {
-                  setGelirUseRange(true);
-                  const d = new Date(e.target.value);
-                  setGelirMonth(d.getMonth() + 1);
-                  setGelirYear(d.getFullYear());
-                }
-              }}
-              className="apple-input py-2 px-3"
-            />
-            <span className="text-gray-400 text-sm">—</span>
-            <input
-              type="date"
-              value={gelirDateTo}
-              onChange={e => {
-                setGelirDateTo(e.target.value);
-                if (e.target.value) setGelirUseRange(true);
-              }}
-              className="apple-input py-2 px-3"
-            />
-            {gelirUseRange && (
-              <button onClick={() => { setGelirUseRange(false); setGelirDateFrom(''); setGelirDateTo(''); }} className="text-xs font-bold text-brand hover:underline">
-                ✕ {currentLanguage === 'en' ? 'Clear range' : 'Aralığı temizle'}
-              </button>
-            )}
-          </div>
-          {/* Currency switcher + KPI Cards */}
-          <div className="flex items-center gap-1 apple-card px-3 py-2 w-fit">
-            <span className="text-xs text-gray-400 font-medium mr-1">{currentLanguage === 'tr' ? 'Para Birimi:' : 'Currency:'}</span>
-            {(['TRY', 'USD', 'EUR'] as const).map(cur => (
-              <button
-                key={cur}
-                onClick={() => setGelirCurrency(cur)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${gelirCurrency === cur ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'}`}
-              >
-                {cur === 'TRY' ? '₺ TRY' : cur === 'USD' ? '$ USD' : '€ EUR'}
-              </button>
-            ))}
-            {exchangeRates && (
-              <span className="ml-2 text-[10px] text-gray-400 font-mono">
-                {gelirCurrency === 'USD' ? `1 USD = ₺${(exchangeRates.USD || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
-                 gelirCurrency === 'EUR' ? `1 EUR = ₺${(exchangeRates.EUR || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'TCMB'}
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Gelir Detayı' : 'Income Detail', rows: Object.entries(gelirBreakdown).sort(([,a],[,b])=>(b as number)-(a as number)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar as number, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500 font-medium">{t.totalIncome}</span>
-                <TrendingUp size={16} className="text-green-500" />
-              </div>
-              <div className="text-2xl font-bold text-green-600">
-                {formatInCurrency(toplamGelir, gelirCurrency, exchangeRates)}
-              </div>
-              <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-            </button>
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Gider Detayı' : 'Expense Detail', rows: Object.entries(giderBreakdown).sort(([,a],[,b])=>(b as number)-(a as number)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar as number, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500 font-medium">{t.totalExpense}</span>
-                <TrendingDown size={16} className="text-red-500" />
-              </div>
-              <div className="text-2xl font-bold text-red-600">
-                {formatInCurrency(toplamGider, gelirCurrency, exchangeRates)}
-              </div>
-              <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-            </button>
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Net Kâr/Zarar Özeti' : 'Net Profit/Loss Summary', rows: [{ label: currentLanguage === 'tr' ? 'Toplam Gelir' : 'Total Income', value: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) }, { label: currentLanguage === 'tr' ? 'Toplam Gider' : 'Total Expense', value: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) }, { label: 'Net', badge: netKar >= 0 ? 'Kâr' : 'Zarar', badgeColor: netKar >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600', value: formatInCurrency(netKar, gelirCurrency, exchangeRates) }] })} className="apple-card p-4 text-left cursor-pointer group">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500 font-medium">{t.netProfit}</span>
-                <span className={`text-base font-black ${netKar >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {gelirCurrency === 'USD' ? '$' : gelirCurrency === 'EUR' ? '€' : '₺'}
-                </span>
-              </div>
-              <div className={`text-2xl font-bold ${netKar >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatInCurrency(netKar, gelirCurrency, exchangeRates)}
-              </div>
-              <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
-            </button>
-          </div>
-          {/* Bar Chart */}
-          <div className="apple-card p-4">
-            <h3 className="font-semibold text-gray-800 mb-4">{t.annualChart(gelirYear)}</h3>
-            <div className="overflow-x-auto">
-              <div className="flex items-end gap-2 min-w-[600px] h-48 px-2">
-                {monthlyData.map((d, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full flex items-end justify-center gap-0.5 h-36">
-                      <div
-                        className="flex-1 bg-green-400 rounded-t-sm transition-all"
-                        style={{ height: `${maxChartVal > 0 ? (d.gelir / maxChartVal) * 100 : 0}%`, minHeight: d.gelir > 0 ? 4 : 0 }}
-                        title={`${t.income}: ${formatTRY(d.gelir)}`}
-                      />
-                      <div
-                        className="flex-1 bg-red-400 rounded-t-sm transition-all"
-                        style={{ height: `${maxChartVal > 0 ? (d.gider / maxChartVal) * 100 : 0}%`, minHeight: d.gider > 0 ? 4 : 0 }}
-                        title={`${t.expense}: ${formatTRY(d.gider)}`}
-                      />
-                    </div>
-                    <span className="text-[10px] text-gray-500">{d.month.slice(0, 3)}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-4 mt-2 justify-center">
-                <div className="flex items-center gap-1.5 text-xs text-gray-500"><div className="w-3 h-3 rounded-sm bg-green-400" /> {t.income}</div>
-                <div className="flex items-center gap-1.5 text-xs text-gray-500"><div className="w-3 h-3 rounded-sm bg-red-400" /> {t.expense}</div>
-              </div>
-            </div>
-          </div>
-          {/* Breakdown Tables */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-              <h4 className="font-semibold text-gray-800 mb-3 text-sm">{t.incomeBreakdown}</h4>
-              <div className="overflow-x-auto">
-                <table className="apple-table">
-                  <thead><tr className="border-b border-gray-100"><th className="text-left py-1.5 px-2 text-gray-500 font-medium">{t.account}</th><th className="text-right py-1.5 px-2 text-gray-500 font-medium">{t.amount}</th></tr></thead>
-                  <tbody>
-                    {Object.entries(gelirBreakdown).length === 0 && <tr><td colSpan={2} className="text-center py-4 text-gray-400 text-xs">{t.noIncomeThisPeriod}</td></tr>}
-                    {Object.entries(gelirBreakdown).map(([hesap, tutar], i) => (
-                      <tr key={i} className="border-b border-gray-50"><td className="py-2 px-2 text-gray-600 text-xs">{hesap}</td><td className="py-2 px-2 text-right font-semibold text-green-600">{formatTRY(tutar)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-              <h4 className="font-semibold text-gray-800 mb-3 text-sm">{t.expenseBreakdown}</h4>
-              <div className="overflow-x-auto">
-                <table className="apple-table">
-                  <thead><tr className="border-b border-gray-100"><th className="text-left py-1.5 px-2 text-gray-500 font-medium">{t.account}</th><th className="text-right py-1.5 px-2 text-gray-500 font-medium">{t.amount}</th></tr></thead>
-                  <tbody>
-                    {Object.entries(giderBreakdown).length === 0 && <tr><td colSpan={2} className="text-center py-4 text-gray-400 text-xs">{t.noExpenseThisPeriod}</td></tr>}
-                    {Object.entries(giderBreakdown).map(([hesap, tutar], i) => (
-                      <tr key={i} className="border-b border-gray-50"><td className="py-2 px-2 text-gray-600 text-xs">{hesap}</td><td className="py-2 px-2 text-right font-semibold text-red-600">{formatTRY(tutar)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </motion.div>
+        <GelirGiderTab
+          t={t} currentLanguage={currentLanguage} MONTHS={MONTHS}
+          gelirMonth={gelirMonth} setGelirMonth={setGelirMonth} gelirYear={gelirYear} setGelirYear={setGelirYear}
+          gelirDateFrom={gelirDateFrom} setGelirDateFrom={setGelirDateFrom} gelirDateTo={gelirDateTo} setGelirDateTo={setGelirDateTo}
+          gelirUseRange={gelirUseRange} setGelirUseRange={setGelirUseRange}
+          gelirCurrency={gelirCurrency} setGelirCurrency={setGelirCurrency} exchangeRates={exchangeRates} setDrillDown={setDrillDown}
+          gelirBreakdown={gelirBreakdown} giderBreakdown={giderBreakdown}
+          toplamGelir={toplamGelir} toplamGider={toplamGider} netKar={netKar}
+          monthlyData={monthlyData} maxChartVal={maxChartVal}
+        />
       )}
 
       {/* BÜTÇE */}
       {accountingTab === 'butce' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="apple-card p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-bold text-gray-800">{t.butce}</h3>
-              <button onClick={() => setShowBudgetModal(true)} className="apple-button-primary">
-                <Plus size={14} /> {t.add}
-              </button>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-6">
-                {budgets.length === 0 && (
-                  <div className="text-center py-8 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl">
-                    {t.noRecords}
-                  </div>
-                )}
-                {budgets.map(b => {
-                  // Calculate actual spending for this category and period
-                  const actual = journalEntries
-                    .filter(e => e.kategori === b.category && e.date.startsWith(b.period))
-                    .reduce((sum, e) => sum + (e.borc || 0), 0);
-                  
-                  const percent = b.amount > 0 ? Math.min(100, Math.round((actual / b.amount) * 100)) : 0;
-                  const color = percent > 90 ? 'bg-red-500' : percent > 70 ? 'bg-orange-500' : 'bg-blue-500';
-
-                  return (
-                    <div key={b.id} className="group relative">
-                      <div className="flex justify-between text-sm mb-2">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-gray-800">{b.category}</span>
-                          <span className="text-[10px] text-gray-400 uppercase font-bold">{b.period}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-bold text-gray-800">{formatTRY(actual)}</span>
-                          <span className="text-gray-400 mx-1">/</span>
-                          <span className="text-gray-500">{formatTRY(b.amount)}</span>
-                        </div>
-                      </div>
-                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${percent}%` }}
-                          className={`h-full ${color}`} 
-                        />
-                      </div>
-                      <button 
-                        onClick={() => deleteBudget(b.id)}
-                        className="absolute -right-2 -top-2 p-1 bg-white shadow-sm border border-gray-100 rounded-full text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              
-              <div className="bg-gray-50 rounded-2xl p-6 flex flex-col justify-center items-center text-center">
-                {budgets.length > 0 ? (
-                  <>
-                    {(() => {
-                      const totalBudget = budgets.reduce((sum, b) => sum + b.amount, 0);
-                      const totalActual = budgets.reduce((sum, b) => {
-                        const actual = journalEntries
-                          .filter(e => e.kategori === b.category && e.date.startsWith(b.period))
-                          .reduce((s, entry) => s + (entry.borc || 0), 0);
-                        return sum + actual;
-                      }, 0);
-                      const totalPercent = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
-                      
-                      return (
-                        <>
-                          <div className="w-32 h-32 rounded-full border-8 border-brand flex flex-col items-center justify-center mb-4 relative">
-                            <svg className="absolute inset-0 w-full h-full -rotate-90">
-                              <circle 
-                                cx="64" cy="64" r="56" 
-                                fill="none" stroke="#f3f4f6" strokeWidth="8" 
-                              />
-                              <circle 
-                                cx="64" cy="64" r="56" 
-                                fill="none" stroke="#ff4000" strokeWidth="8" 
-                                strokeDasharray={351.8}
-                                strokeDashoffset={351.8 - (351.8 * Math.min(100, totalPercent)) / 100}
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                            <span className="text-2xl font-black text-gray-800 relative z-10">%{totalPercent}</span>
-                            <span className="text-[10px] text-gray-500 uppercase font-bold relative z-10">{currentLanguage === 'tr' ? 'Kullanım' : 'Usage'}</span>
-                          </div>
-                          <h4 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Genel Bütçe Durumu' : 'Overall Budget Status'}</h4>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {currentLanguage === 'tr' 
-                              ? `Toplam bütçenin %${totalPercent}'i kullanıldı.` 
-                              : `${totalPercent}% of total budget used.`}
-                          </p>
-                        </>
-                      );
-                    })()}
-                  </>
-                ) : (
-                  <div className="text-gray-400">
-                    <PieChart size={48} className="mx-auto mb-4 opacity-20" />
-                    <p className="text-sm">{currentLanguage === 'tr' ? 'Henüz bütçe hedefi belirlenmedi.' : 'No budget goals set yet.'}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </motion.div>
+        <ButceTab
+          t={t} currentLanguage={currentLanguage} budgets={budgets} journalEntries={journalEntries}
+          deleteBudget={deleteBudget} showBudgetModal={showBudgetModal} setShowBudgetModal={setShowBudgetModal}
+          budgetForm={budgetForm} setBudgetForm={setBudgetForm} saveBudget={saveBudget}
+        />
       )}
 
       {/* İŞLETME SERMAYESİ */}
-      {accountingTab === 'isletme_sermayesi' && (() => {
-        const tr = currentLanguage === 'tr';
-        const wc = workingCapital;
-        const donenVarliklar = wc.kasaBanka + wc.ticariAlacaklar + wc.stoklar;
-        const kvYukumluluk = wc.ticariBorclar + wc.vergiSgk + wc.krediler;
-        const netSermaye = donenVarliklar - kvYukumluluk;
-        const cariOran = kvYukumluluk > 0 ? donenVarliklar / kvYukumluluk : 0;
-        const fmt = (n: number) => `₺${Math.round(n).toLocaleString('tr-TR')}`;
-        const oranDurum = cariOran >= 1.5 ? { txt: tr ? 'İdeal' : 'Ideal', cls: 'text-emerald-600' }
-          : cariOran >= 1 ? { txt: tr ? 'Yeterli' : 'Adequate', cls: 'text-amber-600' }
-          : { txt: tr ? 'Riskli' : 'At risk', cls: 'text-red-600' };
-        const WCInput = ({ field, label }: { field: WCField; label: string }) => (
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-gray-500">{label}</span>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
-              <input type="number" value={wc[field] || ''} onChange={e => updateWC(field, Number(e.target.value) || 0)}
-                placeholder="0"
-                className="w-32 pl-5 pr-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums" />
-            </div>
-          </div>
-        );
-        return (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-gray-400">
-              {tr ? 'Kalemleri elle düzenleyin — otomatik kaydedilir.' : 'Edit items manually — auto-saved.'}
-              {wcSaved && <span className="ml-2 text-emerald-600 font-bold">✓ {tr ? 'Kaydedildi' : 'Saved'}</span>}
-            </p>
-            <button onClick={prefillWC} className="apple-button-secondary text-xs">
-              <RefreshCw className="w-3.5 h-3.5" /> {tr ? 'Verilerden Doldur (Alacak + Stok)' : 'Fill from Data (AR + Stock)'}
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Dönen Varlıklar — editlenebilir */}
-            <div className="apple-card p-6">
-              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Dönen Varlıklar' : 'Current Assets'}</h4>
-              <p className="text-2xl font-black text-gray-800 mb-4">{fmt(donenVarliklar)}</p>
-              <div className="space-y-3">
-                <WCInput field="kasaBanka" label={tr ? 'Kasa/Banka' : 'Cash/Bank'} />
-                <WCInput field="ticariAlacaklar" label={tr ? 'Ticari Alacaklar' : 'Trade Receivables'} />
-                <WCInput field="stoklar" label={tr ? 'Stoklar' : 'Inventory'} />
-              </div>
-            </div>
-            {/* Kısa Vadeli Yükümlülükler — editlenebilir */}
-            <div className="apple-card p-6">
-              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Kısa Vadeli Yükümlülükler' : 'Current Liabilities'}</h4>
-              <p className="text-2xl font-black text-red-600 mb-4">{fmt(kvYukumluluk)}</p>
-              <div className="space-y-3">
-                <WCInput field="ticariBorclar" label={tr ? 'Ticari Borçlar' : 'Trade Payables'} />
-                <WCInput field="vergiSgk" label={tr ? 'Vergi/SGK' : 'Tax/Social Sec.'} />
-                <WCInput field="krediler" label={tr ? 'Kısa Vadeli Krediler' : 'Short-term Loans'} />
-              </div>
-            </div>
-            {/* Net İşletme Sermayesi — hesaplanır */}
-            <div className="apple-card bg-brand p-6 text-white">
-              <h4 className="text-xs font-bold opacity-70 uppercase mb-2">{tr ? 'Net İşletme Sermayesi' : 'Net Working Capital'}</h4>
-              <p className="text-3xl font-black">{fmt(netSermaye)}</p>
-              <div className="mt-4 flex items-center gap-2">
-                <span className="text-xs opacity-70">{tr ? 'Cari Oran' : 'Current Ratio'}:</span>
-                <span className="text-lg font-black">{cariOran.toFixed(2)}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white ${oranDurum.cls}`}>{oranDurum.txt}</span>
-              </div>
-              <div className="mt-4 p-3 bg-white/10 rounded-xl">
-                <p className="text-[10px] font-medium leading-relaxed">
-                  {kvYukumluluk === 0 && donenVarliklar === 0
-                    ? (tr ? 'Kalemleri girerek işletme sermayenizi hesaplayın.' : 'Enter items to compute your working capital.')
-                    : cariOran >= 1.5
-                      ? (tr ? `İşletme sermayesi rasyosu ${cariOran.toFixed(2)} ile ideal seviyededir. Likidite riski düşüktür.` : `Working capital ratio is ideal at ${cariOran.toFixed(2)}. Low liquidity risk.`)
-                      : (tr ? `Cari oran ${cariOran.toFixed(2)} — likiditeyi yakından izleyin.` : `Current ratio ${cariOran.toFixed(2)} — monitor liquidity closely.`)}
-                </p>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-        );
-      })()}
+      {accountingTab === 'isletme_sermayesi' && (
+        <IsletmeSermayesiTab
+          currentLanguage={currentLanguage} workingCapital={workingCapital} wcSaved={wcSaved}
+          updateWC={updateWC} prefillWC={prefillWC}
+        />
+      )}
 
       {/* KDV */}
       {accountingTab === 'kdv' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          {/* Filters */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap gap-3 items-center">
-            <span className="text-sm font-medium text-gray-600">{t.period}</span>
-            <select value={kdvMonth} onChange={e => setKdvMonth(Number(e.target.value))} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-              {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
-            <input type="number" value={kdvYear} onChange={e => setKdvYear(Number(e.target.value))} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] w-24" />
-          </div>
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button 
-              onClick={() => setDrillDown({ 
-                title: t.calculatedVat, 
-                rows: journalEntries
-                  .filter(e => {
-                    if (!e.date) return false;
-                    const d = new Date(e.date);
-                    return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear && e.alacakHesap.startsWith('391');
-                  })
-                  .map(e => ({ label: e.alacakHesap, sub: e.aciklama, value: formatTRY(e.alacak || 0) })),
-                total: formatTRY(hesaplananKDV)
-              })}
-              className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
-            >
-              <div className="text-xs text-gray-500 font-medium mb-1">{t.calculatedVat}</div>
-              <div className="text-2xl font-bold text-[#ff4000]">{formatTRY(hesaplananKDV)}</div>
-              <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">391 - Hesaplanan KDV</div>
-            </button>
-            <button 
-              onClick={() => setDrillDown({ 
-                title: t.deductibleVat, 
-                rows: journalEntries
-                  .filter(e => {
-                    if (!e.date) return false;
-                    const d = new Date(e.date);
-                    return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear && e.debitHesap.startsWith('191');
-                  })
-                  .map(e => ({ label: e.debitHesap, sub: e.aciklama, value: formatTRY(e.borc || 0) })),
-                total: formatTRY(indirilecekKDV)
-              })}
-              className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
-            >
-              <div className="text-xs text-gray-500 font-medium mb-1">{t.deductibleVat}</div>
-              <div className="text-2xl font-bold text-blue-600">{formatTRY(indirilecekKDV)}</div>
-              <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">191 - İndirilecek KDV</div>
-            </button>
-            <button 
-              onClick={() => setDrillDown({ 
-                title: t.vatPayable, 
-                rows: [
-                  { label: t.calculatedVat, value: formatTRY(hesaplananKDV) },
-                  { label: t.deductibleVat, value: formatTRY(indirilecekKDV) },
-                  { label: 'Net', badge: odenecekKDV >= 0 ? 'Ödenecek' : 'Devreden', badgeColor: odenecekKDV >= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600', value: formatTRY(Math.abs(odenecekKDV)) }
-                ]
-              })}
-              className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
-            >
-              <div className="text-xs text-gray-500 font-medium mb-1">{t.vatPayable}</div>
-              <div className={`text-2xl font-bold ${odenecekKDV >= 0 ? 'text-red-600' : 'text-green-600'}`}>{formatTRY(odenecekKDV)}</div>
-              <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">{odenecekKDV >= 0 ? t.vatPayableDesc : t.vatRefundDesc}</div>
-            </button>
-          </div>
-          <div className="apple-card p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.vatBreakdown}</h3>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder={currentLanguage === 'en' ? 'Filter rates...' : 'Oran ara...'}
-                    value={kdvSearch}
-                    onChange={e => setKdvSearch(e.target.value)}
-                    className="apple-input pl-7 pr-3 py-1.5 w-32"
-                  />
-                </div>
-                <button onClick={downloadVatDeclaration} className="apple-button-primary py-2 px-4 text-sm">
-                  <FileText size={14} /> {t.vatDeclaration}
-                </button>
-                <button onClick={downloadVatDeclarationCSV} className="apple-button-secondary py-2 px-4 text-sm">
-                  <FileText size={14} /> {currentLanguage === 'tr' ? 'Excel (CSV)' : 'Excel (CSV)'}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.vatRate} 
-                      sortKey="oran" 
-                      currentSort={{ key: kdvSortBy, direction: kdvSortDir2 }} 
-                      onSort={(key) => {
-                        if (kdvSortBy === key) setKdvSortDir2(d => d === 'asc' ? 'desc' : 'asc');
-                        else { setKdvSortBy(key as 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv'); setKdvSortDir2('asc'); }
-                      }} 
-                    />
-                    <SortHeader 
-                      label={t.vatBase} 
-                      sortKey="matrah" 
-                      currentSort={{ key: kdvSortBy, direction: kdvSortDir2 }} 
-                      onSort={(key) => {
-                        if (kdvSortBy === key) setKdvSortDir2(d => d === 'asc' ? 'desc' : 'asc');
-                        else { setKdvSortBy(key as 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv'); setKdvSortDir2('asc'); }
-                      }} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.vatAmount} 
-                      sortKey="kdv" 
-                      currentSort={{ key: kdvSortBy, direction: kdvSortDir2 }} 
-                      onSort={(key) => {
-                        if (kdvSortBy === key) setKdvSortDir2(d => d === 'asc' ? 'desc' : 'asc');
-                        else { setKdvSortBy(key as 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv'); setKdvSortDir2('asc'); }
-                      }} 
-                      className="text-right"
-                    />
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(kdvOranBreakdown).length === 0 && (
-                    <tr><td colSpan={3} className="text-center py-8 text-gray-400">{t.noVatEntries}</td></tr>
-                  )}
-                  {Object.entries(kdvOranBreakdown)
-                    .filter(([oran]) => !kdvSearch || `%${oran}`.includes(kdvSearch))
-                    .sort(([oranA, dataA], [oranB, dataB]) => {
-                      let cmp: number;
-                      if (kdvSortBy === 'oran') cmp = Number(oranA) - Number(oranB);
-                      else if (kdvSortBy === 'matrah') cmp = dataA.matrah - dataB.matrah;
-                      else cmp = dataA.kdv - dataB.kdv;
-                      return kdvSortDir2 === 'asc' ? cmp : -cmp;
-                    })
-                    .map(([oran, data]) => (
-                      <tr key={oran} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">%{oran}</span></td>
-                        <td className="py-2.5 px-3 text-right text-gray-700 font-medium">{formatTRY(data.matrah)}</td>
-                        <td className="py-2.5 px-3 text-right font-semibold text-[#ff4000]">{formatTRY(data.kdv)}</td>
-                      </tr>
-                    ))
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <KdvTab
+          t={t} currentLanguage={currentLanguage} MONTHS={MONTHS}
+          kdvMonth={kdvMonth} setKdvMonth={setKdvMonth} kdvYear={kdvYear} setKdvYear={setKdvYear}
+          journalEntries={journalEntries} hesaplananKDV={hesaplananKDV} indirilecekKDV={indirilecekKDV} odenecekKDV={odenecekKDV}
+          setDrillDown={setDrillDown} kdvSearch={kdvSearch} setKdvSearch={setKdvSearch}
+          kdvSortBy={kdvSortBy} kdvSortDir2={kdvSortDir2} setKdvSortBy={setKdvSortBy} setKdvSortDir2={setKdvSortDir2}
+          kdvOranBreakdown={kdvOranBreakdown} downloadVatDeclaration={downloadVatDeclaration} downloadVatDeclarationCSV={downloadVatDeclarationCSV}
+        />
       )}
 
       {/* SATIŞLAR */}
@@ -3514,1788 +2289,141 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       )}
 
       {accountingTab === 'satislar' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          {/* KPI Cards Row 1 */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {/* Toplam Sipariş — count, no currency toggle */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Siparişler' : 'All Orders', rows: satisKayitlari.map((o: { customerName?: string, syncedAt?: { toDate?: () => Date }, faturali?: boolean, totalPrice?: number }) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
-                  <ShoppingCart size={15} className="text-brand" />
-                </div>
-              </div>
-              <p className="text-xl font-bold text-[#ff4000]">{orders.length}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Sipariş</p>
-            </button>
-            {/* Toplam Ciro */}
-            <div onClick={() => { const byCustomer: Record<string, number> = {}; satisKayitlari.forEach((o: { customerName?: string, totalPrice?: number }) => { const k = o.customerName || '—'; byCustomer[k] = (byCustomer[k] || 0) + (o.totalPrice || 0); }); setDrillDown({ title: currentLanguage === 'tr' ? 'Müşteri Bazlı Ciro' : 'Revenue by Customer', rows: Object.entries(byCustomer).sort(([,a],[,b]) => b - a).map(([name, total]) => ({ label: name, value: formatConv(total) })), total: formatConv(satisKayitlari.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) }); }} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
-                  <TrendingUp size={15} className="text-green-600" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Toplam Ciro = Cetpa sipariş cirosu + (kaynak Mikro'yu içeriyorsa) Mikro satış faturaları.
-                  mikroSatisToplam yalnız 'giden' (satış) faturalarıdır — alış karışmaz. */}
-              <p className="text-xl font-bold text-green-600">{formatConv(orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) + (satisKaynak !== 'cetpa' ? mikroSatisToplam : 0))}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{satisKaynak !== 'cetpa' && mikroSatisToplam > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
-            </div>
-            {/* Faturalı / Faturasız — count, no currency toggle */}
-            <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: satisKayitlari.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number }) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <FileText size={15} className="text-blue-600" />
-                </div>
-              </div>
-              <p className="text-xl font-bold text-blue-600">{orders.filter((o: { faturali?: boolean }) => o.faturali).length + mikroSatisAdet} / {orders.filter((o: { faturali?: boolean }) => !o.faturali).length}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı / Faturasız</p>
-            </button>
-            {/* Toplam KDV — stays TRY */}
-            <button onClick={() => { const byRate: Record<string, number> = {}; satisKayitlari.forEach((o: { kdvOran?: number, kdvTutari?: number }) => { if (o.kdvOran !== undefined) { const k = `%${o.kdvOran} KDV`; byRate[k] = (byRate[k] || 0) + (o.kdvTutari || 0); } }); setDrillDown({ title: currentLanguage === 'tr' ? 'KDV Oranlarına Göre' : 'KDV by Rate', rows: Object.entries(byRate).sort(([,a],[,b]) => b - a).map(([rate, tutar]) => ({ label: rate, value: formatTRY(tutar) })), total: formatTRY(satisKayitlari.reduce((s: number, o: { kdvTutari?: number }) => s + (o.kdvTutari || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
-                  <Calculator size={15} className="text-purple-600" />
-                </div>
-              </div>
-              <p className="text-xl font-bold text-purple-600">{formatTRY(orders.reduce((s: number, o: { kdvTutari?: number }) => s + (o.kdvTutari || 0), 0) + mikroSatisKdv)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam KDV{mikroDahil && mikroSatisKdv > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
-            </button>
-          </div>
-          {/* KPI Cards Row 2 */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {/* Faturalı Ciro */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Ciro Detayı' : 'Invoiced Revenue Detail', rows: satisKayitlari.filter((o: { faturali?: boolean }) => o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
-                  <CheckCircle size={15} className="text-green-600" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-green-600">{formatConv(orders.filter((o: { faturali?: boolean }) => o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) + mikroSatisCiro)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro{mikroDahil && mikroSatisCiro > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
-            </div>
-            {/* Faturasız Ciro */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturasız Ciro Detayı' : 'Non-Invoiced Revenue Detail', rows: satisKayitlari.filter((o: { faturali?: boolean }) => !o.faturali).map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center">
-                  <FileText size={15} className="text-gray-500" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-gray-600">{formatConv(orders.filter((o: { faturali?: boolean }) => !o.faturali).reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0))}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturasız Ciro</p>
-            </div>
-            {/* Ortalama Sipariş */}
-            <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Ortalama Sipariş Analizi' : 'Avg Order Analysis', rows: satisKayitlari.map((o: { customerName?: string, totalPrice?: number }) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.length > 0 ? satisKayitlari.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) / satisKayitlari.length : 0) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
-                  <BarChart3 size={15} className="text-brand" />
-                </div>
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${kpiCurrency === c ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xl font-bold text-[#ff4000]">{formatConv(orders.length > 0 ? orders.reduce((s: number, o: { totalPrice?: number }) => s + (o.totalPrice || 0), 0) / orders.length : 0)}</p>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Ortalama Sipariş</p>
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.satislar}</h3>
-            </div>
-            {/* Search + kaynak seçici */}
-            <div className="flex items-center gap-3 mb-3 flex-wrap">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder={currentLanguage === 'tr' ? 'Müşteri, tutar veya fatura no ara...' : 'Search customer, amount or invoice no...'}
-                  value={satisSearch}
-                  onChange={e => setSatisSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20"
-                />
-              </div>
-              {/* Yıl kapsamı — GÖRÜNÜR olmalı. Eskiden bu sekme Faturalar sekmesinin
-                  yıl/yön filtresini sessizce miras alıyordu ve kapsam dışı kalınca
-                  her şey ₺0,00 görünüyordu. */}
-              <select value={satisYil} onChange={e => setSatisYil(e.target.value)}
-                className="px-2.5 py-1.5 bg-gray-50 rounded-xl text-xs font-medium border-0 outline-none focus:ring-2 focus:ring-[#ff4000]/20">
-                {(() => {
-                  const buYil = new Date().getFullYear();
-                  return [...Array(6)].map((_, i) => String(buYil - i));
-                })().map(y => <option key={y} value={y}>{y}</option>)}
-                <option value="hepsi">{currentLanguage === 'tr' ? 'Tüm yıllar' : 'All years'}</option>
-              </select>
-              {/* Kaynak seçici — varsayılan 'cetpa', yani ekran eskisi gibi davranır.
-                  Mikro faturalarını görmek opt-in (2026-07-31 talebi). */}
-              <div className="flex gap-1 p-0.5 bg-gray-100 rounded-lg">
-                {([
-                  ['cetpa',  currentLanguage === 'tr' ? `Cetpa (${displayedSatis.length})` : `Cetpa (${displayedSatis.length})`],
-                  ['mikro',  `Mikro (${mikroSatisSatirlari.length})`],
-                  ['hepsi',  currentLanguage === 'tr' ? 'Tümü' : 'All'],
-                ] as const).map(([k, l]) => (
-                  <button key={k} onClick={() => setSatisKaynak(k)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${satisKaynak === k ? 'bg-white shadow-sm text-[#1D1D1F]' : 'text-gray-500 hover:text-[#1D1D1F]'}`}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {satisKaynak !== 'cetpa' && mikroSatisSatirlari.length > 0 && (
-              <div className="mb-3 px-3 py-2 bg-blue-50 rounded-xl text-xs text-blue-800">
-                {currentLanguage === 'tr'
-                  ? `${mikroSatisSatirlari.length} Mikro satış faturası · toplam ${formatTRY(mikroSatisToplam)}`
-                  : `${mikroSatisSatirlari.length} Mikro sales invoices · total ${formatTRY(mikroSatisToplam)}`}
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.customer2} 
-                      sortKey="customerName" 
-                      currentSort={{ key: satisSortKey, direction: satisSortDir }} 
-                      onSort={(key) => toggleSatisSort(key as 'customerName' | 'date' | 'totalPrice' | 'faturali')} 
-                    />
-                    <SortHeader 
-                      label={t.date} 
-                      sortKey="date" 
-                      currentSort={{ key: satisSortKey, direction: satisSortDir }} 
-                      onSort={(key) => toggleSatisSort(key as 'customerName' | 'date' | 'totalPrice' | 'faturali')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.total2} 
-                      sortKey="totalPrice" 
-                      currentSort={{ key: satisSortKey, direction: satisSortDir }} 
-                      onSort={(key) => toggleSatisSort(key as 'customerName' | 'date' | 'totalPrice' | 'faturali')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label="Fatura" 
-                      sortKey="faturali" 
-                      currentSort={{ key: satisSortKey, direction: satisSortDir }} 
-                      onSort={(key) => toggleSatisSort(key as 'customerName' | 'date' | 'totalPrice' | 'faturali')} 
-                      className="text-center"
-                    />
-                    <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">KDV%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {satisKaynak !== 'mikro' && displayedSatis.length === 0 && mikroSatisSatirlari.length === 0 &&
-                    <tr><td colSpan={5} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>}
-                  {satisKaynak !== 'mikro' && displayedSatis.map((o: { id?: string, customerName?: string, syncedAt?: { toDate?: () => Date }, totalPrice?: number, faturali?: boolean, kdvOran?: number }) => (
-                    <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{o.customerName}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
-                        {o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(o.totalPrice || 0)}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        {o.faturali
-                          ? <span className="text-[9px] font-bold bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">FATURALI</span>
-                          : <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">FATURASIZ</span>
-                        }
-                      </td>
-                      <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">%{o.kdvOran ?? 0}</td>
-                    </tr>
-                  ))}
-                  {/* Mikro satış faturaları — Cetpa satırlarından rozetle ayrılır.
-                      Cetpa'dan Mikro'ya gönderilmiş olanlar mükerrer sayılmasın diye
-                      mikroEvrakNo eşleşmesiyle zaten elenmiş durumda. */}
-                  {satisKaynak !== 'cetpa' && mikroSatisSatirlari.map(f => (
-                    <tr key={`mikro-${f.id}`} className="border-b border-gray-50 hover:bg-blue-50/40 bg-blue-50/20">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">
-                        {f.musteri}
-                        <span className="ml-1.5 text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full align-middle">MİKRO</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
-                        {f.tarih ? new Date(f.tarih).toLocaleDateString('tr-TR') : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(f.tutar)}</td>
-                      <td className="py-2.5 px-3 text-center text-xs font-mono text-gray-600">{f.faturaNo || '—'}</td>
-                      <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">
-                        {f.kdv ? formatTRY(f.kdv) : '—'}{f.oran !== null ? ` (%${f.oran})` : ''}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <SatislarTab
+          t={t} currentLanguage={currentLanguage} orders={orders} satisKayitlari={satisKayitlari}
+          setDrillDown={setDrillDown} formatConv={formatConv} kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency}
+          satisKaynak={satisKaynak} setSatisKaynak={setSatisKaynak}
+          mikroSatisToplam={mikroSatisToplam} mikroSatisAdet={mikroSatisAdet} mikroSatisCiro={mikroSatisCiro}
+          mikroSatisKdv={mikroSatisKdv} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari}
+          satisSearch={satisSearch} setSatisSearch={setSatisSearch} satisYil={satisYil} setSatisYil={setSatisYil}
+          satisSortKey={satisSortKey} satisSortDir={satisSortDir} toggleSatisSort={toggleSatisSort}
+          displayedSatis={displayedSatis}
+        />
       )}
 
       {/* MÜŞTERİLER */}
       {accountingTab === 'musteriler' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.musteriler}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportCSV('musteriler.csv',
-                    [t.name, t.company, t.email, t.phone, t.taxNo, t.address],
-                    customers.map(c => [c.name, c.company || '', c.email || '', c.phone || '', c.taxNo || '', c.address || ''])
-                  )}
-                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 rounded-full px-3 py-1.5 text-xs font-semibold"
-                >
-                  <Download size={12} /> CSV
-                </button>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder={t.name + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowCustomerModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.name} 
-                      sortKey="name" 
-                      currentSort={{ key: musteriSortKey, direction: musteriSortDir }} 
-                      onSort={(key) => toggleMusteriSort(key as 'name' | 'company' | 'phone')} 
-                    />
-                    <SortHeader 
-                      label={t.company} 
-                      sortKey="company" 
-                      currentSort={{ key: musteriSortKey, direction: musteriSortDir }} 
-                      onSort={(key) => toggleMusteriSort(key as 'name' | 'company' | 'phone')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.email}</th>
-                    <SortHeader
-                      label={t.phone}
-                      sortKey="phone"
-                      currentSort={{ key: musteriSortKey, direction: musteriSortDir }}
-                      onSort={(key) => toggleMusteriSort(key as 'name' | 'company' | 'phone')}
-                      className="hidden md:table-cell"
-                    />
-                    <th className="text-right py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}</th>
-                    <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{currentLanguage === 'tr' ? 'Risk' : 'Risk'}</th>
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedMusteriler.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedMusteriler.map(c => (
-                    <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">
-                        <button onClick={() => setEkstreMusteri(c)} className="text-left hover:text-[#ff4000] hover:underline transition-colors block"
-                          title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri gör' : 'View account statement'}>
-                          {c.name}
-                        </button>
-                        {(() => { const r = cariRol(c); return r ? <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${r.cls}`}>{r.label}</span> : null; })()}
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{c.company || '—'}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{c.email || '—'}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{c.phone || '—'}</td>
-                      <td className="py-2.5 px-3 text-right hidden sm:table-cell">
-                        <span className={`text-xs font-bold ${(c.balance || 0) > 0 ? 'text-red-600' : (c.balance || 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                          ₺{(c.balance || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center hidden sm:table-cell">
-                        {c.riskGroup ? (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${c.riskGroup === 'Yüksek' ? 'bg-red-100 text-red-600' : c.riskGroup === 'Orta' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-600'}`}>
-                            {c.riskGroup}
-                          </span>
-                        ) : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {/* Dekont girişi — 2026-07-30'a kadar burada tek tıkla,
-                              HİÇBİR ŞEY SORMADAN, müşterinin TÜM bakiyesi kadar
-                              dekont atan bir düğme vardı (açıklama "<ad> bakiye
-                              dekontu", evrak tipi tahmini 29). İki kez basmak iki
-                              muhasebe kaydı üretiyordu. Artık modal açılıyor:
-                              tür/yön/tutar/tarih/açıklama girilir, kayıt sonrası
-                              bakiye önizlenir. */}
-                          {(() => {
-                            const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
-                              ?? (c as unknown as { code?: string }).code
-                              ?? c.taxNo;
-                            if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
-                            return (
-                              <button
-                                onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: c.balance || 0, id: c.id })}
-                                title="Mikro'ya dekont/masraf gir"
-                                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 flex flex-col items-center"
-                              >
-                                <Upload size={13} />
-                                <span className="text-[8px] font-semibold leading-none mt-0.5">Mikro</span>
-                              </button>
-                            );
-                          })()}
-                          <button onClick={() => setEkstreMusteri(c)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteCustomer(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Cari ekstre / hareket detayı — müşteri adına/göze tıklayınca */}
-          {ekstreMusteri && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEkstreMusteri(null)}>
-              <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
-                  <div>
-                    <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">{ekstreMusteri.name}</p>
-                  </div>
-                  <button onClick={() => setEkstreMusteri(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
-                </div>
-                <div className="overflow-y-auto flex-1 p-2 sm:p-4">
-                  {(() => {
-                    // Mikro cari kodu varsa gerçek fatura hareketleri gelir; yoksa
-                    // (elle eklenmiş müşteri) eski Cetpa orders/aging moduna düşer.
-                    const cariKod = (ekstreMusteri as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
-                      || (ekstreMusteri as unknown as { code?: string }).code
-                      || ekstreMusteri.taxNo || '';
-                    return cariKod
-                      ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} balance={ekstreMusteri.balance || 0} customerName={ekstreMusteri.name} />
-                      : <CariEkstrePanel currentLanguage={currentLanguage} leadId={ekstreMusteri.id} customerName={ekstreMusteri.name} />;
-                  })()}
-                </div>
-              </div>
-            </div>
-          )}
-        </motion.div>
+        <MusterilerTab
+          t={t} currentLanguage={currentLanguage} customers={customers} displayedMusteriler={displayedMusteriler}
+          customerSearch={customerSearch} setCustomerSearch={setCustomerSearch}
+          musteriSortKey={musteriSortKey} musteriSortDir={musteriSortDir} toggleMusteriSort={toggleMusteriSort}
+          cariRol={cariRol} setDekontHedef={setDekontHedef}
+          showCustomerModal={showCustomerModal} setShowCustomerModal={setShowCustomerModal}
+          editingCustomer={editingCustomer} setEditingCustomer={setEditingCustomer}
+          customerForm={customerForm} setCustomerForm={setCustomerForm} saveCustomer={saveCustomer} deleteCustomer={deleteCustomer}
+          ekstreMusteri={ekstreMusteri} setEkstreMusteri={setEkstreMusteri}
+        />
       )}
 
       {/* TEDARİKÇİLER */}
       {accountingTab === 'tedarikciler' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.tedarikciler}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportCSV('tedarikciler.csv',
-                    [t.name, t.company, t.email, t.phone, t.taxNo, t.address],
-                    suppliers.map(s => [s.name, s.company || '', s.email || '', s.phone || '', s.taxNo || '', s.address || ''])
-                  )}
-                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 rounded-full px-3 py-1.5 text-xs font-semibold"
-                >
-                  <Download size={12} /> CSV
-                </button>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} placeholder={t.name + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowSupplierModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.name} 
-                      sortKey="name" 
-                      currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }} 
-                      onSort={(key) => toggleTedarikciSort(key as 'name' | 'company' | 'phone')} 
-                    />
-                    <SortHeader 
-                      label={t.company} 
-                      sortKey="company" 
-                      currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }} 
-                      onSort={(key) => toggleTedarikciSort(key as 'name' | 'company' | 'phone')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.email}</th>
-                    <SortHeader 
-                      label={t.phone} 
-                      sortKey="phone" 
-                      currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }} 
-                      onSort={(key) => toggleTedarikciSort(key as 'name' | 'company' | 'phone')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.taxNo}</th>
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedTedarikciler.length === 0 && (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedTedarikciler.map(s => (
-                    <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{s.name}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{s.company || '—'}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{s.email || '—'}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{s.phone || '—'}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{s.taxNo || '—'}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => setEkstreTedarikci(s)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteSupplier(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Cari ekstre / hareket detayı — tedarikçi adına/göze tıklayınca. Mikro'da
-              tek cari havuzu olduğundan aynı CariEkstrePanel (mikroCariHareketler,
-              cariKod ile) yeniden kullanılıyor — Cariler sekmesindeki desenin aynısı. */}
-          {ekstreTedarikci && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEkstreTedarikci(null)}>
-              <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
-                  <div>
-                    <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">{ekstreTedarikci.name}</p>
-                  </div>
-                  <button onClick={() => setEkstreTedarikci(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
-                </div>
-                <div className="overflow-y-auto flex-1 p-2 sm:p-4">
-                  {(() => {
-                    const cariKod = ekstreTedarikci.mikroCariKod || ekstreTedarikci.taxNo || '';
-                    return cariKod
-                      ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} customerName={ekstreTedarikci.name} />
-                      : <p className="text-center text-gray-400 text-sm py-8">{currentLanguage === 'tr' ? 'Bu tedarikçi bir Mikro cari koduna bağlı değil (elle eklenmiş).' : 'This supplier is not linked to a Mikro cari code (manually added).'}</p>;
-                  })()}
-                </div>
-              </div>
-            </div>
-          )}
-        </motion.div>
+        <TedarikcilerTab
+          t={t} currentLanguage={currentLanguage} suppliers={suppliers} displayedTedarikciler={displayedTedarikciler}
+          supplierSearch={supplierSearch} setSupplierSearch={setSupplierSearch}
+          tedarikciSortKey={tedarikciSortKey} tedarikciSortDir={tedarikciSortDir} toggleTedarikciSort={toggleTedarikciSort}
+          showSupplierModal={showSupplierModal} setShowSupplierModal={setShowSupplierModal}
+          editingSupplier={editingSupplier} setEditingSupplier={setEditingSupplier}
+          supplierForm={supplierForm} setSupplierForm={setSupplierForm} saveSupplier={saveSupplier} deleteSupplier={deleteSupplier}
+          ekstreTedarikci={ekstreTedarikci} setEkstreTedarikci={setEkstreTedarikci}
+        />
       )}
 
       {/* HİZMET & ÜRÜNLER */}
       {accountingTab === 'urunler' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.urunler}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportCSV('urunler.csv',
-                    [t.code, t.name, t.type2, t.unitPrice, t.vatRate, t.unit],
-                    services.map(s => [s.code, s.name, s.type, s.unitPrice, s.vatRate, s.unit])
-                  )}
-                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 rounded-full px-3 py-1.5 text-xs font-semibold"
-                >
-                  <Download size={12} /> CSV
-                </button>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={serviceSearch} onChange={e => setServiceSearch(e.target.value)} placeholder={t.name + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowServiceModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.code} 
-                      sortKey="code" 
-                      currentSort={{ key: servisSortKey, direction: servisSortDir }} 
-                      onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} 
-                    />
-                    <SortHeader 
-                      label={t.name} 
-                      sortKey="name" 
-                      currentSort={{ key: servisSortKey, direction: servisSortDir }} 
-                      onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} 
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.type2}</th>
-                    <SortHeader 
-                      label={t.unitPrice} 
-                      sortKey="unitPrice" 
-                      currentSort={{ key: servisSortKey, direction: servisSortDir }} 
-                      onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label="KDV%" 
-                      sortKey="vatRate" 
-                      currentSort={{ key: servisSortKey, direction: servisSortDir }} 
-                      onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} 
-                      className="text-center hidden sm:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.unit}</th>
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedServisler.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedServisler.map(s => (
-                    <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-600">{s.code}</td>
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{s.name}</td>
-                      <td className="py-2.5 px-3 hidden sm:table-cell"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${s.type === 'Hizmet' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{s.type}</span></td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(s.unitPrice)}</td>
-                      <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">%{s.vatRate}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{s.unit}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingService(s); setServiceForm({ code: s.code, name: s.name, type: s.type, unitPrice: s.unitPrice, vatRate: s.vatRate, unit: s.unit, notes: s.notes || '' }); setShowServiceModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingService(s); setServiceForm({ code: s.code, name: s.name, type: s.type, unitPrice: s.unitPrice, vatRate: s.vatRate, unit: s.unit, notes: s.notes || '' }); setShowServiceModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteService(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <UrunlerTab
+          t={t} services={services} displayedServisler={displayedServisler}
+          serviceSearch={serviceSearch} setServiceSearch={setServiceSearch}
+          servisSortKey={servisSortKey} servisSortDir={servisSortDir} toggleServisSort={toggleServisSort}
+          showServiceModal={showServiceModal} setShowServiceModal={setShowServiceModal}
+          editingService={editingService} setEditingService={setEditingService}
+          serviceForm={serviceForm} setServiceForm={setServiceForm}
+          saveService={saveService} deleteService={deleteService}
+        />
       )}
 
       {/* WAREHOUSES */}
       {accountingTab === 'warehouses' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımları' : 'Warehouse Definitions'}</h3>
-              <button onClick={() => { setEditingWarehouse(null); setWarehouseForm({ name: '', location: '', manager: '', notes: '' }); setShowWarehouseModal(true); }} className="apple-button-primary">
-                <Plus size={14} /> {t.add}
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {warehouses.map(w => {
-                // O depodaki envanter özeti — kartta göster, tıklanınca detay aç.
-                const depoKalemleri = depoKalemleriIcin(w.id);
-                const toplamAdet = depoKalemleri.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
-                return (
-                <div key={w.id} onClick={() => setDetayDepo(w)}
-                  className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative group cursor-pointer hover:border-[#ff4000]/40 hover:shadow-sm transition-all"
-                  title={currentLanguage === 'tr' ? 'Envanter detayını gör' : 'View inventory detail'}>
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-bold text-gray-800">{w.name}</h4>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={(e) => { e.stopPropagation(); setDetayDepo(w); }} className="p-1.5 hover:bg-white rounded-lg text-blue-500" title={currentLanguage === 'tr' ? 'Envanter detayı' : 'Inventory detail'}><Eye size={12} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setEditingWarehouse(w); setWarehouseForm({ name: w.name, location: w.location || '', manager: w.manager || '', notes: w.notes || '' }); setShowWarehouseModal(true); }} className="p-1.5 hover:bg-white rounded-lg text-gray-500"><Edit2 size={12} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteWarehouse(w.id); }} className="p-1.5 hover:bg-white rounded-lg text-red-500"><Trash2 size={12} /></button>
-                    </div>
-                  </div>
-                  <div className="space-y-1 text-xs text-gray-500">
-                    <div className="flex items-center gap-1.5"><MapPin size={12} /> {w.location || '—'}</div>
-                    <div className="flex items-center gap-1.5"><User size={12} /> {w.manager || '—'}</div>
-                  </div>
-                  <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-gray-600">
-                      {depoKalemleri.length} {currentLanguage === 'tr' ? 'kalem' : 'items'}
-                    </span>
-                    <span className="text-[11px] text-gray-400">
-                      {toplamAdet.toLocaleString('tr-TR')} {currentLanguage === 'tr' ? 'adet' : 'units'}
-                    </span>
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Depo envanter detayı — kart tıklanınca o depodaki kalemler */}
-          {detayDepo && (() => {
-            const kalemler = depoKalemleriIcin(detayDepo.id)
-              .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
-            const toplamAdet = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
-            const toplamDeger = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0) * (Number((wi as unknown as { costPrice?: number }).costPrice) || 0), 0);
-            return (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDetayDepo(null)}>
-                <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-start justify-between p-5 border-b border-gray-100">
-                    <div>
-                      <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Home size={16} /> {detayDepo.name}</h3>
-                      <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1"><MapPin size={11} /> {detayDepo.location || '—'}</p>
-                    </div>
-                    <button onClick={() => setDetayDepo(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 p-5 border-b border-gray-100">
-                    <div className="bg-gray-50 rounded-xl p-3 text-center">
-                      <p className="text-xl font-bold text-[#1D1D1F]">{kalemler.length}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Kalem' : 'Items'}</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-3 text-center">
-                      <p className="text-xl font-bold text-[#1D1D1F]">{toplamAdet.toLocaleString('tr-TR')}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam Adet' : 'Total Units'}</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-3 text-center">
-                      <p className="text-xl font-bold text-green-600">{toplamDeger > 0 ? formatTRY(toplamDeger) : '—'}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value'}</p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-y-auto flex-1 p-5">
-                    {kalemler.length === 0 ? (
-                      <div className="py-10 text-center text-sm text-gray-400">
-                        {currentLanguage === 'tr' ? 'Bu depoda kayıtlı envanter yok.' : 'No inventory recorded in this warehouse.'}
-                      </div>
-                    ) : (
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-gray-100">
-                            <th className="text-left py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.product}</th>
-                            <th className="text-left py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">SKU</th>
-                            <th className="text-right py-2 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.quantity}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {kalemler.map(wi => (
-                            <tr key={wi.id} className="border-b border-gray-50">
-                              <td className="py-2.5 text-sm font-medium text-gray-800">{wi.productName}</td>
-                              <td className="py-2.5 font-mono text-xs text-gray-500 hidden sm:table-cell">{wi.sku || '—'}</td>
-                              <td className="py-2.5 text-right font-semibold text-sm">{(Number(wi.quantity) || 0).toLocaleString('tr-TR')}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </motion.div>
+        <WarehousesTab
+          t={t} currentLanguage={currentLanguage} warehouses={warehouses} depoKalemleriIcin={depoKalemleriIcin}
+          detayDepo={detayDepo} setDetayDepo={setDetayDepo} setEditingWarehouse={setEditingWarehouse}
+          showWarehouseModal={showWarehouseModal} setShowWarehouseModal={setShowWarehouseModal}
+          editingWarehouse={editingWarehouse} warehouseForm={warehouseForm} setWarehouseForm={setWarehouseForm}
+          saveWarehouse={saveWarehouse} deleteWarehouse={deleteWarehouse}
+        />
       )}
 
       {/* DEPO */}
       {accountingTab === 'depo' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.depo}</h3>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={warehouseSearch} onChange={e => setWarehouseSearch(e.target.value)} placeholder={t.product + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => { setEditingStock(null); setStockForm({ productName: '', sku: '', quantity: 0, warehouseId: '', category: '', notes: '' }); setShowStockModal(true); }} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.product} 
-                      sortKey="productName" 
-                      currentSort={{ key: depoSortKey, direction: depoSortDir }} 
-                      onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')} 
-                    />
-                    <SortHeader 
-                      label="SKU" 
-                      sortKey="sku" 
-                      currentSort={{ key: depoSortKey, direction: depoSortDir }} 
-                      onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.quantity} 
-                      sortKey="quantity" 
-                      currentSort={{ key: depoSortKey, direction: depoSortDir }} 
-                      onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')} 
-                      className="text-right"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.location}</th>
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.category}</th>
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedDepo.length === 0 && (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedDepo.map(w => (
-                    <tr key={w.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{w.productName}</td>
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-500 hidden sm:table-cell">{w.sku || '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{w.quantity}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{depoDagilimEtiket(w)}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{w.category || '—'}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => { setEditingStock(w); setStockForm({ productName: w.productName, sku: w.sku || '', quantity: w.quantity, warehouseId: w.warehouseId || '', category: w.category || '', notes: w.notes || '' }); setShowStockModal(true); }} className="p-1.5 hover:bg-blue-50 text-blue-400 rounded-lg transition-colors text-blue-500 hover:bg-blue-50 hover:text-blue-600"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingStock(w); setStockForm({ productName: w.productName, sku: w.sku || '', quantity: w.quantity, warehouseId: w.warehouseId || '', category: w.category || '', notes: w.notes || '' }); setShowStockModal(true); }} className="p-1.5 hover:bg-blue-50 text-blue-400 rounded-lg transition-colors"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteStock(w.id)} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <DepoTab
+          t={t} currentLanguage={currentLanguage} warehouses={warehouses}
+          warehouseSearch={warehouseSearch} setWarehouseSearch={setWarehouseSearch}
+          depoSortKey={depoSortKey} depoSortDir={depoSortDir} toggleDepoSort={toggleDepoSort}
+          displayedDepo={displayedDepo} depoDagilimEtiket={depoDagilimEtiket}
+          showStockModal={showStockModal} setShowStockModal={setShowStockModal}
+          editingStock={editingStock} setEditingStock={setEditingStock}
+          stockForm={stockForm} setStockForm={setStockForm} saveStock={saveStock} deleteStock={deleteStock}
+        />
       )}
 
       {/* DEPOLAR ARASI TRANSFER */}
       {accountingTab === 'transfer' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.transfer}</h3>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={transferSearch} onChange={e => setTransferSearch(e.target.value)} placeholder={t.product + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowTransferModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.product} 
-                      sortKey="productName" 
-                      currentSort={{ key: transferSortKey, direction: transferSortDir }} 
-                      onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')} 
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.fromWarehouse}</th>
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.toWarehouse}</th>
-                    <SortHeader 
-                      label={t.quantity} 
-                      sortKey="quantity" 
-                      currentSort={{ key: transferSortKey, direction: transferSortDir }} 
-                      onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.date} 
-                      sortKey="date" 
-                      currentSort={{ key: transferSortKey, direction: transferSortDir }} 
-                      onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')} 
-                      className="hidden md:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.status2} 
-                      sortKey="status" 
-                      currentSort={{ key: transferSortKey, direction: transferSortDir }} 
-                      onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')} 
-                      className="text-center"
-                    />
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedTransfers.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedTransfers.map(tr => (
-                    <tr key={tr.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">
-                        <div className="flex items-center gap-1.5">
-                          {tr.productName}
-                          <MikroPushButton
-                            compact
-                            method="DepolarArasiSiparisKaydetV2"
-                            entityType="transfer"
-                            entityId={tr.id}
-                            buildPayload={() => {
-                              const depoNo = (s: string) => parseInt((s.match(/\d+/) ?? ['1'])[0], 10);
-                              const sku = (tr as unknown as { sku?: string }).sku;
-                              if (!sku) return null; // SKU'suz transfer Mikro'ya gidemez
-                              return depoTransferPayload({
-                                sku,
-                                quantity: tr.quantity,
-                                fromDepo: depoNo(tr.fromWarehouse),
-                                toDepo: depoNo(tr.toWarehouse),
-                                date: tr.date,
-                                note: tr.notes,
-                              });
-                            }}
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.fromWarehouse}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.toWarehouse}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{tr.quantity}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{tr.date}</td>
-                      <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tr.status === 'Tamamlandı' ? 'bg-green-100 text-green-600' : tr.status === 'İptal' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>{tr.status}</span></td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingTransfer(tr); setTransferForm({ fromWarehouse: tr.fromWarehouse, toWarehouse: tr.toWarehouse, productName: tr.productName, quantity: tr.quantity, date: tr.date, notes: tr.notes || '', status: tr.status }); setShowTransferModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingTransfer(tr); setTransferForm({ fromWarehouse: tr.fromWarehouse, toWarehouse: tr.toWarehouse, productName: tr.productName, quantity: tr.quantity, date: tr.date, notes: tr.notes || '', status: tr.status }); setShowTransferModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteTransfer(tr.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <TransferTab
+          t={t} transferSearch={transferSearch} setTransferSearch={setTransferSearch}
+          transferSortKey={transferSortKey} transferSortDir={transferSortDir} toggleTransferSort={toggleTransferSort}
+          displayedTransfers={displayedTransfers} showTransferModal={showTransferModal} setShowTransferModal={setShowTransferModal}
+          editingTransfer={editingTransfer} setEditingTransfer={setEditingTransfer}
+          transferForm={transferForm} setTransferForm={setTransferForm} saveTransfer={saveTransfer} deleteTransfer={deleteTransfer}
+        />
       )}
 
       {/* ÇEKLER */}
       {accountingTab === 'cekler' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.cekler}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportCSV('cekler.csv',
-                    [t.checkNo, t.bank2, t.amount2, t.dueDate, t.drawer, t.checkType],
-                    checks.map(c => [c.checkNo, c.bankName, c.amount, c.dueDate, c.drawer, c.type])
-                  )}
-                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 rounded-full px-3 py-1.5 text-xs font-semibold"
-                >
-                  <Download size={12} /> CSV
-                </button>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={checkSearch} onChange={e => setCheckSearch(e.target.value)} placeholder={t.checkNo + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowCheckModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.checkNo} 
-                      sortKey="checkNo" 
-                      currentSort={{ key: cekSortKey, direction: cekSortDir }} 
-                      onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')} 
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.bank2}</th>
-                    <SortHeader 
-                      label={t.amount2} 
-                      sortKey="amount" 
-                      currentSort={{ key: cekSortKey, direction: cekSortDir }} 
-                      onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.dueDate} 
-                      sortKey="dueDate" 
-                      currentSort={{ key: cekSortKey, direction: cekSortDir }} 
-                      onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')} 
-                      className="hidden md:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.drawer}</th>
-                    <SortHeader 
-                      label={t.checkType} 
-                      sortKey="type" 
-                      currentSort={{ key: cekSortKey, direction: cekSortDir }} 
-                      onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')} 
-                      className="text-center"
-                    />
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedCekler.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedCekler.map(c => (
-                    <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-800">{c.checkNo}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{c.bankName}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(c.amount)}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{c.dueDate}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{c.drawer}</td>
-                      <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${c.type === 'Alınan' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>{c.type}</span></td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingCheck(c); setCheckForm({ checkNo: c.checkNo, bankName: c.bankName, amount: c.amount, dueDate: c.dueDate, drawer: c.drawer, type: c.type, status: c.status }); setShowCheckModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingCheck(c); setCheckForm({ checkNo: c.checkNo, bankName: c.bankName, amount: c.amount, dueDate: c.dueDate, drawer: c.drawer, type: c.type, status: c.status }); setShowCheckModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteCheck(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <CeklerTab
+          t={t} checks={checks} displayedCekler={displayedCekler}
+          checkSearch={checkSearch} setCheckSearch={setCheckSearch}
+          cekSortKey={cekSortKey} cekSortDir={cekSortDir} toggleCekSort={toggleCekSort}
+          showCheckModal={showCheckModal} setShowCheckModal={setShowCheckModal}
+          editingCheck={editingCheck} setEditingCheck={setEditingCheck}
+          checkForm={checkForm} setCheckForm={setCheckForm}
+          saveCheck={saveCheck} deleteCheck={deleteCheck}
+        />
       )}
 
       {/* ÇALIŞANLAR */}
       {accountingTab === 'calisanlar' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.calisanlar}</h3>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)} placeholder={t.name + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => setShowEmployeeModal(true)} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.name} 
-                      sortKey="name" 
-                      currentSort={{ key: calisanSortKey, direction: calisanSortDir }} 
-                      onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} 
-                    />
-                    <SortHeader 
-                      label={t.position} 
-                      sortKey="position" 
-                      currentSort={{ key: calisanSortKey, direction: calisanSortDir }} 
-                      onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.department}</th>
-                    <SortHeader 
-                      label={t.salary} 
-                      sortKey="salary" 
-                      currentSort={{ key: calisanSortKey, direction: calisanSortDir }} 
-                      onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} 
-                      className="text-right hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.startDate} 
-                      sortKey="startDate" 
-                      currentSort={{ key: calisanSortKey, direction: calisanSortDir }} 
-                      onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} 
-                      className="hidden lg:table-cell"
-                    />
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedCalisanlar.length === 0 && (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {displayedCalisanlar.map(e => (
-                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-medium text-gray-800">{e.name}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{e.position}</td>
-                      <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{e.department || '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold hidden sm:table-cell">{e.salary ? formatTRY(e.salary) : '—'}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{e.startDate || '—'}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: e.salary || 0, startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: e.salary || 0, startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteEmployee(e.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <CalisanlarTab
+          t={t} currentLanguage={currentLanguage}
+          displayedCalisanlar={displayedCalisanlar}
+          employeeSearch={employeeSearch} setEmployeeSearch={setEmployeeSearch}
+          calisanSortKey={calisanSortKey} calisanSortDir={calisanSortDir} toggleCalisanSort={toggleCalisanSort}
+          showEmployeeModal={showEmployeeModal} setShowEmployeeModal={setShowEmployeeModal}
+          editingEmployee={editingEmployee} setEditingEmployee={setEditingEmployee}
+          employeeForm={employeeForm} setEmployeeForm={setEmployeeForm}
+          saveEmployee={saveEmployee} deleteEmployee={deleteEmployee}
+        />
       )}
 
       {/* GİDEN İRSALİYE */}
       {accountingTab === 'giden_irsaliye' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.gidenIrsaliye}</h3>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={waybillSearch} onChange={e => setWaybillSearch(e.target.value)} placeholder={t.waybillNo + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => { setWaybillType('giden'); setShowWaybillModal(true); }} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.waybillNo} 
-                      sortKey="waybillNo" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                    />
-                    <SortHeader 
-                      label={t.customer2} 
-                      sortKey="party" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.date} 
-                      sortKey="date" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="hidden md:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.product}</th>
-                    <SortHeader 
-                      label={t.total2} 
-                      sortKey="total" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.status2} 
-                      sortKey="status" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="text-center"
-                    />
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {makeDisplayedWaybills('giden').length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {makeDisplayedWaybills('giden').map(w => (
-                    <tr key={w.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-800">{w.waybillNo}</td>
-                      <td className="py-2.5 px-3 text-gray-600 hidden sm:table-cell">{w.party}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{w.date}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{w.items?.map(i => i.productName).join(', ') || '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{w.total ? formatTRY(w.total) : '—'}</td>
-                      <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${w.status === 'Tamamlandı' ? 'bg-green-100 text-green-600' : w.status === 'İptal' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>{w.status}</span></td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteWaybill(w.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <GidenIrsaliyeTab
+          t={t} waybillSearch={waybillSearch} setWaybillSearch={setWaybillSearch}
+          setWaybillType={setWaybillType} setShowWaybillModal={setShowWaybillModal}
+          irsaliyeSortKey={irsaliyeSortKey} irsaliyeSortDir={irsaliyeSortDir} toggleIrsaliyeSort={toggleIrsaliyeSort}
+          makeDisplayedWaybills={makeDisplayedWaybills} setEditingWaybill={setEditingWaybill}
+          setWaybillForm={setWaybillForm} deleteWaybill={deleteWaybill}
+        />
       )}
 
       {/* GELEN İRSALİYE */}
       {accountingTab === 'gelen_irsaliye' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800">{t.gelenIrsaliye}</h3>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5">
-                  <Search size={12} className="text-gray-400" />
-                  <input value={waybillSearch} onChange={e => setWaybillSearch(e.target.value)} placeholder={t.waybillNo + '...'} className="text-xs outline-none bg-transparent w-32" />
-                </div>
-                <button onClick={() => { setWaybillType('gelen'); setShowWaybillModal(true); }} className="apple-button-primary">
-                  <Plus size={14} /> {t.add}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="apple-table">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <SortHeader 
-                      label={t.waybillNo} 
-                      sortKey="waybillNo" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                    />
-                    <SortHeader 
-                      label={t.supplier2} 
-                      sortKey="party" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="hidden sm:table-cell"
-                    />
-                    <SortHeader 
-                      label={t.date} 
-                      sortKey="date" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="hidden md:table-cell"
-                    />
-                    <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.product}</th>
-                    <SortHeader 
-                      label={t.total2} 
-                      sortKey="total" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="text-right"
-                    />
-                    <SortHeader 
-                      label={t.status2} 
-                      sortKey="status" 
-                      currentSort={{ key: irsaliyeSortKey, direction: irsaliyeSortDir }} 
-                      onSort={(key) => toggleIrsaliyeSort(key as 'date' | 'waybillNo' | 'party' | 'status' | 'type')} 
-                      className="text-center"
-                    />
-                    <th className="py-3 px-4"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {makeDisplayedWaybills('gelen').length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
-                  )}
-                  {makeDisplayedWaybills('gelen').map(w => (
-                    <tr key={w.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-800">{w.waybillNo}</td>
-                      <td className="py-2.5 px-3 text-gray-600 hidden sm:table-cell">{w.party}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{w.date}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{w.items?.map(i => i.productName).join(', ') || '—'}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold">{w.total ? formatTRY(w.total) : '—'}</td>
-                      <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${w.status === 'Tamamlandı' ? 'bg-green-100 text-green-600' : w.status === 'İptal' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>{w.status}</span></td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('gelen'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                          <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('gelen'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteWaybill(w.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <GelenIrsaliyeTab
+          t={t} waybillSearch={waybillSearch} setWaybillSearch={setWaybillSearch}
+          setWaybillType={setWaybillType} setShowWaybillModal={setShowWaybillModal}
+          irsaliyeSortKey={irsaliyeSortKey} irsaliyeSortDir={irsaliyeSortDir} toggleIrsaliyeSort={toggleIrsaliyeSort}
+          makeDisplayedWaybills={makeDisplayedWaybills} setEditingWaybill={setEditingWaybill}
+          setWaybillForm={setWaybillForm} deleteWaybill={deleteWaybill}
+        />
       )}
-
-      {/* JOURNAL MODAL */}
-      <AnimatePresence>
-        {showJournalModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowJournalModal(false)} />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden"
-            >
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{editingJournal ? t.editJournalEntry : t.newJournalEntry}</h3>
-                <button onClick={() => setShowJournalModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.date}</label>
-                    <input type="date" value={journalForm.date} onChange={e => setJournalForm(prev => ({ ...prev, date: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.receiptDoc}</label>
-                    <input type="text" value={journalForm.fiş} onChange={e => setJournalForm(prev => ({ ...prev, fiş: e.target.value }))} placeholder="FŞ-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.description}</label>
-                  <input type="text" value={journalForm.aciklama} onChange={e => setJournalForm(prev => ({ ...prev, aciklama: e.target.value }))} placeholder={t.descriptionPlaceholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.debitAccountLabel}</label>
-                  <select value={journalForm.debitHesap} onChange={e => setJournalForm(prev => ({ ...prev, debitHesap: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    {HESAP_PLANI.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.creditAccountLabel}</label>
-                  <select value={journalForm.alacakHesap} onChange={e => setJournalForm(prev => ({ ...prev, alacakHesap: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    {HESAP_PLANI.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.debitLabel}</label>
-                    <input type="number" value={journalForm.borc} onChange={e => setJournalForm(prev => ({ ...prev, borc: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.creditLabel}</label>
-                    <input type="number" value={journalForm.alacak} onChange={e => setJournalForm(prev => ({ ...prev, alacak: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.vatRateLabel}</label>
-                    <select value={journalForm.kdvOran} onChange={e => setJournalForm(prev => ({ ...prev, kdvOran: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option value={0}>%0</option><option value={8}>%8</option><option value={18}>%18</option><option value={20}>%20</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.categoryLabel}</label>
-                    <select value={journalForm.kategori} onChange={e => setJournalForm(prev => ({ ...prev, kategori: e.target.value as 'Satış' | 'Alış' | 'Gider' | 'Tahsilat' | 'Ödeme' | 'Diğer' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option>Satış</option><option>Alış</option><option>Gider</option><option>Tahsilat</option><option>Ödeme</option><option>Diğer</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowJournalModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveJournal} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* CUSTOMER MODAL */}
-      <AnimatePresence>
-        {showCustomerModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCustomerModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.musteriler} — {editingCustomer ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowCustomerModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                {[
-                  { label: t.name, key: 'name', type: 'text', placeholder: 'Ahmet Yılmaz' },
-                  { label: t.company, key: 'company', type: 'text', placeholder: 'ABC Ltd. Şti.' },
-                  { label: t.email, key: 'email', type: 'email', placeholder: 'ornek@sirket.com' },
-                  { label: t.phone, key: 'phone', type: 'text', placeholder: '+90 555 000 0000' },
-                  { label: t.address, key: 'address', type: 'text', placeholder: 'İstanbul, Türkiye' },
-                  { label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office', key: 'taxOffice', type: 'text', placeholder: 'Boğaziçi V.D.' },
-                  { label: t.taxNo, key: 'taxNo', type: 'text', placeholder: '1234567890' },
-                  { label: t.notes2, key: 'notes', type: 'text', placeholder: '...' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                    <input type={f.type} value={customerForm[f.key as keyof typeof customerForm] as string} onChange={e => setCustomerForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                ))}
-                {/* Risk & Financial fields */}
-                <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{currentLanguage === 'tr' ? 'Finansal & Risk' : 'Financial & Risk'}</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Kredi Limiti (₺)' : 'Credit Limit (₺)'}</label>
-                      <input type="number" value={customerForm.creditLimit} onChange={e => setCustomerForm(prev => ({ ...prev, creditLimit: Number(e.target.value) }))} placeholder="500000" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Açık Bakiye (₺)' : 'Open Balance (₺)'}</label>
-                      <input type="number" value={customerForm.balance} onChange={e => setCustomerForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{currentLanguage === 'tr' ? 'Risk Grubu' : 'Risk Group'}</label>
-                    <div className="flex gap-2">
-                      {(['Düşük', 'Orta', 'Yüksek'] as const).map(g => (
-                        <button key={g} type="button"
-                          onClick={() => setCustomerForm(prev => ({ ...prev, riskGroup: g }))}
-                          className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${customerForm.riskGroup === g
-                            ? g === 'Yüksek' ? 'bg-red-500 text-white border-red-500' : g === 'Orta' ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-green-500 text-white border-green-500'
-                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}>
-                          {g === 'Düşük' ? '🟢' : g === 'Orta' ? '🟡' : '🔴'} {currentLanguage === 'tr' ? g : g === 'Düşük' ? 'Low' : g === 'Orta' ? 'Medium' : 'High'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowCustomerModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveCustomer} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* STOK / DEPO MODAL */}
-      <AnimatePresence>
-        {showStockModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowStockModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.depo} — {editingStock ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
-                <button onClick={() => setShowStockModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.product}</label>
-                  <input type="text" value={stockForm.productName} onChange={e => setStockForm(prev => ({ ...prev, productName: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">SKU</label>
-                    <input type="text" value={stockForm.sku} onChange={e => setStockForm(prev => ({ ...prev, sku: e.target.value }))} placeholder="CTP-000.00.00" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.quantity}</label>
-                    <input type="number" value={stockForm.quantity} onChange={e => setStockForm(prev => ({ ...prev, quantity: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.location}</label>
-                  <select value={stockForm.warehouseId} onChange={e => setStockForm(prev => ({ ...prev, warehouseId: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    <option value="">{currentLanguage === 'tr' ? '— Depo seçin —' : '— Select warehouse —'}</option>
-                    {warehouses.map(wh => (
-                      <option key={wh.id} value={wh.id}>{wh.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
-                  <input type="text" value={stockForm.category} onChange={e => setStockForm(prev => ({ ...prev, category: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Genel' : 'General'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Not' : 'Notes'}</label>
-                  <input type="text" value={stockForm.notes} onChange={e => setStockForm(prev => ({ ...prev, notes: e.target.value }))} placeholder="..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowStockModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveStock} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* BANKA HESABI MODAL */}
-      <AnimatePresence>
-        {showBankModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hesabı' : 'Bank Account'} — {editingBank ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
-                <button onClick={() => setShowBankModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                {[
-                  { label: currentLanguage === 'tr' ? 'Banka Adı' : 'Bank Name', key: 'bankName', placeholder: 'Ziraat Bankası' },
-                  { label: currentLanguage === 'tr' ? 'Şube' : 'Branch', key: 'branch', placeholder: 'Merkez' },
-                  { label: currentLanguage === 'tr' ? 'Hesap Sahibi' : 'Account Holder', key: 'accountHolder', placeholder: 'Cetpa Ltd. Şti.' },
-                  { label: currentLanguage === 'tr' ? 'Hesap No' : 'Account No', key: 'accountNumber', placeholder: '1234-5678' },
-                  { label: 'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                    <input type="text" value={bankForm[f.key as keyof typeof bankForm] as string} onChange={e => setBankForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                ))}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Döviz' : 'Currency'}</label>
-                    <select value={bankForm.currency} onChange={e => setBankForm(prev => ({ ...prev, currency: e.target.value as 'TRY' | 'USD' | 'EUR' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      {(['TRY', 'USD', 'EUR'] as const).map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}</label>
-                    <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Hesap Tipi' : 'Account Type'}</label>
-                  <select value={bankForm.accountType} onChange={e => setBankForm(prev => ({ ...prev, accountType: e.target.value as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    {(['Vadesiz', 'Vadeli', 'Kredi', 'Kasa', 'Akreditif (L/C)', 'Teminat Mektubu'] as const).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowBankModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveBank} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* DEPO TANIMI MODAL */}
-      <AnimatePresence>
-        {showWarehouseModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowWarehouseModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımı' : 'Warehouse'} — {editingWarehouse ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
-                <button onClick={() => setShowWarehouseModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                {[
-                  { label: currentLanguage === 'tr' ? 'Depo Adı' : 'Warehouse Name', key: 'name', placeholder: 'Ana Depo' },
-                  { label: t.location, key: 'location', placeholder: 'İstanbul' },
-                  { label: currentLanguage === 'tr' ? 'Sorumlu' : 'Manager', key: 'manager', placeholder: 'Ahmet Yılmaz' },
-                  { label: currentLanguage === 'tr' ? 'Not' : 'Notes', key: 'notes', placeholder: '...' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                    <input type="text" value={warehouseForm[f.key as keyof typeof warehouseForm] as string} onChange={e => setWarehouseForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowWarehouseModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveWarehouse} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* SUPPLIER MODAL */}
-      <AnimatePresence>
-        {showSupplierModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSupplierModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.tedarikciler} — {editingSupplier ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowSupplierModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                {[
-                  { label: t.name, key: 'name', type: 'text', placeholder: 'Tedarikçi Adı' },
-                  { label: t.company, key: 'company', type: 'text', placeholder: 'XYZ A.Ş.' },
-                  { label: t.email, key: 'email', type: 'email', placeholder: 'info@tedarikci.com' },
-                  { label: t.phone, key: 'phone', type: 'text', placeholder: '+90 555 000 0000' },
-                  { label: t.address, key: 'address', type: 'text', placeholder: 'Ankara, Türkiye' },
-                  { label: t.taxNo, key: 'taxNo', type: 'text', placeholder: '9876543210' },
-                  { label: t.notes2, key: 'notes', type: 'text', placeholder: '...' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                    <input type={f.type} value={supplierForm[f.key as keyof typeof supplierForm]} onChange={e => setSupplierForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowSupplierModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveSupplier} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* SERVICE MODAL */}
-      <AnimatePresence>
-        {showServiceModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowServiceModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.urunler} — {editingService ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowServiceModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.code}</label>
-                    <input type="text" value={serviceForm.code} onChange={e => setServiceForm(prev => ({ ...prev, code: e.target.value }))} placeholder="PRD-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.type2}</label>
-                    <select value={serviceForm.type} onChange={e => setServiceForm(prev => ({ ...prev, type: e.target.value as 'Ürün' | 'Hizmet' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option value="Ürün">Ürün</option>
-                      <option value="Hizmet">Hizmet</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.name}</label>
-                  <input type="text" value={serviceForm.name} onChange={e => setServiceForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Ürün / Hizmet Adı" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.unitPrice}</label>
-                    <input type="number" value={serviceForm.unitPrice} onChange={e => setServiceForm(prev => ({ ...prev, unitPrice: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">KDV%</label>
-                    <select value={serviceForm.vatRate} onChange={e => setServiceForm(prev => ({ ...prev, vatRate: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option value={0}>%0</option><option value={8}>%8</option><option value={18}>%18</option><option value={20}>%20</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.unit}</label>
-                  <input type="text" value={serviceForm.unit} onChange={e => setServiceForm(prev => ({ ...prev, unit: e.target.value }))} placeholder="Adet, Kg, Saat..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.notes2}</label>
-                  <input type="text" value={serviceForm.notes} onChange={e => setServiceForm(prev => ({ ...prev, notes: e.target.value }))} placeholder="..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowServiceModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveService} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* TRANSFER MODAL */}
-      <AnimatePresence>
-        {showTransferModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTransferModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.transfer} — {editingTransfer ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowTransferModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.product}</label>
-                  <input type="text" value={transferForm.productName} onChange={e => setTransferForm(prev => ({ ...prev, productName: e.target.value }))} placeholder="Ürün adı" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.fromWarehouse}</label>
-                    <input type="text" value={transferForm.fromWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, fromWarehouse: e.target.value }))} placeholder="Depo A" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.toWarehouse}</label>
-                    <input type="text" value={transferForm.toWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, toWarehouse: e.target.value }))} placeholder="Depo B" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.quantity}</label>
-                    <input type="number" value={transferForm.quantity} onChange={e => setTransferForm(prev => ({ ...prev, quantity: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.date}</label>
-                    <input type="date" value={transferForm.date} onChange={e => setTransferForm(prev => ({ ...prev, date: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.status2}</label>
-                  <select value={transferForm.status} onChange={e => setTransferForm(prev => ({ ...prev, status: e.target.value as Transfer['status'] }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    <option value="Bekliyor">Bekliyor</option><option value="Tamamlandı">Tamamlandı</option><option value="İptal">İptal</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.notes2}</label>
-                  <input type="text" value={transferForm.notes} onChange={e => setTransferForm(prev => ({ ...prev, notes: e.target.value }))} placeholder="..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowTransferModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveTransfer} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* CHECK MODAL */}
-      <AnimatePresence>
-        {showCheckModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCheckModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.cekler} — {editingCheck ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowCheckModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.checkNo}</label>
-                    <input type="text" value={checkForm.checkNo} onChange={e => setCheckForm(prev => ({ ...prev, checkNo: e.target.value }))} placeholder="ÇEK-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.checkType}</label>
-                    <select value={checkForm.type} onChange={e => setCheckForm(prev => ({ ...prev, type: e.target.value as Check['type'] }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option value="Alınan">{t.received}</option>
-                      <option value="Verilen">{t.given}</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.bank2}</label>
-                  <input type="text" value={checkForm.bankName} onChange={e => setCheckForm(prev => ({ ...prev, bankName: e.target.value }))} placeholder="Ziraat Bankası" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.amount2}</label>
-                    <input type="number" value={checkForm.amount} onChange={e => setCheckForm(prev => ({ ...prev, amount: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.dueDate}</label>
-                    <input type="date" value={checkForm.dueDate} onChange={e => setCheckForm(prev => ({ ...prev, dueDate: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.drawer}</label>
-                  <input type="text" value={checkForm.drawer} onChange={e => setCheckForm(prev => ({ ...prev, drawer: e.target.value }))} placeholder="Lehtar / Borçlu adı" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowCheckModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveCheck} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* EMPLOYEE MODAL */}
-      <AnimatePresence>
-        {showEmployeeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEmployeeModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.calisanlar} — {editingEmployee ? t.editAccount : t.add}</h3>
-                <button onClick={() => setShowEmployeeModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{t.name}</label>
-                  <input type="text" value={employeeForm.name} onChange={e => setEmployeeForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Ad Soyad" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Çalışan ID' : 'Employee ID'}</label>
-                    <input type="text" value={employeeForm.employeeId} onChange={e => setEmployeeForm(prev => ({ ...prev, employeeId: e.target.value }))} placeholder="EMP-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'TC Kimlik No' : 'TC ID Number'}</label>
-                    <input type="text" value={employeeForm.tcId} onChange={e => setEmployeeForm(prev => ({ ...prev, tcId: e.target.value }))} placeholder="12345678901" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.position}</label>
-                    <input type="text" value={employeeForm.position} onChange={e => setEmployeeForm(prev => ({ ...prev, position: e.target.value }))} placeholder="Yazılım Geliştirici" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.department}</label>
-                    <input type="text" value={employeeForm.department} onChange={e => setEmployeeForm(prev => ({ ...prev, department: e.target.value }))} placeholder="Teknoloji" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.salary}</label>
-                    <input type="number" value={employeeForm.salary} onChange={e => setEmployeeForm(prev => ({ ...prev, salary: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.startDate}</label>
-                    <input type="date" value={employeeForm.startDate} onChange={e => setEmployeeForm(prev => ({ ...prev, startDate: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.email}</label>
-                    <input type="email" value={employeeForm.email} onChange={e => setEmployeeForm(prev => ({ ...prev, email: e.target.value }))} placeholder="calisan@sirket.com" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.phone}</label>
-                    <input type="text" value={employeeForm.phone} onChange={e => setEmployeeForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="+90 555 000 0000" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowEmployeeModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveEmployee} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* BUDGET MODAL */}
-      <AnimatePresence>
-        {showBudgetModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBudgetModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">Bütçe Hedefi Belirle</h3>
-                <button onClick={() => setShowBudgetModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
-              </div>
-              <div className="p-5 space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Kategori</label>
-                  <select value={budgetForm.category} onChange={e => setBudgetForm(prev => ({ ...prev, category: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand">
-                    <option value="Satış">Satış</option>
-                    <option value="Personel">Personel</option>
-                    <option value="Genel Gider">Genel Gider</option>
-                    <option value="Pazarlama">Pazarlama</option>
-                    <option value="Yatırım">Yatırım</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Hedef Tutar (TRY)</label>
-                  <input type="number" value={budgetForm.amount} onChange={e => setBudgetForm(prev => ({ ...prev, amount: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Dönem</label>
-                  <input type="month" value={budgetForm.period} onChange={e => setBudgetForm(prev => ({ ...prev, period: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowBudgetModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
-                <button onClick={saveBudget} className="apple-button-primary"><Save size={14} /> {t.save}</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* WAYBILL MODAL */}
       <AnimatePresence>
@@ -5563,355 +2691,29 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
       {/* ── Banka Hareketleri (Mikro) ── */}
       {accountingTab === 'banka_hareketleri' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="apple-card p-4 sm:p-6 bg-white">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-[#1D1D1F] flex items-center gap-2">
-                  <Landmark className="text-brand w-5 h-5" />
-                  {currentLanguage === 'tr' ? 'Banka Hesap Hareketleri' : 'Bank Account Movements'}
-                </h3>
-                <p className="text-xs text-gray-500 mt-1">
-                  {currentLanguage === 'tr' ? 'Mikro ERP sisteminden çekilen canlı banka hareketleri.' : 'Live bank movements fetched from Mikro ERP.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {mikroBankLastSync && (
-                  <span className="text-[10px] text-gray-400 font-medium">
-                    {currentLanguage === 'tr' ? 'Son senkronizasyon:' : 'Last sync:'} {mikroBankLastSync}
-                  </span>
-                )}
-                <button
-                  onClick={() => setShowErpConfig(v => !v)}
-                  className="apple-button-secondary"
-                  title={currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Connection Settings'}
-                >
-                  <Settings className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Settings'}
-                </button>
-                <button
-                  onClick={handleSyncMikroBank}
-                  disabled={mikroBankLoading}
-                  className="apple-button-primary"
-                >
-                  <RefreshCw className={`w-4 h-4 ${mikroBankLoading ? 'animate-spin' : ''}`} />
-                  {currentLanguage === 'tr' ? 'Mikro\'dan Çek' : 'Fetch from Mikro'}
-                </button>
-              </div>
-            </div>
-
-            {/* ── ERP Bağlantı Ayarları (Mikro / Luca kimlik bilgileri) ── */}
-            {showErpConfig && (
-              <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Mikro */}
-                <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><Landmark className="w-4 h-4 text-brand" /> Mikro ERP</h4>
-                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
-                      <input type="checkbox" checked={mikroEnabled} onChange={e => setMikroEnabled(e.target.checked)} className="accent-[#ff4000]" />
-                      {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
-                    </label>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Access Token</label>
-                    <input type="password" value={mikroAccessToken} onChange={e => setMikroAccessToken(e.target.value)} placeholder="••••••••" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Endpoint</label>
-                    <input type="text" value={mikroEndpoint} onChange={e => setMikroEndpoint(e.target.value)} placeholder="https://jumpbulutapigw.mikro.com.tr/..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
-                  </div>
-                  <button onClick={async () => { setErpConfigSaving('mikro'); try { await saveMikroConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                    <Save size={14} /> {erpConfigSaving === 'mikro' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Mikro Ayarlarını Kaydet' : 'Save Mikro Settings')}
-                  </button>
-                  {mikroEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Mikro aktif edilince Luca otomatik kapanır (karşılıklı dışlama).' : 'Enabling Mikro disables Luca (mutual exclusion).'}</p>}
-                </div>
-                {/* Luca */}
-                <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><BookOpen className="w-4 h-4 text-indigo-500" /> Luca</h4>
-                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
-                      <input type="checkbox" checked={lucaEnabled} onChange={e => setLucaEnabled(e.target.checked)} className="accent-[#ff4000]" />
-                      {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
-                    </label>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">API Key</label>
-                    <input type="password" value={lucaApiKey} onChange={e => setLucaApiKey(e.target.value)} placeholder="••••••••" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Company ID</label>
-                      <input type="text" value={lucaCompanyId} onChange={e => setLucaCompanyId(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Base URL</label>
-                      <input type="text" value={lucaBaseUrl} onChange={e => setLucaBaseUrl(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
-                    </div>
-                  </div>
-                  <button onClick={async () => { setErpConfigSaving('luca'); try { await saveLucaConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                    <Save size={14} /> {erpConfigSaving === 'luca' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Luca Ayarlarını Kaydet' : 'Save Luca Settings')}
-                  </button>
-                  {lucaEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Luca aktif edilince Mikro otomatik kapanır.' : 'Enabling Luca disables Mikro.'}</p>}
-                </div>
-              </div>
-            )}
-
-            <div className="overflow-x-auto -mx-4 sm:mx-0">
-              <table className="apple-table mt-4">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/60 sticky top-0">
-                    <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</th>
-                    <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Banka' : 'Bank'}</th>
-                    <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</th>
-                    <th className="px-4 py-3 text-right">{currentLanguage === 'tr' ? 'Borç' : 'Debit'}</th>
-                    <th className="px-4 py-3 text-right">{currentLanguage === 'tr' ? 'Alacak' : 'Credit'}</th>
-                    <th className="px-4 py-3 text-center">{currentLanguage === 'tr' ? 'Döviz' : 'Currency'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mikroBankMovements.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-20 text-center text-gray-400">
-                        <Landmark className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p className="text-sm font-medium">{currentLanguage === 'tr' ? 'Henüz hareket bulunmuyor.' : 'No movements found yet.'}</p>
-                        <button onClick={handleSyncMikroBank} className="text-brand text-xs font-bold hover:underline mt-2">
-                          {currentLanguage === 'tr' ? 'Senkronizasyon başlat' : 'Start synchronization'}
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    mikroBankMovements.map((move, i) => (
-                      <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/80 transition-all group">
-                        <td className="px-4 py-3 text-gray-600 font-mono text-xs">
-                          {move.Tarih || move.date || '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-[#1D1D1F] text-xs uppercase">{move.BankaAdi || move.bankName || 'Banka'}</div>
-                          <div className="text-[10px] text-gray-400">{move.HesapNo || move.accountNo || '•••'}</div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 text-xs">
-                          {move.Aciklama || move.description || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-red-600">
-                          {move.Borc > 0 ? formatCurrency(move.Borc, move.DovizCinsi || move.currency) : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-green-600">
-                          {move.Alacak > 0 ? formatCurrency(move.Alacak, move.DovizCinsi || move.currency) : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                            {move.DovizCinsi || move.currency || 'TRY'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </motion.div>
+        <BankaHareketleriTab
+          t={t} currentLanguage={currentLanguage} mikroBankLastSync={mikroBankLastSync}
+          showErpConfig={showErpConfig} setShowErpConfig={setShowErpConfig}
+          handleSyncMikroBank={handleSyncMikroBank} mikroBankLoading={mikroBankLoading}
+          mikroEnabled={mikroEnabled} setMikroEnabled={setMikroEnabled}
+          mikroAccessToken={mikroAccessToken} setMikroAccessToken={setMikroAccessToken}
+          mikroEndpoint={mikroEndpoint} setMikroEndpoint={setMikroEndpoint}
+          erpConfigSaving={erpConfigSaving} setErpConfigSaving={setErpConfigSaving} saveMikroConfig={saveMikroConfig}
+          lucaEnabled={lucaEnabled} setLucaEnabled={setLucaEnabled} lucaApiKey={lucaApiKey} setLucaApiKey={setLucaApiKey}
+          lucaCompanyId={lucaCompanyId} setLucaCompanyId={setLucaCompanyId} lucaBaseUrl={lucaBaseUrl} setLucaBaseUrl={setLucaBaseUrl}
+          saveLucaConfig={saveLucaConfig} mikroBankMovements={mikroBankMovements}
+        />
       )}
 
       {/* ── Gelir Tablosu (Income Statement) ── */}
-      {accountingTab === 'gelir_tablosu' && (() => {
-        const [gtYear, setGtYear] = [gelirYear, setGelirYear];
-        const [gtMonth, setGtMonth] = [gelirMonth, setGelirMonth];
-        const monthNames = currentLanguage === 'tr'
-          ? ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
-          : ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-        // Filter orders for selected period
-        const periodOrders = orders.filter(o => {
-          const raw = (o as unknown as Record<string,unknown>).createdAt;
-          const d: Date = raw && typeof (raw as {toDate?:()=>Date}).toDate === 'function'
-            ? (raw as {toDate:()=>Date}).toDate()
-            : new Date(raw as string);
-          return d.getFullYear() === gtYear && d.getMonth() + 1 === gtMonth;
-        });
-
-        // Revenue (Satış Gelirleri)
-        const brutSatislar = periodOrders.reduce((s, o) => s + o.totalPrice, 0);
-        const satisIadeleri = periodOrders.filter(o => o.status === 'Cancelled').reduce((s, o) => s + o.totalPrice, 0);
-        const netSatislar = brutSatislar - satisIadeleri;
-
-        // COGS (Satışların Maliyeti)
-        const satislarinMaliyeti = periodOrders.reduce((s, o) => {
-          return s + (o.lineItems || []).reduce((sc: number, li: {quantity: number; costPrice?: number; inventoryId?: string; sku?: string}) => {
-            return sc + (li.costPrice || 0) * li.quantity;
-          }, 0);
-        }, 0);
-
-        const brutKar = netSatislar - satislarinMaliyeti;
-        const brutKarMarji = netSatislar > 0 ? (brutKar / netSatislar * 100) : 0;
-
-        // Operating Expenses (Faaliyet Giderleri)
-        const personelGiderleri = (employeesProp || []).filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
-        // Other op expenses approximated from journal entries if available
-        const pazarlamaGiderleri = 0; // would come from journal entries
-        const genelYonetimGiderleri = 0;
-        const toplamFaaliyetGiderleri = personelGiderleri + pazarlamaGiderleri + genelYonetimGiderleri;
-
-        const faaliyetKari = brutKar - toplamFaaliyetGiderleri;
-        const faaliyetKarMarji = netSatislar > 0 ? (faaliyetKari / netSatislar * 100) : 0;
-
-        // Financial items
-        const finansmanGiderleri = 0;
-        const diger = 0;
-        const vergionceKar = faaliyetKari + diger - finansmanGiderleri;
-        const vergiOrani = 0.20; // %20 kurumlar vergisi
-        const vergiKarsıligi = vergionceKar > 0 ? vergionceKar * vergiOrani : 0;
-        const netDonemKari = vergionceKar - vergiKarsıligi;
-
-        // Currency conversion
-        const rate = gelirCurrency === 'USD' ? (exchangeRates?.USD || 1) : gelirCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-        const sym = gelirCurrency === 'TRY' ? '₺' : gelirCurrency === 'USD' ? '$' : '€';
-        const fmt = (v: number) => `${sym}${(v / rate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        const fmtPct = (v: number) => `%${v.toFixed(1)}`;
-
-        const rows: { label: string; value: number; indent?: number; bold?: boolean; separator?: boolean; isNeg?: boolean; pct?: number; highlight?: string }[] = [
-          { label: currentLanguage === 'tr' ? 'I. BRÜT SATIŞLAR' : 'I. GROSS SALES', value: brutSatislar, bold: true },
-          { label: currentLanguage === 'tr' ? '  Satış İadeleri ve İndirimleri (-)' : '  Sales Returns & Discounts (-)', value: -satisIadeleri, indent: 1, isNeg: true },
-          { label: currentLanguage === 'tr' ? 'II. NET SATIŞLAR' : 'II. NET SALES', value: netSatislar, bold: true, separator: true, highlight: 'blue' },
-          { label: currentLanguage === 'tr' ? 'III. SATIŞLARIN MALİYETİ (-)' : 'III. COST OF GOODS SOLD (-)', value: -satislarinMaliyeti, isNeg: true },
-          { label: currentLanguage === 'tr' ? 'IV. BRÜT SATIŞ KÂRI/ZARARI' : 'IV. GROSS PROFIT/LOSS', value: brutKar, bold: true, separator: true, pct: brutKarMarji, highlight: brutKar >= 0 ? 'green' : 'red' },
-          { label: currentLanguage === 'tr' ? 'V. FAALİYET GİDERLERİ (-)' : 'V. OPERATING EXPENSES (-)', value: -toplamFaaliyetGiderleri, isNeg: true },
-          { label: currentLanguage === 'tr' ? '  Personel Giderleri' : '  Payroll Expenses', value: -personelGiderleri, indent: 1, isNeg: true },
-          { label: currentLanguage === 'tr' ? '  Pazarlama, Satış ve Dağıtım Giderleri' : '  Marketing, Sales & Distribution', value: -pazarlamaGiderleri, indent: 1, isNeg: true },
-          { label: currentLanguage === 'tr' ? '  Genel Yönetim Giderleri' : '  General & Administrative', value: -genelYonetimGiderleri, indent: 1, isNeg: true },
-          { label: currentLanguage === 'tr' ? 'VI. FAALİYET KÂRI/ZARARI (EBIT)' : 'VI. OPERATING PROFIT/LOSS (EBIT)', value: faaliyetKari, bold: true, separator: true, pct: faaliyetKarMarji, highlight: faaliyetKari >= 0 ? 'green' : 'red' },
-          { label: currentLanguage === 'tr' ? 'VII. FİNANSMAN GİDERLERİ (-)' : 'VII. FINANCIAL EXPENSES (-)', value: -finansmanGiderleri, isNeg: true },
-          { label: currentLanguage === 'tr' ? 'VIII. VERGİ ÖNCESİ KÂR/ZARAR' : 'VIII. PRE-TAX PROFIT/LOSS', value: vergionceKar, bold: true, separator: true, highlight: vergionceKar >= 0 ? 'green' : 'red' },
-          { label: currentLanguage === 'tr' ? '  Kurumlar Vergisi Karşılığı (%20)' : '  Corporate Tax Provision (20%)', value: -vergiKarsıligi, indent: 1, isNeg: true },
-          { label: currentLanguage === 'tr' ? 'IX. NET DÖNEM KÂRI/ZARARI' : 'IX. NET PERIOD PROFIT/LOSS', value: netDonemKari, bold: true, separator: true, highlight: netDonemKari >= 0 ? 'emerald' : 'red' },
-        ];
-
-        const highlightColors: Record<string, string> = {
-          blue: '#eff6ff', green: '#f0fdf4', red: '#fef2f2', emerald: '#ecfdf5'
-        };
-        const textColors: Record<string, string> = {
-          blue: '#1d4ed8', green: '#15803d', red: '#b91c1c', emerald: '#065f46'
-        };
-
-        return (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-            {/* Header controls */}
-            <div className="apple-card p-4 flex flex-wrap gap-3 items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-gray-600">{currentLanguage === 'tr' ? 'Dönem:' : 'Period:'}</span>
-                <select
-                  value={gtMonth}
-                  onChange={e => setGtMonth(Number(e.target.value))}
-                  className="apple-input py-2 px-3"
-                >
-                  {monthNames.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                </select>
-                <input
-                  type="number"
-                  value={gtYear}
-                  onChange={e => setGtYear(Number(e.target.value))}
-                  className="apple-input py-2 px-3 w-24"
-                />
-              </div>
-              {/* Currency */}
-              <div className="flex items-center gap-1">
-                {(['TRY','USD','EUR'] as const).map(cur => (
-                  <button key={cur} onClick={() => setGelirCurrency(cur)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${gelirCurrency === cur ? 'bg-brand text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                    {cur === 'TRY' ? '₺ TRY' : cur === 'USD' ? '$ USD' : '€ EUR'}
-                  </button>
-                ))}
-                {exchangeRates && gelirCurrency !== 'TRY' && (
-                  <span className="ml-2 text-[10px] text-gray-400 font-mono">
-                    1 {gelirCurrency} = ₺{(gelirCurrency === 'USD' ? exchangeRates.USD : exchangeRates.EUR).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                  </span>
-                )}
-              </div>
-              {/* Export CSV */}
-              <button
-                onClick={() => {
-                  const csvRows = [
-                    ['Kalem', 'Tutar', 'Marj %'],
-                    ...rows.map(r => [r.label.trim(), (r.value / rate).toFixed(2), r.pct ? r.pct.toFixed(1) + '%' : ''])
-                  ];
-                  const csv = csvRows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-                  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = `gelir-tablosu-${gtYear}-${String(gtMonth).padStart(2,'0')}.csv`;
-                  a.click(); URL.revokeObjectURL(url);
-                }}
-                className="apple-button-secondary px-4 py-2 text-sm flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                CSV {currentLanguage === 'tr' ? 'İndir' : 'Export'}
-              </button>
-            </div>
-
-            {/* Income Statement Table */}
-            <div className="apple-card overflow-hidden">
-              <div className="p-5 border-b border-gray-100">
-                <h2 className="font-black text-gray-800 text-lg">{currentLanguage === 'tr' ? 'GELİR TABLOSU' : 'INCOME STATEMENT'}</h2>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {monthNames[gtMonth - 1]} {gtYear} · {periodOrders.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {sym === '₺' ? 'TRY' : gelirCurrency}
-                </p>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/60">
-                    <th className="text-left py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{currentLanguage === 'tr' ? 'Kalem' : 'Line Item'}</th>
-                    <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{sym === '₺' ? 'TRY' : gelirCurrency}</th>
-                    <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className={`border-b border-gray-50 ${row.separator ? 'border-t-2 border-t-gray-200' : ''}`}
-                      style={{ background: row.highlight ? highlightColors[row.highlight] + '80' : 'transparent' }}
-                    >
-                      <td className={`py-2.5 px-5 ${row.bold ? 'font-bold' : 'font-normal'} text-gray-800`} style={{ paddingLeft: row.indent ? `${20 + row.indent * 16}px` : '20px' }}>
-                        {row.label}
-                      </td>
-                      <td className={`py-2.5 px-5 text-right font-mono ${row.bold ? 'font-bold' : ''}`}
-                        style={{ color: row.highlight ? textColors[row.highlight] : row.isNeg && row.value < 0 ? '#b91c1c' : '#111827' }}>
-                        {fmt(row.value)}
-                      </td>
-                      <td className="py-2.5 px-5 text-right text-xs font-mono text-gray-400">
-                        {row.pct !== undefined ? (
-                          <span className={`font-bold ${row.pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>{fmtPct(row.pct)}</span>
-                        ) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* KPI summary cards */}
-            <div className="grid grid-cols-4 gap-3">
-              {[
-                { label: currentLanguage === 'tr' ? 'Net Satışlar' : 'Net Sales', value: fmt(netSatislar), color: '#3b82f6' },
-                { label: currentLanguage === 'tr' ? 'Brüt Kâr Marjı' : 'Gross Margin', value: fmtPct(brutKarMarji), color: brutKarMarji >= 30 ? '#10b981' : brutKarMarji >= 15 ? '#f59e0b' : '#ef4444' },
-                { label: currentLanguage === 'tr' ? 'Faaliyet Kârı' : 'Operating Profit', value: fmt(faaliyetKari), color: faaliyetKari >= 0 ? '#10b981' : '#ef4444' },
-                { label: currentLanguage === 'tr' ? 'Net Dönem Kârı' : 'Net Profit', value: fmt(netDonemKari), color: netDonemKari >= 0 ? '#065f46' : '#b91c1c' },
-              ].map((kpi, i) => (
-                <div key={i} className="apple-card p-4 text-center">
-                  <div className="text-lg font-black" style={{ color: kpi.color }}>{kpi.value}</div>
-                  <div className="text-[10px] text-gray-500 mt-1">{kpi.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {periodOrders.length === 0 && (
-              <div className="apple-card p-10 text-center text-gray-400 text-sm">
-                {currentLanguage === 'tr' ? 'Seçilen dönemde sipariş bulunamadı.' : 'No orders found for the selected period.'}
-              </div>
-            )}
-          </motion.div>
-        );
-      })()}
+      {accountingTab === 'gelir_tablosu' && (
+        <GelirTablosuTab
+          currentLanguage={currentLanguage} orders={orders}
+          gelirYear={gelirYear} setGelirYear={setGelirYear} gelirMonth={gelirMonth} setGelirMonth={setGelirMonth}
+          gelirCurrency={gelirCurrency} setGelirCurrency={setGelirCurrency} exchangeRates={exchangeRates}
+          employeesProp={employeesProp}
+        />
+      )}
 
       <ConfirmModal
         isOpen={confirmModal.isOpen}

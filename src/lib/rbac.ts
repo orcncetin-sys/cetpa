@@ -100,6 +100,8 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   rfqQuotes: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
   purchaseBudgets: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing', 'Accounting'] },
   supplierRisks: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
+  supplierRatings: { read: ['Admin', 'Manager', 'Purchasing', 'Accounting'], write: ['Admin', 'Manager', 'Purchasing'] },
+  reportTargets: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Accounting'] },
   supplierConsignments: { read: ['Admin', 'Manager', 'Purchasing', 'Logistics'], write: ['Admin', 'Manager', 'Purchasing', 'Logistics'] },
 
   revExpBudgets: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },

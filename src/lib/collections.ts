@@ -34,7 +34,7 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
   // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi
   // konsinyesi (giden 'consignments'tan FARKLI — gelen mal), kampanya metrikleri
-  'purchaseBudgets', 'supplierRisks', 'supplierConsignments', 'campaignMetrics',
+  'purchaseBudgets', 'supplierRisks', 'supplierRatings', 'reportTargets', 'supplierConsignments', 'campaignMetrics',
   'autoInvoiceSchedules', // p591 Oto.Fatura (p640'ın recurringBilling'inden ayrı — şema farklı)
   // Batch 3 (2026-07-21): Siparişler yerel tabloları — mevcut gerçek akışlardan
   // (rmaRequests/orderReturns, supportTickets, ihracatlar) BİLEREK ayrı şemalar

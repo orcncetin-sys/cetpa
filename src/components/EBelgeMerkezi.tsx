@@ -14,6 +14,7 @@ import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
 } from '../lib/dbClient';
+import { useDataStore } from '../store/dataStore';
 
 interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
 interface LucaKontor { remaining?: number; limit?: number; used?: number; }
@@ -319,6 +320,17 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
     }, { merge: true });
   };
 
+  // Mikro connection — settings/mikro zaten useDataSync tarafından app-wide
+  // dinlenip Zustand store'a (mikroSettings) yazılıyor; burada AYRI bir
+  // onSnapshot AÇMIYORUZ (2026-08-13 code review bulgusu — 3. bağımsız
+  // dinleyici olurdu, AccountingModule.tsx zaten kendi kopyasını tutuyor).
+  // Bu ekran yalnız OKUR — Mikro'nun kendi ayar formu Muhasebe → Banka
+  // Hareketleri → Bağlantı Ayarları'nda; burada sadece "Gelen/Giden/
+  // e-İrsaliye çek" düğmelerinin neden 401/boş döndüğünü açıklayan bir rozet.
+  const mikroSettings = useDataStore(s => s.mikroSettings) as { enabled?: boolean; lastSync?: string | null };
+  const mikroEnabled = mikroSettings.enabled ?? false;
+  const mikroLastSync = mikroSettings.lastSync ?? null;
+
   // Form state
   const [form, setForm] = useState({
     belgeNo: '',
@@ -597,6 +609,25 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
             </span>
             {gibLastCheck && <span className="text-[10px] text-gray-400 hidden sm:inline">{gibLastCheck.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
           </button>
+          {/* Mikro durum rozeti — salt-okunur BİLGİ amaçlı, düğmeleri KİLİTLEMEZ.
+              settings/mikro.enabled sunucunun /api/mikro/ebelge/* uçlarında
+              hiç kontrol edilmiyor (getMikroCreds() env değişkenlerine veya
+              Firestore kimlik bilgilerine bakıyor, enabled bayrağına değil) —
+              rozet kapalı görünse bile çekim gerçekte çalışabilir (ör. Luca
+              karşılıklı-dışlama enabled'ı false yapmış ama kimlik bilgileri
+              hâlâ geçerli). O yüzden düğmeleri disabled yapmıyoruz, yalnız
+              ipucu veriyoruz (2026-08-13 code review bulgusu — düğmeleri
+              kilitlemek yanlış-negatif üretirdi). */}
+          <span
+            title={mikroEnabled ? (mikroLastSync ? `Son senkronizasyon: ${mikroLastSync}` : 'Mikro entegrasyonu aktif') : 'Mikro entegrasyonu kapalı görünüyor (Muhasebe → Banka Hareketleri → Bağlantı Ayarları) — yine de çekmeyi deneyebilirsiniz.'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-full ${mikroEnabled ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${mikroEnabled ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
+            <Wifi size={12} className={mikroEnabled ? 'text-green-600' : 'text-gray-400'} />
+            <span className={`text-xs font-medium ${mikroEnabled ? 'text-green-700' : 'text-gray-500'}`}>
+              {mikroEnabled ? 'Mikro Bağlı' : 'Mikro Bağlı Değil'}
+            </span>
+          </span>
           {/* Mikro'dan çekme — gelen ve giden ayrı uçlar (V17'de giden için
               liste metodu yok, SQL'den gelir; bkz. server.ts /api/mikro/ebelge/*) */}
           <button

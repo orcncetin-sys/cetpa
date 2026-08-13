@@ -14,6 +14,7 @@ import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from '../lib/dbClient';
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
+import { SortHeader } from '../components/accounting/shared';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { authFetch } from '../services/authFetch';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
@@ -292,6 +293,16 @@ export default function MuhasebePage(props: Props) {
   const [fkLoading, setFkLoading] = useState(false);
   const [fkError, setFkError] = useState<string | null>(null);
   const [fkSearch, setFkSearch] = useState('');
+  // Sıralama (2026-08-13 kullanıcı bildirimi: tablo hiç sıralanmıyordu — kolon
+  // başlıkları tıklanabilir değildi). AccountingModule'deki SortHeader deseni
+  // burada yok, bu tek tablo için hafif kendi sıralamamızı yazıyoruz.
+  type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL';
+  const [fkSortKey, setFkSortKey] = useState<FkSortKey>('ad');
+  const [fkSortDir, setFkSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleFkSort = (key: FkSortKey) => {
+    if (fkSortKey === key) setFkSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setFkSortKey(key); setFkSortDir('asc'); }
+  };
   const [fkDetaySku, setFkDetaySku] = useState<string | null>(null);
   const [fkDetaySatirlari, setFkDetaySatirlari] = useState<FiyatDetaySatiri[]>([]);
   const [fkDetayLoading, setFkDetayLoading] = useState(false);
@@ -1334,9 +1345,28 @@ export default function MuhasebePage(props: Props) {
                     // atlıyordu, kullanıcı USD/EUR'a geçince bu sekme yanlışlıkla TL göstermeye
                     // devam ederdi (2026-08-13 code review bulgusu).
                     const fmtF = (v: number | null) => v == null ? '—' : fmtKpi(v, 'full', 2);
-                    const filtered = fkRows.filter(r =>
-                      !fkSearch || r.sku.toLowerCase().includes(fkSearch.toLowerCase()) || r.ad.toLowerCase().includes(fkSearch.toLowerCase())
-                    );
+                    const filtered = fkRows
+                      .filter(r =>
+                        !fkSearch || r.sku.toLowerCase().includes(fkSearch.toLowerCase()) || r.ad.toLowerCase().includes(fkSearch.toLowerCase())
+                      )
+                      .slice()
+                      .sort((a, b) => {
+                        const av = a[fkSortKey], bv = b[fkSortKey];
+                        if (typeof av === 'string' || typeof bv === 'string') {
+                          const cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'tr');
+                          return fkSortDir === 'asc' ? cmp : -cmp;
+                        }
+                        // Sayısal alanlar: null'lar (henüz alım/satış yok) yön ne olursa
+                        // olsun sona düşsün — bu yüzden null karşılaştırması asc/desc
+                        // çevirisinin DIŞINDA, doğrudan döndürülüyor (2026-08-13 code
+                        // review bulgusu: eskiden `fkSortDir==='asc'?cmp:-cmp` null
+                        // sıralamasını da ters çeviriyordu, azalanda null'lar başa düşüyordu).
+                        if (av == null && bv == null) return 0;
+                        if (av == null) return 1;
+                        if (bv == null) return -1;
+                        const cmp = av - bv;
+                        return fkSortDir === 'asc' ? cmp : -cmp;
+                      });
                     return (
                       <motion.div key="muhasebe-fiyat-karsilastirma" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                         <ModuleHeader
@@ -1360,12 +1390,12 @@ export default function MuhasebePage(props: Props) {
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="bg-gray-50 border-b border-gray-100">
-                                    <th className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Ürün' : 'Product'}</th>
-                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-blue-500 uppercase">{trFk ? 'Ort. Alım Fiyatı' : 'Avg. Purchase'}</th>
-                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{trFk ? 'Alım Miktarı' : 'Purchase Qty'}</th>
-                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-emerald-600 uppercase">{trFk ? 'Ort. Satış Fiyatı' : 'Avg. Sale'}</th>
-                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{trFk ? 'Satış Miktarı' : 'Sale Qty'}</th>
-                                    <th className="text-right px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Marj' : 'Margin'}</th>
+                                    <SortHeader label={trFk ? 'Ürün' : 'Product'} sortKey="ad" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} />
+                                    <SortHeader label={trFk ? 'Ort. Alım Fiyatı' : 'Avg. Purchase'} sortKey="alisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
+                                    <SortHeader label={trFk ? 'Alım Miktarı' : 'Purchase Qty'} sortKey="alisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
+                                    <SortHeader label={trFk ? 'Ort. Satış Fiyatı' : 'Avg. Sale'} sortKey="satisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
+                                    <SortHeader label={trFk ? 'Satış Miktarı' : 'Sale Qty'} sortKey="satisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
+                                    <SortHeader label={trFk ? 'Marj' : 'Margin'} sortKey="marjTL" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <th className="px-4 py-3"></th>
                                   </tr>
                                 </thead>

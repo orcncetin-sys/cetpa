@@ -479,6 +479,13 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
     actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
   };
 
+  // Denetim Uyumluluk: audit sekmesindeki donut ile KPI şeridindeki kart AYNI
+  // hesaba dayanır (auditItems.score ortalaması, 1-5) — bileşen üstünde tek yerde
+  // hesaplanır, iki yerde de tekrar edilmez.
+  const denetimUyum = auditItems.length > 0
+    ? Math.round((auditItems.reduce((s, a) => s + a.score, 0) / auditItems.length / 5) * 100)
+    : null;
+
   const kpiData = React.useMemo(() => {
     const totalSamples = qcRecords.reduce((sum, r) => sum + r.sampleSize, 0);
     const totalDefects = qcRecords.reduce((sum, r) => sum + r.defects, 0);
@@ -769,21 +776,32 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
           </motion.div>
         )}
 
-        {activeTab === 'audit' && (
+        {activeTab === 'audit' && (() => {
+          // Denetim Uyumluluk: önceden sabit 90/100 literal + sabit strokeDashoffset
+          // idi (2026-08-13 KPI denetimi bulgusu) — artık gerçek auditItems.score
+          // ortalamasından (bileşen üstünde hesaplanan denetimUyum), hiç madde yoksa
+          // sahte bir yüzde uydurmak yerine '—' gösterilir.
+          const cevre = 282.7; // 2*π*45, SVG r=45 çemberin çevresi
+          const offset = denetimUyum != null ? cevre * (1 - denetimUyum / 100) : cevre;
+          return (
           <motion.div key="audit" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="apple-card p-6 flex flex-col items-center justify-center text-center">
               <h3 className="font-bold text-[#1D1D1F] mb-6">{currentLanguage === 'tr' ? 'Denetim Uyumluluk' : 'Audit Compliance'}</h3>
               <div className="relative w-40 h-40">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="45" fill="none" stroke="#F5F5F7" strokeWidth="10" />
-                  <circle cx="50" cy="50" r="45" fill="none" stroke="#34C759" strokeWidth="10" strokeDasharray="282.7" strokeDashoffset="28.2" strokeLinecap="round" transform="rotate(-90 50 50)" />
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="#34C759" strokeWidth="10" strokeDasharray={cevre} strokeDashoffset={offset} strokeLinecap="round" transform="rotate(-90 50 50)" />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-4xl font-bold text-[#1D1D1F]">90</span>
+                  <span className="text-4xl font-bold text-[#1D1D1F]">{denetimUyum ?? '—'}</span>
                   <span className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">/ 100</span>
                 </div>
               </div>
-              <p className="text-sm text-[#86868B] mt-6">{currentLanguage === 'tr' ? 'Son iç denetim sonucuna göre ISO 9001 uyumluluğu yüksektir.' : 'ISO 9001 compliance is high based on the latest internal audit result.'}</p>
+              <p className="text-sm text-[#86868B] mt-6">
+                {denetimUyum != null
+                  ? (currentLanguage === 'tr' ? `${auditItems.length} denetim maddesinin ortalama puanına göre hesaplandı.` : `Calculated from the average score of ${auditItems.length} audit items.`)
+                  : (currentLanguage === 'tr' ? 'Henüz denetim maddesi girilmedi.' : 'No audit items entered yet.')}
+              </p>
             </div>
 
             <div className="lg:col-span-2 apple-card p-6">
@@ -828,14 +846,15 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               </div>
             </div>
           </motion.div>
-        )}
+          );
+        })()}
 
         {activeTab === 'kpi' && (
           <motion.div key="kpi" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
                 {/* KPI Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {[
-                    { label: 'OEE', value: '%88', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', tab: 'kpi' },
+                    { label: currentLanguage === 'tr' ? 'Denetim Uyumluluk' : 'Audit Compliance', value: denetimUyum != null ? `${denetimUyum}` : '—', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', tab: 'audit' },
                     { label: currentLanguage === 'tr' ? 'Hata Oranı' : 'Defect Rate', value: `%${kpiData.defectRate}`, icon: Zap, color: 'text-red-600', bg: 'bg-red-50', tab: 'qc' },
                     { label: currentLanguage === 'tr' ? 'Şikayet Endeksi' : 'Complaint Index', value: kpiData.complaintIndex, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50', tab: 'complaints' },
                     { label: currentLanguage === 'tr' ? 'İlk Seferde Doğru' : 'First Pass Yield', value: `%${kpiData.firstPassYield}`, icon: Award, color: 'text-green-600', bg: 'bg-green-50', tab: 'qc' },

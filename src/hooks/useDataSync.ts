@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
   collection, query, where, limit, orderBy, onSnapshot,
-  addDoc, serverTimestamp, doc, setDoc
+  addDoc, serverTimestamp, doc, setDoc, getDocs
 } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { useDataStore } from '../store/dataStore';
@@ -369,14 +369,31 @@ export function useDataSync({
     const timer = setTimeout(async () => {
       sessionStorage.setItem('riskScoreAt', String(Date.now()));
       const now = new Date();
+      // Mikro-farkında hale getirildi (2026-08-13 KPI denetimi bulgusu): önceden
+      // yalnız native orders'a bakıyordu, Mikro-ağırlıklı caride customerOrders
+      // hep boş kalıp yazma sessizce atlanıyordu ("continue" satırı). RiskPanel.tsx
+      // zaten canlı olarak cariBalances'a (Mikro, gerçek bakiye) fallback yapıyordu
+      // — bu günlük özet artık AYNI kaynağı kullanır, ikisi birbirinden sapmaz.
+      const cariBalanceMap = new Map<string, number>();
+      try {
+        const snap = await getDocs(collection(db, 'cariBalances'));
+        snap.docs.forEach(d => {
+          const x = d.data() as Record<string, unknown>;
+          const kod = String(x.cariKod ?? d.id).trim();
+          if (kod) cariBalanceMap.set(kod, Number(x.bakiye ?? 0));
+        });
+      } catch { /* Mikro bakiyesi çekilemedi — native hesaba devam */ }
       for (const lead of leads) {
         try {
+          const cariKod = String((lead as unknown as { mikroCariKod?: string }).mikroCariKod ?? '').trim();
+          const mikroBakiye = cariKod ? Math.max(0, cariBalanceMap.get(cariKod) ?? 0) : 0; // pozitif=bize borçlu
           const customerOrders = orders.filter(
             o => o.leadId === lead.id || o.customerName === lead.name
           );
-          const totalBalance = customerOrders
+          const nativeBalance = customerOrders
             .filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled')
             .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0);
+          const totalBalance = nativeBalance + mikroBakiye;
 
           let daysAllowed = 30;
           if (lead.paymentTerms) {
