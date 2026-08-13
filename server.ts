@@ -9549,9 +9549,17 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         loadCompanyDocs('inventory', cid),
       ]);
       const adMap = new Map<string, string>();
+      const stokMap = new Map<string, number>();
       for (const it of inventory) {
-        const sku = String((it as Record<string, unknown>).sku ?? '').trim();
-        if (sku) adMap.set(sku, String((it as Record<string, unknown>).name ?? sku));
+        const rec = it as Record<string, unknown>;
+        const sku = String(rec.sku ?? '').trim();
+        if (!sku) continue;
+        adMap.set(sku, String(rec.name ?? sku));
+        // Kalan stok — hareket bazlı alış-satış netine DEĞİL, inventory.stockLevel'a
+        // (gerçek/güncel stok) dayanır: hareket penceresi tüm geçmişi kapsamayabilir
+        // (açılış bakiyesi, transfer, sayım farkı gibi alış/satış dışı hareketler),
+        // stockLevel Mikro gece senkronundan gelen otoriter değer (2026-08-13).
+        stokMap.set(sku, Number(rec.stockLevel ?? 0));
       }
 
       type Grup = { alisTutar: number; alisMiktar: number; alisAdet: number; satisTutar: number; satisMiktar: number; satisAdet: number };
@@ -9580,6 +9588,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
           alisOrtFiyat: alisOrt, alisMiktar: g.alisMiktar, alisTutar: g.alisTutar, alisAdet: g.alisAdet,
           satisOrtFiyat: satisOrt, satisMiktar: g.satisMiktar, satisTutar: g.satisTutar, satisAdet: g.satisAdet,
           marjTL: marj, marjYuzde,
+          kalanStok: stokMap.has(sku) ? stokMap.get(sku)! : null,
         };
       }).sort((a, b) => (b.alisTutar + b.satisTutar) - (a.alisTutar + a.satisTutar));
 

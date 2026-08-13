@@ -284,6 +284,8 @@ export default function MuhasebePage(props: Props) {
     alisOrtFiyat: number | null; alisMiktar: number; alisTutar: number; alisAdet: number;
     satisOrtFiyat: number | null; satisMiktar: number; satisTutar: number; satisAdet: number;
     marjTL: number | null; marjYuzde: number | null;
+    /** inventory.stockLevel'dan — hareket netine değil gerçek stoğa dayanır; SKU inventory'de yoksa null. */
+    kalanStok: number | null;
   }
   interface FiyatDetaySatiri {
     tarih: string | null; yon: 'alis' | 'satis'; miktar: number; tutar: number;
@@ -296,7 +298,7 @@ export default function MuhasebePage(props: Props) {
   // Sıralama (2026-08-13 kullanıcı bildirimi: tablo hiç sıralanmıyordu — kolon
   // başlıkları tıklanabilir değildi). AccountingModule'deki SortHeader deseni
   // burada yok, bu tek tablo için hafif kendi sıralamamızı yazıyoruz.
-  type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL';
+  type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL' | 'kalanStok';
   const [fkSortKey, setFkSortKey] = useState<FkSortKey>('ad');
   const [fkSortDir, setFkSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleFkSort = (key: FkSortKey) => {
@@ -1395,6 +1397,7 @@ export default function MuhasebePage(props: Props) {
                                     <SortHeader label={trFk ? 'Alım Miktarı' : 'Purchase Qty'} sortKey="alisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
                                     <SortHeader label={trFk ? 'Ort. Satış Fiyatı' : 'Avg. Sale'} sortKey="satisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <SortHeader label={trFk ? 'Satış Miktarı' : 'Sale Qty'} sortKey="satisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
+                                    <SortHeader label={trFk ? 'Kalan Stok' : 'Remaining Stock'} sortKey="kalanStok" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <SortHeader label={trFk ? 'Marj' : 'Margin'} sortKey="marjTL" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <th className="px-4 py-3"></th>
                                   </tr>
@@ -1410,6 +1413,9 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.alisMiktar.toLocaleString('tr-TR')}</td>
                                       <td className="px-4 py-3 text-right font-medium text-emerald-600">{fmtF(r.satisOrtFiyat)}</td>
                                       <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.satisMiktar.toLocaleString('tr-TR')}</td>
+                                      <td className={`px-4 py-3 text-right font-medium ${r.kalanStok == null ? 'text-gray-300' : r.kalanStok <= 0 ? 'text-red-500' : 'text-gray-700'}`}>
+                                        {r.kalanStok == null ? '—' : r.kalanStok.toLocaleString('tr-TR')}
+                                      </td>
                                       <td className={`px-4 py-3 text-right font-bold ${r.marjTL == null ? 'text-gray-300' : r.marjTL >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                                         {r.marjTL == null ? '—' : `${fmtF(r.marjTL)}${r.marjYuzde != null ? ` (%${r.marjYuzde.toFixed(0)})` : ''}`}
                                       </td>
