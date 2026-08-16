@@ -3,12 +3,14 @@ import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, increm
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3 } from 'lucide-react';
+import type { Warehouse as WarehouseRecord } from '../types';
 
 interface MobileWMSModuleProps {
   currentLanguage: string;
   isAuthenticated: boolean;
   inventory: any[];
   orders: any[];
+  warehouses: WarehouseRecord[];
 }
 
 interface WMSLocation {
@@ -18,6 +20,9 @@ interface WMSLocation {
   rack: string;     // 01
   level: string;    // 01
   zone: 'receive' | 'storage' | 'pick' | 'ship' | 'return';
+  // Konumlar önceden gerçek depo listesinden (warehouses) tamamen kopuktu —
+  // "Depo Konumları" hep anlamsız/boş görünüyordu (2026-08-17 bildirimi).
+  warehouseId?: string;
   active: boolean;
   createdAt: any;
 }
@@ -58,7 +63,7 @@ interface CycleCountEntry {
   counted: boolean;
 }
 
-export default function MobileWMSModule({ currentLanguage, isAuthenticated, inventory, orders }: MobileWMSModuleProps) {
+export default function MobileWMSModule({ currentLanguage, isAuthenticated, inventory, orders, warehouses }: MobileWMSModuleProps) {
   const tr = currentLanguage === 'tr';
   const [view, setView] = useState<'dashboard' | 'receive' | 'pick' | 'transfer' | 'cycle' | 'locations' | 'tasks'>('dashboard');
   const [locations, setLocations] = useState<WMSLocation[]>([]);
@@ -73,7 +78,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const scanRef = useRef<HTMLInputElement>(null);
 
   // Location form
-  const [locForm, setLocForm] = useState({ aisle:'A', rack:'01', level:'01', zone:'storage' as WMSLocation['zone'] });
+  const [locForm, setLocForm] = useState({ aisle:'A', rack:'01', level:'01', zone:'storage' as WMSLocation['zone'], warehouseId: '' });
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -655,6 +660,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Kod' : 'Code'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Depo' : 'Warehouse'}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Koridor' : 'Aisle'}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Raf' : 'Rack'}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Seviye' : 'Level'}</th>
@@ -665,6 +671,11 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   {locations.sort((a,b) => a.code.localeCompare(b.code)).map(l => (
                     <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="p-3 font-mono font-medium">{l.code}</td>
+                      <td className="p-3 text-xs">
+                        {l.warehouseId
+                          ? (warehouses.find(w => w.id === l.warehouseId)?.name ?? <span className="text-amber-500">{tr ? 'Bilinmeyen depo' : 'Unknown warehouse'}</span>)
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="p-3">{l.aisle}</td>
                       <td className="p-3">{l.rack}</td>
                       <td className="p-3">{l.level}</td>
@@ -693,6 +704,13 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{tr ? 'Yeni Konum' : 'New Location'}</h2>
               <button onClick={() => setShowLocForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Depo' : 'Warehouse'}</label>
+              <select className="apple-input w-full p-3 rounded-xl text-sm" value={locForm.warehouseId} onChange={e=>setLocForm(p=>({...p,warehouseId:e.target.value}))}>
+                <option value="">{tr ? 'Depo seçin' : 'Select warehouse'}</option>
+                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>

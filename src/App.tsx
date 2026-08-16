@@ -6073,6 +6073,7 @@ function AppContent() {
                   isAuthenticated={!!user}
                   inventory={inventory}
                   orders={orders}
+                  warehouses={warehouses}
                 />
               </React.Suspense>
             </motion.div>
