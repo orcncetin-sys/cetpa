@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -97,6 +97,13 @@ export default function CRMPage({
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,
   logAuditAction,
 }: Props) {
+  // Faturası/bakiyesi olan lead'ler artık aday değil, gerçek cari — Müşteri
+  // Adayları listesinden/hunisinden gizlenir (silinmez; useDataSync'teki otomatik
+  // durum-ilerletme efekti isMusteri=true yazar). Kullanıcı onayı 2026-08-16.
+  const activeLeads = useMemo(
+    () => leads.filter(l => (l as unknown as { isMusteri?: boolean }).isMusteri !== true),
+    [leads]
+  );
   // ── Local state ──────────────────────────────────────────────────────────────
   const [crmSearch, setCrmSearch] = useState('');
   // Kalıcılaştırma (2026-07-21): kampanya metrik düzenleme modu
@@ -2054,7 +2061,7 @@ export default function CRMPage({
                       </div>
                     )}
                     {(() => {
-                      const filtered = leads.filter(l =>
+                      const filtered = activeLeads.filter(l =>
                         (leadStatusFilter === 'All' || l.status === leadStatusFilter) &&
                         (l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                         l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
@@ -2429,7 +2436,7 @@ export default function CRMPage({
                       <h3 className="font-bold text-sm mb-4 flex items-center justify-between">
                         {currentT[status.toLowerCase()] || status}
                         <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-                          {leads.filter(l => l.status === status && (
+                          {activeLeads.filter(l => l.status === status && (
                             l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                             l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                             l.email.toLowerCase().includes(crmSearch.toLowerCase())
@@ -2437,7 +2444,7 @@ export default function CRMPage({
                         </span>
                       </h3>
                       <div className="space-y-3">
-                        {leads.filter(l => l.status === status && (
+                        {activeLeads.filter(l => l.status === status && (
                           l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                           l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                           l.email.toLowerCase().includes(crmSearch.toLowerCase())

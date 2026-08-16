@@ -153,6 +153,13 @@ export default function CariEkstrePanel({
   const [rows, setRows]       = useState<AgingRow[]>([]);
   const [buckets, setBuckets] = useState<AgingBuckets>({ current: 0, d30: 0, d60: 0, d90: 0, over90: 0 });
   const [loading, setLoading] = useState(true);
+  // Gerçek zamanlı hareketlerden hesaplanan bakiye — leads.balance gibi Mikro'yla
+  // hiç senkronlanmayan/stale bir prop'a güvenmek yerine (2026-08-13 bildirimi:
+  // Müşteri Adayı ekranında Bakiye hep ₺0,00 görünüyordu, oysa aynı cari Cariler
+  // sayfasında doğru bakiyeyi gösteriyordu — kaynak farkı: Cariler'de canlı Mikro
+  // senkronlu customer.balance kullanılıyor, lead.balance ise hiç güncellenmiyor).
+  // Formül doğrulanmış (2026-07-30): eksi = Cetpa borçlu. SUM(cha_tip=0 ? +meblag : -meblag).
+  const [computedBalance, setComputedBalance] = useState<number | null>(null);
   const [filter, setFilter]   = useState<'all' | 'overdue'>('all');
   const [sortCol, setSortCol] = useState<'ageD' | 'amount' | 'customerName'>('ageD');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
@@ -186,6 +193,7 @@ export default function CariEkstrePanel({
         const now = Date.now();
         const newBuckets: AgingBuckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
         const newRows: AgingRow[] = [];
+        let balanceAcc = 0;
         (json.satirlar ?? []).forEach(x0 => {
           const x = x0 as Record<string, unknown>;
           const dt = toDate(x.cha_tarihi);
@@ -193,6 +201,7 @@ export default function CariEkstrePanel({
           const amount = Number(x.cha_meblag ?? 0);
           // cha_tip 0 = borç (satış/masraf → cari borçlanır), 1 = alacak (tahsilat/alış).
           const borc = Number(x.cha_tip ?? 0) === 0;
+          balanceAcc += borc ? amount : -amount;
           const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
           const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
           // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
@@ -226,6 +235,7 @@ export default function CariEkstrePanel({
         });
         setBuckets(newBuckets);
         setRows(newRows);
+        setComputedBalance(balanceAcc);
         setLoading(false);
       })
       .catch(() => { if (!iptal) setLoading(false); });
@@ -340,13 +350,20 @@ export default function CariEkstrePanel({
           <div className={`text-[10px] font-bold uppercase ${overdueAR > 0 ? 'text-red-500' : 'text-green-500'}`}>{t ? 'Vadesi Geçmiş' : 'Overdue'}</div>
           <div className={`text-base font-bold ${overdueAR > 0 ? 'text-red-700' : 'text-green-700'}`}>₺{fmt(overdueAR)}</div>
         </div>
-        {mikroModu && balance !== undefined ? (
+        {mikroModu && (computedBalance !== null || balance !== undefined) ? (() => {
           // Bakiye: eksi = Cetpa borçlu (yeşil), artı = cari borçlu (kırmızı).
-          <div className={`rounded-xl p-3 text-center ${balance < 0 ? 'bg-green-50' : balance > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-bold uppercase ${balance < 0 ? 'text-green-500' : balance > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? 'Bakiye' : 'Balance'}</div>
-            <div className={`text-base font-bold ${balance < 0 ? 'text-green-700' : balance > 0 ? 'text-red-700' : 'text-gray-700'}`}>₺{fmt(Math.abs(balance))}</div>
-          </div>
-        ) : (
+          // computedBalance TERCİH EDİLİR — aynı ekranda gösterilen hareketlerden
+          // canlı hesaplanır, aksi halde `balance` prop'una düşülür (ör. Müşteri
+          // Adayı ekranında lead.balance Mikro'yla hiç senkronlanmadığından hep 0
+          // görünüyordu — 2026-08-13 bildirimi).
+          const bal = computedBalance ?? balance ?? 0;
+          return (
+            <div className={`rounded-xl p-3 text-center ${bal < 0 ? 'bg-green-50' : bal > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+              <div className={`text-[10px] font-bold uppercase ${bal < 0 ? 'text-green-500' : bal > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? 'Bakiye' : 'Balance'}</div>
+              <div className={`text-base font-bold ${bal < 0 ? 'text-green-700' : bal > 0 ? 'text-red-700' : 'text-gray-700'}`}>₺{fmt(Math.abs(bal))}</div>
+            </div>
+          );
+        })() : (
           <div className="bg-gray-50 rounded-xl p-3 text-center">
             <div className="text-[10px] text-gray-500 font-bold uppercase">{mikroModu ? (t ? 'Hareket' : 'Entries') : (t ? 'Açık Sipariş' : 'Open Orders')}</div>
             <div className="text-base font-bold text-gray-700">{rows.length}</div>

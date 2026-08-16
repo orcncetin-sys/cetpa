@@ -16,6 +16,7 @@ import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
 import { SortHeader } from '../components/accounting/shared';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
+import { itemCostTRY } from '../utils/cost';
 import { authFetch } from '../services/authFetch';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
@@ -1831,7 +1832,12 @@ export default function MuhasebePage(props: Props) {
                     // (Finansal Oranlar'da zaten kullanılan, Mikro cariBalances'tan gerçek
                     // net bakiye toplamı) additive eklendi — aynı desen KDV/Satışlar'da da var.
                     const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0) + cariBalanceToplam.ar;
-                    const stok547   = inventory.reduce((s,i) => s + (i.stockLevel||0) * ((i.prices?.['Retail']??i.price??0)), 0);
+                    // Stoklar MALİYETLE taşınır (TMS 2 / genel muhasebe ilkesi) — satış
+                    // fiyatıyla değil. Eskiden i.prices.Retail (satış fiyatı) kullanılıyordu,
+                    // bu Aktif'i ve dolayısıyla Toplam Aktif/Özkaynaklar'ı sistematik olarak
+                    // şişiriyordu (2026-08-16 kullanıcı bildirimi: "hesap alış fiyatı x adet
+                    // olmamalı mı?"). itemCostTRY = inventory.costPrice (Mikro gece senkronu).
+                    const stok547   = inventory.reduce((s,i) => s + (i.stockLevel||0) * itemCostTRY(i, exchangeRates), 0);
                     const duranVarlık547 = p547FixedAssets.reduce((s,fa) => s + Math.max(0, fa.cost - fa.depreciation), 0);
                     const toplamAktif547 = kasa547 + banka547 + ar547 + stok547 + duranVarlık547;
                     // — Pasif (Liabilities + Equity) —

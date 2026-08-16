@@ -441,6 +441,63 @@ export function useDataSync({
     return () => clearTimeout(timer);
   }, [leads, orders, user]);
 
+  // ── Lead status auto-advance from Mikro fatura kesim tarihi (2026-08-16) ──
+  // Kullanıcı isteği: bakiyesi/fatura geçmişi olan bir "müşteri adayı" artık
+  // aday değil, gerçek bir cari — o yüzden (a) durumu son fatura tarihine göre
+  // otomatik ilerlet (1 ay içinde kesilmiş: İrtibat, 1-3 ay kesilmemiş: Nitelikli,
+  // 3+ ay kesilmemiş: Kapandı) ve (b) isMusteri=true bayrağıyla işaretle — CRM
+  // sayfası bu bayrağı Müşteri Adayları listesinden/hunisinden GİZLEMEK için
+  // kullanır (silme değil, kullanıcı onayı: "Lead listesinden gizle ama silme").
+  // Hiç faturası olmayan lead'lere DOKUNULMAZ (gerçek, henüz kapanmamış aday).
+  useEffect(() => {
+    if (!user || leads.length === 0) return;
+    const lastRun = Number(sessionStorage.getItem('leadStatusAt') || 0);
+    if (Date.now() - lastRun < 24 * 60 * 60 * 1000) return;
+    const timer = setTimeout(async () => {
+      sessionStorage.setItem('leadStatusAt', String(Date.now()));
+      try {
+        const snap = await getDocs(collection(db, 'mikroFaturalar'));
+        // Son GİDEN (satış) fatura tarihi, cari kodu bazında — 'YYYY-MM-DD' string
+        // karşılaştırması yeterli (aynı formatta gelir, mapMikroFatura ile aynı kaynak).
+        const sonFaturaMap = new Map<string, string>();
+        snap.docs.forEach(d => {
+          const x = d.data() as Record<string, unknown>;
+          const iptal = x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1;
+          if (iptal) return;
+          if (Number(x.cha_tip ?? 0) !== 0) return; // yalnız giden/satış (cha_tip=0)
+          const kod = String(x.cha_kod ?? '').trim();
+          const tarih = String(x.cha_tarihi ?? '').slice(0, 10);
+          if (!kod || !tarih) return;
+          if (!sonFaturaMap.has(kod) || tarih > sonFaturaMap.get(kod)!) sonFaturaMap.set(kod, tarih);
+        });
+        if (sonFaturaMap.size === 0) return; // Mikro faturası hiç yok — dokunma
+        const now = Date.now();
+        for (const lead of leads) {
+          try {
+            const kod = String(
+              (lead as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
+              ?? (lead as unknown as { code?: string }).code ?? ''
+            ).trim();
+            if (!kod) continue;
+            const sonTarih = sonFaturaMap.get(kod);
+            if (!sonTarih) continue; // bu cari için hiç giden fatura yok
+            const gunFark = Math.floor((now - new Date(sonTarih).getTime()) / 86400000);
+            const hedefDurum = gunFark < 30 ? 'Contacted' : gunFark < 90 ? 'Qualified' : 'Closed';
+            const zatenMusteri = (lead as unknown as { isMusteri?: boolean }).isMusteri === true;
+            if (lead.status === hedefDurum && zatenMusteri) continue; // değişiklik yok
+            await setDoc(doc(db, 'leads', lead.id), {
+              status: hedefDurum,
+              isMusteri: true,
+              sonFaturaTarihi: sonTarih,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+          } catch { /* tek lead hatası diğerlerini durdurmasın */ }
+        }
+      } catch { /* Mikro faturaları okunamadı — sessizce vazgeç, native lead akışı bozulmasın */ }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [leads, user]);
+
 
   // --- Phase 2: Rest of onSnapshots ---
   useEffect(() => {
