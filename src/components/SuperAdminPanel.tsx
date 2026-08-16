@@ -6,6 +6,7 @@ import {
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
 import OpsWatchdogCard from './OpsWatchdogCard';
+import ModuleStatusBoard from './ModuleStatusBoard';
 
 interface Tenant {
   companyId: string;
@@ -256,6 +257,9 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
 
       {/* Operasyon Bekçisi — günlük altyapı sağlık kontrolleri */}
       <OpsWatchdogCard currentLanguage={currentLanguage} toast={toast} />
+
+      {/* Sistem Sağlığı & Modül Durumu — canlı uç nokta nabzı + sezgisel modül olgunluğu */}
+      <ModuleStatusBoard currentLanguage={currentLanguage} toast={toast} />
 
       {/* Search */}
       <div className="relative">

@@ -4441,6 +4441,101 @@ async function startServer() {
     }
   });
 
+  /** GET /api/ops/module-status — modül bazlı sezgisel olgunluk göstergesi.
+   *  GERÇEK dosya sinyallerinden hesaplanır (satır sayısı, App.tsx/diğer
+   *  bileşenlerde kullanılıyor mu, TODO/stub/placeholder işaretleri) —
+   *  "bitti/eksik" gibi kesin bir iddia ÜRETMEZ, yalnız ham sinyalleri döner;
+   *  istemci bunu açıkça "sezgisel gösterge" etiketiyle sunar (bkz. CLAUDE.md
+   *  "sahte kesinlik gösterme"). 2026-08-16, süper-admin panel isteği.
+   */
+  const MODULE_REGISTRY: { id: string; label: string; file: string; group: string }[] = [
+    { id: 'crm', label: 'CRM (Satış Hunisi)', file: 'src/pages/CRMPage.tsx', group: 'Satış' },
+    { id: 'orders', label: 'Sipariş & Lojistik', file: 'src/pages/OrdersPage.tsx', group: 'Satış' },
+    { id: 'inventory', label: 'Envanter', file: 'src/pages/InventoryPage.tsx', group: 'Stok' },
+    { id: 'muhasebe', label: 'Muhasebe (ana)', file: 'src/pages/MuhasebePage.tsx', group: 'Muhasebe' },
+    { id: 'satinalma', label: 'Satın Alma', file: 'src/pages/SatinAlmaPage.tsx', group: 'Satın Alma' },
+    { id: 'ik', label: 'İnsan Kaynakları', file: 'src/pages/IKPage.tsx', group: 'IK' },
+    { id: 'raporlar', label: 'Raporlar', file: 'src/pages/RaporlarPage.tsx', group: 'Rapor' },
+    { id: 'admin', label: 'Admin', file: 'src/pages/AdminPage.tsx', group: 'Yönetim' },
+    { id: 'ayarlar', label: 'Ayarlar', file: 'src/pages/SettingsPage.tsx', group: 'Yönetim' },
+    { id: 'dashboard', label: 'Dashboard', file: 'src/pages/DashboardPage.tsx', group: 'Genel' },
+    { id: 'b2bportal', label: 'B2B Portal', file: 'src/components/B2BPortal.tsx', group: 'Satış' },
+    { id: 'hr', label: 'HR Modülü', file: 'src/components/HRModule.tsx', group: 'IK' },
+    { id: 'legal', label: 'Hukuk', file: 'src/components/LegalModule.tsx', group: 'Yönetim' },
+    { id: 'quality', label: 'Kalite', file: 'src/components/QualityModule.tsx', group: 'Üretim' },
+    { id: 'production', label: 'Üretim', file: 'src/components/ProductionModule.tsx', group: 'Üretim' },
+    { id: 'mrp', label: 'MRP', file: 'src/components/MRPModule.tsx', group: 'Üretim' },
+    { id: 'bom', label: 'Ürün Ağacı (BOM)', file: 'src/components/BOMPanel.tsx', group: 'Üretim' },
+    { id: 'bakim', label: 'Bakım', file: 'src/components/BakimModule.tsx', group: 'Üretim' },
+    { id: 'servis', label: 'Servis', file: 'src/components/ServisModule.tsx', group: 'Satış' },
+    { id: 'lotseri', label: 'Lot/Seri Takip', file: 'src/components/LotSeriModule.tsx', group: 'Stok' },
+    { id: 'sube', label: 'Şube Yönetimi', file: 'src/components/SubeModule.tsx', group: 'Yönetim' },
+    { id: 'holding', label: 'Holding', file: 'src/components/HoldingModule.tsx', group: 'Yönetim' },
+    { id: 'kurumsalyonetim', label: 'Kurumsal Yönetim', file: 'src/components/CorporateGovernanceModule.tsx', group: 'Yönetim' },
+    { id: 'maliyetmerkezi', label: 'Maliyet Merkezi', file: 'src/components/MaliyetMerkeziModule.tsx', group: 'Muhasebe' },
+    { id: 'gelirtanima', label: 'Gelir Tanıma', file: 'src/components/GelirTanimaModule.tsx', group: 'Muhasebe' },
+    { id: 'muhtasar', label: 'Muhtasar', file: 'src/components/MuhtasarModule.tsx', group: 'Muhasebe' },
+    { id: 'sabitkiymet', label: 'Sabit Kıymet', file: 'src/components/SabitKiymetModule.tsx', group: 'Muhasebe' },
+    { id: 'kasa', label: 'Kasa', file: 'src/components/KasaModule.tsx', group: 'Muhasebe' },
+    { id: 'dunning', label: 'Tahsilat Hatırlatma', file: 'src/components/DunningModule.tsx', group: 'Muhasebe' },
+    { id: 'ihracat', label: 'İhracat', file: 'src/components/IhracatModule.tsx', group: 'Satış' },
+    { id: 'territory', label: 'Bölge Yönetimi', file: 'src/components/TerritoryModule.tsx', group: 'Satış' },
+    { id: 'performans', label: 'Performans', file: 'src/components/PerformansModule.tsx', group: 'IK' },
+    { id: 'cpq', label: 'CPQ (Teklif Yapılandırma)', file: 'src/components/CPQPanel.tsx', group: 'Satış' },
+    { id: 'demandforecast', label: 'Talep Tahmini', file: 'src/components/DemandForecastPanel.tsx', group: 'Stok' },
+    { id: 'priceintel', label: 'Fiyat İstihbaratı', file: 'src/components/PriceIntelPanel.tsx', group: 'Satış' },
+    { id: 'dealercomm', label: 'Bayi Komisyonu', file: 'src/components/DealerCommissionPanel.tsx', group: 'Satış' },
+    { id: 'subscription', label: 'Abonelik Yönetimi', file: 'src/components/SubscriptionPanel.tsx', group: 'Yönetim' },
+    { id: 'mobilewms', label: 'Mobil WMS', file: 'src/components/MobileWMSModule.tsx', group: 'Stok' },
+    { id: 'erp_hub', label: 'ERP Hub', file: 'src/components/ERPHubPanel.tsx', group: 'Entegrasyon' },
+    { id: 'marketplace', label: 'Pazaryeri', file: 'src/components/MarketplacePanel.tsx', group: 'Entegrasyon' },
+    { id: 'sku_mapping', label: 'SKU Eşleştirme', file: 'src/components/SkuMappingPanel.tsx', group: 'Entegrasyon' },
+    { id: 'mutabakat', label: 'Mutabakat', file: 'src/components/MutabakatPanel.tsx', group: 'Muhasebe' },
+    { id: 'overdue', label: 'Vadesi Geçen', file: 'src/components/OverduePanel.tsx', group: 'Muhasebe' },
+    { id: 'risk', label: 'Risk Paneli', file: 'src/components/RiskPanel.tsx', group: 'Muhasebe' },
+    { id: 'finance', label: 'Finans Paneli', file: 'src/components/FinancePanel.tsx', group: 'Muhasebe' },
+    { id: 'analytics', label: 'Analitik', file: 'src/components/AnalyticsPanel.tsx', group: 'Rapor' },
+  ];
+  const MODULE_STUB_MARKERS = ['todo', 'yakında', 'coming soon', 'henüz bağlı değil', 'placeholder veri', 'mock veri', 'dummy veri', 'not implemented', 'stub veri', 'demo veri'];
+  function walkSourceFiles(dir: string, out: string[] = []): string[] {
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walkSourceFiles(full, out);
+      else if (e.name.endsWith('.tsx') || e.name.endsWith('.ts')) out.push(full);
+    }
+    return out;
+  }
+  app.get('/api/ops/module-status', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+    try {
+      const root = process.cwd();
+      const scanDirs = [path.join(root, 'src', 'pages'), path.join(root, 'src', 'components'), path.join(root, 'src', 'App.tsx')];
+      const files = scanDirs.flatMap(d => (fs.existsSync(d) && fs.statSync(d).isDirectory()) ? walkSourceFiles(d) : (fs.existsSync(d) ? [d] : []));
+      const contents = new Map<string, string>();
+      for (const f of files) { try { contents.set(f, fs.readFileSync(f, 'utf8')); } catch { /* okunamayan dosya atlanır */ } }
+      const combined = [...contents.values()].join('\n');
+      const modules = MODULE_REGISTRY.map(m => {
+        const full = path.join(root, m.file);
+        const content = contents.get(full);
+        if (content === undefined) return { ...m, exists: false, lines: 0, stubMarkers: [] as string[], wired: false, mtimeMs: null as number | null };
+        const lines = content.split('\n').length;
+        const lower = content.toLowerCase();
+        const stubMarkers = MODULE_STUB_MARKERS.filter(s => lower.includes(s));
+        const compName = path.basename(m.file, path.extname(m.file));
+        const occurrences = combined.split(compName).length - 1; // kendi dosyasındaki tanım + başka yerdeki kullanım(lar)
+        const wired = occurrences >= 2;
+        let mtimeMs: number | null = null;
+        try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* yok say */ }
+        return { ...m, exists: true, lines, stubMarkers, wired, mtimeMs };
+      });
+      res.json({ success: true, modules, generatedAt: new Date().toISOString() });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).
    *  Body: { productId, sku?, productName?, quantity, from?, to?, note? }
    *    from/to: { type:'warehouse'|'vehicle', id, name? } | null
