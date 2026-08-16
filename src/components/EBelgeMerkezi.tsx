@@ -15,6 +15,7 @@ import {
   onSnapshot, query, serverTimestamp
 } from '../lib/dbClient';
 import { useDataStore } from '../store/dataStore';
+import { getMikroStatus } from '../services/mikroService';
 
 interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
 interface LucaKontor { remaining?: number; limit?: number; used?: number; }
@@ -320,16 +321,22 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
     }, { merge: true });
   };
 
-  // Mikro connection — settings/mikro zaten useDataSync tarafından app-wide
-  // dinlenip Zustand store'a (mikroSettings) yazılıyor; burada AYRI bir
-  // onSnapshot AÇMIYORUZ (2026-08-13 code review bulgusu — 3. bağımsız
-  // dinleyici olurdu, AccountingModule.tsx zaten kendi kopyasını tutuyor).
-  // Bu ekran yalnız OKUR — Mikro'nun kendi ayar formu Muhasebe → Banka
-  // Hareketleri → Bağlantı Ayarları'nda; burada sadece "Gelen/Giden/
-  // e-İrsaliye çek" düğmelerinin neden 401/boş döndüğünü açıklayan bir rozet.
-  const mikroSettings = useDataStore(s => s.mikroSettings) as { enabled?: boolean; lastSync?: string | null };
-  const mikroEnabled = mikroSettings.enabled ?? false;
+  // Mikro connection rozeti — eskiden settings/mikro.enabled (manuel bir
+  // yapılandırma anahtarı) okuyordu, GERÇEK bağlantı durumunu yansıtmıyordu:
+  // Mikro fiilen çalışırken (e-Fatura Takip 616 gerçek fatura gösteriyor) bu
+  // rozet hâlâ "Bağlı Değil" diyordu (2026-08-17 bildirimi: "mikro bağlı ama
+  // bağlı değil diyor"). GET /api/mikro/status (getMikroCreds + token testi
+  // yapan gerçek uç, MikroSyncPanel'in de kullandığı) ile değiştirildi — tek
+  // seferlik fetch, yeni bir realtime listener DEĞİL (2026-08-13 bulgusunun
+  // "3. dinleyici olma" endişesi burada geçerli değil).
+  const mikroSettings = useDataStore(s => s.mikroSettings) as { lastSync?: string | null };
   const mikroLastSync = mikroSettings.lastSync ?? null;
+  const [mikroEnabled, setMikroEnabled] = useState(false);
+  useEffect(() => {
+    let iptal = false;
+    getMikroStatus().then(s => { if (!iptal) setMikroEnabled(!!s.connected); }).catch(() => {});
+    return () => { iptal = true; };
+  }, []);
 
   // Form state
   const [form, setForm] = useState({
