@@ -139,6 +139,13 @@ interface CariEkstrePanelProps {
   cariKod?: string;
   /** cariBalances'tan gelen güncel bakiye — mikroFaturalar tahsilatı içermez, bakiye ayrı gelir. */
   balance?: number;
+  /** Sadece GLOBAL modda (leadId/cariKod yokken) kullanılır: tüm carilerin net
+   *  pozitif bakiyesi (cariBalanceToplam.ar) — "Toplam Alacak"a additive eklenir.
+   *  Bu ekran eskiden salt native orders'tı (bkz. dosya başı yorumu), gerçek iş
+   *  hacminin çoğu Mikro'dan geldiğinden hep ₺0'a yakın görünüyordu (2026-08-17
+   *  bildirimi). Vade kovaları hâlâ yalnız native orders'tan — Mikro'da vade
+   *  tarihi yok, sahte kesinlik üretmemek için oraya karışmıyor. */
+  mikroArTotal?: number;
 }
 
 export default function CariEkstrePanel({
@@ -147,6 +154,7 @@ export default function CariEkstrePanel({
   customerName,
   cariKod,
   balance,
+  mikroArTotal,
 }: CariEkstrePanelProps) {
   const t = currentLanguage === 'tr';
 
@@ -294,7 +302,9 @@ export default function CariEkstrePanel({
   }, [mikroModu, leadId]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const totalAR = Object.values(buckets).reduce((s, v) => s + v, 0);
+  // Global modda (ne leadId ne cariKod) mikroArTotal additive eklenir — bkz.
+  // CariEkstrePanelProps.mikroArTotal yorumu.
+  const totalAR = Object.values(buckets).reduce((s, v) => s + v, 0) + (!mikroModu && !leadId ? (mikroArTotal ?? 0) : 0);
   const overdueAR = buckets.d30 + buckets.d60 + buckets.d90 + buckets.over90;
 
   const displayed = [...rows]
@@ -407,7 +417,11 @@ export default function CariEkstrePanel({
           <div className="py-10 text-center">
             <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-2" />
             <p className="text-sm text-gray-500 font-medium">
-              {mikroModu ? (t ? 'Bu cariye ait hesap hareketi yok.' : 'No entries for this account.') : (t ? 'Açık alacak yok.' : 'No open receivables.')}
+              {mikroModu
+                ? (t ? 'Bu cariye ait hesap hareketi yok.' : 'No entries for this account.')
+                : (!leadId && (mikroArTotal ?? 0) > 0)
+                  ? (t ? 'Sipariş bazlı detay yok — üstteki toplam Mikro cari bakiyelerinden.' : 'No order-level detail — total above is from Mikro cari balances.')
+                  : (t ? 'Açık alacak yok.' : 'No open receivables.')}
             </p>
           </div>
         ) : (

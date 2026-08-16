@@ -540,7 +540,14 @@ export default function MuhasebePage(props: Props) {
                         const now110 = Date.now();
                         // Only include open/pending POs (not delivered/cancelled)
                         const openPOs = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status));
-                        const totalAP = openPOs.reduce((s, po) => s + po.totalAmount, 0);
+                        // "Toplam Borç" eskiden yalnız native apPurchaseOrders'tı — gerçek iş
+                        // hacmi Mikro'dan geçtiğinden hep ₺0'a yakın görünüyordu (2026-08-17
+                        // bildirimi). cariBalanceToplam.ap (tüm tedarikçi/cari negatif
+                        // bakiyelerin toplamı, /api/mikro/pull/bakiye kaynaklı) additive
+                        // eklendi. Vade kovaları (0-30/31-60/60+) Mikro'da vade tarihi
+                        // olmadığından yalnız native PO'lardan — sahte kesinlik üretmemek
+                        // için o kısım değiştirilmedi.
+                        const totalAP = openPOs.reduce((s, po) => s + po.totalAmount, 0) + cariBalanceToplam.ap;
 
                         type APBucket = { label: string; range: string; orders: typeof openPOs; color: string; bg: string; dot: string };
                         const apBuckets: APBucket[] = [
@@ -1120,7 +1127,9 @@ export default function MuhasebePage(props: Props) {
                       />
                       {(() => {
                         const now131 = Date.now();
-                        const unpaid131 = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                        // faturali siparişler Mikro'ya gidip cariBalances'a (aşağıdaki
+                        // cariBalanceToplam.ar) yansıdığından burada tekrar sayılmıyor.
+                        const unpaid131 = orders.filter(o => !o.paid && o.status !== 'Cancelled' && !(o as unknown as { faturali?: boolean }).faturali);
                         // Group by customer
                         type CustAR = { name: string; total: number; b0_30: number; b31_60: number; b61_90: number; b90p: number; oldest: number };
                         const custMap: Record<string, CustAR> = {};
@@ -1141,8 +1150,14 @@ export default function MuhasebePage(props: Props) {
                           else custMap[name].b90p += amt;
                         }
                         const custs = Object.values(custMap).sort((a, b) => b.total - a.total);
-                        const totalAR = custs.reduce((s, c) => s + c.total, 0);
-                        if (custs.length === 0) return (
+                        // Yaş kovaları (0-30/31-60/61-90/90+) yalnız native orders'tan —
+                        // Mikro faturalarında vade/tahsilat tarihi yok, o yüzden bunları
+                        // yaşlandıramıyoruz (sahte kesinlik üretmemek için). Ama "Toplam
+                        // Alacak" gerçek cari bakiyeleri (cariBalanceToplam.ar) içermeli,
+                        // yoksa gerçek iş hacminin çoğu Mikro'dan geldiğinden hep ₺0'a
+                        // yakın görünüyordu (2026-08-17 bildirimi).
+                        const totalAR = custs.reduce((s, c) => s + c.total, 0) + cariBalanceToplam.ar;
+                        if (custs.length === 0 && cariBalanceToplam.ar <= 0) return (
                           <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
                             <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-200" />
                             <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tüm siparişler tahsil edildi.' : 'All orders collected.'}</p>
@@ -1508,7 +1523,16 @@ export default function MuhasebePage(props: Props) {
                           return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth() && o.status !== 'Cancelled';
                         } catch { return false; }
                       });
-                      const revenue = monthOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                      // Gelir eskiden yalnız native orders'tı (2026-08-17 bildirimi) — Mikro
+                      // giden faturaları additive eklendi (faturali siparişler mikroFaturalar'da
+                      // zaten sayıldığından gelire ikinci kez katılmıyor, kdv-mutabakat deseni).
+                      // COGS Mikro faturasında satır maliyeti olmadığından hâlâ TÜM
+                      // monthOrders'tan (faturalanma durumundan bağımsız yaklaşık gösterge).
+                      const mmYear = d.getFullYear(), mmMonth = String(d.getMonth() + 1).padStart(2, '0');
+                      const monthMikroRevenue = mikroFaturalar
+                        .filter(f => f.yon === 'giden' && f.tarih.startsWith(`${mmYear}-${mmMonth}`))
+                        .reduce((s, f) => s + (f.tutar || 0), 0);
+                      const revenue = monthOrders.filter(o => !(o as unknown as { faturali?: boolean }).faturali).reduce((s, o) => s + (o.totalPrice || 0), 0) + monthMikroRevenue;
                       const cogs = monthOrders.reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
                       months143.push({ label, revenue, cogs, grossProfit: revenue - cogs });
                     }
@@ -1949,10 +1973,11 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 550: e-Mutabakat (Account Reconciliation) ────────────────── */}
                   {muhasebeTab === 'mutabakat' && (() => {
                     const tr550 = currentLanguage === 'tr';
-                    // AR per customer from orders
+                    // AR per customer from orders (faturali hariç — Mikro'ya gidip
+                    // cariBalances'a yansıdığından üstteki toplamlarda tekrar sayılmasın).
                     const arMap: Record<string, { name: string; ar: number; paid: number }> = {};
                     for (const o of orders) {
-                      if (o.status === 'Cancelled') continue;
+                      if (o.status === 'Cancelled' || (o as unknown as { faturali?: boolean }).faturali) continue;
                       const k = o.customerName;
                       if (!arMap[k]) arMap[k] = { name: k, ar: 0, paid: 0 };
                       arMap[k].ar += o.totalPrice || o.totalAmount || 0;
@@ -1963,11 +1988,18 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div key="mutabakat" initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }} className="space-y-4">
                         <ModuleHeader title={tr550?'Cari Mutabakat':'Account Reconciliation'} subtitle={tr550?'Müşteri bazında alacak/ödeme dengesi':'AR vs. payments balance per customer'} icon={RefreshCw} />
+                        {/* Toplam Alacak/Bakiye eskiden yalnız native orders'tı — gerçek iş
+                            hacminin çoğu Mikro'dan geldiğinden hep ₺0'a yakın görünüyordu
+                            (2026-08-17 bildirimi). cariBalanceToplam.ar (tüm carilerin net
+                            pozitif bakiyesi) additive eklendi. "Tahsil Edilen" Mikro'da ayrı
+                            bir alan olarak yok (yalnız güncel net bakiye var) — o yüzden
+                            değiştirilmedi, alt tablo hâlâ native sipariş bazlı (satır bazında
+                            Mikro carisi olmayan detay). */}
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
                           {[
-                            { label: tr550?'Toplam Alacak':'Total AR',     v: mutRows.reduce((s,r)=>s+r.ar,0),      color:'text-blue-700',   bg:'bg-blue-50' },
+                            { label: tr550?'Toplam Alacak':'Total AR',     v: mutRows.reduce((s,r)=>s+r.ar,0) + cariBalanceToplam.ar,      color:'text-blue-700',   bg:'bg-blue-50' },
                             { label: tr550?'Tahsil Edilen':'Collected',     v: mutRows.reduce((s,r)=>s+r.paid,0),    color:'text-emerald-700', bg:'bg-emerald-50' },
-                            { label: tr550?'Bakiye':'Open Balance',         v: mutRows.reduce((s,r)=>s+r.balance,0), color:'text-orange-700',  bg:'bg-orange-50' },
+                            { label: tr550?'Bakiye':'Open Balance',         v: mutRows.reduce((s,r)=>s+r.balance,0) + cariBalanceToplam.ar, color:'text-orange-700',  bg:'bg-orange-50' },
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
                               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
@@ -2002,7 +2034,13 @@ export default function MuhasebePage(props: Props) {
                               </tbody>
                             </table>
                           </div>
-                          {mutRows.length === 0 && <p className="text-center py-8 text-gray-400 text-sm">{tr550?'Henüz sipariş verisi yok.':'No order data yet.'}</p>}
+                          {mutRows.length === 0 && (
+                            <p className="text-center py-8 text-gray-400 text-sm">
+                              {cariBalanceToplam.ar > 0
+                                ? (tr550 ? 'Sipariş bazlı detay yok — üstteki toplamlar Mikro cari bakiyelerinden.' : 'No order-level detail — totals above are from Mikro cari balances.')
+                                : (tr550 ? 'Henüz sipariş verisi yok.' : 'No order data yet.')}
+                            </p>
+                          )}
                         </div>
                       </motion.div>
                     );
@@ -2476,7 +2514,7 @@ export default function MuhasebePage(props: Props) {
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1 flex items-center gap-1.5">
                         <span>{currentLanguage === 'tr' ? 'Vade Analizi & Cari Ekstre' : 'AR Aging & Account Statement'}</span>
                       </h4>
-                      <React.Suspense fallback={LAZY_FALLBACK}><CariEkstrePanel currentLanguage={currentLanguage} /></React.Suspense>
+                      <React.Suspense fallback={LAZY_FALLBACK}><CariEkstrePanel currentLanguage={currentLanguage} mikroArTotal={cariBalanceToplam.ar} /></React.Suspense>
                     </div>
                   )}
 
@@ -3173,17 +3211,30 @@ export default function MuhasebePage(props: Props) {
                     const monthLabels = tr580
                       ? ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara']
                       : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                    // Derive actuals from orders
+                    // Gerçekleşen eskiden yalnız native orders'tı — gerçek iş hacminin
+                    // çoğu Mikro'dan geldiğinden hep ₺0'a yakın görünüyordu (2026-08-17
+                    // bildirimi: "gerçekleşenler fatura tutarlarına bağlı değil"). Mikro
+                    // giden (satış) faturaları additive eklendi — kdv-mutabakat/
+                    // finansal-oranlar'daki aynı desen.
                     const actuals580 = months580.map(m => {
                       const st = new Date(year580, m, 1);
                       const en = new Date(year580, m+1, 0, 23, 59, 59);
-                      return orders.filter(o => {
+                      const nativeAct = orders.filter(o => {
                         if (o.status === 'Cancelled' || !o.createdAt) return false;
+                        // faturali (Mikro'ya giden) siparişler mikroFaturalar'da zaten
+                        // sayılıyor — burada da sayarsak çift sayım olur (kdv-mutabakat'taki
+                        // aynı desen: donemFaturasiz yalnız faturasız siparişleri toplar).
+                        if ((o as unknown as { faturali?: boolean }).faturali) return false;
                         try {
                           const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
                           return d >= st && d <= en;
                         } catch { return false; }
                       }).reduce((s,o) => s+(o.totalPrice||0), 0);
+                      const mm = String(m + 1).padStart(2, '0');
+                      const mikroAct = mikroFaturalar
+                        .filter(f => f.yon === 'giden' && f.tarih.startsWith(`${year580}-${mm}`))
+                        .reduce((s, f) => s + (f.tutar || 0), 0);
+                      return nativeAct + mikroAct;
                     });
                     const totalActual580 = actuals580.reduce((s,v)=>s+v,0);
                     // Monthly budget targets (equal split for now)
@@ -3512,16 +3563,25 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'gelir-gider-butce' && (() => {
                     const tr625 = currentLanguage === 'tr';
                     const year625 = p625BudgetYear;
-                    // Actual revenue per month from orders
+                    // Gerçekleşen eskiden yalnız native orders'tı (2026-08-17 bildirimi:
+                    // "gerçekleşenler fatura tutarlarına bağlı değil") — Mikro giden
+                    // faturaları additive eklendi (kdv-mutabakat/finansal-oranlar deseni).
                     const actRevByMonth = Array.from({length:12},(_,i)=>{
                       const rev = orders.filter(o=>{
                         if(o.status==='Cancelled'||!o.createdAt) return false;
+                        // faturali siparişler mikroFaturalar'da zaten sayılıyor — çift
+                        // sayım önlemek için burada atlanır (kdv-mutabakat deseni).
+                        if ((o as unknown as { faturali?: boolean }).faturali) return false;
                         try {
                           const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
                           return d.getFullYear()===year625&&d.getMonth()===i;
                         } catch { return false; }
                       }).reduce((s,o)=>s+(o.totalPrice||0),0);
-                      return rev;
+                      const mm625 = String(i + 1).padStart(2, '0');
+                      const mikroRev = mikroFaturalar
+                        .filter(f => f.yon === 'giden' && f.tarih.startsWith(`${year625}-${mm625}`))
+                        .reduce((s, f) => s + (f.tutar || 0), 0);
+                      return rev + mikroRev;
                     });
                     const monthNames = tr625?['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                     const budgetMap:{[m:number]:{budgetRevenue:number;budgetExpense:number}} = {};
@@ -3608,7 +3668,21 @@ export default function MuhasebePage(props: Props) {
                       if(!o.createdAt||o.status==='Cancelled') return false;
                       try{const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);return d>=start634&&d<=end634;}catch{return false;}
                     });
-                    const revenue = periodOrders.reduce((s,o)=>s+(o.totalPrice||0),0);
+                    // Gelir eskiden yalnız native orders'tı (2026-08-17 bildirimi) — Mikro
+                    // giden faturaları additive eklendi. SMM (COGS) Mikro faturasında satır
+                    // maliyeti olmadığından hâlâ yalnız native lineItems'tan — sahte
+                    // kesinlik üretmemek için değiştirilmedi.
+                    const periodMikroFaturalar = mikroFaturalar.filter(f => {
+                      if (f.yon !== 'giden') return false;
+                      const d = new Date(f.tarih);
+                      return d >= start634 && d <= end634;
+                    });
+                    // faturali (Mikro'ya giden) siparişler mikroFaturalar'da zaten sayılıyor
+                    // — gelir toplamına ikinci kez katılmasın (kdv-mutabakat deseni). COGS
+                    // hesabı periodOrders'ın TAMAMINI kullanmaya devam eder (maliyet
+                    // faturalanma durumundan bağımsız bir yaklaşık gösterge).
+                    const revenue = periodOrders.filter(o => !(o as unknown as { faturali?: boolean }).faturali).reduce((s,o)=>s+(o.totalPrice||0),0)
+                      + periodMikroFaturalar.reduce((s,f)=>s+(f.tutar||0),0);
                     // Simulated budget from a simple baseline
                     const budgetRevenue = revenue * 1.15;
                     const budgetCogs = revenue * 0.55;
