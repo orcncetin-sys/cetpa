@@ -10841,13 +10841,28 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   app.post('/api/superadmin/tenants/:companyId/update', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const cid = String(req.params.companyId);
-    const { plan, status, note, cycle, nextPaymentDate } = (req.body ?? {}) as
-      { plan?: string; status?: string; note?: string; cycle?: string; nextPaymentDate?: string | number | null };
+    const { plan, status, note, cycle, nextPaymentDate, profile } = (req.body ?? {}) as
+      { plan?: string; status?: string; note?: string; cycle?: string; nextPaymentDate?: string | number | null; profile?: Record<string, unknown> };
     if (plan !== undefined && !SA_PLANS.has(plan)) return res.status(400).json({ error: 'Geçersiz plan.' });
     if (status !== undefined && status !== 'active' && status !== 'suspended') return res.status(400).json({ error: 'Geçersiz durum.' });
     if (cycle !== undefined && cycle !== 'monthly' && cycle !== 'yearly') return res.status(400).json({ error: 'Geçersiz dönem.' });
     try {
       const changes: string[] = [];
+      // Firma profili (vergi no/dairesi, iletişim, IBAN, adres) — süper-admin
+      // önceden yalnız faturalandırma alanlarını düzenleyebiliyordu (2026-08-17
+      // kullanıcı bildirimi: "Firma Bilgileri" salt-okunurdu).
+      if (profile && typeof profile === 'object') {
+        const PROFILE_FIELDS = ['companyName', 'taxNo', 'taxOffice', 'address', 'email', 'phone', 'iban', 'website'] as const;
+        const patch: Record<string, unknown> = {};
+        for (const f of PROFILE_FIELDS) {
+          if (typeof profile[f] === 'string') patch[f] = (profile[f] as string).slice(0, 500);
+        }
+        if (Object.keys(patch).length) {
+          await adminDb.collection('settings').doc(`${cid}__companyProfile`).set(
+            { ...patch, updatedAt: pgServerTimestamp(), updatedBy: reqActor(req).email }, { merge: true });
+          changes.push('profil');
+        }
+      }
       // Abonelik alanları (plan / dönem / sonraki ödeme tarihi) tek yazımda
       const subPatch: Record<string, unknown> = {};
       if (plan !== undefined) {
@@ -10937,7 +10952,90 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     }
   });
 
-  /** Kiracı firmaya abonelik ödeme linki oluşturur (iyzico) ve isteğe bağlı e-posta gönderir. */
+  /** Kiracının bir kullanıcısının rolünü değiştirir. Süper-admin cross-tenant yazdığından
+   *  (kendi companyId'si hedef kiracıyla eşleşmez) generic /api/db/:coll/:id yolu
+   *  ownsDoc() ile bunu 403'ler — bu yüzden ayrı, dar kapsamlı, requireSuperAdmin ile
+   *  korunan bir uç. Hedef kullanıcının GERÇEKTEN bu kiracıya ait olduğu doğrulanır
+   *  (URL'den companyId tahmin edip başka kiracının kullanıcısını değiştirme riski).
+   */
+  app.post('/api/superadmin/tenants/:companyId/users/:uid/role', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId), uid = String(req.params.uid);
+    const ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
+    const { role } = (req.body ?? {}) as { role?: string };
+    if (!role || !ROLES.includes(role)) return res.status(400).json({ error: 'Geçersiz rol.' });
+    try {
+      const uSnap = await adminDb.collection('users').doc(uid).get();
+      if (!uSnap.exists) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+      const u = uSnap.data() as Record<string, unknown>;
+      if (((u.companyId as string) || uid) !== cid) return res.status(403).json({ error: 'Kullanıcı bu firmaya ait değil.' });
+      await adminDb.collection('users').doc(uid).set({ role, updatedAt: pgServerTimestamp() }, { merge: true });
+      void writeAuditLog(reqActor(req), 'Kiracı kullanıcı rolü değiştirildi', `tenant/${cid} user/${uid} → ${role}`);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+
+  /** Kiracının bir kullanıcısını kaldırır (hard delete — mevcut tenant-admin
+   *  self-service akışıyla aynı davranış, bkz. AdminPage.tsx deleteDoc). */
+  app.post('/api/superadmin/tenants/:companyId/users/:uid/remove', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId), uid = String(req.params.uid);
+    try {
+      const uSnap = await adminDb.collection('users').doc(uid).get();
+      if (!uSnap.exists) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+      const u = uSnap.data() as Record<string, unknown>;
+      if (((u.companyId as string) || uid) !== cid) return res.status(403).json({ error: 'Kullanıcı bu firmaya ait değil.' });
+      if (uid === cid) return res.status(400).json({ error: 'Firma sahibi (owner) buradan silinemez.' });
+      await adminDb.collection('users').doc(uid).delete();
+      void writeAuditLog(reqActor(req), 'Kiracı kullanıcısı kaldırıldı', `tenant/${cid} user/${uid} (${u.email as string || ''})`);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+
+  /** Kiracıya süper-admin adına yeni kullanıcı davet eder (davet e-postası + link),
+   *  /api/admin/invite'ın cross-tenant karşılığı (o uç yalnız kendi firmasına davet
+   *  eder — requireAdmin ile). */
+  app.post('/api/superadmin/tenants/:companyId/invite', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
+    const cid = String(req.params.companyId);
+    const { email, role = 'Sales' } = (req.body ?? {}) as { email?: string; role?: string };
+    if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
+    const ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
+    if (!ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Geçersiz rol.' });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await adminDb.collection('invites').doc(token).set({ companyId: cid, email, role, token, expiresAt, createdAt: pgServerTimestamp(), used: false, invitedBySuperAdmin: reqActor(req).email });
+    } catch (e) { return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) }); }
+    const appUrl = process.env.APP_URL || `https://gen-lang-client-0628151245.web.app`;
+    const inviteUrl = `${appUrl}/?invite=${token}`;
+    void writeAuditLog(reqActor(req), 'Kiracıya kullanıcı davet edildi', `tenant/${cid} ${email} (${role})`);
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) return res.json({ success: true, inviteUrl, emailSent: false, note: 'Resend yapılandırılmadı — daveti manuel paylaşın.' });
+    try {
+      const fromAddress = process.env.RESEND_FROM || 'davet@cetpa.com.tr';
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:system-ui,sans-serif;background:#f5f5f7;margin:0;padding:24px;">
+  <div style="max-width:480px;margin:auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="background:#ff4000;padding:28px 32px;"><h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;">CETPA'ya Davet Edildiniz</h1></div>
+    <div style="padding:28px 32px;">
+      <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">CETPA platformuna <strong>${escapeHtml(role)}</strong> rolüyle davet edildiniz.</p>
+      <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;">Hesap Oluştur</a>
+      <p style="font-size:11px;color:#86868b;margin:20px 0 0;">Bu bağlantı 7 gün geçerlidir.</p>
+    </div></div></body></html>`;
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromAddress, to: [email], subject: `CETPA'ya Davet Edildiniz — ${role} Rolü`, html }),
+      });
+      const d = await r.json() as Record<string, unknown>;
+      if (!r.ok) return res.json({ success: true, inviteUrl, emailSent: false, note: (d.message as string) || 'Resend API hatası' });
+      res.json({ success: true, inviteUrl, emailSent: true, id: d.id });
+    } catch (e) {
+      res.json({ success: true, inviteUrl, emailSent: false, note: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** Kiracıya abonelik ödeme linki oluşturur (iyzico) ve isteğe bağlı e-posta gönderir. */
   app.post('/api/superadmin/tenants/:companyId/payment-link', requireAuth, requireMfaVerified, requireSuperAdmin, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     const creds = await getIyzicoCreds();

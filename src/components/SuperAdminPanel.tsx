@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Building2, Users, RefreshCw, Search, ShieldOff, ShieldCheck, Crown, X,
   CreditCard, Link2, Mail, Copy, Check, Calendar, Phone, MapPin, Receipt, FileText,
+  UserPlus, UserMinus,
 } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
@@ -104,6 +105,23 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   const [fNextDate, setFNextDate] = useState('');
   const [fNote, setFNote] = useState('');
 
+  // Düzenlenebilir firma profili (2026-08-17: önceden salt-okunurdu, kullanıcı bildirimi)
+  const [pCompanyName, setPCompanyName] = useState('');
+  const [pTaxNo, setPTaxNo] = useState('');
+  const [pTaxOffice, setPTaxOffice] = useState('');
+  const [pEmail, setPEmail] = useState('');
+  const [pPhone, setPPhone] = useState('');
+  const [pIban, setPIban] = useState('');
+  const [pAddress, setPAddress] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Kullanıcı yönetimi (ekle/rol değiştir/sil)
+  const [userBusy, setUserBusy] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('Sales');
+  const [inviting, setInviting] = useState(false);
+  const USER_ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
+
   // Ödeme linki modalı
   const [payOpen, setPayOpen] = useState(false);
   const [payAmount, setPayAmount] = useState('');
@@ -143,6 +161,14 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         const ms = toMs(d.billing.nextPaymentDate ?? d.billing.currentPeriodEnd);
         setFNextDate(ms ? new Date(ms).toISOString().slice(0, 10) : '');
         setFNote(d.note || '');
+        setPCompanyName(d.profile.companyName || '');
+        setPTaxNo(d.profile.taxNo || '');
+        setPTaxOffice(d.profile.taxOffice || '');
+        setPEmail(d.profile.email || '');
+        setPPhone(d.profile.phone || '');
+        setPIban(d.profile.iban || '');
+        setPAddress(d.profile.address || '');
+        setInviteEmail(''); setInviteRole('Sales');
         setPayEmail(d.profile.email || d.owner?.email || t.ownerEmail || '');
         setPayAmount(String((d.billing.amount as number) || PLAN_PRICES[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'] || ''));
         setPayCurrency('TRY');
@@ -175,6 +201,58 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       } else { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
     } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
     setSavingBilling(false);
+  };
+
+  const saveProfile = async () => {
+    if (!detailId) return;
+    setSavingProfile(true);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/update`, {
+        method: 'POST',
+        body: JSON.stringify({ profile: { companyName: pCompanyName, taxNo: pTaxNo, taxOffice: pTaxOffice, email: pEmail, phone: pPhone, iban: pIban, address: pAddress } }),
+      });
+      if (res.ok) { toast(tr ? 'Firma bilgileri güncellendi.' : 'Company info updated.', 'success'); void refreshDetail(detailId); }
+      else toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error');
+    } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
+    setSavingProfile(false);
+  };
+
+  const changeUserRole = async (uid: string, role: string) => {
+    if (!detailId) return;
+    setUserBusy(uid);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/users/${encodeURIComponent(uid)}/role`, { method: 'POST', body: JSON.stringify({ role }) });
+      if (res.ok) { toast(tr ? 'Rol güncellendi.' : 'Role updated.', 'success'); void refreshDetail(detailId); }
+      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (tr ? 'Rol güncellenemedi.' : 'Role update failed.'), 'error'); }
+    } catch { toast(tr ? 'Rol güncellenemedi.' : 'Role update failed.', 'error'); }
+    setUserBusy(null);
+  };
+
+  const removeUser = async (uid: string, email: string) => {
+    if (!detailId) return;
+    const ok = await confirmAction({ title: tr ? 'Kullanıcıyı Kaldır' : 'Remove User', message: tr ? `"${email}" bu firmadan kaldırılacak. Emin misiniz?` : `"${email}" will be removed. Are you sure?`, confirmLabel: tr ? 'Kaldır' : 'Remove', variant: 'danger' });
+    if (!ok) return;
+    setUserBusy(uid);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/users/${encodeURIComponent(uid)}/remove`, { method: 'POST' });
+      if (res.ok) { toast(tr ? 'Kullanıcı kaldırıldı.' : 'User removed.', 'success'); void refreshDetail(detailId); }
+      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (tr ? 'Kaldırılamadı.' : 'Removal failed.'), 'error'); }
+    } catch { toast(tr ? 'Kaldırılamadı.' : 'Removal failed.', 'error'); }
+    setUserBusy(null);
+  };
+
+  const inviteUser = async () => {
+    if (!detailId || !inviteEmail.trim()) return;
+    setInviting(true);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/invite`, { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }) });
+      const d = await res.json().catch(() => ({})) as { success?: boolean; error?: string; emailSent?: boolean; inviteUrl?: string };
+      if (res.ok && d.success) {
+        toast(d.emailSent ? (tr ? 'Davet e-postası gönderildi.' : 'Invite email sent.') : (tr ? 'Davet oluşturuldu (e-posta gönderilemedi — linki paylaşın).' : 'Invite created (email failed — share the link manually).'), d.emailSent ? 'success' : 'info');
+        setInviteEmail('');
+      } else toast(d.error || (tr ? 'Davet gönderilemedi.' : 'Invite failed.'), 'error');
+    } catch { toast(tr ? 'Davet gönderilemedi.' : 'Invite failed.', 'error'); }
+    setInviting(false);
   };
 
   const quickStatus = async (t: Tenant, status: 'active' | 'suspended') => {
@@ -332,17 +410,40 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
 
             {!detailLoading && detail && (
               <div className="p-5 space-y-5">
-                {/* Genel / Profil */}
+                {/* Genel / Profil — 2026-08-17'ye kadar salt-okunurdu (kullanıcı bildirimi) */}
                 <section className="apple-card p-4">
                   <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" />{tr ? 'Firma Bilgileri' : 'Company Info'}</h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <Field label={tr ? 'Vergi No' : 'Tax No'} value={detail.profile.taxNo} />
-                    <Field label={tr ? 'Vergi Dairesi' : 'Tax Office'} value={detail.profile.taxOffice} />
-                    <Field label="E-posta" value={detail.profile.email} icon={<Mail className="w-3 h-3" />} />
-                    <Field label={tr ? 'Telefon' : 'Phone'} value={detail.profile.phone} icon={<Phone className="w-3 h-3" />} />
-                    <Field label="IBAN" value={detail.profile.iban} full />
-                    <Field label={tr ? 'Adres' : 'Address'} value={detail.profile.address} icon={<MapPin className="w-3 h-3" />} full />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Firma Adı' : 'Company Name'}</label>
+                      <input value={pCompanyName} onChange={e => setPCompanyName(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Vergi No' : 'Tax No'}</label>
+                      <input value={pTaxNo} onChange={e => setPTaxNo(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Vergi Dairesi' : 'Tax Office'}</label>
+                      <input value={pTaxOffice} onChange={e => setPTaxOffice(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Mail className="w-3 h-3" />E-posta</label>
+                      <input value={pEmail} onChange={e => setPEmail(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Phone className="w-3 h-3" />{tr ? 'Telefon' : 'Phone'}</label>
+                      <input value={pPhone} onChange={e => setPPhone(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">IBAN</label>
+                      <input value={pIban} onChange={e => setPIban(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><MapPin className="w-3 h-3" />{tr ? 'Adres' : 'Address'}</label>
+                      <input value={pAddress} onChange={e => setPAddress(e.target.value)} className="apple-input w-full text-sm" />
+                    </div>
                   </div>
+                  <button onClick={() => void saveProfile()} disabled={savingProfile} className="apple-button-primary text-sm px-4 py-2 mt-3 disabled:opacity-50">{savingProfile ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
                 </section>
 
                 {/* Faturalandırma */}
@@ -384,17 +485,54 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                   </div>
                 </section>
 
-                {/* Kullanıcılar */}
+                {/* Kullanıcılar — 2026-08-17'ye kadar salt-okunurdu (ekle/düzelt/sil
+                    yoktu, kullanıcı bildirimi). Rol değişimi + kaldırma cross-tenant
+                    yazma gerektirdiğinden ayrı super-admin uçları eklendi. */}
                 <section className="apple-card p-4">
                   <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />{tr ? 'Kullanıcılar' : 'Users'} ({detail.users.length})</h4>
                   <div className="space-y-1.5">
-                    {detail.users.map(u => (
-                      <div key={u.uid} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
-                        <div><div className="text-[#1D1D1F]">{u.name || u.email}</div><div className="text-[11px] text-gray-400">{u.email}</div></div>
-                        <div className="text-right"><span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-semibold">{u.role}</span><div className="text-[10px] text-gray-400 mt-0.5">{tr ? 'Son giriş' : 'Last'}: {fmtDate(u.lastLogin, currentLanguage)}</div></div>
-                      </div>
-                    ))}
+                    {detail.users.map(u => {
+                      const isOwner = u.uid === detailId;
+                      return (
+                        <div key={u.uid} className="flex items-center justify-between gap-2 text-sm py-1.5 border-b border-gray-50 last:border-0">
+                          <div className="min-w-0">
+                            <div className="text-[#1D1D1F] truncate">{u.name || u.email}{isOwner && <span className="ml-1.5 text-[9px] font-bold text-brand">{tr ? 'SAHİP' : 'OWNER'}</span>}</div>
+                            <div className="text-[11px] text-gray-400 truncate">{u.email}</div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <select
+                              value={u.role}
+                              disabled={userBusy === u.uid}
+                              onChange={e => void changeUserRole(u.uid, e.target.value)}
+                              aria-label={tr ? 'Rol' : 'Role'}
+                              className="text-[11px] px-1.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold border-0 outline-none disabled:opacity-50"
+                            >
+                              {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                            <button
+                              onClick={() => void removeUser(u.uid, u.email)}
+                              disabled={isOwner || userBusy === u.uid}
+                              title={isOwner ? (tr ? 'Firma sahibi kaldırılamaz' : 'Owner cannot be removed') : (tr ? 'Kaldır' : 'Remove')}
+                              className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-400 disabled:opacity-30 disabled:hover:bg-transparent"
+                            ><UserMinus className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
                     {detail.users.length === 0 && <p className="text-xs text-gray-400">{tr ? 'Kullanıcı yok.' : 'No users.'}</p>}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-gray-100">
+                    <input
+                      type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+                      placeholder={tr ? 'yeni@kullanici.com' : 'new@user.com'}
+                      className="apple-input flex-1 text-sm py-1.5"
+                    />
+                    <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} aria-label={tr ? 'Davet rolü' : 'Invite role'} className="apple-input text-sm py-1.5 w-28">
+                      {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <button onClick={() => void inviteUser()} disabled={inviting || !inviteEmail.trim()} className="apple-button-secondary text-xs px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 shrink-0">
+                      <UserPlus className="w-3.5 h-3.5" />{inviting ? (tr ? 'Gönderiliyor...' : 'Sending...') : (tr ? 'Davet Et' : 'Invite')}
+                    </button>
                   </div>
                 </section>
 
@@ -477,11 +615,3 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   );
 }
 
-function Field({ label, value, icon, full }: { label: string; value: string; icon?: ReactNode; full?: boolean }) {
-  return (
-    <div className={full ? 'col-span-2' : ''}>
-      <div className="text-[11px] text-[#86868B] mb-0.5 flex items-center gap-1">{icon}{label}</div>
-      <div className="text-sm text-[#1D1D1F] break-words">{value || '—'}</div>
-    </div>
-  );
-}

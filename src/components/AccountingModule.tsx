@@ -1720,7 +1720,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
       satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
-      : satisSortKey === 'kdvOran' ? (a.oran ?? 0) - (b.oran ?? 0)
+      // "KDV%" kolonu Mikro satırlarında tutar+oranı birlikte gösteriyor
+      // (₺13.333,34 (%20)) ama neredeyse her satır aynı %20 oranı taşıyor —
+      // orana göre sıralamak görsel olarak "rastgele" görünüyordu (2026-08-17
+      // bildirimi). Görünen ve değişkenlik gösteren asıl değer tutar (kdv).
+      : satisSortKey === 'kdvOran' ? (a.kdv ?? 0) - (b.kdv ?? 0)
       : a.tarih.localeCompare(b.tarih)
     ));
   // Satışlar sekmesi: yalnız giden (satış) faturaları.
@@ -1744,7 +1748,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
       satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
-      : satisSortKey === 'kdvOran' ? (a.oran ?? 0) - (b.oran ?? 0)
+      // "KDV%" kolonu Mikro satırlarında tutar+oranı birlikte gösteriyor
+      // (₺13.333,34 (%20)) ama neredeyse her satır aynı %20 oranı taşıyor —
+      // orana göre sıralamak görsel olarak "rastgele" görünüyordu (2026-08-17
+      // bildirimi). Görünen ve değişkenlik gösteren asıl değer tutar (kdv).
+      : satisSortKey === 'kdvOran' ? (a.kdv ?? 0) - (b.kdv ?? 0)
       : a.tarih.localeCompare(b.tarih)
     ));
   const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);

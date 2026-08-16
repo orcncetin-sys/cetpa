@@ -108,7 +108,9 @@ export default function TedarikcilerTab({
                 )}
                 {displayedTedarikciler.map(s => (
                   <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3 font-medium text-gray-800">{s.name}</td>
+                    <td className="py-2.5 px-3 font-medium text-gray-800">
+                      <button onClick={() => setEkstreTedarikci(s)} className="text-left hover:text-[#ff4000] hover:underline transition-colors block">{s.name}</button>
+                    </td>
                     <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{s.company || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{s.email || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{s.phone || '—'}</td>
