@@ -521,6 +521,16 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
       return true;
     })
     .sort((a, b) => {
+      if (sort.key === 'acik') {
+        const va = a.toplamTutar - a.tahsilEdilen;
+        const vb = b.toplamTutar - b.tahsilEdilen;
+        return sort.dir === 'asc' ? va - vb : vb - va;
+      }
+      if (sort.key === 'gecikFaiz') {
+        const va = calcFaiz(a.toplamTutar - a.tahsilEdilen, a.faizOrani, a.vadeTarihi);
+        const vb = calcFaiz(b.toplamTutar - b.tahsilEdilen, b.faizOrani, b.vadeTarihi);
+        return sort.dir === 'asc' ? va - vb : vb - va;
+      }
       const va: string | number = (a as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
       const vb: string | number = (b as unknown as Record<string, unknown>)[sort.key] as string | number ?? '';
       if (typeof va === 'string' && typeof vb === 'string') {
@@ -875,8 +885,8 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                 <SortHeader label={t.vadeTarihi} sortKey="vadeTarihi" currentSort={sort} onSort={handleSort} />
                 <SortHeader label={t.tutar} sortKey="toplamTutar" currentSort={sort} onSort={handleSort} />
                 <SortHeader label={t.tahsilat} sortKey="tahsilEdilen" currentSort={sort} onSort={handleSort} />
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.acik}</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.gecikFaiz}</th>
+                <SortHeader label={t.acik} sortKey="acik" currentSort={sort} onSort={handleSort} />
+                <SortHeader label={t.gecikFaiz} sortKey="gecikFaiz" currentSort={sort} onSort={handleSort} />
                 <SortHeader label={t.durum} sortKey="durum" currentSort={sort} onSort={handleSort} />
                 <th className="px-4 py-3 text-center text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.islemler}</th>
               </tr>

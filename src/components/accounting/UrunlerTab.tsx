@@ -4,6 +4,7 @@ import { type Service } from '../../types';
 import { SortHeader, formatTRY, exportCSV, type AccountingT } from './shared';
 
 type ServiceForm = { code: string; name: string; type: 'Ürün' | 'Hizmet'; unitPrice: number; vatRate: number; unit: string; notes: string };
+type ServisSortKey = 'name' | 'code' | 'unitPrice' | 'vatRate' | 'type' | 'unit';
 
 interface UrunlerTabProps {
   t: AccountingT;
@@ -11,9 +12,9 @@ interface UrunlerTabProps {
   displayedServisler: Service[];
   serviceSearch: string;
   setServiceSearch: (v: string) => void;
-  servisSortKey: 'name' | 'code' | 'unitPrice' | 'vatRate';
+  servisSortKey: ServisSortKey;
   servisSortDir: 'asc' | 'desc';
-  toggleServisSort: (key: 'name' | 'code' | 'unitPrice' | 'vatRate') => void;
+  toggleServisSort: (key: ServisSortKey) => void;
   showServiceModal: boolean;
   setShowServiceModal: (v: boolean) => void;
   editingService: Service | null;
@@ -59,12 +60,12 @@ export default function UrunlerTab({
             <table className="apple-table">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <SortHeader label={t.code} sortKey="code" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} />
-                  <SortHeader label={t.name} sortKey="name" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.type2}</th>
-                  <SortHeader label={t.unitPrice} sortKey="unitPrice" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} className="text-right" />
-                  <SortHeader label="KDV%" sortKey="vatRate" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as 'code' | 'name' | 'unitPrice' | 'vatRate')} className="text-center hidden sm:table-cell" />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.unit}</th>
+                  <SortHeader label={t.code} sortKey="code" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} />
+                  <SortHeader label={t.name} sortKey="name" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} />
+                  <SortHeader label={t.type2} sortKey="type" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} className="hidden sm:table-cell" />
+                  <SortHeader label={t.unitPrice} sortKey="unitPrice" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} className="text-right" />
+                  <SortHeader label="KDV%" sortKey="vatRate" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} className="text-center hidden sm:table-cell" />
+                  <SortHeader label={t.unit} sortKey="unit" currentSort={{ key: servisSortKey, direction: servisSortDir }} onSort={(key) => toggleServisSort(key as ServisSortKey)} className="hidden md:table-cell" />
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>

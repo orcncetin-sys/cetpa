@@ -588,7 +588,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [waybillSearch, setWaybillSearch] = useState('');
 
   // Sort states for new tabs
-  const [satisSortKey, setSatisSortKey] = useState<'customerName' | 'totalPrice' | 'date' | 'faturali'>('date');
+  const [satisSortKey, setSatisSortKey] = useState<'customerName' | 'totalPrice' | 'date' | 'faturali' | 'kdvOran'>('date');
   const [satisSortDir, setSatisSortDir] = useState<'asc' | 'desc'>('desc');
   const [satisSearch, setSatisSearch] = useState('');
   const [kpiCurrency, setKpiCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
@@ -597,17 +597,17 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const formatConv = (n: number) => kpiCurrency === 'TRY'
     ? formatTRY(n)
     : `${kpiSym}${(n / kpiRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const [musteriSortKey, setMusteriSortKey] = useState<'name' | 'company' | 'phone'>('name');
+  const [musteriSortKey, setMusteriSortKey] = useState<'name' | 'company' | 'phone' | 'balance' | 'riskGroup'>('name');
   const [musteriSortDir, setMusteriSortDir] = useState<'asc' | 'desc'>('asc');
-  const [tedarikciSortKey, setTedarikciSortKey] = useState<'name' | 'company' | 'phone'>('name');
+  const [tedarikciSortKey, setTedarikciSortKey] = useState<'name' | 'company' | 'phone' | 'email' | 'taxNo'>('name');
   const [tedarikciSortDir, setTedarikciSortDir] = useState<'asc' | 'desc'>('asc');
-  const [servisSortKey, setServisSortKey] = useState<'name' | 'code' | 'unitPrice' | 'vatRate'>('name');
+  const [servisSortKey, setServisSortKey] = useState<'name' | 'code' | 'unitPrice' | 'vatRate' | 'type' | 'unit'>('name');
   const [servisSortDir, setServisSortDir] = useState<'asc' | 'desc'>('asc');
-  const [depoSortKey, setDepoSortKey] = useState<'productName' | 'quantity' | 'sku' | 'warehouseId'>('productName');
+  const [depoSortKey, setDepoSortKey] = useState<'productName' | 'quantity' | 'sku' | 'warehouseId' | 'category'>('productName');
   const [depoSortDir, setDepoSortDir] = useState<'asc' | 'desc'>('asc');
-  const [transferSortKey, setTransferSortKey] = useState<'productName' | 'quantity' | 'date' | 'status'>('date');
+  const [transferSortKey, setTransferSortKey] = useState<'productName' | 'quantity' | 'date' | 'status' | 'fromWarehouse' | 'toWarehouse'>('date');
   const [transferSortDir, setTransferSortDir] = useState<'asc' | 'desc'>('desc');
-  const [cekSortKey, setCekSortKey] = useState<'checkNo' | 'amount' | 'dueDate' | 'type'>('dueDate');
+  const [cekSortKey, setCekSortKey] = useState<'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer'>('dueDate');
   const [cekSortDir, setCekSortDir] = useState<'asc' | 'desc'>('asc');
   const [calisanSortKey, setCalisanSortKey] = useState<'name' | 'position' | 'salary' | 'startDate' | 'department'>('name');
   const [calisanSortDir, setCalisanSortDir] = useState<'asc' | 'desc'>('asc');
@@ -1613,7 +1613,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       if (journalSortKey === 'date') cmp = (a.date || '').localeCompare(b.date || '');
       else if (journalSortKey === 'borc') cmp = a.borc - b.borc;
       else if (journalSortKey === 'alacak') cmp = a.alacak - b.alacak;
+      else if (journalSortKey === 'kdvOran') cmp = (a.kdvOran ?? 0) - (b.kdvOran ?? 0);
       else if (journalSortKey === 'kategori') cmp = (a.kategori || '').localeCompare(b.kategori || '', 'tr');
+      else if (journalSortKey === 'fiş') cmp = (a.fiş || '').localeCompare(b.fiş || '', 'tr');
+      else if (journalSortKey === 'aciklama') cmp = (a.aciklama || '').localeCompare(b.aciklama || '', 'tr');
+      else if (journalSortKey === 'debitHesap') cmp = (a.debitHesap || '').localeCompare(b.debitHesap || '', 'tr');
+      else if (journalSortKey === 'alacakHesap') cmp = (a.alacakHesap || '').localeCompare(b.alacakHesap || '', 'tr');
       return journalSortDir === 'asc' ? cmp : -cmp;
     });
 
@@ -1715,6 +1720,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
       satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
+      : satisSortKey === 'kdvOran' ? (a.oran ?? 0) - (b.oran ?? 0)
       : a.tarih.localeCompare(b.tarih)
     ));
   // Satışlar sekmesi: yalnız giden (satış) faturaları.
@@ -1738,6 +1744,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
       satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
+      : satisSortKey === 'kdvOran' ? (a.oran ?? 0) - (b.oran ?? 0)
       : a.tarih.localeCompare(b.tarih)
     ));
   const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
@@ -1778,6 +1785,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       if (satisSortKey === 'customerName') cmp = (a.customerName || '').localeCompare(b.customerName || '', 'tr');
       else if (satisSortKey === 'totalPrice') cmp = (a.totalPrice || 0) - (b.totalPrice || 0);
       else if (satisSortKey === 'faturali') cmp = (a.faturali ? 1 : 0) - (b.faturali ? 1 : 0);
+      else if (satisSortKey === 'kdvOran') cmp = (a.kdvOran || 0) - (b.kdvOran || 0);
       else {
         const ad = (a.syncedAt as { toDate?: () => Date })?.toDate ? (a.syncedAt as { toDate: () => Date }).toDate().toISOString() : '';
         const bd = (b.syncedAt as { toDate?: () => Date })?.toDate ? (b.syncedAt as { toDate: () => Date }).toDate().toISOString() : '';
@@ -1792,12 +1800,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   // Müşteriler computed
+  const RISK_SIRA: Record<string, number> = { 'Düşük': 0, 'Orta': 1, 'Yüksek': 2 };
   const displayedMusteriler = customers
     .filter(c => !customerSearch || c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.company || '').toLowerCase().includes(customerSearch.toLowerCase()))
     .sort((a, b) => {
-      const av = (a[musteriSortKey] || '') as string;
-      const bv = (b[musteriSortKey] || '') as string;
-      const cmp = av.localeCompare(bv, 'tr');
+      let cmp: number;
+      if (musteriSortKey === 'balance') {
+        cmp = (a.balance || 0) - (b.balance || 0);
+      } else if (musteriSortKey === 'riskGroup') {
+        cmp = (RISK_SIRA[a.riskGroup || ''] ?? -1) - (RISK_SIRA[b.riskGroup || ''] ?? -1);
+      } else {
+        const av = (a[musteriSortKey] || '') as string;
+        const bv = (b[musteriSortKey] || '') as string;
+        cmp = av.localeCompare(bv, 'tr');
+      }
       return musteriSortDir === 'asc' ? cmp : -cmp;
     });
 
@@ -1893,6 +1909,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       let cmp: number;
       if (depoSortKey === 'quantity') cmp = a.quantity - b.quantity;
       else if (depoSortKey === 'sku') cmp = (a.sku || '').localeCompare(b.sku || '', 'tr');
+      else if (depoSortKey === 'category') cmp = (a.category || '').localeCompare(b.category || '', 'tr');
       else cmp = a.productName.localeCompare(b.productName, 'tr');
       return depoSortDir === 'asc' ? cmp : -cmp;
     });
@@ -1952,6 +1969,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       if (transferSortKey === 'quantity') cmp = a.quantity - b.quantity;
       else if (transferSortKey === 'date') cmp = a.date.localeCompare(b.date);
       else if (transferSortKey === 'status') cmp = a.status.localeCompare(b.status, 'tr');
+      else if (transferSortKey === 'fromWarehouse') cmp = a.fromWarehouse.localeCompare(b.fromWarehouse, 'tr');
+      else if (transferSortKey === 'toWarehouse') cmp = a.toWarehouse.localeCompare(b.toWarehouse, 'tr');
       else cmp = a.productName.localeCompare(b.productName, 'tr');
       return transferSortDir === 'asc' ? cmp : -cmp;
     });
@@ -1969,6 +1988,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       if (cekSortKey === 'amount') cmp = a.amount - b.amount;
       else if (cekSortKey === 'dueDate') cmp = a.dueDate.localeCompare(b.dueDate);
       else if (cekSortKey === 'type') cmp = a.type.localeCompare(b.type, 'tr');
+      else if (cekSortKey === 'bankName') cmp = (a.bankName || '').localeCompare(b.bankName || '', 'tr');
+      else if (cekSortKey === 'drawer') cmp = (a.drawer || '').localeCompare(b.drawer || '', 'tr');
       else cmp = a.checkNo.localeCompare(b.checkNo);
       return cekSortDir === 'asc' ? cmp : -cmp;
     });

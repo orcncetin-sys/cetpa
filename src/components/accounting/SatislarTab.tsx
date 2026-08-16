@@ -7,7 +7,7 @@ import { SortHeader, formatTRY, type AccountingT } from './shared';
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type SatisKayit = { customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; kdvTutari?: number; syncedAt?: { toDate?: () => Date } };
 type MikroSatisRow = MikroFatura & { musteri: string };
-type SatisSortKey = 'customerName' | 'totalPrice' | 'date' | 'faturali';
+type SatisSortKey = 'customerName' | 'totalPrice' | 'date' | 'faturali' | 'kdvOran';
 
 interface SatislarTabProps {
   t: AccountingT;
@@ -217,7 +217,13 @@ export default function SatislarTab({
                   onSort={(key) => toggleSatisSort(key as SatisSortKey)}
                   className="text-center"
                 />
-                <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">KDV%</th>
+                <SortHeader
+                  label="KDV%"
+                  sortKey="kdvOran"
+                  currentSort={{ key: satisSortKey, direction: satisSortDir }}
+                  onSort={(key) => toggleSatisSort(key as SatisSortKey)}
+                  className="text-center hidden sm:table-cell"
+                />
               </tr>
             </thead>
             <tbody>

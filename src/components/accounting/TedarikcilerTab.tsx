@@ -5,7 +5,7 @@ import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 
 type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string };
-type TedarikciSortKey = 'name' | 'company' | 'phone';
+type TedarikciSortKey = 'name' | 'company' | 'phone' | 'email' | 'taxNo';
 
 interface TedarikcilerTabProps {
   t: AccountingT;
@@ -78,7 +78,13 @@ export default function TedarikcilerTab({
                     onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
                     className="hidden sm:table-cell"
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.email}</th>
+                  <SortHeader
+                    label={t.email}
+                    sortKey="email"
+                    currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }}
+                    onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
+                    className="hidden md:table-cell"
+                  />
                   <SortHeader
                     label={t.phone}
                     sortKey="phone"
@@ -86,7 +92,13 @@ export default function TedarikcilerTab({
                     onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
                     className="hidden sm:table-cell"
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.taxNo}</th>
+                  <SortHeader
+                    label={t.taxNo}
+                    sortKey="taxNo"
+                    currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }}
+                    onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
+                    className="hidden lg:table-cell"
+                  />
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>

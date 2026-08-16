@@ -6,14 +6,15 @@ import MikroPushButton from '../MikroPushButton';
 import { depoTransferPayload } from '../../services/mikroEvrak';
 
 type TransferForm = { fromWarehouse: string; toWarehouse: string; productName: string; quantity: number; date: string; notes: string; status: Transfer['status'] };
+type TransferSortKey = 'productName' | 'quantity' | 'date' | 'status' | 'fromWarehouse' | 'toWarehouse';
 
 interface TransferTabProps {
   t: AccountingT;
   transferSearch: string;
   setTransferSearch: (v: string) => void;
-  transferSortKey: 'productName' | 'quantity' | 'date' | 'status';
+  transferSortKey: TransferSortKey;
   transferSortDir: 'asc' | 'desc';
-  toggleTransferSort: (key: 'productName' | 'quantity' | 'date' | 'status') => void;
+  toggleTransferSort: (key: TransferSortKey) => void;
   displayedTransfers: Transfer[];
   showTransferModal: boolean;
   setShowTransferModal: (v: boolean) => void;
@@ -54,29 +55,41 @@ export default function TransferTab({
                     label={t.product}
                     sortKey="productName"
                     currentSort={{ key: transferSortKey, direction: transferSortDir }}
-                    onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.fromWarehouse}</th>
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.toWarehouse}</th>
+                  <SortHeader
+                    label={t.fromWarehouse}
+                    sortKey="fromWarehouse"
+                    currentSort={{ key: transferSortKey, direction: transferSortDir }}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
+                    className="hidden sm:table-cell"
+                  />
+                  <SortHeader
+                    label={t.toWarehouse}
+                    sortKey="toWarehouse"
+                    currentSort={{ key: transferSortKey, direction: transferSortDir }}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
+                    className="hidden sm:table-cell"
+                  />
                   <SortHeader
                     label={t.quantity}
                     sortKey="quantity"
                     currentSort={{ key: transferSortKey, direction: transferSortDir }}
-                    onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
                     className="text-right"
                   />
                   <SortHeader
                     label={t.date}
                     sortKey="date"
                     currentSort={{ key: transferSortKey, direction: transferSortDir }}
-                    onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
                     className="hidden md:table-cell"
                   />
                   <SortHeader
                     label={t.status2}
                     sortKey="status"
                     currentSort={{ key: transferSortKey, direction: transferSortDir }}
-                    onSort={(key) => toggleTransferSort(key as 'productName' | 'quantity' | 'date' | 'status')}
+                    onSort={(key) => toggleTransferSort(key as TransferSortKey)}
                     className="text-center"
                   />
                   <th className="py-3 px-4"></th>

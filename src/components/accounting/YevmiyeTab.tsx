@@ -98,10 +98,33 @@ export default function YevmiyeTab({
                     currentSort={{ key: journalSortKey, direction: journalSortDir }}
                     onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.receiptNo}</th>
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.description}</th>
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.debitAccount}</th>
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.creditAccount}</th>
+                  <SortHeader
+                    label={t.receiptNo}
+                    sortKey="fiş"
+                    currentSort={{ key: journalSortKey, direction: journalSortDir }}
+                    onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
+                    className="hidden sm:table-cell"
+                  />
+                  <SortHeader
+                    label={t.description}
+                    sortKey="aciklama"
+                    currentSort={{ key: journalSortKey, direction: journalSortDir }}
+                    onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
+                  />
+                  <SortHeader
+                    label={t.debitAccount}
+                    sortKey="debitHesap"
+                    currentSort={{ key: journalSortKey, direction: journalSortDir }}
+                    onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
+                    className="hidden md:table-cell"
+                  />
+                  <SortHeader
+                    label={t.creditAccount}
+                    sortKey="alacakHesap"
+                    currentSort={{ key: journalSortKey, direction: journalSortDir }}
+                    onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
+                    className="hidden md:table-cell"
+                  />
                   <SortHeader
                     label={`Borç ${yevmiyeCurrency === 'TRY' ? '(₺)' : yevmiyeCurrency === 'USD' ? '($)' : '(€)'}`}
                     sortKey="borc"
@@ -116,7 +139,13 @@ export default function YevmiyeTab({
                     onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
                     className="text-right hidden sm:table-cell"
                   />
-                  <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.vatRate}</th>
+                  <SortHeader
+                    label={t.vatRate}
+                    sortKey="kdvOran"
+                    currentSort={{ key: journalSortKey, direction: journalSortDir }}
+                    onSort={(key) => toggleJournalSort(key as keyof JournalEntry)}
+                    className="text-center hidden sm:table-cell"
+                  />
                   <SortHeader
                     label={t.category}
                     sortKey="kategori"

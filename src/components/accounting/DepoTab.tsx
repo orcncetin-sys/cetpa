@@ -11,9 +11,9 @@ interface DepoTabProps {
   warehouses: Warehouse[];
   warehouseSearch: string;
   setWarehouseSearch: (v: string) => void;
-  depoSortKey: 'productName' | 'sku' | 'quantity' | 'warehouseId';
+  depoSortKey: 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category';
   depoSortDir: 'asc' | 'desc';
-  toggleDepoSort: (key: 'productName' | 'sku' | 'quantity' | 'warehouseId') => void;
+  toggleDepoSort: (key: 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category') => void;
   displayedDepo: WarehouseItem[];
   depoDagilimEtiket: (w: WarehouseItem) => string;
   showStockModal: boolean;
@@ -56,24 +56,30 @@ export default function DepoTab({
                     label={t.product}
                     sortKey="productName"
                     currentSort={{ key: depoSortKey, direction: depoSortDir }}
-                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')}
+                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category')}
                   />
                   <SortHeader
                     label="SKU"
                     sortKey="sku"
                     currentSort={{ key: depoSortKey, direction: depoSortDir }}
-                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')}
+                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category')}
                     className="hidden sm:table-cell"
                   />
                   <SortHeader
                     label={t.quantity}
                     sortKey="quantity"
                     currentSort={{ key: depoSortKey, direction: depoSortDir }}
-                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId')}
+                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category')}
                     className="text-right"
                   />
                   <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.location}</th>
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.category}</th>
+                  <SortHeader
+                    label={t.category}
+                    sortKey="category"
+                    currentSort={{ key: depoSortKey, direction: depoSortDir }}
+                    onSort={(key) => toggleDepoSort(key as 'productName' | 'sku' | 'quantity' | 'warehouseId' | 'category')}
+                    className="hidden lg:table-cell"
+                  />
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>

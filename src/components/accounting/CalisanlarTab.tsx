@@ -53,7 +53,7 @@ export default function CalisanlarTab({
                 <tr className="border-b border-gray-100">
                   <SortHeader label={t.name} sortKey="name" currentSort={{ key: calisanSortKey, direction: calisanSortDir }} onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} />
                   <SortHeader label={t.position} sortKey="position" currentSort={{ key: calisanSortKey, direction: calisanSortDir }} onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} className="hidden sm:table-cell" />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">{t.department}</th>
+                  <SortHeader label={t.department} sortKey="department" currentSort={{ key: calisanSortKey, direction: calisanSortDir }} onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} className="hidden md:table-cell" />
                   <SortHeader label={t.salary} sortKey="salary" currentSort={{ key: calisanSortKey, direction: calisanSortDir }} onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} className="text-right hidden sm:table-cell" />
                   <SortHeader label={t.startDate} sortKey="startDate" currentSort={{ key: calisanSortKey, direction: calisanSortDir }} onSort={(key) => toggleCalisanSort(key as 'name' | 'position' | 'salary' | 'startDate' | 'department')} className="hidden lg:table-cell" />
                   <th className="py-3 px-4"></th>

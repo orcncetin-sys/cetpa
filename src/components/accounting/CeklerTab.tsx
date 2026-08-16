@@ -9,9 +9,9 @@ interface CeklerTabProps {
   displayedCekler: Check[];
   checkSearch: string;
   setCheckSearch: (v: string) => void;
-  cekSortKey: 'checkNo' | 'amount' | 'dueDate' | 'type';
+  cekSortKey: 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer';
   cekSortDir: 'asc' | 'desc';
-  toggleCekSort: (key: 'checkNo' | 'amount' | 'dueDate' | 'type') => void;
+  toggleCekSort: (key: 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer') => void;
   showCheckModal: boolean;
   setShowCheckModal: (v: boolean) => void;
   editingCheck: Check | null;
@@ -59,29 +59,41 @@ export default function CeklerTab({
                     label={t.checkNo}
                     sortKey="checkNo"
                     currentSort={{ key: cekSortKey, direction: cekSortDir }}
-                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{t.bank2}</th>
+                  <SortHeader
+                    label={t.bank2}
+                    sortKey="bankName"
+                    currentSort={{ key: cekSortKey, direction: cekSortDir }}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
+                    className="hidden sm:table-cell"
+                  />
                   <SortHeader
                     label={t.amount2}
                     sortKey="amount"
                     currentSort={{ key: cekSortKey, direction: cekSortDir }}
-                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
                     className="text-right"
                   />
                   <SortHeader
                     label={t.dueDate}
                     sortKey="dueDate"
                     currentSort={{ key: cekSortKey, direction: cekSortDir }}
-                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
                     className="hidden md:table-cell"
                   />
-                  <th className="text-left py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{t.drawer}</th>
+                  <SortHeader
+                    label={t.drawer}
+                    sortKey="drawer"
+                    currentSort={{ key: cekSortKey, direction: cekSortDir }}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
+                    className="hidden lg:table-cell"
+                  />
                   <SortHeader
                     label={t.checkType}
                     sortKey="type"
                     currentSort={{ key: cekSortKey, direction: cekSortDir }}
-                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type')}
+                    onSort={(key) => toggleCekSort(key as 'checkNo' | 'amount' | 'dueDate' | 'type' | 'bankName' | 'drawer')}
                     className="text-center"
                   />
                   <th className="py-3 px-4"></th>

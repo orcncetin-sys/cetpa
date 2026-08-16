@@ -472,6 +472,17 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       bVal = b.createdAt && typeof (b.createdAt as { toDate?: () => Date }).toDate === 'function' ? (b.createdAt as { toDate: () => Date }).toDate() : (b.createdAt || 0);
     }
 
+    if (key === 'expectedDate') {
+      const toEtaTime = (raw: PurchaseOrder['expectedDate']): number => {
+        if (!raw) return 0;
+        if (typeof raw === 'string') return new Date(raw).getTime() || 0;
+        if (typeof raw === 'object' && 'toDate' in raw && typeof raw.toDate === 'function') return raw.toDate().getTime();
+        return 0;
+      };
+      aVal = toEtaTime(a.expectedDate);
+      bVal = toEtaTime(b.expectedDate);
+    }
+
     if (aVal < bVal) return direction === 'asc' ? -1 : 1;
     if (aVal > bVal) return direction === 'asc' ? 1 : -1;
     return 0;
@@ -663,7 +674,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 <SortHeader label={t.supplier} sortKey="supplier" currentSort={sortConfig} onSort={handleSort} />
                 <SortHeader label={t.date} sortKey="createdAt" currentSort={sortConfig} onSort={handleSort} />
                 <SortHeader label={t.status} sortKey="status" currentSort={sortConfig} onSort={handleSort} />
-                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{t.eta}</th>
+                <SortHeader label={t.eta} sortKey="expectedDate" currentSort={sortConfig} onSort={handleSort} />
                 <SortHeader label={t.total} sortKey="totalAmount" currentSort={sortConfig} onSort={handleSort} />
                 <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">{t.actions}</th>
               </tr>

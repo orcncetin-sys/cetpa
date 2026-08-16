@@ -245,6 +245,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       return matchesCategory && matchesSearch;
     })
     .sort((a: InventoryItem, b: InventoryItem) => {
+      if (sortConfig.key === 'stockStatus') {
+        // Kritik (stok <= eşik) = 0, Normal = 1 — alfabetik değil, anlamlı sıralama
+        const rank = (item: InventoryItem) => (item.stockLevel <= item.lowStockThreshold ? 0 : 1);
+        const diff = rank(a) - rank(b);
+        return sortConfig.direction === 'asc' ? diff : -diff;
+      }
       const aValue = (a as unknown as Record<string, unknown>)[sortConfig.key] ?? '';
       const bValue = (b as unknown as Record<string, unknown>)[sortConfig.key] ?? '';
       if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -860,7 +866,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                       currentSort={sortConfig}
                       onSort={handleSort}
                     />
-                    <th className="px-6 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest">{currentT.warehouse}</th>
+                    <SortHeader
+                      label={currentT.warehouse}
+                      sortKey="location"
+                      currentSort={sortConfig}
+                      onSort={handleSort}
+                    />
                     <SortHeader
                       label={currentT.stock}
                       sortKey="stockLevel"
@@ -874,10 +885,19 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                       onSort={handleSort}
                     />
                     {/* Phase 59: Cost Price + Margin column */}
-                    <th className="px-4 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest hidden xl:table-cell">
-                      {currentLanguage === 'tr' ? 'Maliyet / Marj' : 'Cost / Margin'}
-                    </th>
-                    <th className="px-6 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest">{currentT.status}</th>
+                    <SortHeader
+                      label={currentLanguage === 'tr' ? 'Maliyet / Marj' : 'Cost / Margin'}
+                      sortKey="costPrice"
+                      currentSort={sortConfig}
+                      onSort={handleSort}
+                      className="hidden xl:table-cell"
+                    />
+                    <SortHeader
+                      label={currentT.status}
+                      sortKey="stockStatus"
+                      currentSort={sortConfig}
+                      onSort={handleSort}
+                    />
                     <th className="px-6 py-4 text-[11px] font-bold text-[#86868B] uppercase tracking-widest text-right">{currentT.actions}</th>
                   </tr>
                 </thead>

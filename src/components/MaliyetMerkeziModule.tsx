@@ -438,6 +438,12 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
     .filter(k => !searchQuery || k.aciklama.toLowerCase().includes(searchQuery.toLowerCase()) || k.belgeNo.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
       const { key, direction } = kalemSort;
+      if (key === 'onaylandi') {
+        // Boolean alan — genel string/sayı karşılaştırıcısı ayırt edemez, açık sıralama
+        const rank = (k: typeof a) => (k.onaylandi ? 1 : 0);
+        const diff = rank(a) - rank(b);
+        return direction === 'asc' ? diff : -diff;
+      }
       const rawA = (a as unknown as Record<string, unknown>)[key];
       const rawB = (b as unknown as Record<string, unknown>)[key];
       const va: string = typeof rawA === 'number' ? String(rawA) : typeof rawA === 'string' ? rawA.toLowerCase() : '';
@@ -681,9 +687,9 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                       <SortHeader label={t.merkez} sortKey="merkezAd" currentSort={kalemSort} onSort={handleSort} />
                       <SortHeader label={t.kategori} sortKey="kategori" currentSort={kalemSort} onSort={handleSort} />
                       <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.aciklama}</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.belgeNo}</th>
+                      <SortHeader label={t.belgeNo} sortKey="belgeNo" currentSort={kalemSort} onSort={handleSort} />
                       <SortHeader label={t.tutar} sortKey="tutar" currentSort={kalemSort} onSort={handleSort} />
-                      <th className="px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.onay}</th>
+                      <SortHeader label={t.onay} sortKey="onaylandi" currentSort={kalemSort} onSort={handleSort} />
                       <th className="px-4 py-3 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{t.islemler}</th>
                     </tr>
                   </thead>

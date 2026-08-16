@@ -183,6 +183,10 @@ export default function OrdersPage({
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [newShipment, setNewShipment] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [editingShipmentId, setEditingShipmentId] = useState<string|null>(null);
+  // Sevkiyat modalında Müşteri serbest metindi -- kullanıcı listeden seçemiyor,
+  // yazınca öneri çıkmıyordu (2026-08-16 bildirimi: "7 Meh.. yazınca 7 Mehmet'i
+  // seçebileyim"). Aşağıdaki iki state bu alanı aranabilir bir combobox yapar.
+  const [shipmentCustOpen, setShipmentCustOpen] = useState(false);
   const [deliveryNoteOrder, setDeliveryNoteOrder] = useState<Order|null>(null);
   const [deliveryNoteText, setDeliveryNoteText] = useState('');
   const [orderNoteText, setOrderNoteText] = useState('');
@@ -3194,8 +3198,40 @@ export default function OrdersPage({
                 <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                <div className="relative">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
+                  <input
+                    type="text"
+                    className="apple-input w-full text-sm"
+                    value={newShipment.customerName ?? ''}
+                    onChange={e => { setNewShipment(s => ({ ...s, customerName: e.target.value })); setShipmentCustOpen(true); }}
+                    onFocus={() => setShipmentCustOpen(true)}
+                    onBlur={() => setTimeout(() => setShipmentCustOpen(false), 150)}
+                    autoComplete="off"
+                    placeholder={currentLanguage === 'tr' ? 'Müşteri adı yazın veya seçin...' : 'Type or pick a customer...'}
+                  />
+                  {shipmentCustOpen && (() => {
+                    const q = (newShipment.customerName ?? '').trim().toLowerCase();
+                    const matches = leads
+                      .filter(l => !q || l.name.toLowerCase().includes(q))
+                      .slice(0, 20);
+                    if (matches.length === 0) return null;
+                    return (
+                      <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white rounded-xl shadow-lg border border-gray-100">
+                        {matches.map(l => (
+                          <button
+                            type="button"
+                            key={l.id}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => { setNewShipment(s => ({ ...s, customerName: l.name })); setShipmentCustOpen(false); }}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 truncate"
+                          >{l.name}</button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
                 {[
-                  { k: 'customerName', label: currentLanguage === 'tr' ? 'Müşteri' : 'Customer' },
                   { k: 'destination', label: currentLanguage === 'tr' ? 'Varış Noktası' : 'Destination' },
                   { k: 'driver', label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver' },
                   { k: 'cargoFirm', label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Firm' },

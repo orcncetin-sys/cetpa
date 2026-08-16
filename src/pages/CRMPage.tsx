@@ -86,6 +86,33 @@ interface Props {
   logAuditAction: (action: string, details: string) => Promise<void>;
 }
 
+// Lead.status 8 değer alabilir (New/Contacted/Qualified/Proposal/Negotiation/
+// Closed/Closed Won/Closed Lost) ama Satış Hunisi ve üstteki özet kartları
+// yalnız 4 durumu (New/Contacted/Qualified/Closed) sayıyordu — Proposal/
+// Negotiation/Closed Won/Closed Lost taşıyan lead'ler hiçbir kutuya düşmüyor,
+// sessizce sayılmıyordu (2026-08-16 bildirimi: "205 aday ama huni hep 0").
+// Bu eşleme her lead'i TAM OLARAK bir huni aşamasına düşürür; ayrı Kazanma
+// Oranı/Closed Won-Lost istatistikleri (Won/Lost ayrımı gereken yerler)
+// kendi tam eşleşmelerini KULLANMAYA devam eder, bu yalnız hunide.
+const HUNI_ASAMASI: Record<string, 'New' | 'Contacted' | 'Qualified' | 'Closed'> = {
+  New: 'New', Contacted: 'Contacted', Qualified: 'Qualified',
+  Proposal: 'Qualified', Negotiation: 'Qualified',
+  Closed: 'Closed', 'Closed Won': 'Closed', 'Closed Lost': 'Closed',
+};
+const huniAsamasi = (status: string): string => HUNI_ASAMASI[status] ?? 'New';
+
+// Lead.status'un 8 ham değeri hiçbir yerde Türkçe'ye çevrilmiyordu — hızlı durum
+// değiştirme dropdown'ı (liste görünümü) "New/Contacted/Proposal/..." gibi ham
+// İngilizce gösteriyordu (2026-08-16 bildirimi). Uygulamanın geri kalanı zaten
+// Yeni/İrtibat/Nitelikli/Kapandı kullanıyor; Proposal/Negotiation/Closed Won/
+// Closed Lost için de tutarlı Türkçe etiket eklendi.
+const DURUM_ETIKET_TR: Record<string, string> = {
+  New: 'Yeni', Contacted: 'İrtibat', Qualified: 'Nitelikli',
+  Proposal: 'Teklif', Negotiation: 'Görüşme',
+  Closed: 'Kapandı', 'Closed Won': 'Kazanıldı', 'Closed Lost': 'Kaybedildi',
+};
+const durumEtiketi = (status: string, tr: boolean): string => (tr ? (DURUM_ETIKET_TR[status] ?? status) : status);
+
 export default function CRMPage({
   crmTab, setCrmTab, selectedLead, setSelectedLead,
   hasFullAccess = () => true, currentLanguage, currentT,
@@ -779,8 +806,8 @@ export default function CRMPage({
                       <div className="flex flex-wrap gap-2">
                         {([
                           { key: 'all',       label: currentLanguage === 'tr' ? `Tümü (${leads.length})` : `All (${leads.length})` },
-                          { key: 'new',       label: currentLanguage === 'tr' ? `Yeni (${leads.filter(l => l.status === 'New').length})` : `New (${leads.filter(l => l.status === 'New').length})` },
-                          { key: 'active',    label: currentLanguage === 'tr' ? `Nitelikli (${leads.filter(l => l.status === 'Qualified').length})` : `Qualified (${leads.filter(l => l.status === 'Qualified').length})` },
+                          { key: 'new',       label: currentLanguage === 'tr' ? `Yeni (${leads.filter(l => huniAsamasi(l.status) === 'New').length})` : `New (${leads.filter(l => huniAsamasi(l.status) === 'New').length})` },
+                          { key: 'active',    label: currentLanguage === 'tr' ? `Nitelikli (${leads.filter(l => huniAsamasi(l.status) === 'Qualified').length})` : `Qualified (${leads.filter(l => huniAsamasi(l.status) === 'Qualified').length})` },
                           { key: 'highScore', label: currentLanguage === 'tr' ? `Yüksek Skor ≥70 (${leads.filter(l => (l.score || 0) >= 70).length})` : `High Score ≥70 (${leads.filter(l => (l.score || 0) >= 70).length})` },
                         ] as const).map(seg => (
                           <button
@@ -822,13 +849,13 @@ export default function CRMPage({
                       <div className="flex-1">
                         {(() => {
                           const count = campaignForm.segment === 'all' ? leads.length
-                            : campaignForm.segment === 'new' ? leads.filter(l => l.status === 'New').length
-                            : campaignForm.segment === 'active' ? leads.filter(l => l.status === 'Qualified').length
+                            : campaignForm.segment === 'new' ? leads.filter(l => huniAsamasi(l.status) === 'New').length
+                            : campaignForm.segment === 'active' ? leads.filter(l => huniAsamasi(l.status) === 'Qualified').length
                             : leads.filter(l => (l.score || 0) >= 70).length;
                           const withEmail = leads.filter(l => (l.email as string | undefined) && (
                             campaignForm.segment === 'all' ? true
-                            : campaignForm.segment === 'new' ? l.status === 'New'
-                            : campaignForm.segment === 'active' ? l.status === 'Qualified'
+                            : campaignForm.segment === 'new' ? huniAsamasi(l.status) === 'New'
+                            : campaignForm.segment === 'active' ? huniAsamasi(l.status) === 'Qualified'
                             : (l.score || 0) >= 70
                           )).length;
                           return (
@@ -850,8 +877,8 @@ export default function CRMPage({
                               const hasEmail = !!(l.email as string | undefined);
                               if (!hasEmail) return false;
                               if (campaignForm.segment === 'all') return true;
-                              if (campaignForm.segment === 'new') return l.status === 'New';
-                              if (campaignForm.segment === 'active') return l.status === 'Qualified';
+                              if (campaignForm.segment === 'new') return huniAsamasi(l.status) === 'New';
+                              if (campaignForm.segment === 'active') return huniAsamasi(l.status) === 'Qualified';
                               return (l.score || 0) >= 70;
                             });
                             // Log campaign to Firestore first (get ID for status update)
@@ -1676,14 +1703,14 @@ export default function CRMPage({
               {!p515Dismissed && (() => {
                 const now515 = new Date(); now515.setHours(0,0,0,0);
                 const overdue = leads.filter(l => {
-                  if (!l.nextFollowUpDate || l.status === 'Closed') return false;
+                  if (!l.nextFollowUpDate || huniAsamasi(l.status) === 'Closed') return false;
                   const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
                     ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
                     : new Date(l.nextFollowUpDate as unknown as string | number);
                   return due <= now515;
                 });
                 const dueToday = leads.filter(l => {
-                  if (!l.nextFollowUpDate || l.status === 'Closed') return false;
+                  if (!l.nextFollowUpDate || huniAsamasi(l.status) === 'Closed') return false;
                   const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
                     ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
                     : new Date(l.nextFollowUpDate as unknown as string | number);
@@ -1775,10 +1802,10 @@ export default function CRMPage({
                   { key: 'Qualified',  labelTR: 'Nitelikli',  color: 'bg-amber-500',   textColor: 'text-amber-700',  bg: 'bg-amber-50'  },
                   { key: 'Closed',     labelTR: 'Kapandı',    color: 'bg-emerald-500', textColor: 'text-emerald-700',bg: 'bg-emerald-50'},
                 ] as const;
-                const counts = stages.map(s => leads.filter(l => l.status === s.key).length);
+                const counts = stages.map(s => leads.filter(l => huniAsamasi(l.status) === s.key).length);
                 const maxCount = Math.max(...counts, 1);
                 const totalRev = (stageKey: string) =>
-                  orders.filter(o => leads.find(l => l.status === stageKey && (l.name === o.customerName || l.id === o.leadId)))
+                  orders.filter(o => leads.find(l => huniAsamasi(l.status) === stageKey && (l.name === o.customerName || l.id === o.leadId)))
                     .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -1827,12 +1854,16 @@ export default function CRMPage({
               {/* ── Phase 91: CRM Win-Rate & Conversion Stats Header ── */}
               {leads.length > 0 && (() => {
                 const total      = leads.length;
-                const closed     = leads.filter(l => l.status === 'Closed').length;
-                const qualified  = leads.filter(l => l.status === 'Qualified').length;
+                // Kazanma Oranı = GERÇEKTEN kazanılan (Closed Won + eski tarz düz
+                // Closed) / toplam — Closed Lost'u da "closed" sayıp kazanma oranına
+                // katmak yanlış olurdu (2026-08-16, Satış Hunisi'nin aksine burada
+                // Won/Lost ayrımı KORUNUYOR, huniAsamasi kullanılmıyor).
+                const closed     = leads.filter(l => l.status === 'Closed' || l.status === 'Closed Won').length;
+                const qualified  = leads.filter(l => huniAsamasi(l.status) === 'Qualified').length;
                 const winRate    = total > 0 ? Math.round((closed / total) * 100) : 0;
                 const convRate   = total > 0 ? Math.round(((closed + qualified) / total) * 100) : 0;
                 const pipelineVal = leads
-                  .filter(l => l.status !== 'Closed')
+                  .filter(l => huniAsamasi(l.status) !== 'Closed')
                   .reduce((s, l) => s + (l.creditLimit ?? 0), 0);
                 const avgScore   = leads.filter(l => l.score != null).length > 0
                   ? Math.round(leads.filter(l => l.score != null).reduce((s, l) => s + (l.score ?? 0), 0) / leads.filter(l => l.score != null).length)
@@ -1867,7 +1898,7 @@ export default function CRMPage({
                   { key: 'Closed',    labelTR: 'Kapandı',      color: 'bg-emerald-400', text: 'text-emerald-700', bg: 'bg-emerald-50' },
                 ];
                 const total = leads.length;
-                const counts = stages.map(s => ({ ...s, count: leads.filter(l => l.status === s.key).length }));
+                const counts = stages.map(s => ({ ...s, count: leads.filter(l => huniAsamasi(l.status) === s.key).length }));
                 const maxCount = Math.max(...counts.map(s => s.count), 1);
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
@@ -1981,7 +2012,7 @@ export default function CRMPage({
                     {/* ── Phase 72: Lead Status Filter Chips ── */}
                     <div className="flex flex-wrap gap-1.5">
                       {(['All', 'New', 'Contacted', 'Qualified', 'Closed'] as const).map(s => {
-                        const count = s === 'All' ? leads.length : leads.filter(l => l.status === s).length;
+                        const count = s === 'All' ? leads.length : leads.filter(l => huniAsamasi(l.status) === s).length;
                         const isActive = leadStatusFilter === s;
                         const chipColors: Record<string, string> = {
                           All:       'bg-gray-900 text-white',
@@ -2062,7 +2093,7 @@ export default function CRMPage({
                     )}
                     {(() => {
                       const filtered = activeLeads.filter(l =>
-                        (leadStatusFilter === 'All' || l.status === leadStatusFilter) &&
+                        (leadStatusFilter === 'All' || huniAsamasi(l.status) === leadStatusFilter) &&
                         (l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                         l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                         l.email.toLowerCase().includes(crmSearch.toLowerCase()))
@@ -2161,7 +2192,7 @@ export default function CRMPage({
                                   )}
                                   title={currentLanguage === 'tr' ? 'Durumu değiştir' : 'Change status'}
                                 >
-                                  {currentT[(lead.status.toLowerCase() as keyof typeof currentT)] || lead.status}
+                                  {durumEtiketi(lead.status, currentLanguage === 'tr')}
                                   <ChevronDown className="w-2.5 h-2.5" />
                                 </button>
                                 {p544QuickStatus === lead.id && (
@@ -2173,7 +2204,7 @@ export default function CRMPage({
                                           try {
                                             await updateDoc(doc(db, 'leads', lead.id), { status: s, updatedAt: serverTimestamp() });
                                             toast(
-                                              currentLanguage === 'tr' ? `Durum "${s}" olarak güncellendi` : `Status updated to "${s}"`,
+                                              currentLanguage === 'tr' ? `Durum "${durumEtiketi(s, true)}" olarak güncellendi` : `Status updated to "${s}"`,
                                               'success'
                                             );
                                           } catch {}
@@ -2184,7 +2215,7 @@ export default function CRMPage({
                                           s === lead.status ? "bg-brand/10 text-brand" : "hover:bg-gray-50 text-gray-700"
                                         )}
                                       >
-                                        {s === lead.status ? '✓ ' : ''}{s}
+                                        {s === lead.status ? '✓ ' : ''}{durumEtiketi(s, currentLanguage === 'tr')}
                                       </button>
                                     ))}
                                   </div>
@@ -2358,7 +2389,7 @@ export default function CRMPage({
                         { key: 'Qualified', labelTR: 'Nitelikli',   color: 'bg-amber-400'   },
                         { key: 'Closed',    labelTR: 'Kapandı',     color: 'bg-emerald-500' },
                       ];
-                      const maxCount = Math.max(...stages.map(s => leads.filter(l => l.status === s.key).length), 1);
+                      const maxCount = Math.max(...stages.map(s => leads.filter(l => huniAsamasi(l.status) === s.key).length), 1);
                       return (
                         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                           <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
@@ -2367,7 +2398,7 @@ export default function CRMPage({
                           </h3>
                           <div className="space-y-2">
                             {stages.map((s, i) => {
-                              const count = leads.filter(l => l.status === s.key).length;
+                              const count = leads.filter(l => huniAsamasi(l.status) === s.key).length;
                               const width = maxCount > 0 ? (count / maxCount) * 100 : 0;
                               // Funnel taper: each stage is slightly narrower
                               const indent = i * 6;
@@ -2436,7 +2467,7 @@ export default function CRMPage({
                       <h3 className="font-bold text-sm mb-4 flex items-center justify-between">
                         {currentT[status.toLowerCase()] || status}
                         <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-                          {activeLeads.filter(l => l.status === status && (
+                          {activeLeads.filter(l => huniAsamasi(l.status) === status && (
                             l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                             l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                             l.email.toLowerCase().includes(crmSearch.toLowerCase())
@@ -2444,7 +2475,7 @@ export default function CRMPage({
                         </span>
                       </h3>
                       <div className="space-y-3">
-                        {activeLeads.filter(l => l.status === status && (
+                        {activeLeads.filter(l => huniAsamasi(l.status) === status && (
                           l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
                           l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
                           l.email.toLowerCase().includes(crmSearch.toLowerCase())

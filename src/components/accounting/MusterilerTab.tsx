@@ -9,7 +9,7 @@ type CustomerForm = {
   taxNo: string; taxOffice: string; notes: string; creditLimit: number; balance: number;
   riskGroup: 'Düşük' | 'Orta' | 'Yüksek';
 };
-type MusteriSortKey = 'name' | 'company' | 'phone';
+type MusteriSortKey = 'name' | 'company' | 'phone' | 'balance' | 'riskGroup';
 type DekontHedef = { cariKod: string; ad: string; bakiye: number; id: string };
 
 interface MusterilerTabProps {
@@ -93,8 +93,20 @@ export default function MusterilerTab({
                     onSort={(key) => toggleMusteriSort(key as MusteriSortKey)}
                     className="hidden md:table-cell"
                   />
-                  <th className="text-right py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}</th>
-                  <th className="text-center py-3 px-4 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden sm:table-cell">{currentLanguage === 'tr' ? 'Risk' : 'Risk'}</th>
+                  <SortHeader
+                    label={currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}
+                    sortKey="balance"
+                    currentSort={{ key: musteriSortKey, direction: musteriSortDir }}
+                    onSort={(key) => toggleMusteriSort(key as MusteriSortKey)}
+                    className="text-right hidden sm:table-cell"
+                  />
+                  <SortHeader
+                    label={currentLanguage === 'tr' ? 'Risk' : 'Risk'}
+                    sortKey="riskGroup"
+                    currentSort={{ key: musteriSortKey, direction: musteriSortDir }}
+                    onSort={(key) => toggleMusteriSort(key as MusteriSortKey)}
+                    className="text-center hidden sm:table-cell"
+                  />
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
