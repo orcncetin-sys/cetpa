@@ -1300,8 +1300,6 @@ function AppContent() {
   const [productSearch, setProductSearch] = useState('');
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
-  const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
-  const [orderCustomerOpen, setOrderCustomerOpen] = useState(false);
   const leadFromOrderRef = useRef(false); // Phase 82: track lead-modal opened from order form
   const [isEditingLead, setIsEditingLead] = useState(false);
 
@@ -2821,7 +2819,6 @@ function AppContent() {
       if (leadFromOrderRef.current) {
         const freshLead = { id: docRef.id, ...data, status: 'New' as const, score: scoreResult.score, assignedTo: user?.uid ?? 'guest', customerType: 'B2B' as const };
         setNewOrder(prev => ({ ...prev, customerName: data.name, shippingAddress: data.company || '' }));
-        setOrderCustomerSearch(data.name);
         setSelectedLead(freshLead as unknown as Lead);
         leadFromOrderRef.current = false;
       }
@@ -6264,7 +6261,6 @@ function AppContent() {
                 setIsEditingLead={setIsEditingLead}
                 setEmailCompose={setEmailCompose}
                 setNewOrder={setNewOrder}
-                setOrderCustomerSearch={setOrderCustomerSearch}
                 handleToggleOrderPaid={handleToggleOrderPaid}
                 openConfirm={openConfirm}
                 toast={toast}

@@ -75,7 +75,6 @@ interface Props {
   setIsEditingLead: React.Dispatch<React.SetStateAction<boolean>>;
   setEmailCompose: React.Dispatch<React.SetStateAction<{ open: boolean; to: string; name: string; subject: string; body: string }>>;
   setNewOrder: React.Dispatch<React.SetStateAction<Partial<Order>>>;
-  setOrderCustomerSearch: React.Dispatch<React.SetStateAction<string>>;
   handleToggleOrderPaid: (order: Order) => void;
   openConfirm: (opts: { title: string; message: string; confirmLabel?: string; variant?: 'danger' | 'default'; onConfirm: () => void }) => void;
   toast: (msg: string, type?: string) => void;
@@ -120,7 +119,7 @@ export default function CRMPage({
   userRole, user, kpiCurrency, setKpiCurrency,
   appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [],
   trackView, setIsEditingLead, setEmailCompose,
-  setNewOrder, setOrderCustomerSearch, handleToggleOrderPaid, openConfirm,
+  setNewOrder, handleToggleOrderPaid, openConfirm,
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,
   logAuditAction,
 }: Props) {
@@ -3167,7 +3166,6 @@ export default function CRMPage({
                           faturaTipi: selectedLead.customerType === 'B2B' ? 'e-fatura' : 'e-arsiv',
                           leadId: selectedLead.id,
                         }));
-                        setOrderCustomerSearch(selectedLead.name);
                         setIsAddingOrder(true);
                       }} className="apple-button-primary">
                         <Plus className="w-4 h-4" /> {currentT.add_order}

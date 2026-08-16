@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Plus, Search } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import type { Lead, Shipment } from '../types';
+import CustomerCombobox from './CustomerCombobox';
 
 interface AddShipmentModalProps {
   isOpen: boolean;
@@ -20,14 +21,12 @@ export default function AddShipmentModal({
 }: AddShipmentModalProps) {
   const [formData, setFormData] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [customerSearch, setCustomerSearch] = useState('');
-  const [customerOpen, setCustomerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setFormData(initialData || { status: 'Pending' });
       setCustomerSearch('');
-      setCustomerOpen(false);
     }
   }, [isOpen, initialData]);
 
@@ -62,35 +61,22 @@ export default function AddShipmentModal({
           {/* Customer picker with address auto-fill */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-gray-500 uppercase">Müşteri Seç</label>
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              <input
-                type="text"
-                value={customerSearch}
-                placeholder="Müşteri ara..."
-                onChange={e => { setCustomerSearch(e.target.value); setCustomerOpen(true); }}
-                onFocus={() => setCustomerOpen(true)}
-                onBlur={() => setTimeout(() => setCustomerOpen(false), 200)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-brand transition-colors"
-              />
-              {customerOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl z-20 max-h-44 overflow-y-auto">
-                  {leads.filter(l => !customerSearch || l.name.toLowerCase().includes(customerSearch.toLowerCase()) || l.company?.toLowerCase().includes(customerSearch.toLowerCase())).slice(0, 6).map(lead => (
-                    <button key={lead.id} type="button"
-                      onMouseDown={() => {
-                        setFormData({ ...formData, customerName: lead.name, destination: lead.company || '' });
-                        setCustomerSearch(lead.name);
-                        setCustomerOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0">
-                      <p className="text-sm font-semibold">{lead.name}</p>
-                      <p className="text-[11px] text-[#86868B]">{lead.company} • {lead.phone}</p>
-                    </button>
-                  ))}
-                  {leads.length === 0 && <p className="px-4 py-3 text-xs text-[#86868B]">Henüz müşteri yok</p>}
-                </div>
-              )}
-            </div>
+            <CustomerCombobox
+              leads={leads}
+              value={customerSearch}
+              onChange={setCustomerSearch}
+              onSelect={lead => {
+                setFormData({ ...formData, customerName: lead.name, destination: lead.company || '' });
+                setCustomerSearch(lead.name);
+              }}
+              placeholder="Müşteri ara..."
+              maxResults={6}
+              blurDelayMs={200}
+              inputClassName="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-brand transition-colors"
+              dropdownMaxHeightClass="max-h-44"
+              renderSecondaryLine={lead => <>{lead.company} • {lead.phone}</>}
+              emptyText="Henüz müşteri yok"
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">

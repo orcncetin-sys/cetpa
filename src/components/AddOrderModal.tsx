@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Search, Scan, Package, Trash2, FileText, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import BarcodeScanner from './BarcodeScanner';
+import CustomerCombobox from './CustomerCombobox';
 import type { Lead, InventoryItem, Order, OrderLineItem } from '../types';
 
 interface AddOrderModalProps {
@@ -39,8 +40,6 @@ export default function AddOrderModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [productSearch, setProductSearch] = useState('');
-  const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
-  const [orderCustomerOpen, setOrderCustomerOpen] = useState(false);
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
 
   const computedTotal = orderLineItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -53,8 +52,6 @@ export default function AddOrderModal({
       setOrderLineItems([]);
       setProductSearch('');
       setShowProductPicker(false);
-      setOrderCustomerSearch('');
-      setOrderCustomerOpen(false);
     }
   }, [isOpen]);
 
@@ -180,59 +177,36 @@ export default function AddOrderModal({
               {!selectedLead && (
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.customer_name}</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={newOrder.customerName || ''}
-                      onChange={e => {
-                        setNewOrder({ ...newOrder, customerName: e.target.value });
-                        setOrderCustomerSearch(e.target.value);
-                        setOrderCustomerOpen(true);
-                      }}
-                      onFocus={() => setOrderCustomerOpen(true)}
-                      onBlur={() => setTimeout(() => setOrderCustomerOpen(false), 200)}
-                      className="apple-input pl-9"
-                      placeholder={currentLanguage === 'tr' ? 'Müşteri ara veya yaz...' : 'Search or type customer...'}
-                    />
-                    {orderCustomerOpen && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto">
-                        {leads.filter(l =>
-                          !orderCustomerSearch ||
-                          l.name.toLowerCase().includes(orderCustomerSearch.toLowerCase()) ||
-                          l.company?.toLowerCase().includes(orderCustomerSearch.toLowerCase())
-                        ).slice(0, 8).map(lead => (
-                          <button key={lead.id} type="button"
-                            onMouseDown={() => {
-                              const isEFatura = lead.customerType === 'B2B' || (lead.taxId && lead.taxId.length >= 10);
-                              setNewOrder({ 
-                                ...newOrder, 
-                                customerName: lead.name, 
-                                shippingAddress: lead.company || '',
-                                faturali: true,
-                                faturaTipi: isEFatura ? 'e-fatura' : 'e-arsiv'
-                              });
-                              setOrderCustomerSearch(lead.name);
-                              setOrderCustomerOpen(false);
-                              setSelectedLead(lead);
-                            }}
-                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
-                            <p className="text-sm font-semibold text-[#1D1D1F]">{lead.name}</p>
-                            <p className="text-[11px] text-[#86868B]">{lead.company} • {lead.email}</p>
-                          </button>
-                        ))}
-                        {leads.length === 0 && (
-                          <p className="px-4 py-3 text-xs text-[#86868B]">{currentLanguage === 'tr' ? 'Henüz müşteri yok' : 'No customers yet'}</p>
-                        )}
-                        <button type="button"
-                          onMouseDown={() => { setOrderCustomerOpen(false); onClose(); onAddLeadClick(); }}
-                          className="w-full text-left px-4 py-2.5 text-xs font-bold text-brand hover:bg-brand/5 flex items-center gap-2">
-                          <Plus className="w-3.5 h-3.5" />
-                          {currentLanguage === 'tr' ? 'Yeni müşteri adayı ekle' : 'Add new lead'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <CustomerCombobox
+                    leads={leads}
+                    value={newOrder.customerName || ''}
+                    onChange={text => setNewOrder({ ...newOrder, customerName: text })}
+                    onSelect={lead => {
+                      const isEFatura = lead.customerType === 'B2B' || (lead.taxId && lead.taxId.length >= 10);
+                      setNewOrder({
+                        ...newOrder,
+                        customerName: lead.name,
+                        shippingAddress: lead.company || '',
+                        faturali: true,
+                        faturaTipi: isEFatura ? 'e-fatura' : 'e-arsiv'
+                      });
+                      setSelectedLead(lead);
+                    }}
+                    placeholder={currentLanguage === 'tr' ? 'Müşteri ara veya yaz...' : 'Search or type customer...'}
+                    maxResults={8}
+                    inputClassName="apple-input pl-9"
+                    dropdownMaxHeightClass="max-h-48"
+                    renderSecondaryLine={lead => <>{lead.company} • {lead.email}</>}
+                    emptyText={currentLanguage === 'tr' ? 'Henüz müşteri yok' : 'No customers yet'}
+                    footer={
+                      <button type="button"
+                        onMouseDown={e => { e.preventDefault(); onClose(); onAddLeadClick(); }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-brand hover:bg-brand/5 flex items-center gap-2">
+                        <Plus className="w-3.5 h-3.5" />
+                        {currentLanguage === 'tr' ? 'Yeni müşteri adayı ekle' : 'Add new lead'}
+                      </button>
+                    }
+                  />
                 </div>
               )}
 
