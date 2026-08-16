@@ -354,7 +354,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
                 </span>
               )}
             </h3>
-            <button onClick={() => setActiveTab?.('accounting')} className="apple-button-secondary py-1.5 px-3 text-xs">
+            <button onClick={() => setActiveTab?.('muhasebe')} className="apple-button-secondary py-1.5 px-3 text-xs">
               <DollarSign size={12} />
               {tr ? 'Bakiye Raporu' : 'Balance Report'}
             </button>

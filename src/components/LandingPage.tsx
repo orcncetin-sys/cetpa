@@ -1455,8 +1455,12 @@ export default function LandingPage({
                     <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} width={1024} height={480} fetchPriority="high" loading="eager" />
                   </div>
                 </div>
-                <div className="mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
-                <div className="mx-auto" style={{ maxWidth: '900px', background: d('linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)', 'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'), borderRadius: '0 0 16px 16px', padding: '10px 32px 0', boxShadow: d('0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)', '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)') }}>
+                {/* Klavye/trackpad gövdesi sabit piksel yükseklikte (52px tuş satırı + 60px
+                    trackpad) — mobilde ekran görüntüsü ~343px'e küçülürken bu blok küçülmüyor,
+                    orantısız/baskın görünüyordu (2026-08-16 mobil denetim). Salt dekoratif
+                    olduğundan mobilde tamamen gizlendi, sm ve üstünde aynen kalıyor. */}
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '900px', background: d('linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)', 'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'), borderRadius: '0 0 16px 16px', padding: '10px 32px 0', boxShadow: d('0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)', '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)') }}>
                   <div style={{ height: 52, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, opacity: 0.6 }}>
                     {[3, 4, 3].map((_, ri) => (
                       <div key={ri} style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
@@ -1468,7 +1472,7 @@ export default function LandingPage({
                   </div>
                   <div style={{ width: 100, height: 60, borderRadius: 10, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.10)'), margin: '8px auto 10px', border: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }} />
                 </div>
-                <div className="mx-auto" style={{ maxWidth: '920px', height: '1px', background: d('rgba(255,255,255,0.04)', 'rgba(0,0,0,0.06)') }} />
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '920px', height: '1px', background: d('rgba(255,255,255,0.04)', 'rgba(0,0,0,0.06)') }} />
               </div>
             </div>
 

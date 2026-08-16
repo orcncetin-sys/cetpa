@@ -1326,7 +1326,13 @@ export default function CRMPage({
                   { key: 'Closed',    label: currentLanguage === 'tr' ? 'Kapandı'      : 'Closed',    color: 'text-emerald-600',bg: 'bg-emerald-50',border: 'border-emerald-200' },
                 ];
                 const grouped: Record<string, Lead[]> = { New: [], Contacted: [], Qualified: [], Closed: [] };
-                for (const l of leads) { if (grouped[l.status]) grouped[l.status].push(l); }
+                // Kanban da CRM huni/istatistik yüzeyleriyle aynı hataya sahipti: l.status'un
+                // 8 değerinden yalnız 4'ünü (New/Contacted/Qualified/Closed) tam eşleşmeyle
+                // arıyordu, Proposal/Negotiation/Closed Won/Closed Lost hiçbir kutuya
+                // düşmüyordu (2026-08-16 bildirimi, "Pipeline hep 0" — huniAsamasi fix'i bu
+                // görünüme henüz uygulanmamıştı). huniAsamasi() her zaman 4 geçerli anahtardan
+                // birini döndürür, ayrıca if-guard'a gerek yok.
+                for (const l of leads) { grouped[huniAsamasi(l.status)].push(l); }
                 return (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">

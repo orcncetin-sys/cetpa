@@ -44,8 +44,8 @@ interface PulseResult { id: string; label: string; status: number | null; ms: nu
 // Grup bazında öneri fikirleri — editoryel içerik, veri değil.
 const GROUP_IDEAS: Record<string, string[]> = {
   'Satış': [
-    'CRM huni/istatistik yüzeylerinin tümü artık huniAsamasi() kullanıyor (2026-08-16) — CPQ ve Bayi Komisyonu panellerinin de aynı 8-durumlu Lead.status setini kullanıp kullanmadığı kontrol edilmeli.',
-    'B2B Portal + Servis + İhracat modülleri arasında "müşteri arama" bileşeni 3 farklı yerde ayrı yazıldı (bkz. task_928695ef) — tek bir CustomerCombobox\'a indirgemek gelecekteki sürüklenmeyi önler.',
+    'CRM huni/istatistik/Pipeline yüzeylerinin tümü artık huniAsamasi() kullanıyor (2026-08-16, CRM Pipeline Kanban\'daki aynı hata da ayrıca bulunup düzeltildi) — CPQ ve Bayi Komisyonu panellerinin de aynı 8-durumlu Lead.status setini kullanıp kullanmadığı hâlâ kontrol edilmeli.',
+    'Sipariş/sevkiyat modallerindeki (AddOrderModal, AddShipmentModal, OrdersPage) 3 ayrı müşteri-arama bileşeni tek CustomerCombobox\'a indirgendi (2026-08-16) — B2B Portal/Servis/İhracat modüllerinde AYRI bir kopyası olduğu doğrulanamadı (grep: leads referansı yok), bu yüzden bu madde kaldırıldı.',
   ],
   'Muhasebe': [
     'Maliyet Merkezi/Gelir Tanıma/Muhtasar/Sabit Kıymet gibi alt modüllerin Mikro senkronuyla ADDITIVE bağlı olup olmadığı (native veri silinmeden) tek tek doğrulanmalı — bugüne kadar yalnız KDV/Satışlar/Bilanço/Finans için bu doğrulandı.',
