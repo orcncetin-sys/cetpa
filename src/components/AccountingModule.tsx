@@ -600,7 +600,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     : `${kpiSym}${(n / kpiRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const [musteriSortKey, setMusteriSortKey] = useState<'name' | 'company' | 'phone' | 'balance' | 'riskGroup'>('name');
   const [musteriSortDir, setMusteriSortDir] = useState<'asc' | 'desc'>('asc');
-  const [tedarikciSortKey, setTedarikciSortKey] = useState<'name' | 'company' | 'phone' | 'email' | 'taxNo'>('name');
+  const [tedarikciSortKey, setTedarikciSortKey] = useState<'name' | 'company' | 'phone' | 'email' | 'taxNo' | 'balance' | 'riskGroup'>('name');
   const [tedarikciSortDir, setTedarikciSortDir] = useState<'asc' | 'desc'>('asc');
   const [servisSortKey, setServisSortKey] = useState<'name' | 'code' | 'unitPrice' | 'vatRate' | 'type' | 'unit'>('name');
   const [servisSortDir, setServisSortDir] = useState<'asc' | 'desc'>('asc');
@@ -617,7 +617,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // New tab form states
   const [customerForm, setCustomerForm] = useState({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', taxOffice: '', notes: '', creditLimit: 0, balance: 0, riskGroup: 'Düşük' as 'Düşük' | 'Orta' | 'Yüksek' });
-  const [supplierForm, setSupplierForm] = useState({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '' });
+  const [supplierForm, setSupplierForm] = useState({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: 0, riskGroup: 'Düşük' as 'Düşük' | 'Orta' | 'Yüksek' });
   const [serviceForm, setServiceForm] = useState({ code: '', name: '', type: 'Ürün' as 'Ürün' | 'Hizmet', unitPrice: 0, vatRate: 18, unit: 'Adet', notes: '' });
   const [transferForm, setTransferForm] = useState({ fromWarehouse: '', toWarehouse: '', productName: '', quantity: 0, date: format(new Date(), 'yyyy-MM-dd'), notes: '', status: 'Bekliyor' as Transfer['status'] });
   const [checkForm, setCheckForm] = useState({ checkNo: '', bankName: '', amount: 0, dueDate: format(new Date(), 'yyyy-MM-dd'), drawer: '', type: 'Alınan' as Check['type'], status: 'Aktif' as Check['status'] });
@@ -818,6 +818,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 taxNo:   (x.taxId as string) || (x.taxNo as string) || '',
                 taxOffice: (x.taxOffice as string) || '',
                 notes:   (x.notes as string) || '',
+                balance: Number(x.bakiye ?? x.balance ?? 0),
+                riskGroup: (x.riskGroup as Supplier['riskGroup']) || 'Düşük',
                 createdAt: x.createdAt,
               } as Supplier;
             })
@@ -1317,7 +1319,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         showToast(t.accountAdded);
       }
       setShowSupplierModal(false);
-      setSupplierForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '' });
+      setSupplierForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: 0, riskGroup: 'Düşük' });
       setEditingSupplier(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -1870,6 +1872,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       phone: c.phone || '',
       taxNo: c.taxNo || '',
       address: c.address || '',
+      // Tedarikçi burada ayrı bir kayıt değil, alış faturası olan AYNI cari
+      // (Customer) — bakiye/risk zaten o kayıtta hesaplı, kaybetmeden taşı.
+      balance: c.balance || 0,
+      riskGroup: c.riskGroup || 'Düşük',
     } as Supplier));
   // Üç kaynak: elle girilmiş suppliers + leads(type='Supplier') + alış faturalı
   // cariler. Ad/vergi no ile dedup.
@@ -1884,9 +1890,16 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const displayedTedarikciler = allSuppliers
     .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company || '').toLowerCase().includes(supplierSearch.toLowerCase()))
     .sort((a, b) => {
-      const av = (a[tedarikciSortKey] || '') as string;
-      const bv = (b[tedarikciSortKey] || '') as string;
-      const cmp = av.localeCompare(bv, 'tr');
+      let cmp: number;
+      if (tedarikciSortKey === 'balance') {
+        cmp = (a.balance || 0) - (b.balance || 0);
+      } else if (tedarikciSortKey === 'riskGroup') {
+        cmp = (RISK_SIRA[a.riskGroup || ''] ?? -1) - (RISK_SIRA[b.riskGroup || ''] ?? -1);
+      } else {
+        const av = (a[tedarikciSortKey] || '') as string;
+        const bv = (b[tedarikciSortKey] || '') as string;
+        cmp = av.localeCompare(bv, 'tr');
+      }
       return tedarikciSortDir === 'asc' ? cmp : -cmp;
     });
 

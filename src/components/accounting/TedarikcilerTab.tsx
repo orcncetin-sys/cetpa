@@ -4,8 +4,8 @@ import { type Supplier } from '../../types';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 
-type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string };
-type TedarikciSortKey = 'name' | 'company' | 'phone' | 'email' | 'taxNo';
+type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string; balance: number; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' };
+type TedarikciSortKey = 'name' | 'company' | 'phone' | 'email' | 'taxNo' | 'balance' | 'riskGroup';
 
 interface TedarikcilerTabProps {
   t: AccountingT;
@@ -99,12 +99,26 @@ export default function TedarikcilerTab({
                     onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
                     className="hidden lg:table-cell"
                   />
+                  <SortHeader
+                    label={currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}
+                    sortKey="balance"
+                    currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }}
+                    onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
+                    className="text-right hidden sm:table-cell"
+                  />
+                  <SortHeader
+                    label={currentLanguage === 'tr' ? 'Risk' : 'Risk'}
+                    sortKey="riskGroup"
+                    currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }}
+                    onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
+                    className="text-center hidden sm:table-cell"
+                  />
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
               <tbody>
                 {displayedTedarikciler.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
                 )}
                 {displayedTedarikciler.map(s => (
                   <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -115,10 +129,22 @@ export default function TedarikcilerTab({
                     <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{s.email || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{s.phone || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{s.taxNo || '—'}</td>
+                    <td className="py-2.5 px-3 text-right hidden sm:table-cell">
+                      <span className={`text-xs font-bold ${(s.balance || 0) > 0 ? 'text-red-600' : (s.balance || 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                        ₺{(s.balance || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-center hidden sm:table-cell">
+                      {s.riskGroup ? (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.riskGroup === 'Yüksek' ? 'bg-red-100 text-red-600' : s.riskGroup === 'Orta' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-600'}`}>
+                          {s.riskGroup}
+                        </span>
+                      ) : <span className="text-gray-300 text-xs">—</span>}
+                    </td>
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => setEkstreTedarikci(s)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '', balance: s.balance || 0, riskGroup: s.riskGroup || 'Düşük' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteSupplier(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -177,9 +203,31 @@ export default function TedarikcilerTab({
                 ].map(f => (
                   <div key={f.key}>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                    <input type={f.type} value={supplierForm[f.key as keyof typeof supplierForm]} onChange={e => setSupplierForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    <input type={f.type} value={supplierForm[f.key as keyof typeof supplierForm] as string} onChange={e => setSupplierForm(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                 ))}
+                {/* Finansal & Risk — MusterilerTab'daki desenin aynısı (2026-08-17) */}
+                <div className="pt-2 border-t border-gray-100">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{currentLanguage === 'tr' ? 'Finansal & Risk' : 'Financial & Risk'}</p>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Açık Bakiye (₺)' : 'Open Balance (₺)'}</label>
+                    <input type="number" value={supplierForm.balance} onChange={e => setSupplierForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  </div>
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{currentLanguage === 'tr' ? 'Risk Grubu' : 'Risk Group'}</label>
+                    <div className="flex gap-2">
+                      {(['Düşük', 'Orta', 'Yüksek'] as const).map(g => (
+                        <button key={g} type="button"
+                          onClick={() => setSupplierForm(prev => ({ ...prev, riskGroup: g }))}
+                          className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${supplierForm.riskGroup === g
+                            ? g === 'Yüksek' ? 'bg-red-500 text-white border-red-500' : g === 'Orta' ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-green-500 text-white border-green-500'
+                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}>
+                          {g === 'Düşük' ? '🟢' : g === 'Orta' ? '🟡' : '🔴'} {currentLanguage === 'tr' ? g : g === 'Düşük' ? 'Low' : g === 'Orta' ? 'Medium' : 'High'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
                 <button onClick={() => setShowSupplierModal(false)} className="bg-gray-100 hover:bg-gray-200 rounded-full px-4 py-2 text-sm font-semibold transition-colors">{t.cancel}</button>
