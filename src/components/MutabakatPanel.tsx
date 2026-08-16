@@ -13,6 +13,7 @@ import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { registerTurkishFont } from '../utils/pdfFont';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ interface MutabakatData {
 function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
   const t = lang === 'tr';
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  registerTurkishFont(doc);
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 20;
 
@@ -56,10 +58,10 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
   doc.rect(0, 0, pageW, 28, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.text('CETPA', margin, 12);
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.text(t ? 'Cari Hesap Mutabakat Mektubu' : 'Account Balance Reconciliation', margin, 20);
 
   // Date top-right
@@ -70,7 +72,7 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
   // ── Period ───────────────────────────────────────────────────────────────
   doc.setTextColor(80, 80, 80);
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.text(`${t ? 'Dönem' : 'Period'}: ${data.period}`, margin, 38);
 
   // ── Customer info box ────────────────────────────────────────────────────
@@ -85,16 +87,16 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
     [`${t ? 'Cari Kod' : 'Account Code'}:`, data.lead.cariKod || '—'],
   ];
   infoLines.forEach(([label, value], i) => {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('Roboto', 'bold');
     doc.text(label, margin + 4, 51 + i * 6);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('Roboto', 'normal');
     doc.text(String(value), margin + 32, 51 + i * 6);
   });
 
   // ── Intro text ───────────────────────────────────────────────────────────
   doc.setFontSize(9.5);
   doc.setTextColor(50, 50, 50);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   const intro = t
     ? `Şirketimizin ${data.period} dönemi itibarıyla kayıtlarımızda görünen bakiye aşağıda belirtilmiş olup, tarafınızla mutabakat sağlanması amacıyla bilgilerinize sunulmaktadır. Aşağıdaki rakamları kayıtlarınızla karşılaştırarak, ${dateStr} tarihinden itibaren 15 gün içinde yazılı bildirimde bulunmanızı rica ederiz. Aksi halde bakiyenin mutabık olarak kabul edileceğini beyan ederiz.`
     : `The balance shown below appears in our records as of period ${data.period}. We kindly request you to compare these figures with your own records and notify us in writing within 15 days from ${dateStr}. Failure to respond will be deemed acceptance of the balance.`;
@@ -126,7 +128,7 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
       { content: data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold' } },
       '', '',
     ]],
-    styles: { fontSize: 8.5, cellPadding: 3 },
+    styles: { font: 'Roboto', fontSize: 8.5, cellPadding: 3 },
     headStyles: { fillColor: [26, 58, 92], textColor: 255, fontStyle: 'bold' },
     footStyles: { fillColor: [240, 244, 248], textColor: [26, 58, 92] },
     alternateRowStyles: { fillColor: [248, 250, 252] },
@@ -138,13 +140,13 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
   doc.setFillColor(240, 244, 248);
   doc.roundedRect(margin, afterTable, pageW - margin * 2, 22, 3, 3, 'F');
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(26, 58, 92);
   doc.text(t ? 'Güncel Cari Bakiye:' : 'Current Account Balance:', margin + 6, afterTable + 9);
   const balStr = `₺${data.lead.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
   doc.text(balStr, pageW - margin - 6 - doc.getTextWidth(balStr), afterTable + 9);
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(100, 100, 100);
   doc.text(t ? '(Mikro ERP kayıtlarından alınmıştır)' : '(Sourced from Mikro ERP records)', margin + 6, afterTable + 17);
 
@@ -152,7 +154,7 @@ function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
   const sigY = afterTable + 36;
   doc.setDrawColor(180, 180, 180);
   doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(80, 80, 80);
 
   // Cetpa signature

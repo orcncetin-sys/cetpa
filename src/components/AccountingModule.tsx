@@ -38,6 +38,7 @@ import MaliyetMerkeziModule from './MaliyetMerkeziModule';
 import SabitKiymetModule from './SabitKiymetModule';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { registerTurkishFont } from '../utils/pdfFont';
 import DocumentDesigner from './DocumentDesigner';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { db, auth } from '../firebase';
@@ -641,31 +642,30 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     setTimeout(() => setToast(null), 3000);
   };
 
-  // jsPDF gömülü fontları Türkçe karakter taşımaz — sadeleştir.
-  const normTR = (s: string) => s
-    .replace(/ş/g, 's').replace(/Ş/g, 'S').replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
-    .replace(/ç/g, 'c').replace(/Ç/g, 'C').replace(/ü/g, 'u').replace(/Ü/g, 'U')
-    .replace(/ö/g, 'o').replace(/Ö/g, 'O').replace(/ı/g, 'i').replace(/İ/g, 'I');
+  // registerTurkishFont (Roboto) Türkçe glifleri kapsıyor — sadeleştirmeye
+  // gerek yok, passthrough (2026-08-17, bkz. pdfFont.ts).
+  const normTR = (s: string) => s;
 
   // GERÇEK PDF (buton "Beyanname PDF" diyor ama eskiden .txt indiriyordu).
   const downloadVatDeclaration = () => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    registerTurkishFont(doc);
     const W = doc.internal.pageSize.getWidth();
     doc.setFillColor(255, 64, 0);
     doc.rect(0, 0, W, 26, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(255, 255, 255);
-    doc.text('KDV BEYANNAMESI OZETI', 14, 13);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-    doc.text(normTR(`Donem: ${kdvMonth}/${kdvYear}`), 14, 20);
+    doc.setFont('Roboto', 'bold'); doc.setFontSize(16); doc.setTextColor(255, 255, 255);
+    doc.text('KDV BEYANNAMESİ ÖZETİ', 14, 13);
+    doc.setFont('Roboto', 'normal'); doc.setFontSize(9);
+    doc.text(normTR(`Dönem: ${kdvMonth}/${kdvYear}`), 14, 20);
     autoTable(doc, {
       startY: 34,
       head: [['Kalem', 'Tutar']],
       body: [
         ['Hesaplanan KDV', normTR(formatTRY(hesaplananKDV))],
-        ['Indirilecek KDV', normTR(formatTRY(indirilecekKDV))],
-        ['Odenecek/Iade KDV', normTR(formatTRY(odenecekKDV))],
+        ['İndirilecek KDV', normTR(formatTRY(indirilecekKDV))],
+        ['Ödenecek/İade KDV', normTR(formatTRY(odenecekKDV))],
       ],
-      styles: { font: 'helvetica', fontSize: 10 },
+      styles: { font: 'Roboto', fontSize: 10 },
       headStyles: { fillColor: [29, 29, 31] },
     });
     const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
@@ -675,7 +675,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60) + 6,
       head: [['Oran', 'Matrah', 'KDV']],
       body: oranBody.length ? oranBody : [['—', '—', '—']],
-      styles: { font: 'helvetica', fontSize: 10 },
+      styles: { font: 'Roboto', fontSize: 10 },
       headStyles: { fillColor: [255, 64, 0] },
     });
     doc.save(`KDV_Beyanname_${kdvMonth}_${kdvYear}.pdf`);

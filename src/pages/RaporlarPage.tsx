@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { registerTurkishFont } from '../utils/pdfFont';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { Download, FileText } from 'lucide-react';
 import UnauthorizedView from '../components/UnauthorizedView';
@@ -118,20 +119,21 @@ export default function RaporlarPage({
             import('jspdf').then(({ jsPDF }) => {
               import('jspdf-autotable').then(({ default: autoTable }) => {
                 const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                registerTurkishFont(pdf);
                 const tr63 = currentLanguage === 'tr';
                 const today63 = new Date().toLocaleDateString(tr63 ? 'tr-TR' : 'en-US');
                 // Cover
                 pdf.setFillColor(26, 58, 92);
                 pdf.rect(0, 0, 210, 40, 'F');
                 pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(18); pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(18); pdf.setFont('Roboto', 'bold');
                 pdf.text('CETPA', 14, 18);
-                pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
+                pdf.setFontSize(10); pdf.setFont('Roboto', 'normal');
                 pdf.text(tr63 ? 'Yönetim Raporu' : 'Management Report', 14, 26);
                 pdf.text(today63, 14, 34);
                 pdf.setTextColor(0, 0, 0);
                 // Section 1: Orders
-                pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
                 pdf.text(tr63 ? 'Sipariş Özeti' : 'Order Summary', 14, 52);
                 const totalRev = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 autoTable(pdf, {
@@ -141,11 +143,11 @@ export default function RaporlarPage({
                     s, orders.filter(o => o.status === s).length,
                     `${orders.length > 0 ? Math.round((orders.filter(o => o.status === s).length / orders.length) * 100) : 0}%`
                   ]),
-                  styles: { fontSize: 9 },
+                  styles: { font: 'Roboto', fontSize: 9 },
                 });
                 // Section 2: Top Customers
                 const finalY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
-                pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
                 pdf.text(tr63 ? 'En Yüksek Cirolu Müşteriler' : 'Top Customers by Revenue', 14, finalY);
                 const custMap: Record<string, number> = {};
                 for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + (o.totalPrice || 0); }
@@ -154,18 +156,18 @@ export default function RaporlarPage({
                   startY: finalY + 4,
                   head: [[tr63 ? 'Müşteri' : 'Customer', tr63 ? 'Ciro' : 'Revenue', tr63 ? 'Pay' : 'Share']],
                   body: top5.map(([name, rev]) => [name, `₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
-                  styles: { fontSize: 9 },
+                  styles: { font: 'Roboto', fontSize: 9 },
                 });
                 // Section 3: Inventory highlights
                 const finalY2 = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
-                pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
                 pdf.text(tr63 ? 'Kritik Stok Uyarıları' : 'Critical Stock Alerts', 14, finalY2);
                 const lowStock = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).slice(0, 10);
                 autoTable(pdf, {
                   startY: finalY2 + 4,
                   head: [['SKU', tr63 ? 'Ürün' : 'Product', tr63 ? 'Stok' : 'Stock', tr63 ? 'Min' : 'Min']],
                   body: lowStock.map(i => [i.sku, i.name, i.stockLevel ?? 0, i.lowStockThreshold ?? 5]),
-                  styles: { fontSize: 9 },
+                  styles: { font: 'Roboto', fontSize: 9 },
                 });
                 pdf.save(`cetpa-rapor-${new Date().toISOString().split('T')[0]}.pdf`);
               });

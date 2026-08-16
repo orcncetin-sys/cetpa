@@ -2,18 +2,16 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 import { Order, Lead } from '../types';
+import { registerTurkishFont } from './pdfFont';
 
-// jsPDF's built-in fonts don't support Turkish chars
-const normTR = (s: string) => s
-  .replace(/ş/g, 's').replace(/Ş/g, 'S')
-  .replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
-  .replace(/ç/g, 'c').replace(/Ç/g, 'C')
-  .replace(/ü/g, 'u').replace(/Ü/g, 'U')
-  .replace(/ö/g, 'o').replace(/Ö/g, 'O')
-  .replace(/ı/g, 'i').replace(/İ/g, 'I');
+// Roboto (registerTurkishFont) Türkçe glifleri kapsıyor — artık harf
+// düşürmeye gerek yok, normTR eski çağrı yerlerini bozmamak için passthrough
+// olarak bırakıldı (2026-08-17, bkz. pdfFont.ts).
+const normTR = (s: string) => s;
 
 export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unknown) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  registerTurkishFont(doc);
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [255, 64, 0];
@@ -25,20 +23,20 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   doc.setFillColor(...BRAND);
   doc.rect(0, 0, W, 32, 'F');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
   doc.text('CETPA', 14, 15);
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 200, 180);
-  doc.text('SATIS & LOJISTIK', 14, 21);
+  doc.text('SATIŞ & LOJİSTİK', 14, 21);
 
   doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text('SIPARIS / FATURA', W - 14, 15, { align: 'right' });
+  doc.text('SİPARİŞ / FATURA', W - 14, 15, { align: 'right' });
 
   const dateStr = (order.syncedAt as { toDate?: () => Date })?.toDate
     ? (order.syncedAt as { toDate: () => Date }).toDate().toLocaleDateString('tr-TR')
@@ -46,7 +44,7 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   const orderNo = String(order.shopifyOrderId || order.id || '').substring(0, 12);
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 220, 210);
   doc.text(`No: ${orderNo}  |  Tarih: ${dateStr}`, W - 14, 26, { align: 'right' });
 
@@ -58,11 +56,11 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
 
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...BRAND);
-  doc.text('MUSTERI BILGILERI', col1 + 4, boxY + 6);
-  doc.setFont('helvetica', 'normal');
+  doc.text('MÜŞTERİ BİLGİLERİ', col1 + 4, boxY + 6);
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
   doc.text(normTR(String(order.customerName || '-')), col1 + 4, boxY + 13);
@@ -72,11 +70,11 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
 
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...BRAND);
-  doc.text('SIPARIS DETAYI', col2 + 4, boxY + 6);
-  doc.setFont('helvetica', 'normal');
+  doc.text('SİPARİŞ DETAYI', col2 + 4, boxY + 6);
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...DARK);
   doc.text(`Durum: ${normTR(String(order.status || '-'))}`, col2 + 4, boxY + 13);
@@ -95,8 +93,9 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
 
   (doc as unknown as { autoTable: (opts: unknown) => void }).autoTable({
     startY: boxY + boxH + 6,
-    head: [['#', 'Urun', 'SKU', 'Miktar', 'Birim Fiyat', 'Tutar']],
+    head: [['#', 'Ürün', 'SKU', 'Miktar', 'Birim Fiyat', 'Tutar']],
     body: tableData.length ? tableData : [['', 'Kalem eklenmedi', '', '', '', '']],
+    styles: { font: 'Roboto' },
     headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [252, 252, 252] },
@@ -126,11 +125,11 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   doc.roundedRect(totalsX - 4, totalsY - 4, 60, 34, 2, 2, 'F');
 
   doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(...GREY);
   doc.text('Ara Toplam:', totalsX + 2, totalsY + 4);
   doc.text(`KDV (%${kdvOran}):`, totalsX + 2, totalsY + 12);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
   doc.text(`${subTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 4, { align: 'right' });
@@ -139,7 +138,7 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   doc.setFillColor(...BRAND);
   doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
   doc.text(`${totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 23, { align: 'right' });
@@ -148,9 +147,9 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
   doc.setFillColor(...BRAND);
   doc.rect(0, H - 14, W, 14, 'F');
   doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 220, 210);
-  doc.text('Bu belge elektronik olarak olusturulmustur.', 14, H - 6);
+  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
   doc.setTextColor(255, 255, 255);
   doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
 
@@ -165,6 +164,7 @@ export const exportCustomerStatement = (
   lang: 'tr' | 'en' = 'tr',
 ) => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [26, 58, 92];   // #1a3a5c navy
@@ -178,25 +178,25 @@ export const exportCustomerStatement = (
   doc.setFillColor(...BRAND);
   doc.rect(0, 0, W, 32, 'F');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
   doc.text('CETPA', 14, 15);
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(200, 220, 255);
-  doc.text('SATIS & LOJISTIK', 14, 22);
+  doc.text('SATIŞ & LOJİSTİK', 14, 22);
 
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text(
-    lang === 'tr' ? 'HESAP EKSTRESI' : 'ACCOUNT STATEMENT',
+    lang === 'tr' ? 'HESAP EKSTRESİ' : 'ACCOUNT STATEMENT',
     W - 14, 15, { align: 'right' },
   );
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(200, 220, 255);
   doc.text(`${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, W - 14, 22, { align: 'right' });
 
@@ -205,23 +205,23 @@ export const exportCustomerStatement = (
   doc.setFillColor(...LIGHT);
   doc.roundedRect(14, boxY, W - 28, 28, 2, 2, 'F');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
-  doc.text(lang === 'tr' ? 'MUSTERI' : 'CUSTOMER', 20, boxY + 7);
+  doc.text(lang === 'tr' ? 'MÜŞTERİ' : 'CUSTOMER', 20, boxY + 7);
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(11);
   doc.text(normTR(lead.name), 20, boxY + 14);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...GREY);
   const infoLine = [lead.company, lead.email, lead.phone].filter(Boolean).join('  •  ');
   doc.text(normTR(infoLine), 20, boxY + 20);
 
   if (lead.creditLimit) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('Roboto', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...BRAND);
     doc.text(
@@ -242,14 +242,14 @@ export const exportCustomerStatement = (
 
   const statusLabel: Record<string, { tr: string; en: string }> = {
     Pending:    { tr: 'Bekliyor',       en: 'Pending'    },
-    Processing: { tr: 'Hazirlanıyor',   en: 'Processing' },
+    Processing: { tr: 'Hazırlanıyor',   en: 'Processing' },
     Shipped:    { tr: 'Kargoda',        en: 'Shipped'    },
     Delivered:  { tr: 'Teslim Edildi',  en: 'Delivered'  },
-    Cancelled:  { tr: 'Iptal',          en: 'Cancelled'  },
+    Cancelled:  { tr: 'İptal',          en: 'Cancelled'  },
   };
 
   const head = lang === 'tr'
-    ? [['Siparis No', 'Tarih', 'Durum', 'Urunler', 'Tutar (TRY)']]
+    ? [['Sipariş No', 'Tarih', 'Durum', 'Ürünler', 'Tutar (TRY)']]
     : [['Order No',   'Date',  'Status', 'Items',  'Amount (TRY)']];
 
   const body = sorted.map(o => {
@@ -270,7 +270,7 @@ export const exportCustomerStatement = (
     startY:     tableY,
     head,
     body,
-    styles:       { fontSize: 8, cellPadding: 3, overflow: 'ellipsize' },
+    styles:       { font: 'Roboto', fontSize: 8, cellPadding: 3, overflow: 'ellipsize' },
     headStyles:   { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
     alternateRowStyles: { fillColor: [250, 250, 252] },
     columnStyles: {
@@ -303,7 +303,7 @@ export const exportCustomerStatement = (
   ];
   rows.forEach(([label, value], i) => {
     const y = sumY + 8 + i * 9;
-    doc.setFont('helvetica', i === 2 ? 'bold' : 'normal');
+    doc.setFont('Roboto', i === 2 ? 'bold' : 'normal');
     doc.setFontSize(i === 2 ? 9 : 8);
     const color = i === 2 ? BRAND : GREY;
     doc.setTextColor(...color);
@@ -314,7 +314,7 @@ export const exportCustomerStatement = (
   // ── Footer ────────────────────────────────────────────────────────────────
   doc.setFillColor(...BRAND);
   doc.rect(0, H - 14, W, 14, 'F');
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(255, 255, 255);
   doc.text(
@@ -352,6 +352,7 @@ interface PurchaseOrderDoc {
 
 export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [255, 64, 0];
@@ -365,23 +366,23 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   doc.setFillColor(...BRAND);
   doc.rect(0, 0, W, 32, 'F');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
   doc.text('CETPA', 14, 15);
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 200, 180);
-  doc.text('SATIS & LOJISTIK', 14, 21);
+  doc.text('SATIŞ & LOJİSTİK', 14, 21);
 
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text(lang === 'tr' ? 'SATIN ALMA EMRI' : 'PURCHASE ORDER', W - 14, 15, { align: 'right' });
+  doc.text(lang === 'tr' ? 'SATIN ALMA EMRİ' : 'PURCHASE ORDER', W - 14, 15, { align: 'right' });
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 220, 210);
   doc.text(`No: ${po.orderNumber}  |  ${today}`, W - 14, 26, { align: 'right' });
 
@@ -394,11 +395,11 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   // Supplier box
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...BRAND);
-  doc.text(lang === 'tr' ? 'TEDARIKCI' : 'SUPPLIER', col1 + 4, boxY + 6);
-  doc.setFont('helvetica', 'bold');
+  doc.text(lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', col1 + 4, boxY + 6);
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...DARK);
   doc.text(normTR(po.supplier || '-'), col1 + 4, boxY + 16);
@@ -406,11 +407,11 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   // Order details box
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...BRAND);
-  doc.text(lang === 'tr' ? 'SIPARIS DETAYI' : 'ORDER DETAILS', col2 + 4, boxY + 6);
-  doc.setFont('helvetica', 'normal');
+  doc.text(lang === 'tr' ? 'SİPARİŞ DETAYI' : 'ORDER DETAILS', col2 + 4, boxY + 6);
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...DARK);
   doc.text(`${lang === 'tr' ? 'Durum' : 'Status'}: ${normTR(po.status || '-')}`, col2 + 4, boxY + 14);
@@ -425,7 +426,7 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   }
   doc.setTextColor(...GREY);
   doc.text(`${lang === 'tr' ? 'Beklenen' : 'Expected'}: ${expDateStr}`, col2 + 4, boxY + 22);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...BRAND);
   doc.text(`${lang === 'tr' ? 'Toplam' : 'Total'}: ${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, col2 + 4, boxY + 30);
@@ -441,13 +442,14 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   ]);
 
   const head = lang === 'tr'
-    ? [['#', 'Urun Adi', 'SKU', 'Miktar', 'Alis Fiyati', 'Tutar']]
+    ? [['#', 'Ürün Adı', 'SKU', 'Miktar', 'Alis Fiyati', 'Tutar']]
     : [['#', 'Product Name', 'SKU', 'Qty', 'Unit Cost', 'Amount']];
 
   autoTable(doc, {
     startY: boxY + boxH + 6,
     head,
     body: tableData.length ? tableData : [['', lang === 'tr' ? 'Kalem eklenmedi' : 'No items', '', '', '', '']],
+    styles: { font: 'Roboto' },
     headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [252, 252, 252] },
@@ -471,7 +473,7 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   doc.setFillColor(...BRAND);
   doc.roundedRect(totalsX - 4, totalsY, 60, 11, 1.5, 1.5, 'F');
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', totalsX + 2, totalsY + 7.5);
   doc.text(`${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 7.5, { align: 'right' });
@@ -479,11 +481,11 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   // ── Notes ─────────────────────────────────────────────────────────────────
   if (po.notes) {
     const notesY = totalsY + 20;
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('Roboto', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(...BRAND);
     doc.text(lang === 'tr' ? 'NOTLAR' : 'NOTES', 14, notesY);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('Roboto', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...DARK);
     const noteLines = doc.splitTextToSize(normTR(po.notes), W - 28);
@@ -494,9 +496,9 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
   doc.setFillColor(...BRAND);
   doc.rect(0, H - 14, W, 14, 'F');
   doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(255, 220, 210);
-  doc.text('Bu belge elektronik olarak olusturulmustur.', 14, H - 6);
+  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
   doc.setTextColor(255, 255, 255);
   doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
 
@@ -508,6 +510,7 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
 
 export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const GREEN: [number, number, number] = [22, 163, 74];   // green-600
@@ -521,23 +524,23 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
   doc.setFillColor(...GREEN);
   doc.rect(0, 0, W, 32, 'F');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
   doc.text('CETPA', 14, 15);
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(180, 240, 200);
-  doc.text('SATIS & LOJISTIK', 14, 21);
+  doc.text('SATIŞ & LOJİSTİK', 14, 21);
 
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text(lang === 'tr' ? 'TESLIM MAKBUZU' : 'GOODS RECEIPT NOTE', W - 14, 15, { align: 'right' });
+  doc.text(lang === 'tr' ? 'TESLİM MAKBUZU' : 'GOODS RECEIPT NOTE', W - 14, 15, { align: 'right' });
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(180, 240, 200);
   doc.text(`SAS: ${po.orderNumber}  |  ${today}`, W - 14, 26, { align: 'right' });
 
@@ -549,22 +552,22 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
 
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...GREEN);
-  doc.text(lang === 'tr' ? 'TEDARIKCI' : 'SUPPLIER', col1 + 4, boxY + 6);
-  doc.setFont('helvetica', 'bold');
+  doc.text(lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', col1 + 4, boxY + 6);
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...DARK);
   doc.text(normTR(po.supplier || '-'), col1 + 4, boxY + 14);
 
   doc.setFillColor(...LIGHT);
   doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...GREEN);
-  doc.text(lang === 'tr' ? 'TESLIM BILGILERI' : 'RECEIPT INFO', col2 + 4, boxY + 6);
-  doc.setFont('helvetica', 'normal');
+  doc.text(lang === 'tr' ? 'TESLİM BİLGİLERİ' : 'RECEIPT INFO', col2 + 4, boxY + 6);
+  doc.setFont('Roboto', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...DARK);
   doc.text(`${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, col2 + 4, boxY + 14);
@@ -583,13 +586,14 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
   ]);
 
   const head = lang === 'tr'
-    ? [['#', 'Urun Adi', 'SKU', 'Beklenen', 'Birim Fiyat', 'Toplam', 'Teslim Alindi']]
+    ? [['#', 'Ürün Adı', 'SKU', 'Beklenen', 'Birim Fiyat', 'Toplam', 'Teslim Alındı']]
     : [['#', 'Product Name', 'SKU', 'Expected', 'Unit Cost', 'Total', 'Received']];
 
   autoTable(doc, {
     startY: boxY + boxH + 6,
     head,
     body: tableData.length ? tableData : [['', lang === 'tr' ? 'Kalem yok' : 'No items', '', '', '', '', '']],
+    styles: { font: 'Roboto' },
     headStyles: { fillColor: GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [250, 255, 252] },
@@ -614,7 +618,7 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
   doc.setFillColor(...GREEN);
   doc.roundedRect(W - 74, sigY, 60, 11, 1.5, 1.5, 'F');
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', W - 70, sigY + 7.5);
   doc.text(`${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, sigY + 7.5, { align: 'right' });
@@ -623,14 +627,14 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
   const sigBoxY = sigY + 20;
   const sigBoxW = (W - 28) / 3;
   [
-    lang === 'tr' ? 'TESLIM EDEN'   : 'DELIVERED BY',
-    lang === 'tr' ? 'TESLIM ALAN'   : 'RECEIVED BY',
+    lang === 'tr' ? 'TESLİM EDEN'   : 'DELIVERED BY',
+    lang === 'tr' ? 'TESLİM ALAN'   : 'RECEIVED BY',
     lang === 'tr' ? 'ONAYLAYAN'     : 'APPROVED BY',
   ].forEach((lbl, i) => {
     const x = 14 + i * (sigBoxW + 4);
     doc.setFillColor(...LIGHT);
     doc.roundedRect(x, sigBoxY, sigBoxW, 22, 1.5, 1.5, 'F');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('Roboto', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(...GREEN);
     doc.text(lbl, x + 4, sigBoxY + 6);
@@ -643,9 +647,9 @@ export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 
   doc.setFillColor(...GREEN);
   doc.rect(0, H - 14, W, 14, 'F');
   doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('Roboto', 'normal');
   doc.setTextColor(180, 240, 200);
-  doc.text('Bu belge elektronik olarak olusturulmustur.', 14, H - 6);
+  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
   doc.setTextColor(255, 255, 255);
   doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
 

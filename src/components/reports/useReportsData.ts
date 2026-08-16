@@ -25,6 +25,7 @@ import { cn } from '../../lib/utils';
 import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { registerTurkishFont } from '../../utils/pdfFont';
 import {
   collection, onSnapshot, query, where,
 } from '../../lib/dbClient';
@@ -207,8 +208,10 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
 
   const exportPDF = () => {
     const doc = new jsPDF();
+    registerTurkishFont(doc);
     doc.text(currentT.report_title, 14, 15);
     autoTable(doc, {
+      styles: { font: 'Roboto' },
       head: [[currentT.customer, currentT.amount, currentT.status, currentT.date]],
       body: orders.map(o => [
         o.customerName,

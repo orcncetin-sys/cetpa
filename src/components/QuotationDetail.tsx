@@ -6,6 +6,7 @@ import { jsPDF } from 'jspdf';
 import MikroPushButton from './MikroPushButton';
 import { teklifPayload } from '../services/mikroEvrak';
 import autoTable from 'jspdf-autotable';
+import { registerTurkishFont } from '../utils/pdfFont';
 import { formatInCurrency } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
 import { format } from 'date-fns';
@@ -40,6 +41,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
   const exportToPDF = () => {
     try {
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      registerTurkishFont(doc);
       const W = doc.internal.pageSize.getWidth();   // 210
       const H = doc.internal.pageSize.getHeight();  // 297
       const BRAND: [number, number, number] = [255, 64, 0];
@@ -47,35 +49,30 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       const GREY: [number, number, number]  = [134, 134, 139];
       const LIGHT: [number, number, number] = [245, 245, 247];
 
-      // jsPDF's built-in fonts don't support Turkish chars — normalise them
-      const tr = (s: string) => s
-        .replace(/ş/g, 's').replace(/Ş/g, 'S')
-        .replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
-        .replace(/ç/g, 'c').replace(/Ç/g, 'C')
-        .replace(/ü/g, 'u').replace(/Ü/g, 'U')
-        .replace(/ö/g, 'o').replace(/Ö/g, 'O')
-        .replace(/ı/g, 'i').replace(/İ/g, 'I');
+      // registerTurkishFont (Roboto) artık Türkçe glifleri kapsıyor — harf
+      // düşürmeye gerek yok (2026-08-17). Passthrough, çağrı yerlerini bozmamak için.
+      const tr = (s: string) => s;
 
       // ── Header band ──────────────────────────────────────────────────────
       doc.setFillColor(...BRAND);
       doc.rect(0, 0, W, 32, 'F');
 
       // Brand name
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setFontSize(22);
       doc.setTextColor(255, 255, 255);
       doc.text('CETPA', 14, 15);
 
       doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('Roboto', 'normal');
       doc.setTextColor(255, 200, 180);
-      doc.text('SATIS & LOJISTIK', 14, 21);
+      doc.text('SATIŞ & LOJİSTİK', 14, 21);
 
       // Document type — right aligned
       doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
-      doc.text('TEKLIF FORMU', W - 14, 15, { align: 'right' });
+      doc.text('TEKLİF FORMU', W - 14, 15, { align: 'right' });
 
       // Parse date
       let dateObj = new Date();
@@ -90,9 +87,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       const validStr = quotation.validUntil ? format(new Date(quotation.validUntil as string | number | Date), 'dd.MM.yyyy') : '-';
 
       doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('Roboto', 'normal');
       doc.setTextColor(255, 220, 210);
-      doc.text(`No: ${docNo}  |  Tarih: ${dateStr}  |  Gecerlilik: ${validStr}`, W - 14, 26, { align: 'right' });
+      doc.text(`No: ${docNo}  |  Tarih: ${dateStr}  |  Geçerlilik: ${validStr}`, W - 14, 26, { align: 'right' });
 
       // ── Info boxes (customer | company) ─────────────────────────────────
       const boxY = 38;
@@ -103,11 +100,11 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       // Customer box
       doc.setFillColor(...LIGHT);
       doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setFontSize(7);
       doc.setTextColor(...BRAND);
-      doc.text('MUSTERI BILGILERI', col1 + 4, boxY + 6);
-      doc.setFont('helvetica', 'normal');
+      doc.text('MÜŞTERİ BİLGİLERİ', col1 + 4, boxY + 6);
+      doc.setFont('Roboto', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(...DARK);
       doc.text(tr(quotation.customerName || '-'), col1 + 4, boxY + 13);
@@ -119,14 +116,14 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       // Company box
       doc.setFillColor(...LIGHT);
       doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setFontSize(7);
       doc.setTextColor(...BRAND);
-      doc.text('SATICI BILGILERI', col2 + 4, boxY + 6);
-      doc.setFont('helvetica', 'normal');
+      doc.text('SATICI BİLGİLERİ', col2 + 4, boxY + 6);
+      doc.setFont('Roboto', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(...DARK);
-      doc.text('CETPA Satis & Lojistik', col2 + 4, boxY + 13);
+      doc.text('CETPA Satış & Lojistik', col2 + 4, boxY + 13);
       doc.setFontSize(8);
       doc.setTextColor(...GREY);
       doc.text('info@cetpa.com', col2 + 4, boxY + 19);
@@ -142,7 +139,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFillColor(...sColor);
       doc.roundedRect(col2 + colW - 28, boxY + 26, 28, 7, 1, 1, 'F');
       doc.setFontSize(7);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
       doc.text(tr(quotation.status || 'Taslak'), col2 + colW - 14, boxY + 31, { align: 'center' });
 
@@ -159,8 +156,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
 
       autoTable(doc, {
         startY: boxY + boxH + 6,
-        head: [['#', 'Urun / Aciklama', 'SKU', 'Miktar', 'Birim Fiyat', 'KDV', 'Tutar']],
-        body: tableData.length ? tableData : [['', 'Urun eklenmedi', '', '', '', '', '']],
+        head: [['#', 'Ürün / Açıklama', 'SKU', 'Miktar', 'Birim Fiyat', 'KDV', 'Tutar']],
+        body: tableData.length ? tableData : [['', 'Ürün eklenmedi', '', '', '', '', '']],
+        styles: { font: 'Roboto' },
         headStyles: {
           fillColor: BRAND,
           textColor: [255, 255, 255],
@@ -196,11 +194,11 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.roundedRect(totalsX - 4, totalsY - 4, 60, 34, 2, 2, 'F');
 
       doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('Roboto', 'normal');
       doc.setTextColor(...GREY);
       doc.text('Ara Toplam:', totalsX + 2, totalsY + 4);
-      doc.text('KDV Toplami:', totalsX + 2, totalsY + 12);
-      doc.setFont('helvetica', 'bold');
+      doc.text('KDV Toplamı:', totalsX + 2, totalsY + 12);
+      doc.setFont('Roboto', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...DARK);
       doc.text(formatInCurrency(subTotal, quotation.currency), W - 16, totalsY + 4, { align: 'right' });
@@ -210,7 +208,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFillColor(...BRAND);
       doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
       doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
       doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
       doc.text(formatInCurrency(total, quotation.currency), W - 16, totalsY + 23, { align: 'right' });
@@ -219,10 +217,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       if (quotation.notes) {
         const notesY = totalsY + 36;
         doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('Roboto', 'bold');
         doc.setTextColor(...GREY);
         doc.text('NOTLAR', 14, notesY);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('Roboto', 'normal');
         doc.setTextColor(...DARK);
         doc.setFontSize(8.5);
         const noteLines = doc.splitTextToSize(tr(quotation.notes), totalsX - 22);
@@ -233,9 +231,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFillColor(...BRAND);
       doc.rect(0, H - 14, W, 14, 'F');
       doc.setFontSize(7.5);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('Roboto', 'normal');
       doc.setTextColor(255, 220, 210);
-      doc.text('Bu teklif elektronik olarak olusturulmustur. Imza gerektirmez.', 14, H - 6);
+      doc.text('Bu teklif elektronik olarak oluşturulmuştur. İmza gerektirmez.', 14, H - 6);
       doc.setTextColor(255, 255, 255);
       doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
 

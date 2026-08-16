@@ -58,6 +58,7 @@
     "react-qr-barcode-scanner": "^2.1.23",
     "react-router-dom": "^7.17.0",
     "recharts": "^3.8.0",
+    "roboto-base64": "^0.1.2",
     "stripe": "^22.1.1",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.22.3",

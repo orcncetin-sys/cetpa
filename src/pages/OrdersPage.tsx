@@ -20,6 +20,7 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { exportOrdersCSV } from '../utils/export';
+import { registerTurkishFont } from '../utils/pdfFont';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
 import AccountingModule from '../components/AccountingModule';
@@ -615,13 +616,14 @@ export default function OrdersPage({
                       import('jspdf').then(({ jsPDF }) => {
                         import('jspdf-autotable').then(({ default: autoTable }) => {
                           const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                          registerTurkishFont(pdf);
                           pdf.setFontSize(14);
                           pdf.text(currentLanguage === 'tr' ? 'Sipariş Listesi' : 'Order List', 14, 20);
                           autoTable(pdf, {
                             startY: 28,
                             head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
                             body: sel.map(o => [o.shopifyOrderId ?? o.id.slice(0,8), o.customerName, o.status, `₺${o.totalPrice.toLocaleString('tr-TR')}`]),
-                            styles: { fontSize: 9 },
+                            styles: { font: 'Roboto', fontSize: 9 },
                           });
                           pdf.save(`siparisler_${new Date().toISOString().split('T')[0]}.pdf`);
                         });
@@ -1701,13 +1703,14 @@ export default function OrdersPage({
                           const o = selectedOrder;
                           const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
                           const doc505 = new jsPDF({ format: 'a4', unit: 'mm' });
+                          registerTurkishFont(doc505);
                           const W = doc505.internal.pageSize.getWidth();
                           doc505.setFillColor(255, 64, 0);
                           doc505.rect(0, 0, W, 28, 'F');
                           doc505.setTextColor(255, 255, 255);
-                          doc505.setFontSize(16); doc505.setFont('helvetica', 'bold');
+                          doc505.setFontSize(16); doc505.setFont('Roboto', 'bold');
                           doc505.text('CETPA', 14, 13);
-                          doc505.setFontSize(10); doc505.setFont('helvetica', 'normal');
+                          doc505.setFontSize(10); doc505.setFont('Roboto', 'normal');
                           doc505.text(currentLanguage === 'tr' ? 'SİPARİŞ FIŞI' : 'ORDER RECEIPT', 14, 21);
                           doc505.setTextColor(80, 80, 80);
                           doc505.setFontSize(9);
@@ -1716,9 +1719,9 @@ export default function OrdersPage({
                           doc505.text(`#${o.shopifyOrderId || o.id.slice(-8)}`, W - 14, 13, { align: 'right' });
                           doc505.text(oDate, W - 14, 21, { align: 'right' });
                           doc505.setTextColor(30, 30, 30);
-                          doc505.setFontSize(11); doc505.setFont('helvetica', 'bold');
+                          doc505.setFontSize(11); doc505.setFont('Roboto', 'bold');
                           doc505.text(o.customerName, 14, 38);
-                          doc505.setFontSize(9); doc505.setFont('helvetica', 'normal');
+                          doc505.setFontSize(9); doc505.setFont('Roboto', 'normal');
                           doc505.setTextColor(120, 120, 120);
                           if (o.shippingAddress) doc505.text(o.shippingAddress, 14, 44);
                           if (o.customerEmail) doc505.text(o.customerEmail, 14, 49);
@@ -1728,7 +1731,7 @@ export default function OrdersPage({
                               startY: 58,
                               head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
                               body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, `₺${(li.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, `₺${((li.price || 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` ]),
-                              styles: { fontSize: 9, cellPadding: 3 },
+                              styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
                               headStyles: { fillColor: [255, 64, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
                               alternateRowStyles: { fillColor: [253, 248, 246] },
                               foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, `₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`]],
