@@ -236,7 +236,7 @@ export const AT = {
     noRecords: 'Kayıt bulunamadı.', add: 'Ekle', name: 'Ad', company: 'Şirket',
     email: 'E-posta', phone: 'Telefon', address: 'Adres', notes2: 'Notlar',
     taxNo: 'Vergi No', code: 'Kod', type2: 'Tür', unitPrice: 'Birim Fiyat',
-    unit: 'Birim', location: 'Konum', fromWarehouse: 'Çıkış Deposu', toWarehouse: 'Giriş Deposu',
+    unit: 'Birim', location: 'Konum', fromWarehouse: 'Çıkış Deposu', toWarehouse: 'Giriş Deposu', selectWarehouse: 'Depo seçin',
     product: 'Ürün', quantity: 'Miktar', checkNo: 'Çek No', bank2: 'Banka',
     amount2: 'Tutar', dueDate: 'Vade Tarihi', drawer: 'Lehtar/Borçlu', checkType: 'Çek Türü',
     received: 'Alınan', given: 'Verilen', position: 'Görev', department: 'Departman',
@@ -302,7 +302,7 @@ export const AT = {
     noRecords: 'No records found.', add: 'Add', name: 'Name', company: 'Company',
     email: 'Email', phone: 'Phone', address: 'Address', notes2: 'Notes',
     taxNo: 'Tax No', code: 'Code', type2: 'Type', unitPrice: 'Unit Price',
-    unit: 'Unit', location: 'Location', fromWarehouse: 'From Warehouse', toWarehouse: 'To Warehouse',
+    unit: 'Unit', location: 'Location', fromWarehouse: 'From Warehouse', toWarehouse: 'To Warehouse', selectWarehouse: 'Select warehouse',
     product: 'Product', quantity: 'Quantity', checkNo: 'Check No', bank2: 'Bank',
     amount2: 'Amount', dueDate: 'Due Date', drawer: 'Drawer/Payee', checkType: 'Check Type',
     received: 'Received', given: 'Given', position: 'Position', department: 'Department',
@@ -630,9 +630,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     items: WaybillItem[];
     total: number;
     status: Waybill['status'];
+    warehouseId: string;
   }>({
     waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'),
-    items: [], total: 0, status: 'Bekliyor'
+    items: [], total: 0, status: 'Bekliyor', warehouseId: ''
   });
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -1554,7 +1555,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       }
 
       setShowWaybillModal(false);
-      setWaybillForm({ waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'), items: [], total: 0, status: 'Bekliyor' });
+      setWaybillForm({ waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'), items: [], total: 0, status: 'Bekliyor', warehouseId: '' });
       setEditingWaybill(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -2402,6 +2403,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           displayedTransfers={displayedTransfers} showTransferModal={showTransferModal} setShowTransferModal={setShowTransferModal}
           editingTransfer={editingTransfer} setEditingTransfer={setEditingTransfer}
           transferForm={transferForm} setTransferForm={setTransferForm} saveTransfer={saveTransfer} deleteTransfer={deleteTransfer}
+          warehouses={warehouses}
         />
       )}
 
@@ -2479,11 +2481,28 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                     <input type="date" value={waybillForm.date} onChange={e => setWaybillForm(prev => ({ ...prev, date: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{waybillType === 'giden' ? t.customer2 : t.supplier2}</label>
-                  <input type="text" value={waybillForm.party} onChange={e => setWaybillForm(prev => ({ ...prev, party: e.target.value }))} placeholder={waybillType === 'giden' ? 'Müşteri adı' : 'Tedarikçi adı'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{waybillType === 'giden' ? t.customer2 : t.supplier2}</label>
+                    <input
+                      type="text" list="waybillPartyList" value={waybillForm.party}
+                      onChange={e => setWaybillForm(prev => ({ ...prev, party: e.target.value }))}
+                      placeholder={waybillType === 'giden' ? 'Müşteri adı' : 'Tedarikçi adı'}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]"
+                    />
+                    <datalist id="waybillPartyList">
+                      {(waybillType === 'giden' ? customers : suppliers).map(p => <option key={p.id} value={p.name} />)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{t.depo}</label>
+                    <select value={waybillForm.warehouseId} onChange={e => setWaybillForm(prev => ({ ...prev, warehouseId: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                      <option value="">{t.selectWarehouse}</option>
+                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                  </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-medium text-gray-600">{t.product}</label>
@@ -2491,14 +2510,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                       <Plus size={10} /> {t.add}
                     </button>
                   </div>
+                  <datalist id="waybillProductList">
+                    {warehouseItems.map(wi => <option key={wi.id} value={wi.productName} />)}
+                  </datalist>
                   {waybillForm.items.map((item, idx) => (
                     <div key={idx} className="p-3 bg-gray-50 rounded-xl border border-gray-100 space-y-2 relative group">
                       <button onClick={() => setWaybillForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                         <X size={14} />
                       </button>
-                      <input type="text" value={item.productName} onChange={e => {
+                      <input type="text" list="waybillProductList" value={item.productName} onChange={e => {
                         const newItems = [...waybillForm.items];
+                        const match = warehouseItems.find(wi => wi.productName === e.target.value);
                         newItems[idx].productName = e.target.value;
+                        if (match?.sku) newItems[idx].sku = match.sku;
                         setWaybillForm(prev => ({ ...prev, items: newItems }));
                       }} placeholder="Ürün adı" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-brand" />
                       <div className="grid grid-cols-3 gap-2">

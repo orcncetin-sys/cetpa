@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
-import { type Transfer } from '../../types';
+import { type Transfer, type Warehouse } from '../../types';
 import { SortHeader, type AccountingT } from './shared';
 import MikroPushButton from '../MikroPushButton';
 import { depoTransferPayload } from '../../services/mikroEvrak';
@@ -24,12 +24,13 @@ interface TransferTabProps {
   setTransferForm: React.Dispatch<React.SetStateAction<TransferForm>>;
   saveTransfer: () => void;
   deleteTransfer: (id: string) => void;
+  warehouses: Warehouse[];
 }
 
 export default function TransferTab({
   t, transferSearch, setTransferSearch, transferSortKey, transferSortDir, toggleTransferSort,
   displayedTransfers, showTransferModal, setShowTransferModal, editingTransfer, setEditingTransfer,
-  transferForm, setTransferForm, saveTransfer, deleteTransfer,
+  transferForm, setTransferForm, saveTransfer, deleteTransfer, warehouses,
 }: TransferTabProps) {
   return (
     <>
@@ -163,11 +164,24 @@ export default function TransferTab({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.fromWarehouse}</label>
-                    <input type="text" value={transferForm.fromWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, fromWarehouse: e.target.value }))} placeholder="Depo A" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    <select value={transferForm.fromWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, fromWarehouse: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                      <option value="">{t.selectWarehouse}</option>
+                      {warehouses.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
+                      {/* Kayıtlı depo listesinde yoksa (eski/serbest metin kayıt) mevcut değer kaybolmasın */}
+                      {transferForm.fromWarehouse && !warehouses.some(w => w.name === transferForm.fromWarehouse) && (
+                        <option value={transferForm.fromWarehouse}>{transferForm.fromWarehouse}</option>
+                      )}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.toWarehouse}</label>
-                    <input type="text" value={transferForm.toWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, toWarehouse: e.target.value }))} placeholder="Depo B" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    <select value={transferForm.toWarehouse} onChange={e => setTransferForm(prev => ({ ...prev, toWarehouse: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                      <option value="">{t.selectWarehouse}</option>
+                      {warehouses.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
+                      {transferForm.toWarehouse && !warehouses.some(w => w.name === transferForm.toWarehouse) && (
+                        <option value={transferForm.toWarehouse}>{transferForm.toWarehouse}</option>
+                      )}
+                    </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">

@@ -447,7 +447,7 @@ export interface WarehouseItem { id: string; productName: string; sku?: string; 
 export interface Transfer { id: string; fromWarehouse: string; toWarehouse: string; productName: string; quantity: number; date: string; notes?: string; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; createdAt?: unknown; }
 export interface Check { id: string; checkNo: string; bankName: string; amount: number; dueDate: string; drawer: string; type: 'Alınan' | 'Verilen'; status: 'Aktif' | 'Tahsil Edildi' | 'İade'; createdAt?: unknown; }
 export interface WaybillItem { productName: string; sku: string; quantity: number; unitPrice: number; taxRate: number; }
-export interface Waybill { id: string; waybillNo: string; invoiceNo?: string; party: string; date: string; items: WaybillItem[]; total?: number; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; type: 'giden' | 'gelen'; createdAt?: unknown; }
+export interface Waybill { id: string; waybillNo: string; invoiceNo?: string; party: string; date: string; items: WaybillItem[]; total?: number; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; type: 'giden' | 'gelen'; warehouseId?: string; createdAt?: unknown; }
 export interface Budget { id: string; category: string; amount: number; period: string; }
 export interface Warehouse { id: string; name: string; location?: string; manager?: string; notes?: string; createdAt?: unknown; }
 

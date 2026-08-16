@@ -5,7 +5,7 @@ import { SortHeader, formatTRY, type AccountingT } from './shared';
 
 type WaybillForm = {
   waybillNo: string; invoiceNo: string; party: string; date: string;
-  items: Waybill['items']; total: number; status: Waybill['status'];
+  items: Waybill['items']; total: number; status: Waybill['status']; warehouseId: string;
 };
 type IrsaliyeSortKey = 'waybillNo' | 'party' | 'date' | 'total' | 'status' | 'type';
 
@@ -100,8 +100,8 @@ export default function GidenIrsaliyeTab({
                   <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${w.status === 'Tamamlandı' ? 'bg-green-100 text-green-600' : w.status === 'İptal' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>{w.status}</span></td>
                   <td className="py-2.5 px-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                      <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                      <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status, warehouseId: w.warehouseId || '' }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                      <button onClick={() => { setEditingWaybill(w); setWaybillForm({ waybillNo: w.waybillNo, invoiceNo: w.invoiceNo || '', party: w.party, date: w.date, items: w.items || [], total: w.total || 0, status: w.status, warehouseId: w.warehouseId || '' }); setWaybillType('giden'); setShowWaybillModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                       <button onClick={() => deleteWaybill(w.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                     </div>
                   </td>
