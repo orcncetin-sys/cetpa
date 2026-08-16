@@ -7009,6 +7009,34 @@ async function startServer() {
     }
   });
 
+  /** GET /api/mikro/cari-hareket/:cariKod — tek carinin TÜM hesap hareketleri.
+   *
+   *  Neden: CariEkstrePanel.tsx eskiden onSnapshot(collection(db,'mikroCariHareketler'),
+   *  where('cha_kod','==',cariKod)) kullanıyordu — dbClient shim'de where() SUNUCUDA
+   *  değil İSTEMCİDE filtreleniyor (src/lib/dbClient.ts onSnapshot: stream.getDocs(coll)
+   *  TÜM koleksiyonu döker, applyConstraints tarayıcıda filtreler). mikroCariHareketler
+   *  şirket-geneli tüm carilerin tüm hareketlerini tuttuğundan, TEK cari ekstresi
+   *  açılırken şirketin TÜM Mikro cari hareket geçmişi tarayıcıya indiriliyordu —
+   *  "çok yavaş" şikayetinin sebebi (2026-08-13). Filtre burada, sunucuda, sadece
+   *  bu tenant'ın verisi üstünde (loadCompanyDocs zaten companyId'ye göre daralt-
+   *  ıyor) yapılıyor; tele yalnız eşleşen satırlar gidiyor. Canlılık (yeni hareket
+   *  gelince otomatik güncelleme) kayboluyor — kısa süreli açılan bir detay ekranı
+   *  için kabul edilebilir bir ödün, aynı /api/reports/stok-fiyat-karsilastirma/:sku/detay
+   *  deseniyle tutarlı.
+   */
+  app.get('/api/mikro/cari-hareket/:cariKod', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const cariKod = String(req.params['cariKod'] || '').trim();
+      if (!cariKod) return res.status(400).json({ success: false, error: 'cariKod gerekli.' });
+      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
+      const docs = await loadCompanyDocs('mikroCariHareketler', cid);
+      const satirlar = docs.filter(d => String(d.cha_kod ?? '').trim() === cariKod);
+      res.json({ success: true, cariKod, satirlar, toplam: satirlar.length });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   /** POST /api/mikro/cari-hareket/kaydet — cari hareket (dekont) → Mikro
    *  Body: { hareket: Record<string, unknown>, aciklama?: string }
    *

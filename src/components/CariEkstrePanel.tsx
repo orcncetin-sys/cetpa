@@ -15,6 +15,7 @@ import {
   collection, query, where, onSnapshot, Timestamp,
 } from '../lib/dbClient';
 import { db } from '../firebase';
+import { authFetch } from '../services/authFetch';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
@@ -165,57 +166,70 @@ export default function CariEkstrePanel({
   // Artık mikroCariHareketler okunur (fatura + masraf + dekont + tahsilat + virman;
   // /api/mikro/import/cari-hareket doldurur). Her hareket bir ekstre satırı:
   // tarih + evrak no + tip (Fatura/Masraf/Dekont…) + borç/alacak + tutar.
+  //
+  // onSnapshot(where(...)) DEĞİL, tek seferlik GET /api/mikro/cari-hareket/:cariKod —
+  // dbClient shim'de where() istemcide filtreleniyor (TÜM koleksiyon indirilip
+  // tarayıcıda süzülüyor), mikroCariHareketler şirket-geneli olduğundan tek cari
+  // ekstresi için ŞİRKETİN TÜM cari hareket geçmişi indiriliyordu — "çok yavaş"
+  // şikayetinin sebebi (2026-08-13). Yeni uç filtreyi sunucuda yapıp yalnız
+  // eşleşen satırları döner. Bedeli: modal açıkken canlı güncelleme kayboldu
+  // (kısa süreli detay ekranı için kabul edilebilir).
   useEffect(() => {
     if (!mikroModu) return;
-    const ref = collection(db, 'mikroCariHareketler');
-    const q = query(ref, where('cha_kod', '==', cariKod));
-    const unsub = onSnapshot(q, snap => {
-      const now = Date.now();
-      const newBuckets: AgingBuckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
-      const newRows: AgingRow[] = [];
-      snap.docs.forEach(d => {
-        const x = d.data() as Record<string, unknown>;
-        const dt = toDate(x.cha_tarihi);
-        const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
-        const amount = Number(x.cha_meblag ?? 0);
-        // cha_tip 0 = borç (satış/masraf → cari borçlanır), 1 = alacak (tahsilat/alış).
-        const borc = Number(x.cha_tip ?? 0) === 0;
-        const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
-        const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
-        // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
-        // hareketleri ne olduğuyla görünür (kullanıcı isteği). Yoksa evrak no'ya düş.
-        const aciklama = String(x.cha_aciklama ?? '').trim();
-        const hizKod = String(x.cha_kasa_hizkod ?? '').trim();
-        const finalAciklama = aciklama || (hizKod ? `Hizmet/Masraf Kodu: ${hizKod}` : '');
-        const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('');
-        const anaEtiket = finalAciklama || evrakNo || (customerName ?? '—');
-        // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
-        // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
-        // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
-        // (code-review bulgusu). Tüm hareketler yine satır olarak listelenir.
-        if (borc) {
-          if (ageD <= 30)       newBuckets.current += amount;
-          else if (ageD <= 60)  newBuckets.d30     += amount;
-          else if (ageD <= 90)  newBuckets.d60     += amount;
-          else if (ageD <= 120) newBuckets.d90     += amount;
-          else                  newBuckets.over90  += amount;
-        }
-        newRows.push({
-          id: d.id,
-          customerName: anaEtiket,
-          amount,
-          ageD,
-          // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
-          status: `${tipEtiket} · ${yon}${finalAciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
-          createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
-          raw: x,
+    let iptal = false;
+    setLoading(true);
+    authFetch(`/api/mikro/cari-hareket/${encodeURIComponent(cariKod!)}`)
+      .then(r => r.json())
+      .then((json: { success: boolean; satirlar?: Record<string, unknown>[] }) => {
+        if (iptal) return;
+        if (!json.success) { setLoading(false); return; }
+        const now = Date.now();
+        const newBuckets: AgingBuckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
+        const newRows: AgingRow[] = [];
+        (json.satirlar ?? []).forEach(x0 => {
+          const x = x0 as Record<string, unknown>;
+          const dt = toDate(x.cha_tarihi);
+          const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
+          const amount = Number(x.cha_meblag ?? 0);
+          // cha_tip 0 = borç (satış/masraf → cari borçlanır), 1 = alacak (tahsilat/alış).
+          const borc = Number(x.cha_tip ?? 0) === 0;
+          const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
+          const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
+          // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
+          // hareketleri ne olduğuyla görünür (kullanıcı isteği). Yoksa evrak no'ya düş.
+          const aciklama = String(x.cha_aciklama ?? '').trim();
+          const hizKod = String(x.cha_kasa_hizkod ?? '').trim();
+          const finalAciklama = aciklama || (hizKod ? `Hizmet/Masraf Kodu: ${hizKod}` : '');
+          const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('');
+          const anaEtiket = finalAciklama || evrakNo || (customerName ?? '—');
+          // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
+          // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
+          // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
+          // (code-review bulgusu). Tüm hareketler yine satır olarak listelenir.
+          if (borc) {
+            if (ageD <= 30)       newBuckets.current += amount;
+            else if (ageD <= 60)  newBuckets.d30     += amount;
+            else if (ageD <= 90)  newBuckets.d60     += amount;
+            else if (ageD <= 120) newBuckets.d90     += amount;
+            else                  newBuckets.over90  += amount;
+          }
+          newRows.push({
+            id: String(x.id ?? ''),
+            customerName: anaEtiket,
+            amount,
+            ageD,
+            // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
+            status: `${tipEtiket} · ${yon}${finalAciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
+            createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
+            raw: x,
+          });
         });
-      });
-      setBuckets(newBuckets);
-      setRows(newRows);
-      setLoading(false);
-    }, () => setLoading(false));
-    return () => unsub();
+        setBuckets(newBuckets);
+        setRows(newRows);
+        setLoading(false);
+      })
+      .catch(() => { if (!iptal) setLoading(false); });
+    return () => { iptal = true; };
   }, [mikroModu, cariKod, t, customerName]);
 
   // ── ORDERS MODU (Cetpa, eski davranış — CRM aging) ──────────────────────────

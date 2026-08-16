@@ -221,7 +221,7 @@ export default function CRMPage({
     if (leadNoteTimer.current) clearTimeout(leadNoteTimer.current);
     if (selectedLead) {
       leadNoteTimer.current = setTimeout(() => {
-        updateDoc(doc(db, 'leads', selectedLead.id), { quickNote: val }).catch(() => {});
+        updateDoc(doc(db, 'leads', selectedLead.id), { quickNote: val, updatedAt: serverTimestamp() }).catch(() => {});
       }, 600);
     }
   };
@@ -239,7 +239,7 @@ export default function CRMPage({
     if (!selectedLead) return;
     try {
       const nextFollowUpDate = Timestamp.fromDate(new Date(date));
-      await updateDoc(doc(db, 'leads', selectedLead.id), { nextFollowUpDate });
+      await updateDoc(doc(db, 'leads', selectedLead.id), { nextFollowUpDate, updatedAt: serverTimestamp() });
       setSelectedLead({ ...selectedLead, nextFollowUpDate });
     } catch (error) {
       console.error('Error updating follow-up date:', error);
@@ -297,7 +297,7 @@ export default function CRMPage({
       const url = await getDownloadURL(sRef);
       const newNote: VoiceNote = { id: Date.now().toString(), url, createdAt: serverTimestamp() };
       const updatedNotes = [...((selectedLead.voiceNotes as VoiceNote[] | undefined) || []), newNote];
-      await updateDoc(doc(db, 'leads', selectedLead.id), { voiceNotes: updatedNotes });
+      await updateDoc(doc(db, 'leads', selectedLead.id), { voiceNotes: updatedNotes, updatedAt: serverTimestamp() });
       setSelectedLead({ ...selectedLead, voiceNotes: updatedNotes });
     } catch (error) {
       console.error('Error uploading voice note:', error);

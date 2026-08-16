@@ -3950,31 +3950,48 @@ function AppContent() {
             </div>
 
             <div className={cn("flex items-center gap-2 pl-2 sm:pl-3 border-l", darkMode ? "border-white/15" : "border-black/10")}>
-              <div className="text-right hidden md:block">
-                <p className={cn("text-xs font-semibold leading-none", darkMode ? "text-white/90" : "text-gray-900")}>{user?.displayName || 'Misafir'}</p>
-                <span className={cn(
-                  "text-[9px] font-bold px-1.5 py-0.5 rounded-full mt-0.5 inline-block",
-                  userRole === 'Admin' ? 'bg-brand/20 text-brand' :
-                  userRole === 'Manager' ? 'bg-orange-500/20 text-orange-400' :
-                  userRole === 'Accounting' ? 'bg-blue-500/20 text-blue-400' :
-                  userRole === 'Sales' ? 'bg-green-500/20 text-green-400' :
-                  userRole === 'Logistics' ? 'bg-purple-500/20 text-purple-400' :
-                  userRole === 'HR' ? 'bg-pink-500/20 text-pink-400' :
-                  userRole === 'Purchasing' ? 'bg-cyan-500/20 text-cyan-400' :
-                  'bg-white/10 text-white/50'
-                )}>{userRole}</span>
-              </div>
-              <div className="relative w-8 h-8 flex-shrink-0">
-                {/* Taban: baş harf — foto yüklenmezse/hatalıysa bu görünür */}
-                <div className={cn("absolute inset-0 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center", darkMode && "border-brand/40")}>
-                  <span className="text-xs font-bold text-brand">{(user?.displayName || user?.email || 'M')[0].toUpperCase()}</span>
-                </div>
-                {user?.photoURL && (
-                  <img src={user.photoURL} referrerPolicy="no-referrer" loading="lazy"
-                    onError={e => { e.currentTarget.style.display = 'none'; }}
-                    className={cn("absolute inset-0 w-8 h-8 rounded-full border-2 shadow-sm object-cover", darkMode ? "border-white/20" : "border-black/10")} alt="User" />
+              {/* Profil bloğu — hesap ayarlarına gider. Ayarlar sekmesi Admin/Manager/
+                  isOwnerAdmin dışına kapalı (bkz. satır ~4024 sidebar aynı koşulu
+                  kullanıyor); diğer rollerde tıklama şimdilik no-op — hazır bir
+                  "kendi profilim" hedefi yok, en azından mevcut davranışı bozmuyor
+                  (2026-08-13 kullanıcı bildirimi: tıklayınca hiçbir yere gitmiyordu). */}
+              <button
+                type="button"
+                onClick={() => { if (userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin) setActiveTab('settings'); }}
+                title={currentLanguage === 'tr' ? 'Hesap Ayarları' : 'Account Settings'}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl -mx-1 px-1 py-0.5 transition-colors",
+                  (userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin)
+                    ? (darkMode ? "hover:bg-white/10 cursor-pointer" : "hover:bg-black/5 cursor-pointer")
+                    : "cursor-default"
                 )}
-              </div>
+              >
+                <div className="text-right hidden md:block">
+                  <p className={cn("text-xs font-semibold leading-none", darkMode ? "text-white/90" : "text-gray-900")}>{user?.displayName || 'Misafir'}</p>
+                  <span className={cn(
+                    "text-[9px] font-bold px-1.5 py-0.5 rounded-full mt-0.5 inline-block",
+                    userRole === 'Admin' ? 'bg-brand/20 text-brand' :
+                    userRole === 'Manager' ? 'bg-orange-500/20 text-orange-400' :
+                    userRole === 'Accounting' ? 'bg-blue-500/20 text-blue-400' :
+                    userRole === 'Sales' ? 'bg-green-500/20 text-green-400' :
+                    userRole === 'Logistics' ? 'bg-purple-500/20 text-purple-400' :
+                    userRole === 'HR' ? 'bg-pink-500/20 text-pink-400' :
+                    userRole === 'Purchasing' ? 'bg-cyan-500/20 text-cyan-400' :
+                    'bg-white/10 text-white/50'
+                  )}>{userRole}</span>
+                </div>
+                <div className="relative w-8 h-8 flex-shrink-0">
+                  {/* Taban: baş harf — foto yüklenmezse/hatalıysa bu görünür */}
+                  <div className={cn("absolute inset-0 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center", darkMode && "border-brand/40")}>
+                    <span className="text-xs font-bold text-brand">{(user?.displayName || user?.email || 'M')[0].toUpperCase()}</span>
+                  </div>
+                  {user?.photoURL && (
+                    <img src={user.photoURL} referrerPolicy="no-referrer" loading="lazy"
+                      onError={e => { e.currentTarget.style.display = 'none'; }}
+                      className={cn("absolute inset-0 w-8 h-8 rounded-full border-2 shadow-sm object-cover", darkMode ? "border-white/20" : "border-black/10")} alt="User" />
+                  )}
+                </div>
+              </button>
               {user && (
                 <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
                   className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
