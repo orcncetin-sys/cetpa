@@ -121,6 +121,12 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   const [inviteRole, setInviteRole] = useState('Sales');
   const [inviting, setInviting] = useState(false);
   const USER_ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
+  const ROLE_LABEL_TR: Record<string, string> = {
+    Admin: 'Admin', Manager: 'Yönetici', Sales: 'Satış', Logistics: 'Lojistik',
+    Accounting: 'Muhasebe', HR: 'İnsan Kaynakları', Purchasing: 'Satın Alma',
+    B2B: 'B2B', Dealer: 'Bayi', Legal: 'Hukuk', Corporate: 'Kurumsal', Quality: 'Kalite',
+  };
+  const roleLabel = (r: string) => (tr ? (ROLE_LABEL_TR[r] ?? r) : r);
 
   // Ödeme linki modalı
   const [payOpen, setPayOpen] = useState(false);
@@ -507,7 +513,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                               aria-label={tr ? 'Rol' : 'Role'}
                               className="text-[11px] px-1.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold border-0 outline-none disabled:opacity-50"
                             >
-                              {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                              {USER_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                             </select>
                             <button
                               onClick={() => void removeUser(u.uid, u.email)}
@@ -528,7 +534,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       className="apple-input flex-1 text-sm py-1.5"
                     />
                     <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} aria-label={tr ? 'Davet rolü' : 'Invite role'} className="apple-input text-sm py-1.5 w-28">
-                      {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      {USER_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
                     <button onClick={() => void inviteUser()} disabled={inviting || !inviteEmail.trim()} className="apple-button-secondary text-xs px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 shrink-0">
                       <UserPlus className="w-3.5 h-3.5" />{inviting ? (tr ? 'Gönderiliyor...' : 'Sending...') : (tr ? 'Davet Et' : 'Invite')}

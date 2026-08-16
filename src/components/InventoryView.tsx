@@ -251,6 +251,14 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         const diff = rank(a) - rank(b);
         return sortConfig.direction === 'asc' ? diff : -diff;
       }
+      if (sortConfig.key === 'location') {
+        // DEPO hücresi item.location DEĞİL, depoEtiketi(item) (gerçek depo
+        // dağılımından hesaplı, çoğu Mikro üründe location boş) gösteriyordu —
+        // location'a göre sıralamak neredeyse hep berabere kalıp "rastgele"
+        // görünüyordu (2026-08-17 bildirimi). Görünen etikete göre sırala.
+        const diff = depoEtiketi(a).localeCompare(depoEtiketi(b), 'tr');
+        return sortConfig.direction === 'asc' ? diff : -diff;
+      }
       const aValue = (a as unknown as Record<string, unknown>)[sortConfig.key] ?? '';
       const bValue = (b as unknown as Record<string, unknown>)[sortConfig.key] ?? '';
       if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
