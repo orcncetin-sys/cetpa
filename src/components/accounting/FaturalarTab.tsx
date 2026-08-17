@@ -14,6 +14,15 @@ type InvoiceForm = {
 type MikroFaturaRow = MikroFatura & { musteri: string };
 type ConfirmModalState = { isOpen: boolean; title: string; message: string; onConfirm: () => void };
 
+// Kolon başlıkları invoices alanlarıyla aynı isimde değil (musteri/tarih/oran/
+// matrah/tutar) — sıralama tıklaması Mikro satırlarında hiç etki etmiyordu
+// (2026-08-17, kullanıcı bildirdi). Statik, bileşen dışında (her render'da
+// yeniden ayrılmasın).
+const MIKRO_SORT_KEY: Record<string, keyof MikroFaturaRow> = {
+  faturaNo: 'faturaNo', customerName: 'musteri', date: 'tarih',
+  kdvOran: 'oran', kdvHaric: 'matrah', totalPrice: 'tutar', faturaTipi: 'yon',
+};
+
 interface FaturalarTabProps {
   currentLanguage: string;
   isAuthenticated: boolean;
@@ -298,7 +307,15 @@ export default function FaturalarTab({
                   Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
                   `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
                   Mevcut mantık değişmedi, kaynak seçici opt-in. */}
-              {faturaKaynak !== 'cetpa' && mikroFaturaSatirlari.map(f => (
+              {faturaKaynak !== 'cetpa' && [...mikroFaturaSatirlari].sort((a, b) => {
+                const key = MIKRO_SORT_KEY[invoiceSort.key];
+                if (!key) return 0;
+                const av = (a[key] as string | number) ?? '';
+                const bv = (b[key] as string | number) ?? '';
+                if (av < bv) return invoiceSort.direction === 'asc' ? -1 : 1;
+                if (av > bv) return invoiceSort.direction === 'asc' ? 1 : -1;
+                return 0;
+              }).map(f => (
                 <tr key={`mikro-fat-${f.id}`}
                   onClick={() => setFaturaDetay({ ...f, uuid: f.uuid })}
                   title={currentLanguage==='tr'?'Detay ve XML/PDF için tıklayın':'Click for detail and XML/PDF'}
@@ -315,7 +332,11 @@ export default function FaturalarTab({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
-                  <td className="px-4 py-3 text-right text-gray-600">{f.oran !== null ? `%${f.oran}` : '—'}</td>
+                  <td className="px-4 py-3 text-right text-gray-600">
+                    {f.oranKarma
+                      ? <span title={currentLanguage==='tr'?'Faturada birden fazla KDV oranı var (ör. %10 + %20) — matrah/toplam KDV bunları içerir, tek oran gösterilemez':'Multiple VAT rates on this invoice — net/total reflect all rates, a single % cannot be shown'} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{currentLanguage==='tr'?'Karma':'Mixed'}</span>
+                      : (f.oran !== null ? `%${f.oran}` : '—')}
+                  </td>
                   <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
                   <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{f.tutar.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                   <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>

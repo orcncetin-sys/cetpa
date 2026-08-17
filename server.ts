@@ -5966,7 +5966,15 @@ async function startServer() {
     tablo: 'CARI_HESAP_HAREKETLERI cha',
     fromEk: ' LEFT JOIN (' +
               'SELECT sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, ' +
-              'SUM(sth_vergi) AS kdv, SUM(sth_tutar) AS matrah, MIN(sth_vergi_pntr) AS vergiPntr ' +
+              'SUM(sth_vergi) AS kdv, SUM(sth_tutar) AS matrah, MIN(sth_vergi_pntr) AS vergiPntr, ' +
+              // Karma KDV tespiti (2026-08-17, kullanıcı bildirdi): bir faturada
+              // hem %10 hem %20'li ürün olabilir. Tek `vergiPntr` (MIN) o zaman
+              // yanıltıcı — matrah/kdv toplamları doğru ama görünen tek oran
+              // faturanın tamamını temsil etmiyor. Karma ise istemci "Karma" gösterir.
+              // ISNULL(...,-1): COUNT(DISTINCT) NULL'ları görmezden gelir — bir
+              // satırın gerçek orana (ör. %20) diğerinin NULL/çözülemeyen orana
+              // sahip olduğu fatura, ISNULL olmadan "tek oran" gibi görünürdü.
+              'COUNT(DISTINCT ISNULL(sth_vergi_pntr, -1)) AS oranSayisi ' +
               'FROM STOK_HAREKETLERI WHERE sth_evraktip IN (3, 4) ' +
               'GROUP BY sth_evrakno_seri, sth_evrakno_sira, sth_evraktip' +
             ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri ' +
@@ -5975,7 +5983,7 @@ async function startServer() {
             // kullanabiliyor (seri boş). evraktip'i de anahtara katmazsak
             // bir satış faturasına alış satırının KDV'si bağlanabilir.
             'AND sat.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END',
-    secim: 'cha.*, ISNULL(sat.kdv, ISNULL(cha.cha_meblag - cha.cha_aratoplam, 0)) AS kdvTutari, ISNULL(sat.matrah, ISNULL(cha.cha_aratoplam, 0)) AS matrah, sat.vergiPntr',
+    secim: 'cha.*, ISNULL(sat.kdv, ISNULL(cha.cha_meblag - cha.cha_aratoplam, 0)) AS kdvTutari, ISNULL(sat.matrah, ISNULL(cha.cha_aratoplam, 0)) AS matrah, sat.vergiPntr, sat.oranSayisi',
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',

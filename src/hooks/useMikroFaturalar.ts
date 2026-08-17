@@ -15,13 +15,14 @@ export interface MikroFatura {
   kdv: number;                   // fatura satırlarından JOIN'li (başlıkta yok)
   matrah: number;
   oran: number | null;           // vergiPntr indeksinden; çözülemezse null
+  oranKarma: boolean;            // true: faturada birden fazla KDV oranı var (ör. %10 + %20) — oran tek başına yanıltıcı
   yon: 'gelen' | 'giden';        // cha_tip 1=gelen(alış), 0=giden(satış)
   uuid?: string;                 // GİB belge kimliği (e-belge XML/PDF)
   ebelgeTuru: number;            // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye; -1=bilinmiyor
   subeNo: number;                // cha_subeno — şube bazlı P&L eşleşmesi için
 }
 
-const VERGI_PNTR_ORAN: Record<string, number> = { '1': 0, '2': 1, '3': 10, '4': 20 };
+export const VERGI_PNTR_ORAN: Record<string, number> = { '1': 0, '2': 1, '3': 10, '4': 20 };
 
 /** Ham mikroFaturalar dokümanını normalize et (iptal edilmişler çıkarılır). */
 export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFatura {
@@ -36,6 +37,7 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     kdv:      Number(x.kdvTutari ?? 0) || 0,
     matrah:   Number(x.matrah ?? 0) || 0,
     oran:     VERGI_PNTR_ORAN[String(x.vergiPntr ?? '')] ?? null,
+    oranKarma: Number(x.oranSayisi ?? 1) > 1,
     uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
     ebelgeTuru: Number(x.cha_ebelge_turu ?? -1),
     yon:      Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden',

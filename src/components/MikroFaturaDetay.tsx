@@ -16,6 +16,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, Download, FileCode, Loader2, AlertTriangle, Package } from 'lucide-react';
 import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
+import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
 
 export interface MikroFaturaDetayVerisi {
   id: string;
@@ -27,6 +28,7 @@ export interface MikroFaturaDetayVerisi {
   kdv: number;
   matrah: number;
   oran: number | null;
+  oranKarma?: boolean;
   yon: 'gelen' | 'giden';
   uuid?: string;
 }
@@ -87,6 +89,26 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     ? cekimHata
     : (tr ? 'Evrak numarası okunamadı — kalemler getirilemiyor.' : 'Unreadable document number.');
 
+  /** Karma KDV kırılımı (2026-08-17, kullanıcı bildirdi): fatura başlığı tek bir
+   *  "%20" gösteriyordu ama satırlarda hem %10 hem %20'li ürün olabiliyordu.
+   *  `kalemler` zaten sth_vergi_pntr/sth_vergi/sth_tutar'ı satır satır getiriyor
+   *  — yeni bir Mikro sorgusu gerekmeden, burada gruplanıp gerçek kırılım
+   *  gösterilebilir (liste ekranındaki "Karma" rozeti yalnız uyarı verir,
+   *  burada asıl rakamlar var). */
+  const oranKirilim = useMemo(() => {
+    if (!kalemler?.length) return null;
+    const map = new Map<string, { oran: number | null; matrah: number; kdv: number }>();
+    for (const k of kalemler) {
+      const oran = VERGI_PNTR_ORAN[String(k.sth_vergi_pntr ?? '')] ?? null;
+      const key = oran === null ? 'bilinmiyor' : String(oran);
+      const cur = map.get(key) ?? { oran, matrah: 0, kdv: 0 };
+      cur.matrah += Number(k.sth_tutar ?? 0) || 0;
+      cur.kdv += Number(k.sth_vergi ?? 0) || 0;
+      map.set(key, cur);
+    }
+    return [...map.values()].sort((a, b) => (b.oran ?? -1) - (a.oran ?? -1));
+  }, [kalemler]);
+
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;
     setIndiriliyor(tur);
@@ -132,7 +154,18 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
           {satir(tr ? 'Tarih' : 'Date', fatura.tarih || '—')}
           {satir(tr ? 'Matrah' : 'Base', typeof fatura.matrah === 'number' ? tl(fatura.matrah) : '—')}
-          {satir(tr ? 'KDV' : 'VAT', typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oran !== null ? ` (%${fatura.oran})` : ''}` : '—')}
+          {satir(tr ? 'KDV' : 'VAT', typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
+          {fatura.oranKarma && oranKirilim && oranKirilim.length > 1 && (
+            <div className="bg-amber-50 rounded-xl px-3 py-2 my-2 space-y-1">
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">{tr ? 'KDV Kırılımı' : 'VAT Breakdown'}</p>
+              {oranKirilim.map(r => (
+                <div key={String(r.oran)} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">{r.oran === null ? (tr ? 'Bilinmiyor' : 'Unknown') : `%${r.oran}`}</span>
+                  <span className="font-semibold text-[#1D1D1F]">{tl(r.kdv)} <span className="text-gray-400 font-normal">({tr ? 'matrah' : 'base'} {tl(r.matrah)})</span></span>
+                </div>
+              ))}
+            </div>
+          )}
           {satir(tr ? 'Toplam' : 'Total', typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
 
           {/* ── Fatura kalemleri ── */}

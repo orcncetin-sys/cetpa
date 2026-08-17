@@ -260,7 +260,7 @@ export default function SatislarTab({
                   <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(f.tutar)}</td>
                   <td className="py-2.5 px-3 text-center text-xs font-mono text-gray-600">{f.faturaNo || '—'}</td>
                   <td className="py-2.5 px-3 text-center text-xs text-gray-500 hidden sm:table-cell">
-                    {f.kdv ? formatTRY(f.kdv) : '—'}{f.oran !== null ? ` (%${f.oran})` : ''}
+                    {f.kdv ? formatTRY(f.kdv) : '—'}{f.oranKarma ? (currentLanguage === 'tr' ? ' (Karma)' : ' (Mixed)') : (f.oran !== null ? ` (%${f.oran})` : '')}
                   </td>
                 </tr>
               ))}
