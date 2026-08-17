@@ -7961,7 +7961,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       await writeSyncLog('SQL:CARI_HESAP_ADRESLERI', 'leads', ozet, true, null, null, Date.now() - t0, reqActor(req));
       await writeAuditLog(reqActor(req), 'Mikro Cari Adres Çekme', ozet);
       res.json({ success: true, total: leadsSnap.size, updated, skipped, yabanciAtlanan,
-                 mikroRows: rows.length, duration: Date.now() - t0 });
+                 mikroRows: rows.length, duration: Date.now() - t0, note: `${updated} dolduruldu, ${skipped} atlandı` });
     } catch (err) {
       console.error('[pull/cari-adres]', err);
       res.status(500).json({ success: false, error: 'Adres çekimi başarısız. Hiçbir adres değiştirilmedi.' });

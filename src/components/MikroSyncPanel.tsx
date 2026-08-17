@@ -404,6 +404,10 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     { key: 'maliyet-mrk',  route: '/api/mikro/import/maliyet-merkezi', title: t ? 'Maliyet Merkezleri' : 'Cost Centers', desc: t ? 'Mikro sorumluluk/maliyet merkezlerini çek.' : 'Pull responsibility/cost centers.' },
     { key: 'personel',     route: '/api/mikro/pull/personel',         title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
     { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
+    // 2026-08-17: yalnız PUSH vardı (leads→Mikro), Mikro'daki cari adresleri
+    // hiç geri gelmiyordu — Satış Bölgesi'nin şehir bazlı otomatik atama
+    // yapabilmesi için şart (bkz. TerritoryModule cityInTerritory).
+    { key: 'cari-adres',   route: '/api/mikro/pull/cari-adres',       title: t ? 'Cari Adresleri' : 'Account Addresses', desc: t ? 'Mikro cari adreslerini çek, yalnız boş şehir/adres alanlarını doldurur (Satış Bölgesi otomatik atama için).' : 'Pull Mikro account addresses, filling only empty city/address fields (feeds Territory auto-assignment).' },
   ];
 
   // ── Dummy ürün temizliği (kaynaksız seed kayıtları) ─────────────────────────
