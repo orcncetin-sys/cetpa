@@ -42,6 +42,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { KpiCard, KpiGrid } from './ReportKit';
 
 export default function UrunlerRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -97,20 +98,16 @@ export default function UrunlerRapor(ctx: ReportsCtx) {
 
         return (
           <div className="space-y-4">
-            {/* KPI Strip */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: currentLanguage === 'tr' ? 'A Sınıfı Ürün' : 'Class A Items', value: countA, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', desc: currentLanguage === 'tr' ? 'Gelirin %70\'i' : '70% of revenue' },
-                { label: currentLanguage === 'tr' ? 'B Sınıfı Ürün' : 'Class B Items', value: countB, cls: 'bg-amber-50 text-amber-700 border-amber-200', desc: currentLanguage === 'tr' ? 'Gelirin %20\'si' : '20% of revenue' },
-                { label: currentLanguage === 'tr' ? 'C Sınıfı Ürün' : 'Class C Items', value: countC, cls: 'bg-gray-50 text-gray-600 border-gray-200', desc: currentLanguage === 'tr' ? 'Gelirin %10\'u' : '10% of revenue' },
-              ].map(k => (
-                <div key={k.label} className={`rounded-xl border px-4 py-3 ${k.cls}`}>
-                  <p className="text-2xl font-black">{k.value}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mt-0.5">{k.label}</p>
-                  <p className="text-[10px] opacity-70">{k.desc}</p>
-                </div>
+            {/* KPI Strip — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
+            <KpiGrid cols={3}>
+              {([
+                { label: currentLanguage === 'tr' ? 'A Sınıfı Ürün' : 'Class A Items', value: countA, symbol: 'A', accent: 'text-emerald-600', accentBg: 'bg-emerald-50', desc: currentLanguage === 'tr' ? 'Gelirin %70\'i' : '70% of revenue' },
+                { label: currentLanguage === 'tr' ? 'B Sınıfı Ürün' : 'Class B Items', value: countB, symbol: 'B', accent: 'text-amber-600', accentBg: 'bg-amber-50', desc: currentLanguage === 'tr' ? 'Gelirin %20\'si' : '20% of revenue' },
+                { label: currentLanguage === 'tr' ? 'C Sınıfı Ürün' : 'Class C Items', value: countC, symbol: 'C', accent: 'text-gray-600', accentBg: 'bg-gray-100', desc: currentLanguage === 'tr' ? 'Gelirin %10\'u' : '10% of revenue' },
+              ] as const).map((k, i) => (
+                <KpiCard key={k.label} index={i} label={k.label} value={k.value} symbol={k.symbol} accent={k.accent} accentBg={k.accentBg} hint={k.desc} />
               ))}
-            </div>
+            </KpiGrid>
 
             {/* Product table */}
             <div className="apple-card overflow-hidden">

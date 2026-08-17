@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { servisIsEmriPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { confirmDelete } from '../lib/confirm';
 import {
   Plus, X, Star, AlertCircle, CheckCircle, Clock, Edit2, Trash2
 } from 'lucide-react';
@@ -202,7 +203,8 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
   }
 
   async function deleteTeknisyen(id: string) {
-    if (!confirm('Teknisyen silinsin mi?')) return;
+    const teknisyen = teknisyenler.find(t => t.id === id);
+    if (!(await confirmDelete(teknisyen?.ad, _lang === 'tr' ? 'tr' : 'en'))) return;
     await deleteDoc(doc(db, 'teknisyenler', id));
   }
 

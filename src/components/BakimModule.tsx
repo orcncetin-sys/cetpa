@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
 import { bakimTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { confirmDelete } from '../lib/confirm';
 import { CalendarDays,
   Plus, X, Settings, Zap, Car, Monitor, Package,
   Edit2, Trash2
@@ -172,7 +173,8 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
         : `${refCount} work orders/faults reference this equipment. Remove them first.`);
       return;
     }
-    if (!confirm(_lang === 'tr' ? 'Ekipman silinsin mi?' : 'Delete equipment?')) return;
+    const ekipman = ekipmanlar.find(e => e.id === id);
+    if (!(await confirmDelete(ekipman?.ad, _lang === 'tr' ? 'tr' : 'en'))) return;
     await deleteDoc(doc(db, 'ekipmanlar', id));
   }
 
