@@ -7863,6 +7863,111 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     }
   });
 
+  // ── Mikro Pull: Cari Adresleri ───────────────────────────────────────────
+  // POST /api/mikro/pull/cari-adres
+  //
+  // Önceden yalnız PUSH vardı (leads.address/city/district → Mikro, bkz.
+  // CariKaydetV2 push payload). PULL yoktu — Mikro'da (elle veya push ile)
+  // girilmiş adresler Cetpa'ya hiç geri gelmiyordu (2026-08-17 kullanıcı
+  // isteği: "müşterilerin adreslerini mikroya kaydediyoruz, otomatik al ve
+  // bölgelerine koy" — Satış Bölgesi'nin otomatik atama yapabilmesi için şart).
+  //
+  // Kolonlar TAHMİN EDİLMİYOR — mikroKolonlar ile şemadan süzülüyor (adr_cadde/
+  // adr_ilce/adr_il/adr_ulke/adr_adres_no zaten mikro_cari_hesap_adresleri
+  // aynasında doğrulanmış — bkz. CREATE TABLE, ~satır 1092). Bir cari'nin
+  // birden çok adresi olabilir (sevk/fatura/vb, adr_adres_no ile ayrılır);
+  // en düşük adres no'yu (genelde varsayılan/ilk girilen) alıyoruz.
+  //
+  // SADECE BOŞ ALANLARI DOLDURUR — elle düzeltilmiş bir city/address varsa
+  // ÜZERİNE YAZMAZ (EKLE, YERİNE KOYMA ilkesi; bu alan için "ekleme" = eksik
+  // olanı doldurmak).
+  app.post('/api/mikro/pull/cari-adres', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const cols = await mikroKolonlar('CARI_HESAP_ADRESLERI');
+      if (!cols.length) {
+        return res.status(502).json({ success: false, error: 'CARI_HESAP_ADRESLERI şeması okunamadı.' });
+      }
+      const istenen = ['adr_cari_kod', 'adr_adres_no', 'adr_cadde', 'adr_ilce', 'adr_il', 'adr_ulke'];
+      const colSet = new Set(cols.map(c => c.toLowerCase()));
+      const secim = istenen.filter(c => colSet.has(c.toLowerCase()));
+      if (!secim.includes('adr_cari_kod') || secim.length < 2) {
+        return res.status(502).json({ success: false, error: 'CARI_HESAP_ADRESLERI beklenen kolonları taşımıyor — hiçbir adres değiştirilmedi.' });
+      }
+
+      // ORDER BY şart: adr_adres_no şemada yoksa (aşağıdaki gruplama her satırı
+      // eşit "0" görür) ya da iki satır aynı adres no'yu taşıyorsa (Mikro bunu
+      // garanti etmiyor), sıralamasız sonuç SQL Server'ın keyfi dönüş sırasına
+      // kalır — her çalıştırmada FARKLI adres seçilebilir (code-review bulgusu).
+      const siraliMi = secim.includes('adr_adres_no');
+      const { rows, hata } = await mikroSql(
+        `SELECT ${secim.join(', ')} FROM CARI_HESAP_ADRESLERI` +
+        (siraliMi ? ' ORDER BY adr_cari_kod, adr_adres_no' : ''),
+      );
+      if (hata) {
+        return res.status(502).json({ success: false, error: `Adres sorgusu çalıştırılamadı: ${hata}. Hiçbir adres değiştirilmedi.` });
+      }
+
+      // cari_kod başına en düşük adr_adres_no'lu satırı tut (ORDER BY ile artık
+      // deterministik — eşit no'larda SQL'in döndürdüğü ilk satır tutarlı kalır).
+      const byKod = new Map<string, Record<string, unknown>>();
+      for (const row of rows) {
+        const kod = String(row.adr_cari_kod ?? '').trim();
+        if (!kod) continue;
+        const mevcut = byKod.get(kod);
+        const no = Number(row.adr_adres_no ?? 0);
+        if (!mevcut || no < Number(mevcut.adr_adres_no ?? 0)) byKod.set(kod, row);
+      }
+
+      const companyId = await reqCompanyId(req);
+      const leadsSnap = await adminDb.collection('leads').where('mikroCariKod', '!=', '').get();
+      let updated = 0, skipped = 0, yabanciAtlanan = 0;
+      let batch = adminDb.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
+
+      for (const leadDoc of leadsSnap.docs) {
+        const veri = leadDoc.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) { yabanciAtlanan++; continue; }
+        const cariKod = String(veri.mikroCariKod ?? '').trim();
+        const adres = cariKod ? byKod.get(cariKod) : undefined;
+        if (!adres) { skipped++; continue; }
+
+        // Boş sayılan: undefined/null/'' ve YALNIZ BOŞLUKTAN oluşan değer —
+        // salt falsy kontrolü ' ' gibi anlamsız-ama-truthy değeri "zaten dolu"
+        // sanıp Mikro'dan doldurmayı atlıyordu (code-review bulgusu).
+        const bos = (v: unknown) => !v || (typeof v === 'string' && !v.trim());
+        const guncelleme: Record<string, unknown> = {};
+        if (bos(veri.address) && adres.adr_cadde) guncelleme.address = String(adres.adr_cadde);
+        if (bos(veri.city) && adres.adr_il) guncelleme.city = String(adres.adr_il);
+        if (bos((veri as { district?: unknown }).district) && adres.adr_ilce) guncelleme.district = String(adres.adr_ilce);
+        if (bos((veri as { country?: unknown }).country) && adres.adr_ulke) guncelleme.country = String(adres.adr_ulke);
+        if (!Object.keys(guncelleme).length) { skipped++; continue; }
+        // Kaynak izi: "en düşük adres no = varsayılan" TAHMİNE dayalı (Mikro'da
+        // doğrulanmış bir kural değil) — sahte kesinlik göstermemek için hangi
+        // alanların bu sezgisel seçimden geldiği işaretleniyor (bkz. task #31,
+        // Satış Bölgesi otomatik ataması bu alanı okuyacak).
+        guncelleme.addressSource = 'mikro-heuristic';
+
+        batch.set(leadDoc.ref, guncelleme, { merge: true });
+        ops++; updated++;
+        if (ops >= 400) await flush();
+      }
+      await flush();
+
+      const ozet = `${updated} cari adresi dolduruldu (Mikro'dan ${rows.length} adres satırı, ${yabanciAtlanan} yabancı kiracı atlandı)`;
+      await writeSyncLog('SQL:CARI_HESAP_ADRESLERI', 'leads', ozet, true, null, null, Date.now() - t0, reqActor(req));
+      await writeAuditLog(reqActor(req), 'Mikro Cari Adres Çekme', ozet);
+      res.json({ success: true, total: leadsSnap.size, updated, skipped, yabanciAtlanan,
+                 mikroRows: rows.length, duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('[pull/cari-adres]', err);
+      res.status(500).json({ success: false, error: 'Adres çekimi başarısız. Hiçbir adres değiştirilmedi.' });
+    }
+  });
+
   // ── Mikro Pull: Mizan (Trial Balance) ───────────────────────────────────────
   // POST /api/mikro/pull/mizan  — aylık mizan → accountingPeriods
   // Body: { period?: 'YYYY-MM' }
