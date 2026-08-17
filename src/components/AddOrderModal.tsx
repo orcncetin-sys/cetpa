@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Search, Scan, Package, Trash2, FileText, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
-import BarcodeScanner from './BarcodeScanner';
+const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead, InventoryItem, Order, OrderLineItem } from '../types';
 
@@ -234,18 +234,20 @@ export default function AddOrderModal({
                   </div>
                 </div>
 
-                <BarcodeScanner
+                <React.Suspense fallback={null}>
+                  <BarcodeScanner
                   isOpen={isOrderScannerOpen}
                   onClose={() => setIsOrderScannerOpen(false)}
                   currentLanguage={currentLanguage}
                   title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
                   onScan={(barcode) => {
-                    const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
-                    if (match) handleAddLineItem(match);
-                    else setProductSearch(barcode);
-                    setShowProductPicker(true);
+                  const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
+                  if (match) handleAddLineItem(match);
+                  else setProductSearch(barcode);
+                  setShowProductPicker(true);
                   }}
-                />
+                  />
+                </React.Suspense>
 
                 {showProductPicker && (
                   <div className="border border-gray-200 rounded-xl overflow-hidden shadow-lg">

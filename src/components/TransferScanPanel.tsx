@@ -6,10 +6,10 @@
  * warehouses/vehicles içinde çözülür. Ürün barkodu inventory'de sku ile eşleşir.
  * Transfer atomik olarak POST /api/logistics/transfer'e gider.
  */
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { QrCode, Package, ArrowRightLeft, X, Check, Warehouse as WarehouseIcon, Truck } from 'lucide-react';
-import BarcodeScanner from './BarcodeScanner';
+const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import ModuleHeader from './ModuleHeader';
 import { parseLocationQr } from '../lib/locationQr';
 import { transferStock, getLocationQty, type LocationRef } from '../services/logisticsService';
@@ -177,14 +177,16 @@ export default function TransferScanPanel({
         {submitting ? '…' : <><Check className="w-4 h-4" />{tr ? 'Transfer Et' : 'Transfer'}</>}
       </button>
 
-      <BarcodeScanner
+      <React.Suspense fallback={null}>
+        <BarcodeScanner
         isOpen={scanTarget !== null}
         onClose={() => setScanTarget(null)}
         onScan={handleScan}
         currentLanguage={currentLanguage}
         title={scanTarget === 'product' ? (tr ? 'Ürün Barkodu' : 'Product Barcode') : (tr ? 'Lokasyon QR' : 'Location QR')}
         placeholder={scanTarget === 'product' ? (tr ? 'SKU / barkod' : 'SKU / barcode') : (tr ? 'Depo/araç QR' : 'Warehouse/vehicle QR')}
-      />
+        />
+      </React.Suspense>
     </motion.div>
   );
 }

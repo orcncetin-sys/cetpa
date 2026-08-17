@@ -36,7 +36,7 @@ import { cn } from '../lib/utils';
 
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
-import BarcodeScanner from './BarcodeScanner';
+const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import SortHeader from './SortHeader';
 import ConfirmModal from './ConfirmModal';
 import ModuleHeader from './ModuleHeader';
@@ -814,18 +814,20 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         ))}
       </div>
 
-      <BarcodeScanner
+      <React.Suspense fallback={null}>
+        <BarcodeScanner
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         currentLanguage={currentLanguage as 'tr' | 'en'}
         title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
         placeholder={currentLanguage === 'tr' ? 'SKU veya barkod girin...' : 'Enter SKU or barcode...'}
         onScan={(barcode) => {
-          setSearchTerm(barcode);
-          const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode);
-          if (match) setSelectedProduct(match);
+        setSearchTerm(barcode);
+        const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode);
+        if (match) setSelectedProduct(match);
         }}
-      />
+        />
+      </React.Suspense>
       <ProductForm
         isOpen={isAddingProduct}
         onClose={() => { setIsAddingProduct(false); setEditingProduct(null); }}
