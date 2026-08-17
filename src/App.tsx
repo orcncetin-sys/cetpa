@@ -585,6 +585,12 @@ function AppContent() {
   const [mfaChallenge, setMfaChallenge] = useState(false);
   const [showMfaSettings, setShowMfaSettings] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
+  // Kullanıcının users/{uid} kaydında role alanı boşsa eskiden sessizce
+  // 'Sales'e düşülüyordu — kullanıcı gerçek rolünün ne olduğunu hiç fark
+  // etmeden en kısıtlı role ile geziniyordu (2026-08-17 kullanıcı bildirimi:
+  // "role boşsa çalışmasın"). Artık sessiz düşme YOK — bu bayrak true olunca
+  // normal uygulama render edilmez, açık bir uyarı ekranı gösterilir.
+  const [roleMissing, setRoleMissing] = useState(false);
 
   // Permission helpers
   const canAccess = (tab: string) => {
@@ -2204,6 +2210,7 @@ function AppContent() {
             } catch (error) {
               handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
             }
+            setRoleMissing(false);
             setUserRole(role as UserRole);
             storeSetRole(role as UserRole);
           } else {
@@ -2212,9 +2219,28 @@ function AppContent() {
             } catch (error) {
               handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
             }
-            const resolvedRole = (u.isAnonymous ? 'Admin' : (userSnap.data().role || 'Sales')) as UserRole;
-            setUserRole(resolvedRole);
-            storeSetRole(resolvedRole);
+            const rawRole = userSnap.data().role as string | undefined;
+            // Sahip hesabı (mevcut kayıt için de) — role alanı boşsa/silinmişse
+            // bile bu e-posta kendi uygulamasından kilitlenmesin. Aynı güvenlik
+            // ağı zaten YENİ kayıt dalında vardı (satır ~2207), buraya da taşındı.
+            if (u.email === 'orcncetin@gmail.com' && !rawRole) {
+              setRoleMissing(false);
+              setUserRole('Admin' as UserRole);
+              storeSetRole('Admin' as UserRole);
+            } else if (!u.isAnonymous && !rawRole) {
+              // Sessizce 'Sales'e düşme — rolü olmayan bir hesap yanlışlıkla
+              // en kısıtlı rolde geziniyor gibi görünmesin, açıkça durdurulsun.
+              setRoleMissing(true);
+            } else {
+              // roleMissing'i burada da temizle — aksi halde rol'süz bir
+              // hesaptan çıkıp AYNI SEKMEDE rolü düzgün bir hesapla giriş
+              // yapan biri, bir önceki oturumdan kalan bayrakla yanlışlıkla
+              // engellenir (code-review bulgusu).
+              setRoleMissing(false);
+              const resolvedRole = (u.isAnonymous ? 'Admin' : rawRole) as UserRole;
+              setUserRole(resolvedRole);
+              storeSetRole(resolvedRole);
+            }
           }
         }
       }
@@ -4410,6 +4436,28 @@ function AppContent() {
               onSuccess={() => { setMfaChallenge(false); window.location.reload(); }}
               onCancel={() => { setMfaChallenge(false); handleLogout(); }}
             />
+          )}
+
+          {/* ── Role atanmamış: sessizce 'Sales'e düşmek yerine durdur ── */}
+          {roleMissing && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="apple-card max-w-md w-full p-8 space-y-4 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center mx-auto">
+                  <ShieldCheck className="w-6 h-6 text-amber-600" />
+                </div>
+                <h3 className="font-bold text-gray-900 text-base">
+                  {currentLanguage === 'tr' ? 'Hesabınıza rol atanmamış' : 'No role assigned to your account'}
+                </h3>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  {currentLanguage === 'tr'
+                    ? 'Bu hesap için bir kullanıcı rolü tanımlı değil, bu yüzden erişim açılamıyor. Lütfen yöneticinizden Süper-admin panelinden bir rol atamasını isteyin.'
+                    : 'No user role is defined for this account, so access cannot be granted. Please ask your administrator to assign a role from the Super-admin panel.'}
+                </p>
+                <button onClick={handleLogout} className="apple-button-primary w-full justify-center py-2.5 text-sm">
+                  {currentLanguage === 'tr' ? 'Çıkış Yap' : 'Log Out'}
+                </button>
+              </div>
+            </div>
           )}
 
           {/* ── 2FA: kullanıcı güvenlik ayarları ── */}
