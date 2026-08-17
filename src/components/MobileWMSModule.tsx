@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, incrementField } from '../lib/dbClient';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, incrementField } from '../lib/dbClient';
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
-import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3 } from 'lucide-react';
+import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3, Pencil, Trash2 } from 'lucide-react';
 import type { Warehouse as WarehouseRecord } from '../types';
+import ConfirmModal from './ConfirmModal';
 
 interface MobileWMSModuleProps {
   currentLanguage: string;
@@ -25,7 +26,14 @@ interface WMSLocation {
   warehouseId?: string;
   active: boolean;
   createdAt: any;
+  // 'mikro_import': server.ts Mikro depo senkronunda merge:true ile periyodik
+  // ÜZERİNE YAZILIYOR (mikro-depo-<kod> id'si) — bu satırlar elle düzenlenirse/
+  // silinirse bir sonraki senkronda değişiklik sessizce geri alınır/satır
+  // yeniden oluşur. Düzenle/Sil bu yüzden bu satırlarda gösterilmez.
+  source?: string;
 }
+
+const BOS_LOC_FORM = { aisle: 'A', rack: '01', level: '01', zone: 'storage' as WMSLocation['zone'], warehouseId: '' };
 
 interface WMSTask {
   id: string;
@@ -78,7 +86,12 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const scanRef = useRef<HTMLInputElement>(null);
 
   // Location form
-  const [locForm, setLocForm] = useState({ aisle:'A', rack:'01', level:'01', zone:'storage' as WMSLocation['zone'], warehouseId: '' });
+  const [locForm, setLocForm] = useState(BOS_LOC_FORM);
+  // Konum listesinde düzenle/sil yoktu — yanlış girilen konum silinemiyordu
+  // (2026-08-17 bildirimi). editingLocId doluysa form "Kaydet" güncelleme yapar.
+  const [editingLocId, setEditingLocId] = useState<string | null>(null);
+  const [deleteLocId, setDeleteLocId] = useState<string | null>(null);
+  const [locFormError, setLocFormError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -92,12 +105,36 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
     return () => unsubs.forEach(u => u());
   }, []);
 
-  const addLocation = async () => {
+  const saveLocation = async () => {
     const code = `${locForm.aisle}-${locForm.rack}-${locForm.level}`;
-    await addDoc(collection(db, 'wmsLocations'), {
-      code, ...locForm, active: true, createdAt: serverTimestamp()
-    });
+    // İki konum aynı kodu taşırsa barkod taraması (handleScan) ve bölge
+    // varsayılanları (receive/ship fallback) ilkini bulup diğerini görmez —
+    // sessizce yanlış konuma yönlendirebilir. Kayıttan önce engelle.
+    const cakisan = locations.some(l => l.id !== editingLocId && l.code.toUpperCase() === code.toUpperCase());
+    if (cakisan) { setLocFormError(tr ? `"${code}" kodlu konum zaten var.` : `A location with code "${code}" already exists.`); return; }
+    setLocFormError(null);
+    if (editingLocId) {
+      await updateDoc(doc(db, 'wmsLocations', editingLocId), { code, ...locForm });
+    } else {
+      await addDoc(collection(db, 'wmsLocations'), {
+        code, ...locForm, active: true, createdAt: serverTimestamp()
+      });
+    }
     setShowLocForm(false);
+    setEditingLocId(null);
+  };
+
+  const openEditLocation = (l: WMSLocation) => {
+    setLocForm({ aisle: l.aisle, rack: l.rack, level: l.level, zone: l.zone, warehouseId: l.warehouseId || '' });
+    setEditingLocId(l.id);
+    setLocFormError(null);
+    setShowLocForm(true);
+  };
+
+  const confirmDeleteLocation = async () => {
+    if (!deleteLocId) return;
+    await deleteDoc(doc(db, 'wmsLocations', deleteLocId));
+    setDeleteLocId(null);
   };
 
   // Barcode / SKU scan handler
@@ -630,7 +667,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">{tr ? 'Depo Konumları' : 'Warehouse Locations'}</h2>
-            <button onClick={() => setShowLocForm(true)}
+            <button onClick={() => { setLocForm(BOS_LOC_FORM); setEditingLocId(null); setLocFormError(null); setShowLocForm(true); }}
               className="apple-button-primary text-white px-3 py-1.5 rounded-full text-xs flex items-center gap-1">
               <Plus className="w-3 h-3" /> {tr ? 'Konum Ekle' : 'Add Location'}
             </button>
@@ -665,6 +702,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Raf' : 'Rack'}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Seviye' : 'Level'}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Bölge' : 'Zone'}</th>
+                    {isAuthenticated && <th className="p-3" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -688,6 +726,27 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                           'bg-gray-50 text-gray-700'
                         }`}>{l.zone}</span>
                       </td>
+                      {isAuthenticated && (
+                        <td className="p-3">
+                          {l.source === 'mikro_import' ? (
+                            // Mikro depo senkronu bu satırı periyodik olarak merge:true ile
+                            // ÜZERİNE YAZIYOR — elle düzenleme/silme sessizce geri alınır/
+                            // yeniden oluşur. Kafa karıştırmamak için düzenle/sil gizli.
+                            <span title={tr ? 'Mikro depo senkronundan geliyor — burada düzenlenemez' : 'Synced from Mikro warehouse — cannot be edited here'} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 float-right">
+                              {tr ? 'Mikro' : 'Mikro'}
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1 justify-end">
+                              <button onClick={() => openEditLocation(l)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => setDeleteLocId(l.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -702,8 +761,8 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{tr ? 'Yeni Konum' : 'New Location'}</h2>
-              <button onClick={() => setShowLocForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              <h2 className="text-lg font-semibold">{editingLocId ? (tr ? 'Konumu Düzenle' : 'Edit Location') : (tr ? 'Yeni Konum' : 'New Location')}</h2>
+              <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Depo' : 'Warehouse'}</label>
@@ -737,13 +796,24 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
               <option value="ship">Ship</option>
               <option value="return">Return</option>
             </select>
+            {locFormError && (
+              <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{locFormError}</p>
+            )}
             <div className="flex gap-3">
-              <button onClick={() => setShowLocForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={addLocation} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={saveLocation} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={!!deleteLocId}
+        onClose={() => setDeleteLocId(null)}
+        onConfirm={confirmDeleteLocation}
+        title={tr ? 'Konumu Sil' : 'Delete Location'}
+        message={tr ? 'Bu konumu silmek istediğinize emin misiniz? Bu işlem geri alınamaz.' : 'Are you sure you want to delete this location? This cannot be undone.'}
+      />
     </div>
   );
 }
