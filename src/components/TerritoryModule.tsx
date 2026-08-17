@@ -218,28 +218,43 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
               <button onClick={() => setShowForm(false)}><X className="w-4 h-4 text-gray-400" /></button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-                placeholder={tr ? 'Bölge adı (ör: İstanbul Avrupa)' : 'Territory name (e.g. Istanbul West)'}
-                className="apple-input px-3 py-2 text-sm" />
-              <input value={draft.repName} onChange={e => setDraft(d => ({ ...d, repName: e.target.value }))}
-                placeholder={tr ? 'Sorumlu Temsilci' : 'Assigned Rep'} className="apple-input px-3 py-2 text-sm" />
-              <input value={draft.repEmail ?? ''} onChange={e => setDraft(d => ({ ...d, repEmail: e.target.value }))}
-                placeholder={tr ? 'Temsilci e-posta (opsiyonel)' : 'Rep email (optional)'} className="apple-input px-3 py-2 text-sm" />
-              <select value={draft.countryCode || ''} onChange={e => { setDraft(d => ({ ...d, countryCode: e.target.value })); setCityPickerInput(''); }}
-                className="apple-input px-3 py-2 text-sm">
-                <option value="">{tr ? 'Ülke seçin' : 'Select country'}</option>
-                {countryList.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-              </select>
-              <input type="number" value={draft.revenueTarget || ''} onChange={e => setDraft(d => ({ ...d, revenueTarget: parseFloat(e.target.value) || 0 }))}
-                placeholder={tr ? 'Yıllık Kota (₺)' : 'Annual Quota (₺)'} className="apple-input px-3 py-2 text-sm" />
+              <div>
+                <label htmlFor="territory-name" className="sr-only">{tr ? 'Bölge adı' : 'Territory name'}</label>
+                <input id="territory-name" name="territoryName" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                  placeholder={tr ? 'Bölge adı (ör: İstanbul Avrupa)' : 'Territory name (e.g. Istanbul West)'}
+                  className="apple-input px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label htmlFor="territory-rep" className="sr-only">{tr ? 'Sorumlu Temsilci' : 'Assigned Rep'}</label>
+                <input id="territory-rep" name="repName" value={draft.repName} onChange={e => setDraft(d => ({ ...d, repName: e.target.value }))}
+                  placeholder={tr ? 'Sorumlu Temsilci' : 'Assigned Rep'} className="apple-input px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label htmlFor="territory-rep-email" className="sr-only">{tr ? 'Temsilci e-posta' : 'Rep email'}</label>
+                <input id="territory-rep-email" name="repEmail" type="email" value={draft.repEmail ?? ''} onChange={e => setDraft(d => ({ ...d, repEmail: e.target.value }))}
+                  placeholder={tr ? 'Temsilci e-posta (opsiyonel)' : 'Rep email (optional)'} className="apple-input px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label htmlFor="territory-country" className="sr-only">{tr ? 'Ülke' : 'Country'}</label>
+                <select id="territory-country" name="countryCode" value={draft.countryCode || ''} onChange={e => { setDraft(d => ({ ...d, countryCode: e.target.value })); setCityPickerInput(''); }}
+                  className="apple-input px-3 py-2 text-sm w-full">
+                  <option value="">{tr ? 'Ülke seçin' : 'Select country'}</option>
+                  {countryList.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="territory-quota" className="sr-only">{tr ? 'Yıllık Kota' : 'Annual Quota'}</label>
+                <input id="territory-quota" name="revenueTarget" type="number" value={draft.revenueTarget || ''} onChange={e => setDraft(d => ({ ...d, revenueTarget: parseFloat(e.target.value) || 0 }))}
+                  placeholder={tr ? 'Yıllık Kota (₺)' : 'Annual Quota (₺)'} className="apple-input px-3 py-2 text-sm w-full" />
+              </div>
               <div className="md:col-span-2">
-                <label className="text-xs font-semibold text-gray-600 mb-1 block">{tr ? 'Şehirler' : 'Cities'}</label>
+                <label htmlFor="territory-city-picker" className="text-xs font-semibold text-gray-600 mb-1 block">{tr ? 'Şehirler' : 'Cities'}</label>
                 <div className="flex gap-2">
                   {/* Ülke seçilmemişse (ör. 2026-08-17 öncesi eski bölgeler) alan
                       KİLİTLENMEZ — yalnız otomatik tamamlama listesi boş kalır,
                       serbest yazıp Enter/Ekle ile eklemeye devam edilebilir
                       (code-review bulgusu: eski bölgeleri düzenlemeyi kırıyordu). */}
-                  <input list="territoryCityList" value={cityPickerInput} onChange={e => setCityPickerInput(e.target.value)}
+                  <input id="territory-city-picker" name="cityPicker" list="territoryCityList" value={cityPickerInput} onChange={e => setCityPickerInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCityToDraft(cityPickerInput); } }}
                     placeholder={draft.countryCode ? (tr ? 'Şehir yazın, listeden seçin ya da Enter\'a basın' : 'Type a city, pick from the list, or press Enter') : (tr ? 'Şehir yazın (öneri için önce ülke seçin)' : 'Type a city (select a country for suggestions)')}
                     className="apple-input px-3 py-2 text-sm flex-1" />
@@ -261,18 +276,21 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-xs font-semibold text-gray-600">{tr ? 'Renk' : 'Color'}</label>
-                <div className="flex gap-1.5 flex-wrap">
+                <span className="text-xs font-semibold text-gray-600">{tr ? 'Renk' : 'Color'}</span>
+                <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label={tr ? 'Renk' : 'Color'}>
                   {TERRITORY_COLORS.map(c => (
-                    <button key={c} onClick={() => setDraft(d => ({ ...d, color: c }))}
+                    <button key={c} type="button" role="radio" aria-checked={draft.color === c} aria-label={c} onClick={() => setDraft(d => ({ ...d, color: c }))}
                       className={`w-6 h-6 rounded-full transition-transform ${draft.color === c ? 'scale-125 ring-2 ring-offset-1 ring-gray-400' : ''}`}
                       style={{ backgroundColor: c }} />
                   ))}
                 </div>
               </div>
-              <textarea value={draft.description} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
-                placeholder={tr ? 'Açıklama (opsiyonel)' : 'Description (optional)'}
-                className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
+              <div className="md:col-span-2">
+                <label htmlFor="territory-description" className="sr-only">{tr ? 'Açıklama' : 'Description'}</label>
+                <textarea id="territory-description" name="description" value={draft.description} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+                  placeholder={tr ? 'Açıklama (opsiyonel)' : 'Description (optional)'}
+                  className="apple-input px-3 py-2 text-sm w-full resize-none" rows={2} />
+              </div>
             </div>
             <div className="flex gap-2">
               <button onClick={saveDraft} className="apple-button-primary px-4 py-2 text-sm">

@@ -38,6 +38,24 @@
   outline-offset: 2px;
 }
 
+/* Görsel olarak gizli ama ekran okuyucuya görünür etiketler için — aynı
+   sebeple plain CSS (Tailwind'in sr-only'si bu JIT kurulumunda derlenmiyor,
+   yukarıdaki .skip-link notuna bak). Form alanları placeholder-only tasarım
+   kullanıyor (ör. TerritoryModule) — <label htmlFor> ile eşleştirilip bu
+   sınıfla görsel olarak gizleniyor (2026-08-17, DevTools erişilebilirlik
+   denetimi bulgusu). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Light mode tokens ────────────────────────────── */
 :root {
   --bg-base:        #F5F5F7;

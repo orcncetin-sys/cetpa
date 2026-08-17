@@ -197,6 +197,17 @@ export default function CRMPage({
   const [showPriceOverrideForm, setShowPriceOverrideForm] = useState(false);
   const [priceOverrideForm, setPriceOverrideForm] = useState({ customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: '' });
   const [showStmtModal, setShowStmtModal] = useState<string|null>(null);
+  // CRM alt-sekmesi değişince açık kalan modaller kapanmıyordu (kullanıcı
+  // bildirimi 2026-08-17: "modalı açıp başka ekrana gidince açık kalmasın") —
+  // bu state'ler CRMPage'de local, crmTab değişse de component unmount
+  // olmadığı için (sekmeler arası aynı instance) sıfırlanmıyordu.
+  useEffect(() => {
+    setShowStmtModal(null);
+    setShowTicketForm(false);
+    setShowContractForm(false);
+    setShowPriceOverrideForm(false);
+    setShowLeadFunnel(false);
+  }, [crmTab]);
   const [orderSearch, setOrderSearch] = useState('');
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
 
