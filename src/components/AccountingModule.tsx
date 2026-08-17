@@ -69,7 +69,7 @@ import {
   type MikroConfig
 } from '../types';
 import { format } from 'date-fns';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import { sortByCreatedAt } from '../utils/fsSort';
 
 // --- SortHeader Component ---
@@ -368,12 +368,6 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
   const [viewingPdf, setViewingPdf] = useState<{ name: string; date: string; dataUrl?: string } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
 
   // Invoices
   const [invoices, setInvoices] = useState<Record<string,unknown>[]>([]);
@@ -1029,20 +1023,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteBank = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Hesabı Sil' : 'Delete Account',
       message: t.confirmDeleteAccount,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'bankAccounts', id));
-          showToast(t.accountDeleted);
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `bankAccounts/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'bankAccounts', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `bankAccounts/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   // Bank Transaction Pull (from Mikro)
@@ -1126,20 +1120,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteJournal = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Kaydı Sil' : 'Delete Entry',
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'journalEntries', id));
-          showToast(t.journalDeleted);
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `journalEntries/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'journalEntries', id));
+      showToast(t.journalDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `journalEntries/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const openEditJournal = (e: JournalEntry) => {
@@ -1193,39 +1187,37 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteWarehouse = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'warehouses', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `warehouses/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'warehouses', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `warehouses/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const deleteStock = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'warehouseItems', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `warehouseItems/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'warehouseItems', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `warehouseItems/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveCustomer = async () => {
@@ -1291,21 +1283,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteCustomer = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'leads', id)); // ortak kaynak: leads
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `customers/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'leads', id)); // ortak kaynak: leads
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `customers/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveSupplier = async () => {
@@ -1326,21 +1317,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteSupplier = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'suppliers', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `suppliers/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'suppliers', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `suppliers/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveService = async () => {
@@ -1361,21 +1351,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteService = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'services', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `services/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'services', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `services/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveTransfer = async () => {
@@ -1403,21 +1392,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteTransfer = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'transfers', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `transfers/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'transfers', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `transfers/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveCheck = async () => {
@@ -1438,21 +1426,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteCheck = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'checks', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `checks/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'checks', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `checks/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveEmployee = async () => {
@@ -1473,21 +1460,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteEmployee = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'employees', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `employees/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'employees', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `employees/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveBudget = async () => {
@@ -1501,21 +1487,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteBudget = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'budgets', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `budgets/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'budgets', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `budgets/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   const saveWaybill = async () => {
@@ -1564,21 +1549,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const deleteWaybill = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'waybills', id));
-          showToast(t.accountDeleted);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `waybills/${id}`);
-          showToast(t.deleteError, 'error');
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'waybills', id));
+      showToast(t.accountDeleted);
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `waybills/${id}`);
+      showToast(t.deleteError, 'error');
+    }
   };
 
   // KPI computations
@@ -2236,7 +2220,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           invoiceSearch={invoiceSearch} setInvoiceSearch={setInvoiceSearch}
           invoiceTypeFilter={invoiceTypeFilter} setInvoiceTypeFilter={setInvoiceTypeFilter}
           invoiceSort={invoiceSort} setInvoiceSort={setInvoiceSort}
-          setFaturaDetay={setFaturaDetay} setConfirmModal={setConfirmModal}
+          setFaturaDetay={setFaturaDetay}
         />
       )}
 
@@ -2787,15 +2771,6 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         />
       )}
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
 
       {faturaDetay && (
         <MikroFaturaDetay

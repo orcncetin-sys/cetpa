@@ -13,7 +13,7 @@ import { logFirestoreError, OperationType } from '../utils/firebase';
 import { format } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import ModuleHeader from './ModuleHeader';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
 
@@ -81,9 +81,6 @@ export default function DealerCommissionPanel({
   const [kpiCurrency, setKpiCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false, title: '', message: '', onConfirm: () => {}
-  });
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   const [seedingDefaults, setSeedingDefaults] = useState(false);
@@ -552,15 +549,17 @@ export default function DealerCommissionPanel({
                           className="p-2 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
                         ><Edit2 size={14} /></button>
                         <button
-                          onClick={() => setConfirmModal({
-                            isOpen: true,
-                            title: currentLanguage === 'tr' ? 'Kuralı Sil' : 'Delete Rule',
-                            message: currentLanguage === 'tr' ? 'Bu komisyon kuralını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this commission rule?',
-                            onConfirm: async () => {
-                              await deleteDoc(doc(db, 'commissionRules', rule.id));
-                              showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
-                            }
-                          })}
+                          onClick={async () => {
+                            const ok = await confirmAction({
+                              title: currentLanguage === 'tr' ? 'Kuralı Sil' : 'Delete Rule',
+                              message: currentLanguage === 'tr' ? 'Bu komisyon kuralını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this commission rule?',
+                              confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                              variant: 'danger',
+                            });
+                            if (!ok) return;
+                            await deleteDoc(doc(db, 'commissionRules', rule.id));
+                            showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
+                          }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
                         ><Trash2 size={14} /></button>
                       </div>
@@ -668,14 +667,6 @@ export default function DealerCommissionPanel({
         )}
       </AnimatePresence>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        onConfirm={async () => { await confirmModal.onConfirm(); setConfirmModal(c => ({ ...c, isOpen: false })); }}
-        onCancel={() => setConfirmModal(c => ({ ...c, isOpen: false }))}
-        variant="danger"
-      />
     </div>
   );
 }

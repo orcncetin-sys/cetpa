@@ -21,7 +21,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import MikroPushButton from './MikroPushButton';
 import { recetePayload } from '../services/mikroEvrak';
 import { useMikroUretimReceteleri } from '../hooks/useMikroUretimReceteleri';
@@ -104,9 +104,6 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
   const [form,      setForm]      = useState<Omit<BOM, 'id'>>(emptyBOM());
   const [saving,    setSaving]    = useState(false);
 
-  // Confirm modal
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; onConfirm: () => void }>({ isOpen: false, onConfirm: () => {} });
-
   // Expanded BOM cards
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -162,14 +159,17 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
     }
   };
 
-  const handleDelete = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
-      onConfirm: async () => {
-        await deleteDoc(doc(db, 'bom', id));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      },
+  const handleDelete = async (id: string) => {
+    const ok = await confirmAction({
+      title: tr ? 'BOM\'u Sil' : 'Delete BOM',
+      message: tr
+        ? 'Bu BOM\'u silmek istediğinize emin misiniz? Bu işlem geri alınamaz.'
+        : 'Are you sure you want to delete this BOM? This cannot be undone.',
+      confirmLabel: tr ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    await deleteDoc(doc(db, 'bom', id));
   };
 
   // ── Component form helpers ─────────────────────────────────────────────────
@@ -538,13 +538,6 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
         </div>
       )}
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        title={tr ? 'BOM\'u Sil' : 'Delete BOM'}
-        message={tr ? 'Bu BOM\'u silmek istediğinize emin misiniz? Bu işlem geri alınamaz.' : 'Are you sure you want to delete this BOM? This cannot be undone.'}
-        onConfirm={confirmModal.onConfirm}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-      />
     </div>
   );
 }

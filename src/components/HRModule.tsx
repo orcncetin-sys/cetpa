@@ -23,7 +23,7 @@ import {
   type Payroll 
 } from '../types';
 import { format } from 'date-fns';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
@@ -88,12 +88,6 @@ const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key:
 export default function HRModule({ currentLanguage, isAuthenticated, userRole, employees: employeesProp, exchangeRates }: HRModuleProps) {
   const [activeTab, setActiveTab] = useState('employees');
   const [salaryCurrency, setSalaryCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   useEffect(() => {
@@ -290,39 +284,38 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   }, [isAuthenticated, userRole]);
 
   const handleDeleteEmployee = async (empId: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Çalışanı Sil' : 'Delete Employee',
       message: t.confirmDelete,
-      onConfirm: async () => {
-        try {
-          // Find all related documents
-          const relatedDocs = [
-            { collection: 'leaveRequests', field: 'employeeId' },
-            { collection: 'payrolls', field: 'employeeId' },
-            { collection: 'performanceReviews', field: 'employeeId' },
-            { collection: 'trainings', field: 'employeeId' },
-            { collection: 'travelRequests', field: 'employeeId' },
-          ];
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      // Find all related documents
+      const relatedDocs = [
+        { collection: 'leaveRequests', field: 'employeeId' },
+        { collection: 'payrolls', field: 'employeeId' },
+        { collection: 'performanceReviews', field: 'employeeId' },
+        { collection: 'trainings', field: 'employeeId' },
+        { collection: 'travelRequests', field: 'employeeId' },
+      ];
 
-          for (const docInfo of relatedDocs) {
-            const q = query(collection(db, docInfo.collection), where(docInfo.field, '==', empId));
-            const snap = await getDocs(q);
-            for (const docItem of snap.docs) {
-              await deleteDoc(doc(db, docInfo.collection, docItem.id));
-            }
-          }
-
-          // Delete the employee
-          await deleteDoc(doc(db, 'employees', empId));
-          showToast(currentLanguage === 'tr' ? 'Çalışan ve ilişkili veriler silindi.' : 'Employee and related data deleted.');
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `employees/${empId}`);
-          showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'An error occurred.', 'error');
+      for (const docInfo of relatedDocs) {
+        const q = query(collection(db, docInfo.collection), where(docInfo.field, '==', empId));
+        const snap = await getDocs(q);
+        for (const docItem of snap.docs) {
+          await deleteDoc(doc(db, docInfo.collection, docItem.id));
         }
       }
-    });
+
+      // Delete the employee
+      await deleteDoc(doc(db, 'employees', empId));
+      showToast(currentLanguage === 'tr' ? 'Çalışan ve ilişkili veriler silindi.' : 'Employee and related data deleted.');
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `employees/${empId}`);
+      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'An error occurred.', 'error');
+    }
   };
 
   const handleSaveEmployee = async () => {
@@ -743,21 +736,20 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                             )}
                             <button 
                               onClick={async () => {
-                                setConfirmModal({
-                                  isOpen: true,
+                                const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Bordro Sil' : 'Delete Payroll',
                                   message: t.confirmDelete,
-                                  onConfirm: async () => {
-                                    try {
-                                      await deleteDoc(doc(db, 'payrolls', p.id as string));
-                                      showToast(currentLanguage === 'tr' ? 'Bordro silindi.' : 'Payroll deleted.');
-                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    } catch (error) {
-                                      logFirestoreError(error, OperationType.DELETE, `payrolls/${p.id}`);
-                                      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
-                                    }
-                                  }
+                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  variant: 'danger',
                                 });
+                                if (!ok) return;
+                                try {
+                                  await deleteDoc(doc(db, 'payrolls', p.id as string));
+                                  showToast(currentLanguage === 'tr' ? 'Bordro silindi.' : 'Payroll deleted.');
+                                } catch (error) {
+                                  logFirestoreError(error, OperationType.DELETE, `payrolls/${p.id}`);
+                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                             >
@@ -879,21 +871,20 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                              </button>
                              <button 
                                onClick={async () => {
-                                 setConfirmModal({
-                                   isOpen: true,
+                                 const ok = await confirmAction({
                                    title: currentLanguage === 'tr' ? 'İzin Sil' : 'Delete Leave',
                                    message: t.confirmDelete,
-                                   onConfirm: async () => {
-                                     try {
-                                       await deleteDoc(doc(db, 'leaveRequests', req.id as string));
-                                       showToast(currentLanguage === 'tr' ? 'İzin silindi.' : 'Leave deleted.');
-                                       setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                     } catch (error) {
-                                       logFirestoreError(error, OperationType.DELETE, `leaveRequests/${req.id}`);
-                                       showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
-                                     }
-                                   }
+                                   confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                   variant: 'danger',
                                  });
+                                 if (!ok) return;
+                                 try {
+                                   await deleteDoc(doc(db, 'leaveRequests', req.id as string));
+                                   showToast(currentLanguage === 'tr' ? 'İzin silindi.' : 'Leave deleted.');
+                                 } catch (error) {
+                                   logFirestoreError(error, OperationType.DELETE, `leaveRequests/${req.id}`);
+                                   showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                 }
                                }}
                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                                title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
@@ -986,21 +977,20 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                             </button>
                             <button 
                               onClick={async () => {
-                                setConfirmModal({
-                                  isOpen: true,
+                                const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Eğitim Sil' : 'Delete Training',
                                   message: t.confirmDelete,
-                                  onConfirm: async () => {
-                                    try {
-                                      await deleteDoc(doc(db, 'trainings', tr.id));
-                                      showToast(currentLanguage === 'tr' ? 'Eğitim silindi.' : 'Training deleted.');
-                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    } catch (error) {
-                                      logFirestoreError(error, OperationType.DELETE, `trainings/${tr.id}`);
-                                      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
-                                    }
-                                  }
+                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  variant: 'danger',
                                 });
+                                if (!ok) return;
+                                try {
+                                  await deleteDoc(doc(db, 'trainings', tr.id));
+                                  showToast(currentLanguage === 'tr' ? 'Eğitim silindi.' : 'Training deleted.');
+                                } catch (error) {
+                                  logFirestoreError(error, OperationType.DELETE, `trainings/${tr.id}`);
+                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                               title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
@@ -1100,21 +1090,20 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                             </button>
                             <button 
                               onClick={async () => {
-                                setConfirmModal({
-                                  isOpen: true,
+                                const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Talep Sil' : 'Delete Request',
                                   message: t.confirmDelete,
-                                  onConfirm: async () => {
-                                    try {
-                                      await deleteDoc(doc(db, 'travelRequests', req.id));
-                                      showToast(currentLanguage === 'tr' ? 'Talep silindi.' : 'Request deleted.');
-                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    } catch (error) {
-                                      logFirestoreError(error, OperationType.DELETE, `travelRequests/${req.id}`);
-                                      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
-                                    }
-                                  }
+                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  variant: 'danger',
                                 });
+                                if (!ok) return;
+                                try {
+                                  await deleteDoc(doc(db, 'travelRequests', req.id));
+                                  showToast(currentLanguage === 'tr' ? 'Talep silindi.' : 'Request deleted.');
+                                } catch (error) {
+                                  logFirestoreError(error, OperationType.DELETE, `travelRequests/${req.id}`);
+                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                               title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
@@ -1436,15 +1425,6 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         )}
       </AnimatePresence>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
     </div>
   );
 }

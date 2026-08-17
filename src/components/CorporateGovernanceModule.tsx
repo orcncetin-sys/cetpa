@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { confirmAction } from '../lib/confirm';
 import { 
   Gavel, Users, FileText, Calendar, Plus, Search, Edit2, Trash2, Download, AlertCircle,
   Shield, Scale, Briefcase, UserPlus, CheckCircle2, X, Eye, TrendingUp
@@ -77,7 +78,25 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
   const [showContractModal, setShowContractModal] = useState(false);
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [editingShareholderId, setEditingShareholderId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean, title: string, message: string, onConfirm: () => void } | null>(null);
+  /**
+   * Silme onayi - global GlobalConfirm uzerinden. Bu modul eskiden KENDI
+   * onay modalini elle render ediyordu (ConfirmModal bilesenini bile
+   * kullanmiyordu), yani uygulamadaki ucuncu bir onay gorunumuydu.
+   */
+  const askDelete = async (title: string, message: string, run: () => Promise<void>) => {
+    const ok = await confirmAction({
+      title, message,
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await run();
+    } catch (error) {
+      console.error('Confirmation action failed:', error);
+      showToast(currentLanguage === 'tr' ? 'İşlem başarısız oldu.' : 'Action failed.', 'error');
+    }
+  };
 
   // Form States
   const [boardForm, setBoardForm] = useState({
@@ -390,15 +409,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                           <Edit2 size={16} />
                         </button>
                         <button 
-                          onClick={() => setConfirmModal({
-                            isOpen: true,
-                            title: currentLanguage === 'tr' ? 'Toplantıyı Sil' : 'Delete Meeting',
-                            message: currentLanguage === 'tr' ? 'Bu toplantı kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this meeting record?',
-                            onConfirm: async () => {
+                          onClick={() => { void askDelete(
+                            currentLanguage === 'tr' ? 'Toplantıyı Sil' : 'Delete Meeting',
+                            currentLanguage === 'tr' ? 'Bu toplantı kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this meeting record?',
+                            async () => {
                               await deleteDoc(doc(db, 'boardMeetings', meeting.id));
                               showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
-                            }
-                          })}
+                            },
+                          ); }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
                           title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
                         ><Trash2 size={16} /></button>
@@ -507,15 +525,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             <Edit2 size={16} />
                           </button>
                           <button 
-                            onClick={() => setConfirmModal({
-                              isOpen: true,
-                              title: currentLanguage === 'tr' ? 'Ortağı Sil' : 'Delete Shareholder',
-                              message: currentLanguage === 'tr' ? 'Bu ortağı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this shareholder?',
-                              onConfirm: async () => {
+                            onClick={() => { void askDelete(
+                              currentLanguage === 'tr' ? 'Ortağı Sil' : 'Delete Shareholder',
+                              currentLanguage === 'tr' ? 'Bu ortağı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this shareholder?',
+                              async () => {
                                 await deleteDoc(doc(db, 'shareholders', sh.id));
                                 showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
-                              }
-                            })}
+                              },
+                            ); }}
                             className="p-2 hover:bg-red-50 rounded-xl text-red-600 transition-all"
                             title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
                           ><Trash2 size={16} /></button>
@@ -572,15 +589,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     {isAuthenticated && (
                       <div className="pt-4 border-t border-gray-50 flex justify-end">
                         <button
-                          onClick={() => setConfirmModal({
-                            isOpen: true,
-                            title: currentLanguage === 'tr' ? 'Kaydı Sil' : 'Delete Record',
-                            message: currentLanguage === 'tr' ? 'Bu genel kurul kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this assembly record?',
-                            onConfirm: async () => {
+                          onClick={() => { void askDelete(
+                            currentLanguage === 'tr' ? 'Kaydı Sil' : 'Delete Record',
+                            currentLanguage === 'tr' ? 'Bu genel kurul kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this assembly record?',
+                            async () => {
                               await deleteDoc(doc(db, 'assemblyMeetings', meeting.id));
                               showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
-                            }
-                          })}
+                            },
+                          ); }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
                         ><Trash2 size={16} /></button>
                       </div>
@@ -645,15 +661,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                         <td className="py-4 px-6 text-center">
                           {isAuthenticated && (
                             <button
-                              onClick={() => setConfirmModal({
-                                isOpen: true,
-                                title: currentLanguage === 'tr' ? 'Sözleşmeyi Sil' : 'Delete Contract',
-                                message: currentLanguage === 'tr' ? 'Bu sözleşmeyi silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this contract?',
-                                onConfirm: async () => {
+                              onClick={() => { void askDelete(
+                                currentLanguage === 'tr' ? 'Sözleşmeyi Sil' : 'Delete Contract',
+                                currentLanguage === 'tr' ? 'Bu sözleşmeyi silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this contract?',
+                                async () => {
                                   await deleteDoc(doc(db, 'contracts', c.id));
                                   showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
-                                }
-                              })}
+                                },
+                              ); }}
                               className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
                             ><Trash2 size={16} /></button>
                           )}
@@ -868,35 +883,6 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
           </div>
         )}
 
-        {confirmModal?.isOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl">
-              <div className="flex items-center gap-3 mb-4 text-red-600">
-                <AlertCircle size={24} />
-                <h3 className="text-lg font-bold">{confirmModal.title}</h3>
-              </div>
-              <p className="text-gray-600 mb-6">{confirmModal.message}</p>
-              <div className="flex gap-3">
-                <button onClick={() => setConfirmModal(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-500 hover:bg-gray-50 transition-all">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                <button 
-                  onClick={async () => {
-                    try {
-                      await confirmModal.onConfirm();
-                    } catch (error) {
-                      console.error("Confirmation action failed:", error);
-                      showToast(currentLanguage === 'tr' ? 'İşlem başarısız oldu.' : 'Action failed.', 'error');
-                    } finally {
-                      setConfirmModal(null);
-                    }
-                  }} 
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 shadow-sm transition-all"
-                >
-                  {currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {toast && (
           <div className={`fixed bottom-8 right-8 px-6 py-3 rounded-2xl shadow-2xl z-[300] flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300 ${

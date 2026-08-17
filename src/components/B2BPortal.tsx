@@ -3,7 +3,7 @@
  * Handles quotations, dealers, and price lists for B2B/dealer users.
  */
 import React, { useState, useEffect } from 'react';
-import { confirmDelete } from '../lib/confirm';
+import { confirmAction, confirmDelete } from '../lib/confirm';
 import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -28,7 +28,7 @@ import { exportOrderPDF } from '../utils/pdf';
 import { syncShopify } from '../services/shopifyService';
 import SortHeader from './SortHeader';
 import ModuleHeader from './ModuleHeader';
-import ConfirmModal from './ConfirmModal';
+
 // Lazy-loaded components (defined in App.tsx via React.lazy) — keep the same pattern
 const QuotationForm   = React.lazy(() => import('./QuotationForm'));
 const QuotationDetail = React.lazy(() => import('./QuotationDetail'));
@@ -88,10 +88,6 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   const [dealerSearch, setDealerSearch] = useState('');
   const [shopifySyncing, setShopifySyncing] = useState(false);
   const [shopifySyncStatus, setShopifySyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [confirmState, setConfirmState] = useState<{
-    isOpen: boolean; title: string; message: string;
-    confirmLabel?: string; variant?: 'danger' | 'default'; onConfirm: () => void;
-  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   useEffect(() => {
     if (!user || !userRole) return;
@@ -186,12 +182,15 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
     });
 
   const handleConvertToOrder = async (q: Quotation) => {
-    setConfirmState({
-      isOpen: true,
+    const ok = await confirmAction({
       title: currentT.confirm_convert_to_order || 'Siparişe Dönüştür',
       message: currentT.confirm_convert_to_order_msg || 'Bu teklifi Shopify siparişine dönüştürmek istediğinize emin misiniz?',
-      onConfirm: async () => {
-        setShopifySyncing(true);
+      confirmLabel: currentLanguage === 'tr' ? 'Dönüştür' : 'Convert',
+      // Silme değil, dış sisteme yazan geri alınamaz bir işlem — 'warning'.
+      variant: 'warning',
+    });
+    if (!ok) return;
+    setShopifySyncing(true);
         try {
           const response = await authFetch('/api/shopify/draft-order', {
             method: 'POST',
@@ -213,11 +212,9 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
           setShopifySyncStatus({ type: 'success', message: 'Teklif başarıyla Shopify siparişine dönüştürüldü.' });
         } catch (err) {
           setShopifySyncStatus({ type: 'error', message: err instanceof Error ? err.message : 'Dönüştürme hatası.' });
-        } finally {
-          setShopifySyncing(false);
-        }
-      },
-    });
+    } finally {
+      setShopifySyncing(false);
+    }
   };
 
   return (
@@ -537,7 +534,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                             <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-3.5 h-3.5" /></button>
                             <button onClick={(e) => { e.stopPropagation(); exportOrderPDF(q as unknown as Record<string, unknown>, currentT); }} className="p-1.5 rounded-lg hover:bg-green-50 text-[#86868B] hover:text-green-600 transition-colors" title={currentT.download_pdf || 'PDF İndir'}><Download className="w-3.5 h-3.5" /></button>
                             <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); setIsEditingQuotation(true); }} className="p-1.5 rounded-lg hover:bg-brand/10 text-[#86868B] hover:text-brand transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmState({ isOpen: true, title: currentT.confirm_delete, message: currentT.confirm_delete_quotation || 'Bu teklifi silmek istediğinize emin misiniz?', onConfirm: async () => { try { await deleteDoc(doc(db, 'quotations', q.id)); } catch (error) { throwFirestoreError(error, OperationType.DELETE, `quotations/${q.id}`); } } }); }} className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); void (async () => { if (!(await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en'))) return; try { await deleteDoc(doc(db, 'quotations', q.id)); } catch (error) { throwFirestoreError(error, OperationType.DELETE, `quotations/${q.id}`); } })(); }} className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
                       </tr>
@@ -605,9 +602,6 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
       {isCreatingQuote && (<QuotationForm isOpen={isCreatingQuote} onClose={() => setIsCreatingQuote(false)} leads={leads} inventory={inventory} t={currentT} />)}
       {isEditingQuotation && selectedQuotation && (<QuotationForm isOpen={isEditingQuotation} onClose={() => { setIsEditingQuotation(false); setSelectedQuotation(null); }} leads={leads} inventory={inventory} initialData={selectedQuotation} t={currentT} />)}
 
-      <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} variant={confirmState.variant}
-        onConfirm={() => { confirmState.onConfirm(); setConfirmState(prev => ({ ...prev, isOpen: false })); }}
-        onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))} />
     </div>
   );
 };

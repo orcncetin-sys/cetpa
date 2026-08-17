@@ -4,7 +4,8 @@ import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3, Pencil, Trash2 } from 'lucide-react';
 import type { Warehouse as WarehouseRecord } from '../types';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
+
 
 interface MobileWMSModuleProps {
   currentLanguage: string;
@@ -90,7 +91,6 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   // Konum listesinde düzenle/sil yoktu — yanlış girilen konum silinemiyordu
   // (2026-08-17 bildirimi). editingLocId doluysa form "Kaydet" güncelleme yapar.
   const [editingLocId, setEditingLocId] = useState<string | null>(null);
-  const [deleteLocId, setDeleteLocId] = useState<string | null>(null);
   const [locFormError, setLocFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -131,10 +131,17 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
     setShowLocForm(true);
   };
 
-  const confirmDeleteLocation = async () => {
-    if (!deleteLocId) return;
-    await deleteDoc(doc(db, 'wmsLocations', deleteLocId));
-    setDeleteLocId(null);
+  const confirmDeleteLocation = async (id: string) => {
+    const ok = await confirmAction({
+      title: tr ? 'Konumu Sil' : 'Delete Location',
+      message: tr
+        ? 'Bu konumu silmek istediğinize emin misiniz? Bu işlem geri alınamaz.'
+        : 'Are you sure you want to delete this location? This cannot be undone.',
+      confirmLabel: tr ? 'Sil' : 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    await deleteDoc(doc(db, 'wmsLocations', id));
   };
 
   // Barcode / SKU scan handler
@@ -740,7 +747,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                               <button onClick={() => openEditLocation(l)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => setDeleteLocId(l.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                              <button onClick={() => { void confirmDeleteLocation(l.id); }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -807,13 +814,6 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
         </div>
       )}
 
-      <ConfirmModal
-        isOpen={!!deleteLocId}
-        onClose={() => setDeleteLocId(null)}
-        onConfirm={confirmDeleteLocation}
-        title={tr ? 'Konumu Sil' : 'Delete Location'}
-        message={tr ? 'Bu konumu silmek istediğinize emin misiniz? Bu işlem geri alınamaz.' : 'Are you sure you want to delete this location? This cannot be undone.'}
-      />
     </div>
   );
 }

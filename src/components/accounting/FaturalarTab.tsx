@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { confirmAction } from '../../lib/confirm';
 import { X, Plus, Search, FileText, Trash2 } from 'lucide-react';
 import { doc, deleteDoc } from '../../lib/dbClient';
 import { db } from '../../firebase';
@@ -12,7 +13,6 @@ type InvoiceForm = {
   address: string; kdvOran: number; date: string; notes: string; orderId: string;
 };
 type MikroFaturaRow = MikroFatura & { musteri: string };
-type ConfirmModalState = { isOpen: boolean; title: string; message: string; onConfirm: () => void };
 
 // Kolon başlıkları invoices alanlarıyla aynı isimde değil (musteri/tarih/oran/
 // matrah/tutar) — sıralama tıklaması Mikro satırlarında hiç etki etmiyordu
@@ -49,7 +49,6 @@ interface FaturalarTabProps {
   invoiceSort: { key: string; direction: 'asc' | 'desc' };
   setInvoiceSort: React.Dispatch<React.SetStateAction<{ key: string; direction: 'asc' | 'desc' }>>;
   setFaturaDetay: (v: MikroFaturaDetayVerisi | null) => void;
-  setConfirmModal: React.Dispatch<React.SetStateAction<ConfirmModalState>>;
 }
 
 export default function FaturalarTab({
@@ -57,7 +56,7 @@ export default function FaturalarTab({
   invoiceForm, setInvoiceForm, invoiceSource, setInvoiceSource, handleCreateInvoice,
   faturaKaynak, setFaturaKaynak, faturaYon, setFaturaYon, faturaYil, setFaturaYil,
   mikroFaturalar, mikroFaturaSatirlari, invoices, invoiceSearch, setInvoiceSearch,
-  invoiceTypeFilter, setInvoiceTypeFilter, invoiceSort, setInvoiceSort, setFaturaDetay, setConfirmModal,
+  invoiceTypeFilter, setInvoiceTypeFilter, invoiceSort, setInvoiceSort, setFaturaDetay,
 }: FaturalarTabProps) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -297,7 +296,16 @@ export default function FaturalarTab({
                       <td className="px-4 py-3"><span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{inv.status as string || 'Kesildi'}</span></td>
                       {isAuthenticated && (
                         <td className="px-4 py-3">
-                          <button onClick={() => setConfirmModal({ isOpen: true, title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice', message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.', onConfirm: async () => { await deleteDoc(doc(db,'invoices',inv.id as string)); setConfirmModal(prev => ({ ...prev, isOpen: false })); } })} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                          <button onClick={async () => {
+                            const ok = await confirmAction({
+                              title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice',
+                              message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.',
+                              confirmLabel: currentLanguage==='tr'?'Sil':'Delete',
+                              variant: 'danger',
+                            });
+                            if (!ok) return;
+                            await deleteDoc(doc(db,'invoices',inv.id as string));
+                          }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                         </td>
                       )}
                     </tr>

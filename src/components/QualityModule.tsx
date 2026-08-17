@@ -6,7 +6,7 @@ import {
   TrendingUp, Target, Zap, Activity, Award, Star, Eye, X
 } from 'lucide-react';
 import ModuleHeader from './ModuleHeader';
-import ConfirmModal from './ConfirmModal';
+import { confirmDelete } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { suggestFMEAMitigation, suggest8DRootCause } from '../services/geminiService';
 import { Loader2, Sparkles } from 'lucide-react';
@@ -215,12 +215,6 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
   });
   
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
@@ -385,31 +379,25 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
     }
   };
 
-  const handleDelete = (id: string, type: 'qc' | 'complaint' | 'audit' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d') => {
+  const handleDelete = async (id: string, type: 'qc' | 'complaint' | 'audit' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d') => {
     if (!isAuthenticated) { showToast(currentLanguage === 'tr' ? 'Bu işlem için giriş gerekli.' : 'Login required.', 'error'); return; }
-    setConfirmModal({
-      isOpen: true,
-      title: currentLanguage === 'tr' ? 'Silme Onayı' : 'Delete Confirmation',
-      message: currentLanguage === 'tr' ? 'Bu kaydı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this record?',
-      onConfirm: async () => {
-        try {
-          const col = type === 'qc' ? 'qcRecords' : 
-                      type === 'complaint' ? 'complaints' : 
-                      type === 'audit' ? 'auditItems' : 
-                      type === 'fmea' ? 'fmeaRecords' :
-                      type === 'pfmea' ? 'pfmeaRecords' :
-                      type === 'ctpat' ? 'ctpatRecords' :
-                      type === 'kaizen' ? 'kaizenRecords' :
-                      type === '5s' ? 'fiveSRecords' : 'eightDRecords';
-          await deleteDoc(doc(db, col, id));
-          showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
-        } catch (err) {
-          logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-          showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
-        }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    const ok = await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en');
+    if (!ok) return;
+    try {
+      const col = type === 'qc' ? 'qcRecords' :
+                  type === 'complaint' ? 'complaints' :
+                  type === 'audit' ? 'auditItems' :
+                  type === 'fmea' ? 'fmeaRecords' :
+                  type === 'pfmea' ? 'pfmeaRecords' :
+                  type === 'ctpat' ? 'ctpatRecords' :
+                  type === 'kaizen' ? 'kaizenRecords' :
+                  type === '5s' ? 'fiveSRecords' : 'eightDRecords';
+      await deleteDoc(doc(db, col, id));
+      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+    } catch (err) {
+      logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
+      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+    }
   };
 
   const handleSaveModal = async (e: React.FormEvent) => {
@@ -1788,15 +1776,6 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
         )}
       </AnimatePresence>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
     </div>
   );
 };

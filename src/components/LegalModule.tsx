@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, Calendar, ChevronRight, Folder, X, Eye, TrendingUp,
   Upload, ThumbsUp, ThumbsDown, Send, Paperclip, CheckSquare
 } from 'lucide-react';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction, confirmDelete } from '../lib/confirm';
 import { db, auth, storage } from '../firebase';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
@@ -156,17 +156,16 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     }
   };
 
-  const handleDeleteDoc = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+  const handleDeleteDoc = async (id: string) => {
+    const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Belgeyi Sil' : 'Delete Document',
       message: currentLanguage === 'tr' ? 'Bu belgeyi kalıcı olarak silmek istediğinize emin misiniz?' : 'Are you sure you want to permanently delete this document?',
-      onConfirm: async () => {
-        try { await deleteDoc(doc(db, 'legalDocs', id)); showToast(currentLanguage === 'tr' ? 'Belge silindi' : 'Document deleted'); }
-        catch (err) { logFirestoreError(err, OperationType.DELETE, `legalDocs/${id}`, auth.currentUser?.uid); }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try { await deleteDoc(doc(db, 'legalDocs', id)); showToast(currentLanguage === 'tr' ? 'Belge silindi' : 'Document deleted'); }
+    catch (err) { logFirestoreError(err, OperationType.DELETE, `legalDocs/${id}`, auth.currentUser?.uid); }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -201,12 +200,6 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
   });
   
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
@@ -295,23 +288,16 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     }
   };
 
-  const handleDelete = (id: string, type: 'contract' | 'case' | 'compliance') => {
-    setConfirmModal({
-      isOpen: true,
-      title: currentLanguage === 'tr' ? 'Silme Onayı' : 'Delete Confirmation',
-      message: currentLanguage === 'tr' ? 'Bu kaydı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this record?',
-      onConfirm: async () => {
-        try {
-          const col = type === 'contract' ? 'contracts' : type === 'case' ? 'legalCases' : 'complianceItems';
-          await deleteDoc(doc(db, col, id));
-          showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
-        } catch (err) {
-          logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-          showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
-        }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+  const handleDelete = async (id: string, type: 'contract' | 'case' | 'compliance') => {
+    if (!(await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en'))) return;
+    try {
+      const col = type === 'contract' ? 'contracts' : type === 'case' ? 'legalCases' : 'complianceItems';
+      await deleteDoc(doc(db, col, id));
+      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+    } catch (err) {
+      logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
+      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+    }
   };
 
   const handleSaveModal = async (e: React.FormEvent) => {
@@ -1307,15 +1293,6 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
         )}
       </AnimatePresence>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
     </div>
   );
 };

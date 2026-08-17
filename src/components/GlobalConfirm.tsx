@@ -19,6 +19,7 @@ export default function GlobalConfirm() {
       title={opts.title}
       message={opts.message}
       confirmLabel={opts.confirmLabel}
+      cancelText={opts.cancelLabel}
       variant={opts.variant}
       onConfirm={() => { _resolveConfirm(true); setOpts(null); }}
       onCancel={() => { _resolveConfirm(false); setOpts(null); }}

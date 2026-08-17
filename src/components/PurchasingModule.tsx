@@ -8,7 +8,7 @@ import { satinAlmaTalepPayload } from '../services/mikroEvrak';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
@@ -95,12 +95,6 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   const [validationError, setValidationError] = useState('');
   const showValidationError = (msg: string) => { setValidationError(msg); setTimeout(() => setValidationError(''), 3500); };
 
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
   
   // New Order Form State
   const [newOrder, setNewOrder] = useState({
@@ -415,18 +409,18 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   };
 
   const handleDeleteOrder = async (id: string) => {
-    setConfirmModal({
-      isOpen: true,
+    const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Siparişi Sil' : 'Delete Order',
       message: currentLanguage === 'tr' ? 'Bu siparişi silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this order?',
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'purchaseOrders', id));
-        } catch (error) {
-          logFirestoreError(error, OperationType.DELETE, `purchaseOrders/${id}`);
-        }
-      }
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      variant: 'danger',
     });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'purchaseOrders', id));
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, `purchaseOrders/${id}`);
+    }
   };
 
   useEffect(() => {
@@ -1159,16 +1153,6 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
           </div>
         )}
       </AnimatePresence>
-      {/* Confirm Modal */}
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
     </div>
   );
 }

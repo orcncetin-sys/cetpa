@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { format, parseISO, differenceInDays, addDays, startOfMonth } from 'date-fns';
 import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, ReferenceLine } from 'recharts';
 import ModuleHeader from './ModuleHeader';
-import ConfirmModal from './ConfirmModal';
+import { confirmDelete } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { db, auth } from '../firebase';
 import { 
@@ -225,12 +225,6 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
   });
   
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {}
-  });
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
@@ -335,27 +329,20 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
     }
   };
 
-  const handleDelete = (id: string, type: 'project' | 'task' | 'resource') => {
-    setConfirmModal({
-      isOpen: true,
-      title: currentLanguage === 'tr' ? 'Silme Onayı' : 'Delete Confirmation',
-      message: currentLanguage === 'tr' ? 'Bu kaydı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this record?',
-      onConfirm: async () => {
-        try {
-          const col = type === 'project' ? 'projects' : type === 'task' ? 'tasks' : 'resources';
-          await deleteDoc(doc(db, col, id));
-          // Proje silinince görevleri de silinir (orphan görev engeli).
-          if (type === 'project') {
-            await Promise.allSettled(tasks.filter(t => t.projectId === id).map(t => deleteDoc(doc(db, 'tasks', t.id))));
-          }
-          showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
-        } catch (err) {
-          logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-          showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
-        }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+  const handleDelete = async (id: string, type: 'project' | 'task' | 'resource') => {
+    if (!(await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en'))) return;
+    try {
+      const col = type === 'project' ? 'projects' : type === 'task' ? 'tasks' : 'resources';
+      await deleteDoc(doc(db, col, id));
+      // Proje silinince görevleri de silinir (orphan görev engeli).
+      if (type === 'project') {
+        await Promise.allSettled(tasks.filter(t => t.projectId === id).map(t => deleteDoc(doc(db, 'tasks', t.id))));
       }
-    });
+      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+    } catch (err) {
+      logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
+      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+    }
   };
 
   const handleSaveModal = async (e: React.FormEvent) => {
@@ -934,15 +921,6 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
         )}
       </AnimatePresence>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
-        cancelText={currentLanguage === 'tr' ? 'Vazgeç' : 'Cancel'}
-      />
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-2xl text-white font-medium shadow-xl z-50 transition-all ${

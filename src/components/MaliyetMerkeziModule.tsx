@@ -14,7 +14,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -257,7 +257,15 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
   const [kalemSort, setKalemSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'tarih', direction: 'desc' });
 
   // Delete confirm
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'merkez' | 'kalem'; id: string } | null>(null);
+  /** Silme onayı — global GlobalConfirm üzerinden (lokal modal state'i kaldırıldı). */
+  const askDelete = async (type: 'merkez' | 'kalem', id: string) => {
+    const ok = await confirmAction({
+      title: t.silOnay, message: t.silAciklama,
+      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete', variant: 'danger',
+    });
+    if (!ok) return;
+    if (type === 'merkez') deleteMerkez(id); else deleteKalem(id);
+  };
 
   // Analysis month
   const [analizAy, setAnalizAy] = useState<string>('');
@@ -594,7 +602,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                           <button className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors" onClick={() => openEditMerkez(m)}>
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" onClick={() => setConfirmDelete({ type: 'merkez', id: m.id })}>
+                          <button className="p-1.5 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" onClick={() => { void askDelete('merkez', m.id); }}>
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -737,7 +745,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                             <button className="p-1.5 rounded-xl hover:bg-blue-50 text-gray-400 hover:text-blue-500 transition-colors" onClick={() => openEditKalem(k)}>
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            <button className="p-1.5 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" onClick={() => setConfirmDelete({ type: 'kalem', id: k.id })}>
+                            <button className="p-1.5 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" onClick={() => { void askDelete('kalem', k.id); }}>
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -1097,20 +1105,6 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
         )}
       </AnimatePresence>
 
-      {/* ── Confirm Delete Modal ── */}
-      {confirmDelete && (
-        <ConfirmModal
-          isOpen={!!confirmDelete}
-          title={t.silOnay}
-          message={t.silAciklama}
-          onConfirm={() => {
-            if (confirmDelete.type === 'merkez') deleteMerkez(confirmDelete.id);
-            else deleteKalem(confirmDelete.id);
-            setConfirmDelete(null);
-          }}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
     </div>
   );
 }

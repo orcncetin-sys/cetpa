@@ -5,7 +5,7 @@ import {
   Plus, Search, Trash2, Edit2, Settings, BarChart3, Package, Activity, X, Wrench, Zap, Target
 } from 'lucide-react';
 import ModuleHeader from './ModuleHeader';
-import ConfirmModal from './ConfirmModal';
+import { confirmAction } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import MikroPushButton from './MikroPushButton';
@@ -430,8 +430,6 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
   const [machineSaving, setMachineSaving] = useState(false);
 
   // Delete confirms
-  const [deleteOrderId, setDeleteOrderId] = useState<string | null>(null);
-  const [deleteMachineId, setDeleteMachineId] = useState<string | null>(null);
 
   // ── Ters Kayıt state ───────────────────────
   const [boms, setBoms] = useState<PMBOM[]>([]);
@@ -670,16 +668,18 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
     [openTersKayit]
   );
 
-  const handleDeleteOrder = useCallback(async () => {
-    if (!deleteOrderId) return;
+  const handleDeleteOrder = useCallback(async (id: string) => {
+    const ok = await confirmAction({
+      title: t.deleteOrder, message: t.confirm_delete_msg,
+      confirmLabel: t.delete, variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      await deleteDoc(doc(db, 'productionOrders', deleteOrderId));
+      await deleteDoc(doc(db, 'productionOrders', id));
     } catch (err) {
       logFirestoreError(err as Error, OperationType.DELETE, 'productionOrders');
-    } finally {
-      setDeleteOrderId(null);
     }
-  }, [deleteOrderId]);
+  }, [t]);
 
   // ── Machine CRUD ───────────────────────────
   const openAddMachine = useCallback(() => {
@@ -717,16 +717,18 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
     }
   }, [machineForm, editingMachine, closeMachineModal]);
 
-  const handleDeleteMachine = useCallback(async () => {
-    if (!deleteMachineId) return;
+  const handleDeleteMachine = useCallback(async (id: string) => {
+    const ok = await confirmAction({
+      title: t.deleteMachine, message: t.confirm_delete_msg,
+      confirmLabel: t.delete, variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      await deleteDoc(doc(db, 'machines', deleteMachineId));
+      await deleteDoc(doc(db, 'machines', id));
     } catch (err) {
       logFirestoreError(err as Error, OperationType.DELETE, 'machines');
-    } finally {
-      setDeleteMachineId(null);
     }
-  }, [deleteMachineId]);
+  }, [t]);
 
   // ── Analytics data ─────────────────────────
   const statusCounts = (['Planlandı', 'Devam Ediyor', 'Duraklatıldı', 'Tamamlandı', 'İptal Edildi'] as const).map(
@@ -979,7 +981,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                             {/* Delete */}
                             <button
                               title={t.delete}
-                              onClick={() => setDeleteOrderId(order.id)}
+                              onClick={() => { void handleDeleteOrder(order.id); }}
                               className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1037,7 +1039,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => setDeleteMachineId(machine.id)}
+                        onClick={() => { void handleDeleteMachine(machine.id); }}
                         className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1478,26 +1480,6 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
         </div>
       </SlidePanel>
 
-      {/* ─── Delete Confirms ─── */}
-      <ConfirmModal
-        isOpen={deleteOrderId !== null}
-        title={t.deleteOrder}
-        message={t.confirm_delete_msg}
-        onConfirm={handleDeleteOrder}
-        onCancel={() => setDeleteOrderId(null)}
-        variant="danger"
-        confirmText={t.delete}
-      />
-
-      <ConfirmModal
-        isOpen={deleteMachineId !== null}
-        title={t.deleteMachine}
-        message={t.confirm_delete_msg}
-        onConfirm={handleDeleteMachine}
-        onCancel={() => setDeleteMachineId(null)}
-        variant="danger"
-        confirmText={t.delete}
-      />
 
       {/* ─── Ters Kayıt Onay Modalı ─── */}
       <AnimatePresence>

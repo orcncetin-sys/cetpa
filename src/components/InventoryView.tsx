@@ -38,7 +38,7 @@ import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
 const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import SortHeader from './SortHeader';
-import ConfirmModal from './ConfirmModal';
+import { confirmDelete } from '../lib/confirm';
 import ModuleHeader from './ModuleHeader';
 import { authFetch } from '../services/authFetch';
 import { type LabelItem } from './LabelSheetModal';
@@ -159,19 +159,22 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   }, [depoDagilim, warehouses]);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [confirmState, setConfirmState] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    variant?: 'danger' | 'default';
-    onConfirm: () => void;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-  });
+
+  /**
+   * Ürün silme — tablo ve kart görünümlerinin ORTAK yolu.
+   * Eskiden iki ayrı `setConfirmState({...})` bloğu vardı ve yalnız tablo
+   * görünümündeki `logAudit` çağırıyordu; kart görünümünden yapılan silmeler
+   * denetim kaydına hiç düşmüyordu.
+   */
+  const handleDeleteProduct = async (item: { id: string; name: string; sku: string }) => {
+    if (!(await confirmDelete(item.name, currentLanguage === 'tr' ? 'tr' : 'en'))) return;
+    try {
+      await deleteDoc(doc(db, 'inventory', item.id));
+      logAudit('Ürün Silme', `${item.name} (${item.sku}) silindi`);
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.DELETE, `inventory/${item.id}`);
+    }
+  };
 
   // Mikro'dan çekilen stok hareketleri inventoryMovements'a HAM satır olarak
   // düşüyor (sth_stok_kod / sth_miktar / sth_tip / sth_tarih) — panel ise
@@ -1130,22 +1133,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                             )}
                           </div>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmState({
-                                isOpen: true,
-                                title: currentT.confirm_delete,
-                                message: currentT.confirm_delete_product || 'Bu ürünü silmek istediğinize emin misiniz?',
-                                onConfirm: async () => {
-                                  try {
-                                    await deleteDoc(doc(db, 'inventory', item.id));
-                            logAudit('Ürün Silme', `${item.name} (${item.sku}) silindi`);
-                                  } catch (error) {
-                                    logFirestoreError(error as Error, OperationType.DELETE, `inventory/${item.id}`);
-                                  }
-                                },
-                              });
-                            }}
+                            onClick={(e) => { e.stopPropagation(); void handleDeleteProduct(item); }}
                             className="p-2 rounded-xl hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-all"
                             title={currentT.delete}
                           >
@@ -1219,21 +1207,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmState({
-                        isOpen: true,
-                        title: currentT.confirm_delete,
-                        message: currentT.confirm_delete_product || 'Bu ürünü silmek istediğinize emin misiniz?',
-                        onConfirm: async () => {
-                          try {
-                            await deleteDoc(doc(db, 'inventory', item.id));
-                          } catch (error) {
-                            logFirestoreError(error as Error, OperationType.DELETE, `inventory/${item.id}`);
-                          }
-                        },
-                      });
-                    }}
+                    onClick={(e) => { e.stopPropagation(); void handleDeleteProduct(item); }}
                     className="p-2 rounded-xl bg-red-50 text-red-500"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1713,18 +1687,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      <ConfirmModal
-        isOpen={confirmState.isOpen}
-        title={confirmState.title}
-        message={confirmState.message}
-        confirmLabel={confirmState.confirmLabel}
-        variant={confirmState.variant}
-        onConfirm={() => {
-          confirmState.onConfirm();
-          setConfirmState(prev => ({ ...prev, isOpen: false }));
-        }}
-        onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
-      />
     </div>
   );
 };

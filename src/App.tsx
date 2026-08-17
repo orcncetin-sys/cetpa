@@ -158,7 +158,7 @@ import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fn
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
-import ConfirmModal from './components/ConfirmModal';
+import { confirmAction, setConfirmLanguage } from './lib/confirm';
 import GlobalConfirm from './components/GlobalConfirm';
 import { confirmDelete } from './lib/confirm';
 import { MUHASEBE_MENU, type MuhasebeTarget } from './lib/muhasebeMenu';
@@ -517,6 +517,11 @@ function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
   const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
   const darkModeFromServerRef = React.useRef(false); // listener'dan gelen değeri işaretler (echo-write engeli)
+
+  // Onay diyalogunun "Vazgeç/Cancel" metni React ağacının dışındaki bir modülde
+  // (lib/confirm.ts) üretiliyor — dili oraya bildirmezsek İngilizce kullanan
+  // kullanıcı Türkçe düğme görür.
+  useEffect(() => { setConfirmLanguage(currentLanguage === 'tr' ? 'tr' : 'en'); }, [currentLanguage]);
 
   // ── Zustand store sync ────────────────────────────────────────────────────
   const { setExchangeRates: storeSetRates,
@@ -2121,29 +2126,34 @@ function AppContent() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // ── Confirmation Modal state (replaces PIN + window.confirm) ──────────────
-  const [confirmState, setConfirmState] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    variant?: 'danger' | 'default';
-    onConfirm: () => void;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => { },
-  });
-
+  /**
+   * Onay diyalogu - App kokunde bir kez mount edilen <GlobalConfirm /> uzerinden.
+   *
+   * Eskiden App.tsx kendi yerel onay state'ini ve modal render'ini tasiyordu,
+   * yani uygulamada IKI ayri onay altyapisi vardi (GlobalConfirm zaten mount
+   * ediliyordu). Artik tek kaynak var. `openConfirm`'un imzasi bilerek KORUNDU:
+   * AdminPage/OrdersPage/CRMPage'e prop olarak geciyor ve 15+ cagri noktasi bu
+   * callback bicimini kullaniyor - mekanizma birlesti, cagri noktalarina
+   * dokunulmadi.
+   */
   const openConfirm = (opts: {
     title: string;
     message: string;
     confirmLabel?: string;
     variant?: 'danger' | 'default';
     onConfirm: () => void;
-  }) => setConfirmState({ ...opts, isOpen: true });
-
-  const closeConfirm = () => setConfirmState(prev => ({ ...prev, isOpen: false }));
+  }) => {
+    void confirmAction({
+      title: opts.title,
+      message: opts.message,
+      confirmLabel: opts.confirmLabel,
+      variant: opts.variant,
+    }).then(ok => { if (ok) opts.onConfirm(); })
+      // onConfirm eskiden tıklama işleyicisinde SENKRON çağrılıyordu; hata
+      // atarsa konsola düşerdi. Promise zincirinde aynı hata "unhandled
+      // rejection" olup sessizleşir — açıkça yakalıyoruz.
+      .catch(err => console.error('[openConfirm] onConfirm hata verdi:', err));
+  };
 
   const DEPOTS = {
     eski_sanayi: { name: 'Eski Sanayi', lat: 36.9081, lng: 30.6956 },
@@ -6383,16 +6393,6 @@ function AppContent() {
       </main>
       </div>{/* ── /flex wrapper (sidebar + main) ── */}
 
-      {/* ── Confirm Modal (replaces PIN modal + window.confirm) ── */}
-      <ConfirmModal
-        isOpen={confirmState.isOpen}
-        title={confirmState.title}
-        message={confirmState.message}
-        confirmLabel={confirmState.confirmLabel}
-        variant={confirmState.variant}
-        onConfirm={() => { confirmState.onConfirm(); closeConfirm(); }}
-        onCancel={closeConfirm}
-      />
 
       {/* ── Add Lead Modal (Zod-validated) ── */}
       <NewLeadModal
