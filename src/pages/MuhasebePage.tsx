@@ -241,6 +241,12 @@ export default function MuhasebePage(props: Props) {
   // Kalıcılaştırma (2026-07-21): düzenleme modu kimlikleri — hangi kayıt formda
   const [p591EditId, setP591EditId] = useState<string | null>(null);
   const [p573EditId, setP573EditId] = useState<string | null>(null);
+  // e-Fatura Takip Paneli: satıra tıklayınca detay açılmıyordu (kullanıcı
+  // bildirimi) — satırlar zaten hesaplanmış tüm alanları taşıyordu, yalnız
+  // tıklama/modal eksikti. Id tutulur (obje değil) — orders canlı senkron
+  // prop'u, modal açıkken güncellenirse (ör. başka sekmeden faturalandı)
+  // gösterim otomatik tazelensin, tıklama anındaki donuk kopya kalmasın.
+  const [p564DetayId, setP564DetayId] = useState<string | null>(null);
 
   // Banka ekstresi CSV içe aktarma modalı
   const [showBankImport, setShowBankImport] = useState(false);
@@ -2843,7 +2849,7 @@ export default function MuhasebePage(props: Props) {
                                       return d.toLocaleDateString('tr-TR');
                                     })();
                                     return (
-                                      <tr key={o.id} className={`hover:bg-gray-50/50 transition-colors ${!hasFatura?'bg-red-50/20':''}`}>
+                                      <tr key={o.id} onClick={() => setP564DetayId(o.id)} className={`hover:bg-gray-50/50 transition-colors cursor-pointer ${!hasFatura?'bg-red-50/20':''}`}>
                                         <td className="px-3 py-2.5 text-gray-400">{dateStr}</td>
                                         <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[150px] truncate">{o.customerName}</td>
                                         <td className="px-3 py-2.5 font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR')}</td>
@@ -2866,7 +2872,8 @@ export default function MuhasebePage(props: Props) {
                                         </td>
                                         <td className="px-3 py-2.5">
                                           {!hasFatura && hasFullAccess('muhasebe') && (
-                                            <button onClick={async () => {
+                                            <button onClick={async (e) => {
+                                              e.stopPropagation();
                                               await updateDoc(doc(db, 'orders', o.id), { hasInvoice: true });
                                               toast(tr564?'Fatura kesildi olarak işaretlendi.':'Marked as invoiced.', 'success');
                                             }} className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors">
@@ -2882,6 +2889,63 @@ export default function MuhasebePage(props: Props) {
                             </div>
                           )}
                         </div>
+
+                        {p564DetayId && (() => {
+                          const d = orders.find(o => o.id === p564DetayId);
+                          if (!d) return null;
+                          const dInvoiceNo = d.mikroFaturaNo || d.lucaFaturaNo || d.irsaliyeNo || '—';
+                          const dSynced = d.mikroSynced || d.lucaSynced;
+                          const satir564 = (etiket: string, deger: React.ReactNode) => (
+                            <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                              <span className="text-xs text-gray-500">{etiket}</span>
+                              <span className="text-sm font-semibold text-[#1D1D1F] text-right">{deger}</span>
+                            </div>
+                          );
+                          return (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setP564DetayId(null)}>
+                              <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-start justify-between p-5 border-b border-gray-100">
+                                  <div>
+                                    <h3 className="font-bold text-[#1D1D1F]">{tr564 ? 'Fatura / Sipariş Detayı' : 'Invoice / Order Detail'}</h3>
+                                    <p className="text-xs text-gray-500 mt-0.5 font-mono">{d.id}</p>
+                                  </div>
+                                  <button onClick={() => setP564DetayId(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-[18px] h-[18px]" /></button>
+                                </div>
+                                <div className="p-5 overflow-y-auto flex-1 min-h-0">
+                                  {satir564(tr564 ? 'Müşteri' : 'Customer', d.customerName)}
+                                  {d.customerEmail && satir564(tr564 ? 'E-posta' : 'Email', d.customerEmail)}
+                                  {d.shippingAddress && satir564(tr564 ? 'Adres' : 'Address', <span className="font-normal text-xs">{d.shippingAddress}</span>)}
+                                  {satir564(tr564 ? 'Tutar' : 'Amount', `₺${(d.totalPrice||0).toLocaleString('tr-TR')}`)}
+                                  {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ₺${d.kdvTutari.toLocaleString('tr-TR')}` : ''}`)}
+                                  {d.faturaTipi && satir564(tr564 ? 'Fatura Türü' : 'Invoice Type', d.faturaTipi)}
+                                  {satir564(tr564 ? 'Fatura No' : 'Invoice No', dInvoiceNo)}
+                                  {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
+                                  {d.irsaliyeNo && satir564(tr564 ? 'İrsaliye No' : 'Waybill No', d.irsaliyeNo)}
+                                  {satir564(tr564 ? 'ERP Durumu' : 'ERP Status', dSynced
+                                    ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {d.lucaSynced?'Luca':'Mikro'}</span>
+                                    : (d.hasInvoice || d.mikroFaturaNo || d.lucaFaturaNo)
+                                      ? <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {tr564?'Bekliyor':'Pending'}</span>
+                                      : <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {tr564?'Fatura Yok':'No Invoice'}</span>)}
+                                  {satir564(tr564 ? 'Sipariş Durumu' : 'Order Status', d.status)}
+                                  {d.notes && satir564(tr564 ? 'Not' : 'Notes', <span className="font-normal text-xs">{d.notes}</span>)}
+                                  {!!d.lineItems?.length && (
+                                    <div className="mt-3">
+                                      <p className="text-xs font-bold text-gray-500 mb-1.5">{tr564 ? 'Kalemler' : 'Line items'} · {d.lineItems.length}</p>
+                                      <div className="space-y-1">
+                                        {d.lineItems.map((li, i) => (
+                                          <div key={li.id || i} className="flex items-center justify-between text-xs text-gray-600 py-1 border-b border-gray-50 last:border-0">
+                                            <span>{li.name} {li.quantity ? `× ${li.quantity}` : ''}</span>
+                                            <span className="font-semibold tabular-nums">₺{((li.price||0)*(li.quantity||1)).toLocaleString('tr-TR')}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </motion.div>
                     );
                   })()}
