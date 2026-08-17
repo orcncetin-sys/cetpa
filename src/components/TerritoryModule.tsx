@@ -23,6 +23,7 @@ import {
 import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
+import { useCountryList, useCitiesForCountry } from '../hooks/useWorldGeo';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,11 @@ interface Territory {
   name: string;
   description: string;
   cities: string[];          // list of city/region names in this territory
+  // Şehirler önceden serbest metindi (virgülle ayrılmış) — yazım hatası/eşleşmeyen
+  // isim kolaydı. Artık ülke seçilip o ülkenin gerçek şehir listesinden eklenir
+  // (2026-08-17, kullanıcı: "tüm dünyadaki şehirleri göm, ülke seçimi ekle").
+  // countryCode opsiyonel — eski bölgelerde yok, geriye dönük kırmaz.
+  countryCode?: string;       // ISO2, ör. 'TR'
   repName: string;
   repEmail?: string;
   revenueTarget: number;     // annual revenue quota (TRY)
@@ -60,8 +66,16 @@ const TERRITORY_COLORS = [
 
 function cityInTerritory(city: string, territory: Territory): boolean {
   if (!city) return false;
-  const c = city.toLowerCase().trim();
-  return territory.cities.some(t => c.includes(t.toLowerCase()) || t.toLowerCase().includes(c));
+  // Salt .toLowerCase() Türkçe 'İ'yi 'i' değil 'i̇' (nokta + birleşik aksan)
+  // yapar — "İstanbul" artık dünya veritabanından doğru aksanla geldiği için
+  // (2026-08-17) düz ASCII "Istanbul" içeren sipariş/lead kayıtlarıyla
+  // eşleşmeyi code-review'da SESSİZCE kırardı. toLocaleLowerCase('tr-TR')
+  // İ→i, I→ı doğru katlar.
+  const c = city.toLocaleLowerCase('tr-TR').trim();
+  return territory.cities.some(t => {
+    const tl = t.toLocaleLowerCase('tr-TR');
+    return c.includes(tl) || tl.includes(c);
+  });
 }
 
 function pct(actual: number, target: number): number {
@@ -78,13 +92,27 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedTerritoryId, setSelectedTerritoryId] = useState<string | null>(null);
-  const [citiesInput, setCitiesInput] = useState('');
+  // Şehir eklemek için yazılmakta olan metin (tek tek "Ekle" ile draft.cities'e girer) —
+  // eski serbest-metin virgüllü giriş yerine (2026-08-17).
+  const [cityPickerInput, setCityPickerInput] = useState('');
 
   const emptyDraft: Omit<Territory, 'id' | 'createdAt'> = {
-    name: '', description: '', cities: [], repName: '', repEmail: '',
+    name: '', description: '', cities: [], countryCode: '', repName: '', repEmail: '',
     revenueTarget: 0, currency: 'TRY', color: TERRITORY_COLORS[0], active: true,
   };
   const [draft, setDraft] = useState(emptyDraft);
+  const countryList = useCountryList(tr ? 'tr' : 'en');
+  const countryCities = useCitiesForCountry(draft.countryCode || null);
+
+  const addCityToDraft = (raw: string) => {
+    const name = raw.trim();
+    if (!name || draft.cities.includes(name)) { setCityPickerInput(''); return; }
+    setDraft(d => ({ ...d, cities: [...d.cities, name] }));
+    setCityPickerInput('');
+  };
+  const removeCityFromDraft = (name: string) => {
+    setDraft(d => ({ ...d, cities: d.cities.filter(c => c !== name) }));
+  };
 
   // ── Firestore listener ────────────────────────────────────────────────────
   useEffect(() => {
@@ -110,8 +138,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
   // ── Save / update ──────────────────────────────────────────────────────────
   const saveDraft = async () => {
     if (!draft.name.trim() || !draft.repName.trim()) return;
-    const cities = citiesInput.split(',').map(s => s.trim()).filter(Boolean);
-    const payload = { ...draft, cities };
+    const payload = { ...draft };
     if (editingId) {
       await updateDoc(doc(db, 'territories', editingId), payload);
     } else {
@@ -120,14 +147,14 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
     setShowForm(false);
     setEditingId(null);
     setDraft(emptyDraft);
-    setCitiesInput('');
+    setCityPickerInput('');
   };
 
   const startEdit = (t: Territory) => {
-    setDraft({ name: t.name, description: t.description, cities: t.cities, repName: t.repName,
-      repEmail: t.repEmail ?? '', revenueTarget: t.revenueTarget, currency: t.currency,
+    setDraft({ name: t.name, description: t.description, cities: t.cities, countryCode: t.countryCode || '',
+      repName: t.repName, repEmail: t.repEmail ?? '', revenueTarget: t.revenueTarget, currency: t.currency,
       color: t.color, active: t.active });
-    setCitiesInput(t.cities.join(', '));
+    setCityPickerInput('');
     setEditingId(t.id);
     setShowForm(true);
   };
@@ -158,7 +185,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
         subtitle={tr ? 'Bölge bazlı satış temsilcisi atama, kota takibi ve boru hattı görünümü' : 'Rep assignment, quota tracking and pipeline by territory'}
         icon={MapPin}
         actionButton={isAuthenticated ? (
-          <button onClick={() => { setShowForm(true); setEditingId(null); setDraft(emptyDraft); setCitiesInput(''); }}
+          <button onClick={() => { setShowForm(true); setEditingId(null); setDraft(emptyDraft); setCityPickerInput(''); }}
             className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" />{tr ? 'Bölge Ekle' : 'Add Territory'}
           </button>
@@ -198,11 +225,41 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                 placeholder={tr ? 'Sorumlu Temsilci' : 'Assigned Rep'} className="apple-input px-3 py-2 text-sm" />
               <input value={draft.repEmail ?? ''} onChange={e => setDraft(d => ({ ...d, repEmail: e.target.value }))}
                 placeholder={tr ? 'Temsilci e-posta (opsiyonel)' : 'Rep email (optional)'} className="apple-input px-3 py-2 text-sm" />
-              <input value={citiesInput} onChange={e => setCitiesInput(e.target.value)}
-                placeholder={tr ? 'Şehirler — virgülle ayırın (İstanbul, Tekirdağ, Edirne)' : 'Cities — comma separated'}
-                className="apple-input px-3 py-2 text-sm" />
+              <select value={draft.countryCode || ''} onChange={e => { setDraft(d => ({ ...d, countryCode: e.target.value })); setCityPickerInput(''); }}
+                className="apple-input px-3 py-2 text-sm">
+                <option value="">{tr ? 'Ülke seçin' : 'Select country'}</option>
+                {countryList.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
               <input type="number" value={draft.revenueTarget || ''} onChange={e => setDraft(d => ({ ...d, revenueTarget: parseFloat(e.target.value) || 0 }))}
                 placeholder={tr ? 'Yıllık Kota (₺)' : 'Annual Quota (₺)'} className="apple-input px-3 py-2 text-sm" />
+              <div className="md:col-span-2">
+                <label className="text-xs font-semibold text-gray-600 mb-1 block">{tr ? 'Şehirler' : 'Cities'}</label>
+                <div className="flex gap-2">
+                  {/* Ülke seçilmemişse (ör. 2026-08-17 öncesi eski bölgeler) alan
+                      KİLİTLENMEZ — yalnız otomatik tamamlama listesi boş kalır,
+                      serbest yazıp Enter/Ekle ile eklemeye devam edilebilir
+                      (code-review bulgusu: eski bölgeleri düzenlemeyi kırıyordu). */}
+                  <input list="territoryCityList" value={cityPickerInput} onChange={e => setCityPickerInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCityToDraft(cityPickerInput); } }}
+                    placeholder={draft.countryCode ? (tr ? 'Şehir yazın, listeden seçin ya da Enter\'a basın' : 'Type a city, pick from the list, or press Enter') : (tr ? 'Şehir yazın (öneri için önce ülke seçin)' : 'Type a city (select a country for suggestions)')}
+                    className="apple-input px-3 py-2 text-sm flex-1" />
+                  <datalist id="territoryCityList">
+                    {countryCities.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                  <button type="button" onClick={() => addCityToDraft(cityPickerInput)} disabled={!cityPickerInput.trim()}
+                    className="apple-button-secondary px-3 py-2 text-sm disabled:opacity-40">{tr ? 'Ekle' : 'Add'}</button>
+                </div>
+                {draft.cities.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {draft.cities.map(c => (
+                      <span key={c} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                        {c}
+                        <button type="button" onClick={() => removeCityFromDraft(c)} className="hover:text-red-500"><X className="w-3 h-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <label className="text-xs font-semibold text-gray-600">{tr ? 'Renk' : 'Color'}</label>
                 <div className="flex gap-1.5 flex-wrap">
