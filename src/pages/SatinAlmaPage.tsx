@@ -5,13 +5,15 @@ import {
   X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp } from '../lib/dbClient';
+import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, query, where, onSnapshot } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
-import type { Order, InventoryItem, Supplier } from '../types';
+import type { Order, InventoryItem, Supplier, Lead } from '../types';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
+import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
@@ -27,6 +29,7 @@ interface Props {
   orders: Order[];
   inventory: InventoryItem[];
   suppliers: Supplier[];
+  companyId: string | null;
   exchangeRates: Record<string, number> | null;
   fmtKpi: (value: number, format?: 'full' | 'K', decimals?: number) => string;
   toast: (msg: string, type?: string) => void;
@@ -91,7 +94,7 @@ interface Props {
 export default function SatinAlmaPage(props: Props) {
   const {
     currentLanguage, canAccess, hasFullAccess, user, userRole, darkMode,
-    orders, inventory, suppliers, exchangeRates, fmtKpi, toast, setActiveTab,
+    orders, inventory, suppliers, companyId, exchangeRates, fmtKpi, toast, setActiveTab,
     kpiCurrency, setKpiCurrency,
     purchasingSubTab, setPurchasingSubTab,
     apPurchaseOrders,
@@ -111,6 +114,34 @@ export default function SatinAlmaPage(props: Props) {
   const [p612EditId, setP612EditId] = React.useState<string | null>(null);
   const [p627EditId, setP627EditId] = React.useState<string | null>(null);
   const [p608EditId, setP608EditId] = React.useState<string | null>(null);
+
+  // Tedarikçi Rehberi Mikro'ya bağlı değildi — `suppliers` yalnız elle
+  // girilenleri gösteriyordu (kullanıcı bildirimi 2026-08-17: "mikro bağlı
+  // değil, tedarikçiler aslında belli"). AccountingModule.tsx'teki Tedarikçiler
+  // sekmesinde aynı boşluk daha önce kapatılmıştı; aynı mantık paylaşılan
+  // hook'a çıkarılıp burada da kullanıldı.
+  //
+  // Kendi `leads` dinleyicisi (App.tsx'in paylaşılan `leads` state'i DEĞİL):
+  // useDataSync.ts o state'i Admin/Manager dışındaki roller için
+  // assignedTo===uid'e KISITLIYOR (CRM pipeline sahipliği amaçlı). Bu
+  // ekranın gerçek kullanıcıları (Purchasing/Logistics rolleri, satin-alma
+  // full erişiminde) Admin/Manager değil — paylaşılan `leads`'i kullansaydım
+  // tedarikçiler onlara neredeyse hep boş görünürdü (code-review bulgusu).
+  // rbac.ts: leads read = [Admin,Manager,Sales,Accounting,Purchasing] —
+  // Purchasing zaten yetkili, yalnız companyId'ye göre süz, assignedTo'ya değil.
+  const [tedarikciLeads, setTedarikciLeads] = React.useState<Lead[]>([]);
+  React.useEffect(() => {
+    if (!companyId || !canAccess('satin-alma')) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'leads'), where('companyId', '==', companyId)),
+      snap => setTedarikciLeads(snap.docs.map((d: { id: string; data: () => Record<string, unknown> }) => ({ id: d.id, ...d.data() } as Lead))),
+      () => setTedarikciLeads([]),
+    );
+    return () => unsub();
+  }, [companyId]);
+  const mikroFaturalarSA = useMikroFaturalar(!!user && canAccess('satin-alma'));
+  const mikroTedarikciler = useMikroTedarikciler(tedarikciLeads, mikroFaturalarSA, suppliers);
+  const allSuppliers = [...suppliers, ...mikroTedarikciler];
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -282,25 +313,34 @@ export default function SatinAlmaPage(props: Props) {
 
                       {/* Supplier Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {suppliers
+                        {allSuppliers
                           .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company ?? '').toLowerCase().includes(supplierSearch.toLowerCase()))
-                          .map(s => (
+                          .map(s => {
+                            // Mikro'dan türetilen kayıtlar `suppliers` koleksiyonunda yok —
+                            // düzenle/sil elle girilenler dışına gösterilmez (id gerçek bir
+                            // suppliers dokümanına karşılık gelmeyebilir).
+                            const isNative = suppliers.some(x => x.id === s.id);
+                            return (
                             <div key={s.id} className="apple-card p-5 space-y-3 group">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
                                   <Building2 className="w-5 h-5 text-emerald-600" />
                                 </div>
-                                {hasFullAccess('satin-alma') && (
-                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => { setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
-                                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button onClick={() => void handleDeleteSupplier(s.id)}
-                                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
+                                {isNative ? (
+                                  hasFullAccess('satin-alma') && (
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => { setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
+                                        className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button onClick={() => void handleDeleteSupplier(s.id)}
+                                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )
+                                ) : (
+                                  <span title={currentLanguage==='tr'?'Mikro alış faturalarından/carilerinden türetildi':'Derived from Mikro purchase invoices/accounts'} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-500">Mikro</span>
                                 )}
                               </div>
                               <div>
@@ -313,8 +353,9 @@ export default function SatinAlmaPage(props: Props) {
                                 {s.taxNo && <p className="flex items-center gap-1.5"><FileText className="w-3 h-3 flex-shrink-0" />VKN: {s.taxNo}</p>}
                               </div>
                             </div>
-                          ))}
-                        {suppliers.length === 0 && (
+                            );
+                          })}
+                        {allSuppliers.length === 0 && (
                           <div className="col-span-full text-center py-16 border-2 border-dashed border-gray-100 rounded-2xl">
                             <Building2 className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                             <p className="text-sm text-gray-400 font-medium">{currentLanguage === 'tr' ? 'Henüz tedarikçi yok' : 'No suppliers yet'}</p>

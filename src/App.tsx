@@ -4824,6 +4824,7 @@ function AppContent() {
                 orders={orders}
                 inventory={inventory}
                 suppliers={suppliers}
+                companyId={storeCompanyId ?? user?.uid ?? null}
                 exchangeRates={exchangeRates}
                 fmtKpi={fmtKpi}
                 toast={toast}
