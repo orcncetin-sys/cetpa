@@ -56,7 +56,7 @@
     "react-leaflet": "^5.0.0",
     "react-markdown": "^10.1.0",
     "react-qr-barcode-scanner": "^2.1.23",
-    "react-router-dom": "^7.17.0",
+    "react-router-dom": "^7.18.2",
     "recharts": "^3.8.0",
     "roboto-base64": "^0.1.2",
     "stripe": "^22.1.1",
