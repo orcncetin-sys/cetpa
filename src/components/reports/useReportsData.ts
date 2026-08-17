@@ -206,9 +206,9 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
 
   const COLORS = ['#ff4000', '#007AFF', '#34C759', '#FF9500', '#AF52DE', '#00C7BE', '#FF2D55'];
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
     const doc = new jsPDF();
-    registerTurkishFont(doc);
+    await registerTurkishFont(doc);
     doc.text(currentT.report_title, 14, 15);
     autoTable(doc, {
       styles: { font: 'Roboto' },

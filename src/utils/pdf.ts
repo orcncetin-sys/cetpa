@@ -9,9 +9,9 @@ import { registerTurkishFont } from './pdfFont';
 // olarak bırakıldı (2026-08-17, bkz. pdfFont.ts).
 const normTR = (s: string) => s;
 
-export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unknown) => {
+export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t: unknown) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  registerTurkishFont(doc);
+  await registerTurkishFont(doc);
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [255, 64, 0];
@@ -158,13 +158,13 @@ export const exportOrderPDF = (order: Order | Record<string, unknown>, _t: unkno
 
 // ── Customer Account Statement ────────────────────────────────────────────────
 
-export const exportCustomerStatement = (
+export const exportCustomerStatement = async (
   lead: Lead,
   orders: Order[],
   lang: 'tr' | 'en' = 'tr',
 ) => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  registerTurkishFont(doc);
+  await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [26, 58, 92];   // #1a3a5c navy
@@ -350,9 +350,9 @@ interface PurchaseOrderDoc {
   notes?: string;
 }
 
-export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
+export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  registerTurkishFont(doc);
+  await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const BRAND: [number, number, number] = [255, 64, 0];
@@ -508,9 +508,9 @@ export const exportPurchaseOrderPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' =
 
 // ── Goods Receipt Note (Teslim Makbuzu) ──────────────────────────────────────
 
-export const exportGoodsReceiptPDF = (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
+export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 'en' = 'tr') => {
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  registerTurkishFont(doc);
+  await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
   const H    = doc.internal.pageSize.getHeight();
   const GREEN: [number, number, number] = [22, 163, 74];   // green-600

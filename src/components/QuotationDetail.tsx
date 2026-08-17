@@ -38,10 +38,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
     }
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     try {
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      registerTurkishFont(doc);
+      await registerTurkishFont(doc);
       const W = doc.internal.pageSize.getWidth();   // 210
       const H = doc.internal.pageSize.getHeight();  // 297
       const BRAND: [number, number, number] = [255, 64, 0];

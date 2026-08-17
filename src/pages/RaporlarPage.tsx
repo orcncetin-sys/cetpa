@@ -117,9 +117,9 @@ export default function RaporlarPage({
         <button
           onClick={() => {
             import('jspdf').then(({ jsPDF }) => {
-              import('jspdf-autotable').then(({ default: autoTable }) => {
+              import('jspdf-autotable').then(async ({ default: autoTable }) => {
                 const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                registerTurkishFont(pdf);
+                await registerTurkishFont(pdf);
                 const tr63 = currentLanguage === 'tr';
                 const today63 = new Date().toLocaleDateString(tr63 ? 'tr-TR' : 'en-US');
                 // Cover

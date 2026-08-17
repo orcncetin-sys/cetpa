@@ -647,9 +647,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const normTR = (s: string) => s;
 
   // GERÇEK PDF (buton "Beyanname PDF" diyor ama eskiden .txt indiriyordu).
-  const downloadVatDeclaration = () => {
+  const downloadVatDeclaration = async () => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    registerTurkishFont(doc);
+    await registerTurkishFont(doc);
     const W = doc.internal.pageSize.getWidth();
     doc.setFillColor(255, 64, 0);
     doc.rect(0, 0, W, 26, 'F');

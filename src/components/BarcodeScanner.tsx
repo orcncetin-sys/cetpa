@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Scan, Keyboard, Camera } from 'lucide-react';
-import BarcodeScannerComponent from 'react-qr-barcode-scanner';
+
+// react-qr-barcode-scanner (ZXing) TEK BAŞINA 427 kB — ölçüldü (2026-08-17,
+// "sistem çok yavaş açılıyor" şikayeti). Statik import olduğu için bu bileşeni
+// kullanan HER ekran (Envanter, Siparişler/AddOrderModal, QR Transfer) o 427
+// kB'ı kullanıcı kamerayı hiç açmasa bile indiriyordu. Artık yalnız kamera
+// modu SEÇİLİNCE indiriliyor; manuel giriş modu hiç indirmez.
+const BarcodeScannerComponent = React.lazy(() => import('react-qr-barcode-scanner'));
 
 interface BarcodeScannerProps {
   isOpen: boolean;
@@ -77,16 +83,22 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
 
           {mode === 'camera' ? (
             <div className="relative aspect-square rounded-2xl overflow-hidden bg-black border-4 border-gray-100">
-              <BarcodeScannerComponent
-                width="100%"
-                height="100%"
-                onUpdate={(err, result) => {
-                  if (result) {
-                    onScan(result.getText());
-                    onClose();
-                  }
-                }}
-              />
+              <Suspense fallback={
+                <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">
+                  {currentLanguage === 'tr' ? 'Kamera yükleniyor…' : 'Loading camera…'}
+                </div>
+              }>
+                <BarcodeScannerComponent
+                  width="100%"
+                  height="100%"
+                  onUpdate={(err, result) => {
+                    if (result) {
+                      onScan(result.getText());
+                      onClose();
+                    }
+                  }}
+                />
+              </Suspense>
               <div className="absolute inset-0 border-2 border-brand opacity-30 pointer-events-none m-12 rounded-lg" />
               <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-brand opacity-50 animate-pulse" />
             </div>

@@ -46,10 +46,10 @@ interface MutabakatData {
 
 // ── PDF Generator ─────────────────────────────────────────────────────────────
 
-function generateMutabakatPDF(data: MutabakatData, lang: string): jsPDF {
+async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<jsPDF> {
   const t = lang === 'tr';
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  registerTurkishFont(doc);
+  await registerTurkishFont(doc);
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 20;
 
@@ -217,9 +217,9 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
     }
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!data) return;
-    const doc = generateMutabakatPDF(data, currentLanguage);
+    const doc = await generateMutabakatPDF(data, currentLanguage);
     doc.save(`mutabakat-${data.lead.name.replace(/\s+/g, '-')}-${data.period}.pdf`);
   };
 
@@ -227,7 +227,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
     if (!data?.lead.phone) return;
     setSending('whatsapp');
     try {
-      const doc = generateMutabakatPDF(data, currentLanguage);
+      const doc = await generateMutabakatPDF(data, currentLanguage);
       const pdfBase64 = doc.output('datauristring');
       // Send a WhatsApp message with a link/notification (PDF inline not supported in basic API)
       const msg = t
@@ -260,7 +260,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
     setSending('email');
     try {
       // Generate PDF and trigger mailto with the PDF as download
-      const doc = generateMutabakatPDF(data, currentLanguage);
+      const doc = await generateMutabakatPDF(data, currentLanguage);
       doc.save(`mutabakat-${data.lead.name.replace(/\s+/g, '-')}-${data.period}.pdf`);
       const subject = encodeURIComponent(t ? `${data.period} Cari Hesap Mutabakat Mektubu` : `${data.period} Account Reconciliation`);
       const body = encodeURIComponent(t

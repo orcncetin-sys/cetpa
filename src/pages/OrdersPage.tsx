@@ -614,9 +614,9 @@ export default function OrdersPage({
                       // Bulk PDF export: generate one PDF with all selected orders
                       const sel = activeOrders.filter(o => selectedOrderIds.has(o.id));
                       import('jspdf').then(({ jsPDF }) => {
-                        import('jspdf-autotable').then(({ default: autoTable }) => {
+                        import('jspdf-autotable').then(async ({ default: autoTable }) => {
                           const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                          registerTurkishFont(pdf);
+                          await registerTurkishFont(pdf);
                           pdf.setFontSize(14);
                           pdf.text(currentLanguage === 'tr' ? 'Sipariş Listesi' : 'Order List', 14, 20);
                           autoTable(pdf, {
@@ -1703,7 +1703,7 @@ export default function OrdersPage({
                           const o = selectedOrder;
                           const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
                           const doc505 = new jsPDF({ format: 'a4', unit: 'mm' });
-                          registerTurkishFont(doc505);
+                          await registerTurkishFont(doc505);
                           const W = doc505.internal.pageSize.getWidth();
                           doc505.setFillColor(255, 64, 0);
                           doc505.rect(0, 0, W, 28, 'F');
