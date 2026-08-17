@@ -17,13 +17,11 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
+  AlertCircle, Calendar, Download, CheckCircle2,
   CreditCard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import { cn } from '../../lib/utils';
-import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -42,6 +40,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function IKRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -50,37 +49,17 @@ export default function IKRapor(ctx: ReportsCtx) {
     <>
       {reportsTab === 'ik' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* KPIs — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
+          <KpiGrid cols={3}>
             {([
-              { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
-              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
-              { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
-            ] as { label: string; value: string; icon: React.ElementType; color: string; bg: string; desc: string; isMoney: boolean }[]).map((k,i) => {
-              const Icon = k.icon;
-              return (
-                <div key={i} className={`apple-card p-5 ${k.bg}`}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-5 h-5 ${k.color}`} />
-                      <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{k.label}</p>
-                    </div>
-                    {k.isMoney && (
-                      <div className="flex gap-0.5 bg-white/70 rounded-md p-0.5">
-                        {(['TRY','USD','EUR'] as const).map(c => (
-                          <button key={c} onClick={() => setRevenueCurrency(c)}
-                            className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${revenueCurrency===c ? 'bg-white shadow-sm text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>
-                            {c==='TRY'?'₺':c==='USD'?'$':'€'}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-                  <p className="text-xs text-gray-400 mt-1">{k.desc}</p>
-                </div>
-              );
-            })}
-          </div>
+              { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, accent: 'text-blue-600', accentBg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
+              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
+              { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
+            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; desc: string; isMoney: boolean }[]).map((k,i) => (
+              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg} hint={k.desc}
+                action={k.isMoney ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
+            ))}
+          </KpiGrid>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="apple-card p-6">

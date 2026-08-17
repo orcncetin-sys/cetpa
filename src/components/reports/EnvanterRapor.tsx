@@ -17,13 +17,11 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
+  AlertCircle, Calendar, Download, CheckCircle2,
   CreditCard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import { cn } from '../../lib/utils';
-import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -42,6 +40,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function EnvanterRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -50,33 +49,18 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
     <>
       {reportsTab === 'envanter' && (
         <div className="space-y-6">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* KPIs — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
+          <KpiGrid>
             {([
-              { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), color: 'text-blue-600', bg: 'bg-blue-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), color: 'text-orange-500', bg: 'bg-orange-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates), color: 'text-green-600', bg: 'bg-green-50', isMoney: true },
-              { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), color: 'text-purple-600', bg: 'bg-purple-50', isMoney: false },
-            ] as { label: string; value: string; color: string; bg: string; isMoney: boolean }[]).map((k,i) => (
-              <motion.div key={i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}}
-                className={`apple-card p-5 ${k.bg}`}>
-                <div className="flex items-start justify-between mb-1">
-                  <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{k.label}</p>
-                  {k.isMoney && (
-                    <div className="flex gap-0.5 bg-white/70 rounded-md p-0.5" onClick={e => e.stopPropagation()}>
-                      {(['TRY','USD','EUR'] as const).map(c => (
-                        <button key={c} onClick={() => setRevenueCurrency(c)}
-                          className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${revenueCurrency===c ? 'bg-white shadow-sm text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>
-                          {c==='TRY'?'₺':c==='USD'?'$':'€'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-              </motion.div>
+              { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), icon: Package, accent: 'text-blue-600', accentBg: 'bg-blue-50', isMoney: false },
+              { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), icon: AlertCircle, accent: 'text-orange-500', accentBg: 'bg-orange-50', isMoney: false },
+              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', isMoney: true },
+              { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), icon: List, accent: 'text-purple-600', accentBg: 'bg-purple-50', isMoney: false },
+            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; isMoney: boolean }[]).map((k,i) => (
+              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg}
+                action={k.isMoney ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
             ))}
-          </div>
+          </KpiGrid>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Kategori Stok */}

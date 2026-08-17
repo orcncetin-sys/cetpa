@@ -17,13 +17,11 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
+  AlertCircle, Calendar, Download, CheckCircle2,
   CreditCard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import { cn } from '../../lib/utils';
-import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -42,6 +40,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { KpiCard, KpiGrid } from './ReportKit';
 
 export default function LojistikRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -50,19 +49,20 @@ export default function LojistikRapor(ctx: ReportsCtx) {
     <>
       {reportsTab === 'lojistik' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), color: 'text-brand', bg: 'bg-brand/10' },
-              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), color: 'text-green-600', bg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Aktarma':'In Transit', value: String(orders.filter(o=>o.status==='Shipped').length), color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: currentLanguage==='tr'?'Toplam Ciro':'Revenue', value: `₺${totalRevenueTRY.toLocaleString('tr-TR',{minimumFractionDigits:0})}`, color: 'text-purple-600', bg: 'bg-purple-50' },
-            ].map((k,i) => (
-              <motion.div key={i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}} className={`apple-card p-5 ${k.bg}`}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{k.label}</p>
-                <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-              </motion.div>
+          {/* KPIs — ortak KpiCard/KpiGrid (ReportKit) ile tek tip.
+              4. kart eskiden "Toplam Ciro" idi: ciro bir SATIŞ göstergesi, lojistik
+              raporunda konu dışıydı (kullanıcı: "rapor çekerken gelen veriler o
+              konuyla ilgili olmalı"). Yerine sevkiyat bekleyen sipariş sayısı. */}
+          <KpiGrid>
+            {([
+              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10' },
+              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
+              { label: currentLanguage==='tr'?'Yolda':'In Transit', value: String(orders.filter(o=>o.status==='Shipped').length), icon: Truck, accent: 'text-blue-600', accentBg: 'bg-blue-50' },
+              { label: currentLanguage==='tr'?'Sevkiyat Bekleyen':'Awaiting Shipment', value: String(orders.filter(o=>o.status==='Pending'||o.status==='Processing').length), icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50' },
+            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string }[]).map((k,i) => (
+              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg} />
             ))}
-          </div>
+          </KpiGrid>
 
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Teslimat Performansı':'Delivery Performance'}</h3>

@@ -17,13 +17,11 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
+  AlertCircle, Calendar, Download, CheckCircle2,
   CreditCard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import { cn } from '../../lib/utils';
-import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -42,6 +40,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function GenelRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -50,54 +49,29 @@ export default function GenelRapor(ctx: ReportsCtx) {
     <>
       {reportsTab === 'genel' && (
         <div className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}
-              onClick={() => onNavigate?.('crm')}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onNavigate?.('crm'); }}
-              className="apple-card p-6 text-left w-full hover:shadow-md hover:scale-[1.01] transition-all duration-200 cursor-pointer group">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-brand/10">
-                  <span className="text-xl font-black text-brand leading-none">{revenueSymbol}</span>
-                </div>
-                <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
-                  {(['TRY', 'USD', 'EUR'] as const).map(c => (
-                    <button key={c} onClick={() => setRevenueCurrency(c)} className={cn('px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-colors', revenueCurrency === c ? 'bg-white text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600')}>
-                      {c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{currentT.kpi_revenue}</p>
-              <p className="text-2xl font-bold mt-1">{revenueFormatted}</p>
-              <p className="text-[10px] text-brand mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
-              </p>
-            </motion.div>
-            {[
-              { label: currentT.kpi_orders, value: String(totalOrders), icon: Package as React.ElementType | null, symbol: null as string | null, color: 'text-blue-500', bg: 'bg-blue-50', tab: 'crm' },
-              { label: currentT.kpi_avg_order, value: avgOrderFormatted, icon: null, symbol: revenueSymbol, color: 'text-green-500', bg: 'bg-green-50', tab: 'crm' },
-              { label: currentT.kpi_low_stock, value: String(lowStockItems), icon: AlertCircle as React.ElementType | null, symbol: null, color: 'text-orange-500', bg: 'bg-orange-50', tab: 'inventory' },
-            ].map((kpi, i) => (
-              <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (i + 1) * 0.1 }}
+          {/* KPI Cards — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
+          <KpiGrid>
+            {([
+              { label: currentT.kpi_revenue, value: revenueFormatted, icon: undefined, symbol: revenueSymbol, accent: 'text-brand', accentBg: 'bg-brand/10', tab: 'crm', money: true },
+              { label: currentT.kpi_orders, value: String(totalOrders), icon: Package, symbol: undefined, accent: 'text-blue-500', accentBg: 'bg-blue-50', tab: 'crm', money: false },
+              { label: currentT.kpi_avg_order, value: avgOrderFormatted, icon: undefined, symbol: revenueSymbol, accent: 'text-green-500', accentBg: 'bg-green-50', tab: 'crm', money: false },
+              { label: currentT.kpi_low_stock, value: String(lowStockItems), icon: AlertCircle, symbol: undefined, accent: 'text-orange-500', accentBg: 'bg-orange-50', tab: 'inventory', money: false },
+            ] as { label: string; value: string; icon?: React.ElementType; symbol?: string; accent: string; accentBg: string; tab: string; money: boolean }[]).map((kpi, i) => (
+              <KpiCard
+                key={kpi.tab + i}
+                index={i}
+                label={kpi.label}
+                value={kpi.value}
+                icon={kpi.icon}
+                symbol={kpi.symbol}
+                accent={kpi.accent}
+                accentBg={kpi.accentBg}
+                action={kpi.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined}
                 onClick={() => onNavigate?.(kpi.tab)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onNavigate?.(kpi.tab); }}
-                className="apple-card p-6 text-left w-full hover:shadow-md hover:scale-[1.01] transition-all duration-200 cursor-pointer group">
-                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-4", kpi.bg)}>
-                  {kpi.symbol ? <span className={cn('text-xl font-black leading-none', kpi.color)}>{kpi.symbol}</span> : kpi.icon && <kpi.icon className={cn("w-6 h-6", kpi.color)} />}
-                </div>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{kpi.label}</p>
-                <p className="text-2xl font-bold mt-1">{kpi.value}</p>
-                <p className="text-[10px] text-brand mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
-                </p>
-              </motion.div>
+                linkHint={currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
+              />
             ))}
-          </div>
+          </KpiGrid>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="apple-card p-8">
