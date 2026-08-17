@@ -25,7 +25,10 @@ interface KdvTabProps {
   kdvSortDir2: 'asc' | 'desc';
   setKdvSortBy: (v: KdvSortKey) => void;
   setKdvSortDir2: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>;
-  kdvOranBreakdown: Record<number, { matrah: number; kdv: number }>;
+  // 'karma': Mikro'da hem %10 hem %20'li ürün taşıyan faturalar (code-review
+  // bulgusu, task #27) — AccountingModule bu anahtarı üretiyor, burada da
+  // ele alınmalı, aksi halde ekranda "%karma" gibi anlamsız bir etiket çıkar.
+  kdvOranBreakdown: Record<string, { matrah: number; kdv: number }>;
   downloadVatDeclaration: () => void;
   downloadVatDeclarationCSV: () => void;
 }
@@ -161,14 +164,16 @@ export default function KdvTab({
                 .filter(([oran]) => !kdvSearch || `%${oran}`.includes(kdvSearch))
                 .sort(([oranA, dataA], [oranB, dataB]) => {
                   let cmp: number;
-                  if (kdvSortBy === 'oran') cmp = Number(oranA) - Number(oranB);
+                  // 'karma' Number()'da NaN verir — sıralamada sabit bir değere düş.
+                  const oranSayi = (o: string) => o === 'karma' ? -1 : Number(o);
+                  if (kdvSortBy === 'oran') cmp = oranSayi(oranA) - oranSayi(oranB);
                   else if (kdvSortBy === 'matrah') cmp = dataA.matrah - dataB.matrah;
                   else cmp = dataA.kdv - dataB.kdv;
                   return kdvSortDir2 === 'asc' ? cmp : -cmp;
                 })
                 .map(([oran, data]) => (
                   <tr key={oran} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">%{oran}</span></td>
+                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{oran === 'karma' ? (currentLanguage === 'tr' ? 'Karma' : 'Mixed') : `%${oran}`}</span></td>
                     <td className="py-2.5 px-3 text-right text-gray-700 font-medium">{formatTRY(data.matrah)}</td>
                     <td className="py-2.5 px-3 text-right font-semibold text-[#ff4000]">{formatTRY(data.kdv)}</td>
                   </tr>

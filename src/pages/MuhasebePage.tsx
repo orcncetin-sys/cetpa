@@ -2396,9 +2396,12 @@ export default function MuhasebePage(props: Props) {
                     const maxVal = Math.max(...monthlyData.map(d => d.collected), 1);
 
                     // KDV by rate breakdown — Mikro giden (satış) faturalarından, gerçek oran.
+                    // Karma oranlı faturalar (hem %10 hem %20) tek f.oran'a göre kovalanırsa
+                    // KDV'si yanlış orana yazılır — ayrı "karma" kovası (task #27, #18'in
+                    // aynı kök nedenli devamı).
                     const rateMap: Record<string,number> = {};
                     yilFaturalari.filter(f => f.yon === 'giden' && f.kdv > 0).forEach(f => {
-                      const key = f.oran == null ? 'bilinmiyor' : String(f.oran);
+                      const key = f.oranKarma ? 'karma' : (f.oran == null ? 'bilinmiyor' : String(f.oran));
                       rateMap[key] = (rateMap[key] || 0) + f.kdv;
                     });
 
@@ -2499,9 +2502,14 @@ export default function MuhasebePage(props: Props) {
                             <div className="mt-4 pt-4 border-t border-gray-100">
                               <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">{tr558 ? `KDV Oranına Göre Dağılım (${yearNum})` : `Distribution by VAT Rate (${yearNum})`}</p>
                               <div className="flex flex-wrap gap-3">
-                                {Object.entries(rateMap).sort((a,b) => (Number(b[0])||-1)-(Number(a[0])||-1)).map(([rate, total]) => (
+                                {/* 'karma' ve 'bilinmiyor' ikisi de Number()'da NaN'a
+                                    düşüp aynı -1 rütbesine kayardı — 'karma' önce gelsin. */}
+                                {Object.entries(rateMap).sort((a,b) => {
+                                  const rank = (k: string) => k === 'karma' ? -0.5 : (Number(k) || -1);
+                                  return rank(b[0]) - rank(a[0]);
+                                }).map(([rate, total]) => (
                                   <div key={rate} className="bg-gray-50 rounded-xl px-3 py-2">
-                                    <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (tr558?'Oran yok':'No rate') : `%${rate} KDV`}</p>
+                                    <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (tr558?'Oran yok':'No rate') : rate === 'karma' ? (tr558?'Karma oran':'Mixed rate') : `%${rate} KDV`}</p>
                                     <p className="font-bold text-gray-800 text-sm">₺{total.toLocaleString('tr-TR')}</p>
                                   </div>
                                 ))}
@@ -3567,10 +3575,12 @@ export default function MuhasebePage(props: Props) {
                     const totalKdv = donemFaturalar.reduce((s, f) => s + f.kdv, 0);
                     // Oran bazlı gruplama — DİNAMİK (veride hangi oranlar varsa). Sabit
                     // %18/%8 bandı yanlıştı: TR oranları 20/10/1/0'a geçti.
-                    const oranMap = new Map<string, { oran: number | null; matrah: number; kdv: number; count: number }>();
+                    // Karma oranlı faturalar (task #27, #18'in devamı) ayrı kovada —
+                    // f.oran'a göre gruplarsak KDV'si tek (yanlış) orana yazılırdı.
+                    const oranMap = new Map<string, { oran: number | null; oranKarma?: boolean; matrah: number; kdv: number; count: number }>();
                     for (const f of donemFaturalar) {
-                      const key = f.oran == null ? 'bilinmiyor' : String(f.oran);
-                      const g = oranMap.get(key) ?? { oran: f.oran, matrah: 0, kdv: 0, count: 0 };
+                      const key = f.oranKarma ? 'karma' : (f.oran == null ? 'bilinmiyor' : String(f.oran));
+                      const g = oranMap.get(key) ?? { oran: f.oran, oranKarma: f.oranKarma, matrah: 0, kdv: 0, count: 0 };
                       g.matrah += f.matrah; g.kdv += f.kdv; g.count++;
                       oranMap.set(key, g);
                     }
@@ -3599,8 +3609,8 @@ export default function MuhasebePage(props: Props) {
                           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50"><h3 className="font-bold text-gray-800 text-sm">{tr617?'KDV Dilimi Analizi':'VAT Band Analysis'}</h3></div>
                           <div className="divide-y divide-gray-50">
                             {oranRows.map(row=>(
-                              <div key={String(row.oran)} className="grid grid-cols-4 px-4 py-3 text-xs">
-                                <span className={`font-bold ${bandColor(row.oran)}`}>{row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
+                              <div key={row.oranKarma ? 'karma' : String(row.oran)} className="grid grid-cols-4 px-4 py-3 text-xs">
+                                <span className={`font-bold ${bandColor(row.oran)}`}>{row.oranKarma ? (tr617?'Karma oran':'Mixed rate') : row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
                                 <span className="tabular-nums text-gray-600">₺{Math.round(row.matrah).toLocaleString('tr-TR')}</span>
                                 <span className="tabular-nums font-bold text-gray-800">₺{Math.round(row.kdv).toLocaleString('tr-TR')}</span>
                                 <span className="text-gray-400">{row.count} {tr617?'fatura':'invoices'}</span>

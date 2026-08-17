@@ -669,7 +669,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       headStyles: { fillColor: [29, 29, 31] },
     });
     const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
-      `%${oran}`, normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
+      oran === 'karma' ? (currentLanguage === 'tr' ? 'Karma' : 'Mixed') : `%${oran}`,
+      normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
     ]);
     autoTable(doc, {
       startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60) + 6,
@@ -1778,6 +1779,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         totalPrice: f.tutar,
         faturali: true,
         kdvOran: f.oran ?? undefined,
+        oranKarma: f.oranKarma,
         kdvTutari: f.kdv,
         syncedAt: undefined as unknown,
       }))
@@ -2130,7 +2132,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const odenecekKDV = hesaplananKDV - indirilecekKDV;
   // Matrah yalnız gelir (alacakHesap 6xx) fişlerinden, oran bazında; KDV = matrah*oran.
   // (Önceki sürüm her borç satırından matrah uyduruyordu.)
-  const kdvOranBreakdown: Record<number, { matrah: number; kdv: number }> = {};
+  // string key: Mikro'dan gelen karma oranlı faturalar (2026-08-17, task #27,
+  // #18'in devamı — bu KDV Beyannamesi PDF/CSV'sini besliyor) 'karma' adında
+  // ayrı bir kovaya gider; tek f.oran'a göre kovalarsak KDV yanlış orana yazılır.
+  const kdvOranBreakdown: Record<string, { matrah: number; kdv: number }> = {};
   kdvFilteredEntries.filter(e => e.alacakHesap.startsWith('6') && (e.kdvOran ?? 0) > 0).forEach(e => {
     const oran = e.kdvOran ?? 0;
     const matrah = e.alacak ?? e.borc;
@@ -2141,7 +2146,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Mikro satış faturaları oran bazında (2026-08-02): tablo journalEntries'ten
   // türüyordu, o boş → tablo boştu. mikroFaturaSatirlari matrah/kdv/oran taşır.
   mikroKdvDonem.filter(f => f.yon === 'giden').forEach(f => {
-    const oran = Number((f as { oran?: number }).oran) || 0;
+    const karma = (f as { oranKarma?: boolean }).oranKarma;
+    const oran = karma ? 'karma' : String(Number((f as { oran?: number }).oran) || 0);
     if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
     kdvOranBreakdown[oran].matrah += Number((f as { matrah?: number }).matrah) || 0;
     kdvOranBreakdown[oran].kdv += Number((f as { kdv?: number }).kdv) || 0;

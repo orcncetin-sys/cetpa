@@ -5,7 +5,7 @@ import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
-type SatisKayit = { customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; kdvTutari?: number; syncedAt?: { toDate?: () => Date } };
+type SatisKayit = { customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; oranKarma?: boolean; kdvTutari?: number; syncedAt?: { toDate?: () => Date } };
 type MikroSatisRow = MikroFatura & { musteri: string };
 type SatisSortKey = 'customerName' | 'totalPrice' | 'date' | 'faturali' | 'kdvOran';
 
@@ -91,7 +91,9 @@ export default function SatislarTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı / Faturasız</p>
         </button>
         {/* Toplam KDV — stays TRY */}
-        <button onClick={() => { const byRate: Record<string, number> = {}; satisKayitlari.forEach((o) => { if (o.kdvOran !== undefined) { const k = `%${o.kdvOran} KDV`; byRate[k] = (byRate[k] || 0) + (o.kdvTutari || 0); } }); setDrillDown({ title: currentLanguage === 'tr' ? 'KDV Oranlarına Göre' : 'KDV by Rate', rows: Object.entries(byRate).sort(([,a],[,b]) => b - a).map(([rate, tutar]) => ({ label: rate, value: formatTRY(tutar) })), total: formatTRY(satisKayitlari.reduce((s, o) => s + (o.kdvTutari || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        {/* Karma oranlı faturalar (task #27, #18'in devamı): oranKarma tek
+            f.oran'a göre kovalanırsa KDV'si yanlış orana yazılır — ayrı kova. */}
+        <button onClick={() => { const byRate: Record<string, number> = {}; satisKayitlari.forEach((o) => { if (o.oranKarma) { byRate[currentLanguage==='tr'?'Karma':'Mixed'] = (byRate[currentLanguage==='tr'?'Karma':'Mixed'] || 0) + (o.kdvTutari || 0); } else if (o.kdvOran !== undefined) { const k = `%${o.kdvOran} KDV`; byRate[k] = (byRate[k] || 0) + (o.kdvTutari || 0); } }); setDrillDown({ title: currentLanguage === 'tr' ? 'KDV Oranlarına Göre' : 'KDV by Rate', rows: Object.entries(byRate).sort(([,a],[,b]) => b - a).map(([rate, tutar]) => ({ label: rate, value: formatTRY(tutar) })), total: formatTRY(satisKayitlari.reduce((s, o) => s + (o.kdvTutari || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
               <Calculator size={15} className="text-purple-600" />
