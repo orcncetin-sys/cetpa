@@ -1762,7 +1762,32 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
       add(key, age < 26 && newest.size >= minBytes,
         `${newest.name} — ${age.toFixed(1)} saat önce, ${(newest.size / 1024).toFixed(0)} KB`);
     } catch (e) {
-      add(key, false, 'Storage listelenemedi: ' + (e instanceof Error ? e.message : String(e)));
+      const msg = e instanceof Error ? e.message : String(e);
+      // "The specified bucket does not exist" TESHIS EDILEBILIR bir hata:
+      // Firebase projelerinde bucket adi iki bicimde olabilir — eski projeler
+      // `<proje>.appspot.com`, yeniler `<proje>.firebasestorage.app`. Yanlis
+      // olani yapilandirilmissa yedek gorevi de bekci de sessizce basarisiz
+      // olur ve OFF-SITE YEDEK HIC ALINMAZ. Hangi adin gercekte var oldugunu
+      // BURADA (uretim kimligiyle) sinayip mesaja yaziyoruz — aksi halde
+      // disaridan tespit edilemiyor (2026-08-18: lokalde servis hesabi yok,
+      // ADC ile yapilan deneme kanit sayilmaz).
+      let ipucu = '';
+      if (/bucket does not exist|notFound|404/i.test(msg)) {
+        const adaylar = [
+          OPS_STORAGE_BUCKET,
+          `${PROJECT_ID}.appspot.com`,
+          `${PROJECT_ID}.firebasestorage.app`,
+        ].filter((v, i, a) => a.indexOf(v) === i);
+        const bulunan: string[] = [];
+        for (const b of adaylar) {
+          try { const [varMi] = await admin.storage().bucket(b).exists(); if (varMi) bulunan.push(b); }
+          catch { /* bu aday sinanamadi */ }
+        }
+        ipucu = bulunan.length
+          ? ` — GERCEKTE VAR OLAN bucket: ${bulunan.join(', ')} (yapilandirilan: ${OPS_STORAGE_BUCKET})`
+          : ` — denenen adlarin HICBIRI yok (${adaylar.join(', ')}); Firebase Storage projede hic etkinlestirilmemis olabilir`;
+      }
+      add(key, false, 'Storage listelenemedi: ' + msg + ipucu);
     }
   }
 
