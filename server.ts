@@ -207,6 +207,23 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
 }
 
 /** Actor info extracted from an authenticated request — for audit logging. */
+/**
+ * Uygulamanin GECERLI rol listesi — TEK KAYNAK.
+ *
+ * Bu liste src/types.ts'teki UserRole enum'u ve src/lib/rbac.ts'teki AppRole
+ * tipiyle birebir ayni olmak ZORUNDA. Daha once /api/admin/invite kendi
+ * listesini elle tasiyordu ve uc uydurma rol iceriyordu (Accountant, Warehouse,
+ * Viewer) — bunlarla davet edilen kullanici giris yapabiliyor ama RBAC onu
+ * tanimadigi icin her yerde sessiz 403 aliyordu. Ayrica 7 gercek rol
+ * (Logistics, Accounting, HR, Purchasing, Legal, Corporate, Quality) hic davet
+ * edilemiyordu. Yeni rol eklenirken UC yer birlikte guncellenmeli:
+ * types.ts UserRole, rbac.ts AppRole ve burasi.
+ */
+const APP_ROLES = [
+  'Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR',
+  'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality',
+] as const;
+
 function reqActor(req: Request): { uid: string; email: string } {
   const r = req as Request & { uid?: string; userEmail?: string };
   return { uid: r.uid || 'system', email: r.userEmail || '' };
@@ -9546,14 +9563,76 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     res.json({ success: true, id: result.id });
   });
 
+  // ── Davet Kullanimi (redeem) ──────────────────────────────────────────────
+  // POST /api/invites/redeem  Body: { token }
+  //
+  // Bu uc EKSIKTI: /api/admin/invite ve super-admin daveti `invites/{token}`
+  // dokumanini YAZIYOR ama hicbir yer OKUMUYORDU. Sonuc: davetteki rol ve
+  // companyId hicbir zaman uygulanmiyor, davetle gelen herkes App.tsx'teki
+  // varsayilan dala dusup 'Sales' + kendi uid'i ile aciliyordu (rolsuz hesap
+  // kapisi eklendikten sonra ise dogrudan "rol atanmamis" ekranina).
+  //
+  // requireAdmin YOK — daveti kullanan kisi hentiz rolsuz normal bir
+  // kullanicidir; yetki kontrolu davetin KENDISIDIR (token + e-posta esmesi).
+  app.post('/api/invites/redeem', authLimiter, requireAuth, async (req: Request, res: Response) => {
+    const { token } = (req.body ?? {}) as { token?: string };
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ success: false, error: 'Davet kodu gerekli.' });
+    }
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Veritabanı kullanılamıyor.' });
+
+    const { uid, email } = reqActor(req);
+    try {
+      const snap = await adminDb.collection('invites').doc(token).get();
+      if (!snap.exists) return res.status(404).json({ success: false, error: 'Davet bulunamadı.' });
+      const inv = snap.data() as { email?: string; role?: string; companyId?: string; expiresAt?: string; used?: boolean };
+
+      if (inv.used) return res.status(409).json({ success: false, error: 'Bu davet daha önce kullanılmış.' });
+      if (inv.expiresAt && new Date(inv.expiresAt).getTime() < Date.now()) {
+        return res.status(410).json({ success: false, error: 'Davetin süresi dolmuş.' });
+      }
+      // E-POSTA ESLESMESI ZORUNLU: davet baglantisi ele gecirilse bile baskasi
+      // kullanamaz. Kucuk/buyuk harf duyarsiz karsilastirma.
+      const davetEposta = (inv.email || '').trim().toLowerCase();
+      const girenEposta = (email || '').trim().toLowerCase();
+      if (!davetEposta || !girenEposta || davetEposta !== girenEposta) {
+        return res.status(403).json({ success: false, error: 'Bu davet başka bir e-posta adresi için oluşturulmuş.' });
+      }
+      // Rol, davet yazilirken dogrulanmisti; yine de burada TEKRAR dogrula —
+      // eski/bozuk bir davet dokumani uydurma rol tasiyor olabilir (Accountant,
+      // Warehouse, Viewer gibi; bkz. APP_ROLES yorumu).
+      if (!inv.role || !(APP_ROLES as readonly string[]).includes(inv.role)) {
+        return res.status(422).json({ success: false, error: 'Davetteki rol artık geçerli değil. Yöneticinizden yeni davet isteyin.' });
+      }
+
+      const guncelleme: Record<string, unknown> = { role: inv.role };
+      // companyId davet dokumanindan gelir — istemciden ASLA alinmaz, aksi
+      // halde kullanici istedigi kiraciya katilabilirdi.
+      if (inv.companyId) guncelleme.companyId = inv.companyId;
+
+      await adminDb.collection('users').doc(uid).set(guncelleme, { merge: true });
+      await adminDb.collection('invites').doc(token).set(
+        { used: true, usedAt: pgServerTimestamp(), usedBy: uid },
+        { merge: true },
+      );
+
+      void writeAuditLog({ uid, email }, 'Davet kullanıldı', `${email} → ${inv.role}${inv.companyId ? ` (firma: ${inv.companyId})` : ''}`);
+      return res.json({ success: true, role: inv.role, companyId: inv.companyId ?? null });
+    } catch (e) {
+      console.error('Davet kullanım hatası:', (e as Error).message);
+      return res.status(500).json({ success: false, error: 'Davet işlenemedi.' });
+    }
+  });
+
   // ── Admin: User Invite ────────────────────────────────────────────────────
   // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
   // Body: { email, role }
   app.post('/api/admin/invite', authLimiter, requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
-    const ALLOWED_INVITE_ROLES = ['Admin', 'Manager', 'Sales', 'Accountant', 'Warehouse', 'Dealer', 'B2B', 'Viewer'];
-    if (!ALLOWED_INVITE_ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Geçersiz rol.' });
+    if (!(APP_ROLES as readonly string[]).includes(role)) {
+      return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` });
+    }
 
     // Generate a random token
     const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -11112,8 +11191,9 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const cid = String(req.params.companyId);
     const { email, role = 'Sales' } = (req.body ?? {}) as { email?: string; role?: string };
     if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
-    const ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
-    if (!ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Geçersiz rol.' });
+    if (!(APP_ROLES as readonly string[]).includes(role)) {
+      return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` });
+    }
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();

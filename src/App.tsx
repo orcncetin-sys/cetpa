@@ -126,6 +126,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, storage } from './firebase';
 import { authFetch } from './services/authFetch';
+import { captureInviteFromUrl, redeemPendingInvite, getPendingInvite } from './lib/invite';
 import { syncOrderWithCari } from './services/mikroService';
 import { pushMikroEvrak, processMikroRetries, izinTalepPayload } from './services/mikroEvrak';
 import { 
@@ -502,6 +503,11 @@ function DeltaBadge({ delta }: { delta: number | null | undefined }) {
 // KpiCurrencyToggle src/components/KpiCurrencyToggle.tsx'e tasindi (sayfa
 // ayrimlarinda paylasiliyor).
 
+// Davet kodunu, herhangi bir yonlendirme/render olmadan ONCE yakala:
+// Google girisi sayfadan ayrilip geri donuyor ve `?invite=` parametresi o turda
+// kayboluyor. Modul yuklenirken calismasi icin bilerek bilesen disinda.
+captureInviteFromUrl();
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -596,6 +602,8 @@ function AppContent() {
   // "role boşsa çalışmasın"). Artık sessiz düşme YOK — bu bayrak true olunca
   // normal uygulama render edilmez, açık bir uyarı ekranı gösterilir.
   const [roleMissing, setRoleMissing] = useState(false);
+  // Davet uygulanamadiysa "rol atanmamis" ekraninda GERCEK sebebi goster.
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   // Permission helpers
   const canAccess = (tab: string) => {
@@ -2179,6 +2187,20 @@ function AppContent() {
           const mfa = await getMfaStatus();
           setMfaChallenge(mfa.enabled && !mfa.verified);
         } catch { /* status alınamazsa engelleme */ }
+        // ── Bekleyen daveti UYGULA (users dokumani OKUNMADAN once) ──────────
+        // Sunucu users/{uid}'e role + companyId yaziyor; sirayi boyle kurunca
+        // asagidaki mevcut mantik hicbir ozel dal gerektirmeden davetteki rolu
+        // okuyor. Ters sirada yeni kullanici once 'Sales' olarak yazilir ve
+        // davet bir sonraki girise kadar etkisiz kalirdi.
+        if (!u.isAnonymous && getPendingInvite()) {
+          const davet = await redeemPendingInvite(authFetch);
+          if (davet && davet.ok === false) {
+            // Sessizce yutma: kullanici neden hala rolsuz oldugunu bilmeli.
+            console.warn('[invite] Davet uygulanamadi:', davet.error);
+            setInviteError(davet.error);
+          }
+        }
+
         // Sync user profile to Firestore
         const userRef = doc(db, 'users', u.uid);
         let userSnap;
@@ -4463,6 +4485,15 @@ function AppContent() {
                     ? 'Bu hesap için bir kullanıcı rolü tanımlı değil, bu yüzden erişim açılamıyor. Lütfen yöneticinizden Süper-admin panelinden bir rol atamasını isteyin.'
                     : 'No user role is defined for this account, so access cannot be granted. Please ask your administrator to assign a role from the Super-admin panel.'}
                 </p>
+                {/* Davet bağlantısıyla gelip takılan kullanıcı GERÇEK sebebi görsün
+                    (süresi dolmuş / kullanılmış / başka e-posta için) — aksi halde
+                    yukarıdaki genel metin yanıltıcı olur. */}
+                {inviteError && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
+                    {currentLanguage === 'tr' ? 'Davet bağlantısı işlenemedi: ' : 'Invite link could not be applied: '}
+                    <span className="font-semibold">{inviteError}</span>
+                  </p>
+                )}
                 <button onClick={handleLogout} className="apple-button-primary w-full justify-center py-2.5 text-sm">
                   {currentLanguage === 'tr' ? 'Çıkış Yap' : 'Log Out'}
                 </button>
