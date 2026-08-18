@@ -1,4 +1,10 @@
 import 'leaflet/dist/leaflet.css';
+// CSS burada import edilir, main.tsx'te DEGIL.
+// main.tsx giris dosyasi oldugu icin oradaki statik `leaflet/dist/leaflet.css`
+// importu tum leaflet paketini (148 kB) EAGER grafige sokuyordu — harita
+// bileseni React.lazy ile ertelenmis olmasina ragmen. Artik CSS de bilesenle
+// birlikte, yalniz harita acildiginda iniyor.
+import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import type { Order, RouteStop } from '../types';
