@@ -105,15 +105,22 @@ export function KpiCard({
 }: KpiCardProps) {
   const clickable = typeof onClick === 'function';
   return (
+    // KART ARTIK BIR DUGME DEGIL.
+    //
+    // Daha once tiklanabilir kart `role="button"` + tabIndex aliyordu; ama
+    // icinde GERCEK <button> ogeleri var (para birimi secici). Ic ice
+    // interaktif oge gecersiz ARIA'dir: ekran okuyucular ic dugmeleri hic
+    // duyurmayabilir ve klavye olaylari karta baloncuklanir (o semptomu
+    // stopPropagation ile bastirmistik — asil sorun yapinin kendisiydi).
+    //
+    // Cozum: kart notr bir kapsayici; tiklama sorumlulugu asagidaki gercek
+    // <button>'a tasindi. Klavye erisimi, odak halkasi ve ekran okuyucu
+    // duyurusu artik tarayicidan ucretsiz geliyor — el yapimi onKeyDown yok.
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className={`apple-card p-5 ${clickable ? 'cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all duration-200 group' : ''} ${className}`}
-      onClick={onClick}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
+      className={`apple-card p-5 relative ${clickable ? 'hover:shadow-md hover:scale-[1.01] transition-all duration-200 group' : ''} ${className}`}
     >
       {(Icon || symbol || action) && (
         <div className="flex items-start justify-between mb-3">
@@ -124,20 +131,11 @@ export function KpiCard({
                 : Icon && <Icon className={`w-5 h-5 ${accent}`} />}
             </div>
           ) : <span />}
-          {action && (
-            // Aksiyon alanı (para birimi düğmeleri) kartın KENDİ tıklamasını
-            // tetiklememeli. onClick YETMEZ: kart tıklanabilir olduğunda
-            // onKeyDown de kartta duruyor ve düğmeye Tab'layıp Enter'a basan
-            // kullanıcının tuşu kartın üstüne baloncuklanıp para birimini
-            // değiştirmek yerine başka sekmeye gönderiyordu (code-review bulgusu).
-            <div
-              className="flex-shrink-0"
-              onClick={e => e.stopPropagation()}
-              onKeyDown={e => e.stopPropagation()}
-            >
-              {action}
-            </div>
-          )}
+          {/* Aksiyon alani (para birimi secici) artik kartin tiklama alaniyla
+              CAKISMIYOR: tiklama ayri bir <button>'a tasindi, dolayisiyla
+              stopPropagation gibi bir bastirmaya gerek kalmadi. `relative
+              z-10` ile tam kapsayan tiklama katmaninin ustunde durur. */}
+          {action && <div className="flex-shrink-0 relative z-10">{action}</div>}
         </div>
       )}
       <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">{label}</p>
@@ -151,6 +149,19 @@ export function KpiCard({
         <p className="text-[10px] text-brand mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <ChevronRight className="w-3 h-3" />{linkHint}
         </p>
+      )}
+      {clickable && (
+        // Karti kaplayan gercek dugme. Gorsel icerik zaten yukarida; bu oge
+        // yalnizca tiklama/odak tasir, bu yuzden metni sr-only.
+        // `inset-0` ile tum karti kaplar ama `action` alani z-10 ile ustte
+        // kaldigi icin para birimi dugmeleri erisilebilir kalir.
+        <button
+          type="button"
+          onClick={onClick}
+          className="absolute inset-0 w-full h-full rounded-2xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+        >
+          <span className="sr-only">{typeof label === 'string' ? label : 'Detaya git'}</span>
+        </button>
       )}
     </motion.div>
   );

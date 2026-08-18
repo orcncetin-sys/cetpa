@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useToast } from './Toast';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Factory, Play, Pause, CheckCircle2,
@@ -408,6 +409,7 @@ const DEFAULT_MACHINE: Omit<Machine, 'id'> = {
 // Main Component
 // ─────────────────────────────────────────────
 export default function ProductionModule({ currentLanguage, isAuthenticated }: ProductionModuleProps) {
+  const toast = useToast();
   const t = T[currentLanguage] as typeof T['tr'];
   const tr = currentLanguage === 'tr';
 
@@ -599,7 +601,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
     if (!tersKayitOrder) return;
     // Negatif stoğa düşürecek backflush engellenir (uyarı artık sadece önizleme değil).
     if (tersKayitLines.some(l => l.hasStockWarning)) {
-      alert(currentLanguage === 'tr' ? 'Yetersiz hammadde stoğu — bazı kalemler stoğu negatife düşürür. İşlem iptal edildi.' : 'Insufficient raw-material stock — operation aborted.');
+      toast(currentLanguage === 'tr' ? 'Yetersiz hammadde stoğu — bazı kalemler stoğu negatife düşürür. İşlem iptal edildi.' : 'Insufficient raw-material stock — operation aborted.', 'error');
       return;
     }
     setTersKayitLoading(true);

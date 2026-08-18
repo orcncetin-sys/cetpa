@@ -641,7 +641,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           <div className="apple-card p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="font-bold text-gray-800">Logistics Performance Score</h3>
+                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Lojistik Performans Puanı' : 'Logistics Performance Score'}</h3>
                 <p className="text-xs text-gray-500">Composite score from delivery, cancellation & fulfillment KPIs</p>
               </div>
               <div className="text-center">
@@ -679,14 +679,14 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (aged.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">Open Order Priority Queue</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Açık Sipariş Öncelik Sırası' : 'Open Order Priority Queue'}</h3>
               <p className="text-xs text-green-600 text-center py-4">✅ No open orders pending fulfillment</p>
             </div>
           );
         }
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Open Order Priority Queue</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Açık Sipariş Öncelik Sırası' : 'Open Order Priority Queue'}</h3>
             <p className="text-xs text-gray-500 mb-4">Age-based prioritization of {aged.length} open orders</p>
             <div className="space-y-3">
               {buckets.map((b,i) => (
@@ -723,7 +723,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const totalRev = cargoEntries.reduce((s,[,d])=>s+d.revenue,0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Cargo Partner Performance</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Kargo Firması Performansı' : 'Cargo Partner Performance'}</h3>
             <p className="text-xs text-gray-500 mb-3">Revenue and order distribution by shipping carrier</p>
             <div className="space-y-2 mb-4">
               {cargoEntries.slice(0,6).map(([cargo,d],i) => (
@@ -777,7 +777,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const avg = delivered.reduce((s,d)=>s+d,0)/delivered.length;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Fulfilment Speed Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Karşılama Hızı Dağılımı' : 'Order Fulfilment Speed Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Based on {delivered.length} delivered orders · avg {avg.toFixed(1)} days</p>
             <div className="flex items-end gap-3 h-24">
               {bucketData.map((b,i) => (
@@ -855,7 +855,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (drivers.length === 0) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Driver Performance Scorecard</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Sürücü Performans Karnesi' : 'Driver Performance Scorecard'}</h3>
             <div className="space-y-2">
               {drivers.map((d,i) => (
                 <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50">
@@ -935,7 +935,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">On-Hold Order Value</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Beklemedeki Sipariş Tutarı' : 'On-Hold Order Value'}</h3>
             <p className="text-xs text-gray-500 mb-4">{pending.length} orders holding {fmtAna(totalHeld,'full',0)} · oldest: {oldestDays}d</p>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-amber-50 rounded-xl p-3 text-center">
@@ -989,7 +989,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const monthKeys = Object.keys(months324).sort().slice(-6);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Late Delivery Rate</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Geç Teslimat Oranı' : 'Late Delivery Rate'}</h3>
             <p className="text-xs text-gray-500 mb-4">Orders taking {'>'}3 days to deliver · Overall late rate: <span className="font-bold text-red-500">{lateRate}%</span></p>
             <div className="flex items-center gap-6 mb-4">
               {[{label: 'On-Time', val: onTime, color: '#10b981'}, {label: 'Late (>3d)', val: lateOrders.length, color: '#ef4444'}].map((s, i) => (
@@ -1031,7 +1031,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const cancelRevLost = cancelled330.reduce((s, o) => s + (o.totalPrice || 0), 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Cancellation Analysis</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş İptali Analizi' : 'Order Cancellation Analysis'}</h3>
             <p className="text-xs text-gray-500 mb-4">{cancelled330.length} cancelled orders · {cancelRate}% rate · {fmtAna(cancelRevLost,'full',0)} revenue lost</p>
             <div className="space-y-2">
               {reasons.map((r, i) => (
@@ -1067,7 +1067,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const busiest = dayData.reduce((a, b) => b.count > a.count ? b : a);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Orders by Day of Week</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Haftanın Gününe Göre Siparişler' : 'Orders by Day of Week'}</h3>
             <p className="text-xs text-gray-500 mb-4">Busiest day: <span className="font-bold text-[#ff4000]">{busiest.day}</span> · {busiest.count} orders</p>
             <div className="flex items-end gap-2 h-20">
               {dayData.map((d, i) => (
@@ -1099,7 +1099,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         }));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Recurring Order Health</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Abonelik Siparişi Sağlığı' : 'Recurring Order Health'}</h3>
             <p className="text-xs text-gray-500 mb-4">{active335.length} active subscriptions · {inactive335.length} paused · ARR: {fmtAna(totalARR,'full',0)}</p>
             <div className="grid grid-cols-3 gap-3">
               {freqBreak.map((f, i) => (
@@ -1122,7 +1122,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxS = Math.max(...statuses.map(s => s.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Status Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Durumu Dağılımı' : 'Order Status Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">{orders.length} total orders · current pipeline snapshot</p>
             <div className="space-y-2">
               {statuses.map((s, i) => (
@@ -1170,7 +1170,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxB349 = Math.max(...buckets349.map(b => b.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Fulfilment Time Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Karşılama Süresi Dağılımı' : 'Fulfilment Time Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Days from order to delivery · Avg: {avg349}d · P50: {p50}d · P90: {p90}d</p>
             <div className="flex items-end gap-3 h-20">
               {buckets349.map((b, i) => (
@@ -1204,7 +1204,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const totalItems = keys356.reduce((s, k) => s + monthItems[k], 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Monthly Shipment Volume</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Aylık Sevkiyat Hacmi' : 'Monthly Shipment Volume'}</h3>
             <p className="text-xs text-gray-500 mb-4">Total line-item units shipped · {totalItems.toLocaleString('tr-TR')} over {keys356.length} months</p>
             <div className="flex items-end gap-2 h-24">
               {keys356.map(k => (
@@ -1234,7 +1234,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const colors363 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#ef4444','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Top Suppliers by Stock Value</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Değerine Göre En İyi Tedarikçiler' : 'Top Suppliers by Stock Value'}</h3>
             <p className="text-xs text-gray-500 mb-4">Current inventory value held per supplier</p>
             <div className="space-y-2">
               {supps363.map((s, i) => (
@@ -1278,7 +1278,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxAB = Math.max(...ageBuckets.map(b => b.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Open Order Age Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Açık Sipariş Yaşı Dağılımı' : 'Open Order Age Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">{openOrders.length} open orders (Pending + Processing + Shipped)</p>
             <div className="flex items-end gap-3 h-20">
               {ageBuckets.map((b, i) => (
@@ -1305,7 +1305,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxMRR = Math.max(...byCustomer.map(d => d.v), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Recurring Revenue Overview</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Yinelenen Gelir Genel Bakış' : 'Recurring Revenue Overview'}</h3>
             <div className="flex gap-6 mb-4">
               <div><p className="text-xl font-black text-[#ff4000]">{fmtAna(mrr,'full',0)}</p><p className="text-[10px] text-gray-400">MRR</p></div>
               <div><p className="text-xl font-black text-indigo-600">{fmtAna(arr,'full',0)}</p><p className="text-[10px] text-gray-400">ARR</p></div>
@@ -1387,7 +1387,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-sm">Delivery Lead Time Distribution</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Teslimat Süresi Dağılımı' : 'Delivery Lead Time Distribution'}</h3>
               <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">Avg {avg}d</span>
             </div>
             <div className="flex items-end gap-1 h-24">
@@ -1417,7 +1417,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (totalOrders < 3) return null;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Orders by Line Item Count</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kalem Sayısına Göre Siparişler' : 'Orders by Line Item Count'}</h3>
             <div className="flex items-end gap-2 h-24 mb-1">
               {bucketLabels.map((label, i) => (
                 <div key={label} className="flex-1 flex flex-col items-center gap-0.5">
@@ -1443,7 +1443,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const rows = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Orders by Status</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Duruma Göre Siparişler' : 'Orders by Status'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([status, count]) => (
                 <div key={status} style={{width: `${(count / total) * 100}%`, background: statusColors[status] ?? '#6b7280'}} title={`${status}: ${count}`} />
@@ -1482,7 +1482,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Customer Purchase Frequency</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Alışveriş Sıklığı' : 'Customer Purchase Frequency'}</h3>
             <div className="flex h-5 rounded-full overflow-hidden mb-3">
               {segments.map(s => s.count > 0 && (
                 <div key={s.label} style={{width: `${(s.count/total)*100}%`, background: s.color}} title={`${s.label}: ${s.count}`} />
@@ -1567,7 +1567,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Avg Order Value by Day</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Güne Göre Ortalama Sipariş Tutarı' : 'Avg Order Value by Day'}</h3>
               <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">Best: {days[bestDay]}</span>
             </div>
             <div className="flex items-end gap-1.5 h-20 mb-1">
@@ -1605,7 +1605,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Delivery Success Rate</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Teslimat Başarı Oranı' : 'Delivery Success Rate'}</h3>
               <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{avgRate.toFixed(0)}% avg</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -1639,7 +1639,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxC = top[0][1].count;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Delivery Locations</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'En Çok Teslimat Yapılan Konumlar' : 'Top Delivery Locations'}</h3>
             <div className="space-y-2">
               {top.map(([city, d], i) => (
                 <div key={city} className="flex items-center gap-2">
@@ -1667,7 +1667,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const totalOrders = orders.length;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Order Fulfillment Funnel</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Karşılama Hunisi' : 'Order Fulfillment Funnel'}</h3>
             <div className="space-y-2">
               {funnel.map(f => {
                 const w = (f.count / maxCount) * 100;
@@ -1710,7 +1710,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           const rate = total > 0 ? Math.round((delivered/total)*100) : 0;
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">Delivery Performance</h3>
+              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Teslimat Performansı' : 'Delivery Performance'}</h3>
               <p className="text-3xl font-bold text-green-500">{rate}%</p>
               <p className="text-xs text-gray-500">{delivered}/{total} orders delivered</p>
             </div>
@@ -1720,7 +1720,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxAvg = Math.max(...rows.map(r => r.avg), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Avg Delivery Days by Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aya Göre Ortalama Teslim Süresi' : 'Avg Delivery Days by Month'}</h3>
             <div className="flex items-end gap-2 h-20 mb-1">
               {rows.map(r => (
                 <div key={r.month} className="flex-1 flex flex-col items-center gap-0.5">
@@ -1755,7 +1755,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxRev = Math.max(singleRev, multiRev, bulkRev, 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Order Complexity Breakdown</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Karmaşıklığı Dağılımı' : 'Order Complexity Breakdown'}</h3>
             <div className="flex h-3 rounded-full overflow-hidden mb-3">
               {segments.map(s => s.count > 0 && <div key={s.label} style={{width:`${(s.count/total)*100}%`,background:s.color}} />)}
             </div>
@@ -1793,7 +1793,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Shipped Orders by Month</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Aya Göre Sevk Edilen Siparişler' : 'Shipped Orders by Month'}</h3>
               <span className="text-xs" style={{color: trend >= 0 ? '#22c55e' : '#ef4444'}}>
                 {trend >= 0 ? '▲' : '▼'} {Math.abs(trend)} trend
               </span>
@@ -1828,7 +1828,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Recurring Orders</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Abonelik Siparişleri' : 'Recurring Orders'}</h3>
               <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{recurringCount} active</span>
             </div>
             <div className="flex items-center gap-4 mb-2">
@@ -1869,7 +1869,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (totalDelivered < 2) return null;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Delivered Order Lead Times</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Teslim Edilen Sipariş Süreleri' : 'Delivered Order Lead Times'}</h3>
             <div className="flex h-3 rounded-full overflow-hidden mb-3">
               {counts.map(s=>s.count>0&&<div key={s.label} style={{width:`${(s.count/totalDelivered)*100}%`,background:s.color}} />)}
             </div>
@@ -1904,7 +1904,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         });
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Quote-to-Order Conversion</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Tekliften Siparişe Dönüşüm' : 'Quote-to-Order Conversion'}</h3>
             <div className="flex items-center gap-4 mb-3">
               <div className="relative w-16 h-16 flex-shrink-0">
                 <svg width="64" height="64" viewBox="0 0 64 64">
@@ -1942,7 +1942,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const totalRev=rows.reduce((s,[,v])=>s+v,0);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Revenue by Delivery City</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Teslimat Şehrine Göre Ciro' : 'Revenue by Delivery City'}</h3>
             <div className="space-y-2">
               {rows.map(([city,rev],i)=>(
                 <div key={city} className="flex items-center gap-2">
@@ -1970,7 +1970,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const cancelled = orders.filter(o=>o.status==='Cancelled').length;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Active Order Pipeline</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aktif Sipariş Hattı' : 'Active Order Pipeline'}</h3>
             <div className="space-y-2 mb-3">
               {pipeline.map(p=>(
                 <div key={p.status} className="flex items-center gap-2">
@@ -2006,7 +2006,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Order Operations Overview</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Operasyonları Genel Bakış' : 'Order Operations Overview'}</h3>
             <div className="grid grid-cols-2 gap-2">
               {stats.map(s=>(
                 <div key={s.label} className="rounded-xl p-3" style={{background:`${s.color}10`}}>
@@ -2036,7 +2036,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const colors=['#94a3b8','#3b82f6','#f59e0b','#ff4000','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Orders by Total Quantity</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Toplam Miktara Göre Siparişler' : 'Orders by Total Quantity'}</h3>
             <div className="flex items-end gap-2 h-20 mb-1">
               {data.map((b,i)=>(
                 <div key={b.label} className="flex-1 flex flex-col items-center gap-0.5">
@@ -2071,7 +2071,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           const deliveredCount=orders.filter(o=>o.status==='Delivered').length;
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">Delivered Orders</h3>
+              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Teslim Edilen Siparişler' : 'Delivered Orders'}</h3>
               <p className="text-3xl font-bold text-green-500">{deliveredCount}</p>
               <p className="text-xs text-gray-500">orders successfully delivered</p>
             </div>
@@ -2108,7 +2108,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const totalOrders=weekdayCount+weekendCount;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Weekday vs Weekend Orders</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Hafta İçi ve Hafta Sonu Siparişleri' : 'Weekday vs Weekend Orders'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               <div style={{width:`${(weekdayCount/Math.max(totalOrders,1))*100}%`,background:'#3b82f6'}}/>
               <div style={{width:`${(weekendCount/Math.max(totalOrders,1))*100}%`,background:'#f59e0b'}}/>
@@ -2167,7 +2167,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Order Value Distribution</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Sipariş Tutarı Dağılımı' : 'Order Value Distribution'}</h3>
               <span className="text-xs text-gray-500">median {fmtAna(median,'K',1)}</span>
             </div>
             <div className="flex items-end gap-1 h-20 mb-1">

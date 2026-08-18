@@ -2304,7 +2304,7 @@ function AppContent() {
     if (!file || !user) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      alert(currentT.logo_size_error);
+      toast(currentT.logo_size_error, 'error');
       return;
     }
 
@@ -2317,10 +2317,10 @@ function AppContent() {
       await setDoc(doc(db, 'settings', 'app'), { logoUrl: url }, { merge: true });
       setLogoUrl(url);
       logAuditAction(currentT.logo_update, currentT.logo_updated);
-      alert(currentT.logo_update_success);
+      toast(currentT.logo_update_success, 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/app');
-      alert(currentT.logo_upload_failed);
+      toast(currentT.logo_upload_failed, 'error');
     } finally {
       setIsUploadingLogo(false);
     }
@@ -2364,10 +2364,11 @@ function AppContent() {
       } else if (code === 'auth/popup-closed-by-user') {
         toast(currentLanguage === 'tr' ? 'Giriş penceresi kapatıldı.' : 'The sign-in popup was closed.', 'info');
       } else {
-        alert(
+        toast(
           currentLanguage === 'tr'
-            ? `Google ile giris basarisiz: ${code || 'bilinmeyen-hata'}`
-            : `Google sign-in failed: ${code || 'unknown-error'}`
+            ? `Google ile giriş başarısız: ${code || 'bilinmeyen-hata'}`
+            : `Google sign-in failed: ${code || 'unknown-error'}`,
+          'error',
         );
       }
       console.error("Login error:", error);
@@ -2779,7 +2780,7 @@ function AppContent() {
   const handleBuildRoute = () => {
     const eligible = orders.filter(o => o.location && o.status !== 'Delivered' && o.status !== 'Cancelled');
     if (eligible.length === 0) {
-      alert(currentT.no_active_orders_to_route);
+      toast(currentT.no_active_orders_to_route, 'info');
       return;
     }
     const stops: RouteStop[] = eligible.map(o => ({

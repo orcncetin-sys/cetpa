@@ -658,7 +658,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxRev = Math.max(...data.map(d=>d.revenue),1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Payroll-to-Revenue Ratio Trend</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Bordro/Ciro Oranı Eğilimi' : 'Payroll-to-Revenue Ratio Trend'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly payroll burden as % of revenue — target: below 30%</p>
             <div className="space-y-2">
               {data.map((d,i) => (
@@ -701,7 +701,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const depts = Object.entries(deptData).sort((a,b)=>b[1].payroll-a[1].payroll).slice(0,5);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Employee Efficiency Ratios</h3>
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Çalışan Verimlilik Oranları' : 'Employee Efficiency Ratios'}</h3>
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <div className="text-lg font-black text-blue-700">{fmtAna(revenuePerEmp,'K',0)}</div>
@@ -742,7 +742,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Headcount by Department</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
             <p className="text-xs text-gray-500 mb-4">Active employees: {total} across {depts.length} departments</p>
             <div className="space-y-2">
               {depts.map(([dept,count],i) => (
@@ -785,7 +785,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxRevPerHead = Math.max(...depts.map(d=>d.revPerHead), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue per Employee by Department</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Başına Ciro' : 'Revenue per Employee by Department'}</h3>
             <p className="text-xs text-gray-500 mb-4">Annual revenue allocated proportionally by headcount</p>
             <div className="space-y-2">
               {depts.map((d,i) => (
@@ -825,7 +825,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...bucketData.map(b=>b.count),1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Employee Tenure Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Active employees · avg tenure: {avgTenure.toFixed(1)} years</p>
             <div className="space-y-2">
               {bucketData.map((b,i) => (
@@ -861,7 +861,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...buckets.map(b => b.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Salary Band Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Maaş Bandı Dağılımı' : 'Salary Band Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Active employees · avg: {fmtAna(avg,'full',0)} · median: {fmtAna(median,'full',0)}</p>
             <div className="flex items-end gap-2 h-20 mb-3">
               {buckets.map((b, i) => (
@@ -896,7 +896,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxPH = Math.max(...deptRevPerEmp.map(d => d.perHead), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue per Employee</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Başına Ciro' : 'Revenue per Employee'}</h3>
             <p className="text-xs text-gray-500 mb-4">Estimated revenue contribution per headcount by department · Overall: {fmtAna(revPerEmp,'full',0)}/emp</p>
             <div className="space-y-2">
               {deptRevPerEmp.map((d, i) => (
@@ -929,7 +929,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const colors329 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Department Salary Cost</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departman Maaş Maliyeti' : 'Department Salary Cost'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly payroll by department · Total: {fmtAna(totalCost329,'full',0)}</p>
             <div className="space-y-2">
               {deptRows.map((d, i) => (
@@ -968,7 +968,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxTotal = Math.max(...cumulData.map(d => d.total), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Headcount Growth</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Sayısı Artışı' : 'Headcount Growth'}</h3>
             <p className="text-xs text-gray-500 mb-4">Cumulative employee count by hire month · Current: {employees.length}</p>
             <div className="flex items-end gap-2 h-24">
               {cumulData.map((d, i) => (
@@ -1010,7 +1010,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const avgTenure = (tenures.reduce((s, t) => s + t, 0) / tenures.length).toFixed(1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Employee Tenure Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Years of service · Avg tenure: {avgTenure} years</p>
             <div className="flex items-end gap-3 h-20">
               {buckets342.map((b, i) => (
@@ -1039,7 +1039,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const overallAvg = employees.reduce((s, e) => s + (e.salary || 0), 0) / (employees.length || 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Avg Salary by Position</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Pozisyona Göre Ortalama Maaş' : 'Avg Salary by Position'}</h3>
             <p className="text-xs text-gray-500 mb-4">Company average: {fmtAna(overallAvg,'full',0)}/mo</p>
             <div className="space-y-2">
               {positions.map((p, i) => (
@@ -1069,7 +1069,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxOT = Math.max(...topOT.map(e => (((e as unknown as Record<string,unknown>).overtimeHours as number)||0)), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Overtime & Absence Overview</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Fazla Mesai ve Devamsızlık Genel Bakış' : 'Overtime & Absence Overview'}</h3>
             <div className="flex gap-6 mb-4">
               <div className="text-center"><p className="text-2xl font-black text-amber-500">{otRate}%</p><p className="text-[10px] text-gray-400">with OT ({withOT.length})</p></div>
               <div className="text-center"><p className="text-2xl font-black text-red-500">{absRate}%</p><p className="text-[10px] text-gray-400">with absences ({withAbsence.length})</p></div>
@@ -1120,7 +1120,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxRatio = Math.max(...ratioData.map(d => d.ratio), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Payroll-to-Revenue Ratio</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Bordro/Ciro Oranı' : 'Payroll-to-Revenue Ratio'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly salary ({fmtAna(totalSalary,'full',0)}) as % of revenue · Avg: {avgRatio.toFixed(1)}%</p>
             <div className="flex items-end gap-2 h-24">
               {ratioData.map((d, i) => (
@@ -1144,7 +1144,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const colors366 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#8b5cf6','#ef4444'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Headcount by Department</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
             <p className="text-xs text-gray-500 mb-4">{totalHC} employees across {deptRows.length} departments</p>
             <div className="space-y-2">
               {deptRows.map((d, i) => (
@@ -1174,7 +1174,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxSkill = Math.max(...topSkills.map(([, c]) => c), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Skill Coverage Matrix</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Yetkinlik Kapsama Matrisi' : 'Skill Coverage Matrix'}</h3>
             <p className="text-xs text-gray-500 mb-4">Number of employees with each skill</p>
             <div className="space-y-2">
               {topSkills.map(([skill, count], i) => (
@@ -1215,7 +1215,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxC = Math.max(...finalRows.map(r => r.cumulative), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Headcount Growth by Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aya Göre Çalışan Sayısı Artışı' : 'Headcount Growth by Month'}</h3>
             <div className="flex items-end gap-2 h-24 mb-1">
               {finalRows.map(r => (
                 <div key={r.month} className="flex-1 flex flex-col items-center gap-0.5">
@@ -1249,7 +1249,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...rows.map(r => r[1].count), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Headcount by Department</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
             <div className="space-y-2">
               {rows.map(([dept, d]) => (
                 <div key={dept} className="flex items-center gap-2">
@@ -1285,7 +1285,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Employee Tenure Distribution</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
               <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg {avgTenure.toFixed(1)}yr</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -1320,7 +1320,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const rpeYTD = activeCount > 0 ? revYTD / activeCount : 0;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Revenue per Employee</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Çalışan Başına Ciro' : 'Revenue per Employee'}</h3>
             <div className="grid grid-cols-2 gap-3">
               {[{label:'Last 30 Days', val: rpe30, color: '#3b82f6'}, {label:'YTD', val: rpeYTD, color: '#ff4000'}].map(r => (
                 <div key={r.label} className="rounded-xl p-3 text-center" style={{background: `${r.color}12`}}>
@@ -1356,7 +1356,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Salary Distribution</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Maaş Dağılımı' : 'Salary Distribution'}</h3>
               <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg {fmtAna(avgSal,'K',1)}</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -1384,7 +1384,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         if (rows.length <= 1) {
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">Employment Types</h3>
+              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'İstihdam Türleri' : 'Employment Types'}</h3>
               <p className="text-sm text-gray-600">{total} {rows[0]?.[0] ?? 'Full-time'} employees</p>
             </div>
           );
@@ -1392,7 +1392,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const palette = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Employment Type Breakdown</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İstihdam Türü Dağılımı' : 'Employment Type Breakdown'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([t, n], i) => (
                 <div key={t} style={{width: `${(n/total)*100}%`, background: palette[i]}} title={`${t}: ${n}`} />
@@ -1439,7 +1439,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">HR Overview</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İK Genel Bakış' : 'HR Overview'}</h3>
             <div className="grid grid-cols-2 gap-2">
               {metrics.map(m => (
                 <div key={m.label} className="rounded-xl p-3" style={{background: `${m.color}12`}}>
@@ -1509,7 +1509,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         };
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Employee Status Overview</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Çalışan Durumu Genel Bakış' : 'Employee Status Overview'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([status,n]) => <div key={status} style={{width:`${(n/total)*100}%`,background:statusColors[status]??'#6b7280'}} title={status} />)}
             </div>
@@ -1541,7 +1541,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const median = percentiles.length > 0 ? percentiles[Math.floor(percentiles.length/2)] : 0;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Monthly Payroll Estimate</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aylık Bordro Tahmini' : 'Monthly Payroll Estimate'}</h3>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div className="rounded-xl p-3 bg-indigo-50">
                 <p className="text-xl font-bold text-indigo-600">{fmtAna(totalPayroll,'K',0)}</p>
@@ -1634,7 +1634,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-1">Sales Productivity</h3>
+            <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Satış Verimliliği' : 'Sales Productivity'}</h3>
             <p className="text-[10px] text-gray-400 mb-3">{salesDept.length>0?`${salesDept.length} sales rep${salesDept.length>1?'s':''}`:'All staff as baseline'}</p>
             <div className="grid grid-cols-2 gap-2">
               {metrics.map(m=>(
@@ -1660,14 +1660,14 @@ export default function IKRapor(ctx: ReportsCtx) {
         const topSkills = Object.entries(skillCounts).sort((a,b)=>b[1]-a[1]).slice(0,8);
         if (topSkills.length===0) return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-1">Skills Overview</h3>
+            <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Yetkinlik Genel Bakış' : 'Skills Overview'}</h3>
             <p className="text-sm text-gray-500">{employees.length} employees — skill data not yet recorded</p>
           </div>
         );
         const maxCount = topSkills[0][1];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Skills Across Team</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Ekipteki En Yaygın Yetkinlikler' : 'Top Skills Across Team'}</h3>
             <div className="space-y-1.5">
               {topSkills.map(([skill,count])=>(
                 <div key={skill} className="flex items-center gap-2">
@@ -1693,7 +1693,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const newIn90 = employees.filter(e=>{ const d=e.startDate?((e.startDate as unknown as {toDate?:()=>Date}).toDate?.()??new Date(e.startDate as string)):null; return d&&!isNaN(d.getTime())&&(now.getTime()-d.getTime())/(86400000)<90; }).length;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Workforce Retention</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İşgücü Kalıcılığı' : 'Workforce Retention'}</h3>
             <div className="flex items-center gap-4 mb-3">
               <div className="text-center">
                 <p className="text-3xl font-bold" style={{color:retentionRate>=90?'#22c55e':retentionRate>=70?'#f59e0b':'#ef4444'}}>{retentionRate}%</p>
@@ -1718,7 +1718,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         if(ratings.length<2) {
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">Performance Ratings</h3>
+              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Performans Değerlendirmeleri' : 'Performance Ratings'}</h3>
               <p className="text-sm text-gray-500">{employees.length} employees — no performance data yet</p>
             </div>
           );
@@ -1729,7 +1729,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Performance Ratings</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Performans Değerlendirmeleri' : 'Performance Ratings'}</h3>
               <span className="text-xs bg-yellow-100 text-yellow-700 rounded-full px-2 py-0.5">avg {avg.toFixed(1)}★</span>
             </div>
             <div className="space-y-1.5">
@@ -1762,7 +1762,7 @@ export default function IKRapor(ctx: ReportsCtx) {
           .sort((a,b)=>b.daysIn-a.daysIn);
         if(onboarding.length===0) return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-1">Onboarding Queue</h3>
+            <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'İşe Alım Sırası' : 'Onboarding Queue'}</h3>
             <p className="text-sm text-gray-500">No employees in their first 90 days</p>
           </div>
         );

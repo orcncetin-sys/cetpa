@@ -1703,7 +1703,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (risky.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">Inventory Write-Down Risk</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Değer Düşüklüğü Riski' : 'Inventory Write-Down Risk'}</h3>
               <p className="text-xs text-gray-500 mt-2 text-center py-4">✅ No inventory expiring within 180 days</p>
             </div>
           );
@@ -1711,7 +1711,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const totalRisk = risky.reduce((s,r)=>s+r.value,0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Inventory Write-Down Risk</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Değer Düşüklüğü Riski' : 'Inventory Write-Down Risk'}</h3>
             <p className="text-xs text-gray-500 mb-3">Items expiring within 180 days — potential write-down: {fmtAna(totalRisk,'full',0)}</p>
             <div className="space-y-2">
               {risky.map((r,i) => (
@@ -1744,7 +1744,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const totalVal = suppliers.reduce((s,s2) => s + s2.totalValue, 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Supplier Inventory Exposure</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Tedarikçi Stok Bağımlılığı' : 'Supplier Inventory Exposure'}</h3>
             <p className="text-xs text-gray-500 mb-3">Stock value at cost by supplier — top {suppliers.length}</p>
             <div className="space-y-2">
               {suppliers.map((s, i) => (
@@ -1829,14 +1829,14 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (lowStockItems.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">Stockout Frequency Monitor</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stoksuz Kalma Sıklığı İzleyici' : 'Stockout Frequency Monitor'}</h3>
               <p className="text-xs text-green-600 text-center py-4">✅ No items currently at or below reorder threshold</p>
             </div>
           );
         }
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Stockout Frequency Monitor</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stoksuz Kalma Sıklığı İzleyici' : 'Stockout Frequency Monitor'}</h3>
             <p className="text-xs text-gray-500 mb-3">Items at/below threshold sorted by movement frequency</p>
             <div className="space-y-2">
               {lowStockItems.map((item,i) => (
@@ -1908,7 +1908,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const deadValue = noSales.reduce((s,d)=>s+d.value,0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">SKU Rationalization Candidates</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'SKU Sadeleştirme Adayları' : 'SKU Rationalization Candidates'}</h3>
             <p className="text-xs text-gray-500 mb-3">Zero-sales SKUs holding {fmtAna(deadValue,'full',0)} in capital</p>
             {noSales.length > 0 && (
               <div className="mb-3">
@@ -1993,7 +1993,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const shrinkageValue = inventory.filter(i=>i.stockLevel < 0).reduce((s,i)=>s+Math.abs(i.stockLevel)*(i.costPrice||0),0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Inventory Health & Shrinkage</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Stok Sağlığı ve Fire' : 'Inventory Health & Shrinkage'}</h3>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-blue-700">{inbound.toLocaleString()}</div>
@@ -2041,7 +2041,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxCount = topPairs[0][1];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Product Bundle Affinity</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ürün Paketi Yakınlığı' : 'Product Bundle Affinity'}</h3>
             <p className="text-xs text-gray-500 mb-4">Products frequently ordered together — top co-purchase pairs</p>
             <div className="space-y-3">
               {topPairs.map(([pair, count],i) => {
@@ -2079,7 +2079,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#84cc16'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Inventory Cost by Category</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok Maliyeti' : 'Inventory Cost by Category'}</h3>
             <p className="text-xs text-gray-500 mb-3">Total at cost: {fmtAna(totalValue,'full',0)}</p>
             <div className="flex h-4 rounded-full overflow-hidden mb-4 gap-0.5">
               {cats.slice(0,8).map(([,d],i) => (
@@ -2124,7 +2124,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (data.length === 0) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Stock-to-Sales Ratio by Category</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok/Satış Oranı' : 'Stock-to-Sales Ratio by Category'}</h3>
             <p className="text-xs text-gray-500 mb-3">Ratio = current stock ÷ total units sold · lower = faster moving</p>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -2166,7 +2166,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const criticalValue = critical.reduce((s, i) => s + i.lowStockThreshold * itemCostTRY(i, exchangeRates), 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Inventory Reorder Alert Dashboard</h3>
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Stok Yenileme Uyarı Paneli' : 'Inventory Reorder Alert Dashboard'}</h3>
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-red-50 rounded-xl p-3 text-center">
                 <div className="text-2xl font-black text-red-600">{critical.length}</div>
@@ -2260,7 +2260,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxT = Math.max(...turnoverData.map(d => d.turnover), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Stock Turnover Rate</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Devir Hızı' : 'Stock Turnover Rate'}</h3>
             <p className="text-xs text-gray-500 mb-4">Units sold ÷ average stock level · higher = faster-moving inventory</p>
             <div className="space-y-2">
               {turnoverData.map((d, i) => (
@@ -2285,7 +2285,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (atRisk.length < 2) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Stockout Risk Alert</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stoksuz Kalma Riski Uyarısı' : 'Stockout Risk Alert'}</h3>
             <p className="text-xs text-gray-500 mb-4">{atRisk.length} SKU{atRisk.length !== 1 ? 's' : ''} at or below reorder point — action needed</p>
             <div className="space-y-2">
               {atRisk.map((item, i) => {
@@ -2323,7 +2323,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const colors334 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#ef4444','#8b5cf6','#06b6d4'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Inventory Value by Category</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok Değeri' : 'Inventory Value by Category'}</h3>
             <p className="text-xs text-gray-500 mb-4">Total stock value · {fmtAna(totalVal334,'full',0)}</p>
             <div className="space-y-2">
               {cats334.map((c, i) => (
@@ -2357,7 +2357,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxOC = Math.max(...topProducts.map(p => p.orderCount), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Most-Ordered Products</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'En Çok Sipariş Edilen Ürünler' : 'Most-Ordered Products'}</h3>
             <p className="text-xs text-gray-500 mb-4">Products by number of orders they appear in</p>
             <div className="space-y-2">
               {topProducts.map((p, i) => (
@@ -2396,7 +2396,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxQty = Math.max(...keys344.map(k => Math.max(monthIO[k].in, monthIO[k].out)), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Inventory Inflow vs Outflow</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Girişi ve Çıkışı' : 'Inventory Inflow vs Outflow'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly stock movement volume · green = in, red = out</p>
             <div className="flex items-end gap-2 h-24 mb-2">
               {keys344.map(k => {
@@ -2438,7 +2438,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const totalCOGS = keys348.reduce((s, k) => s + monthCOGS[k], 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Monthly COGS Trend</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Aylık Satılan Malın Maliyeti Eğilimi' : 'Monthly COGS Trend'}</h3>
             <p className="text-xs text-gray-500 mb-4">Cost of Goods Sold · {keys348.length}-month total: {fmtAna(totalCOGS,'full',0)}</p>
             <div className="flex items-end gap-2 h-24">
               {keys348.map(k => (
@@ -2467,7 +2467,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (marginData.length < 2) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Low Margin Products</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Düşük Marjlı Ürünler' : 'Low Margin Products'}</h3>
             <p className="text-xs text-gray-500 mb-4">Items with gross margin below 40% — review pricing or costs</p>
             <div className="space-y-2">
               {marginData.map((d, i) => (
@@ -2549,7 +2549,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const totalDeadValue = deadStock.reduce((s, d) => s + d.value, 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Dead Stock Report</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ölü Stok Raporu' : 'Dead Stock Report'}</h3>
             <p className="text-xs text-gray-500 mb-4">No sales in 180+ days · Locked capital: {fmtAna(totalDeadValue,'full',0)}</p>
             <div className="space-y-2">
               {deadStock.map((d, i) => (
@@ -2574,7 +2574,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxCount364 = Math.max(...reorderData.map(d => d.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Most Frequently Reordered</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'En Sık Tekrar Sipariş Edilenler' : 'Most Frequently Reordered'}</h3>
             <p className="text-xs text-gray-500 mb-4">Products with most inbound stock movements</p>
             <div className="space-y-2">
               {reorderData.map((d, i) => (
@@ -2641,7 +2641,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const classColors: Record<string, string> = {A: '#10b981', B: '#f59e0b', C: '#ef4444'};
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">ABC Inventory Analysis</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'ABC Stok Analizi' : 'ABC Inventory Analysis'}</h3>
             <p className="text-xs text-gray-500 mb-4">A = top 80% revenue · B = next 15% · C = bottom 5%</p>
             <div className="flex gap-4 mb-4">
               {(['A','B','C'] as const).map(cls => (
@@ -2680,7 +2680,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxRev376 = Math.max(...skuData.map(d => d.rev), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue per SKU</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'SKU Başına Ciro' : 'Revenue per SKU'}</h3>
             <p className="text-xs text-gray-500 mb-4">Top SKUs by total revenue generated from sales</p>
             <div className="space-y-2">
               {skuData.map((d, i) => (
@@ -2720,7 +2720,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxAbs = Math.max(...keys379.map(k => Math.abs(monthDelta[k])), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Monthly Stock Value Change</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Aylık Stok Değeri Değişimi' : 'Monthly Stock Value Change'}</h3>
             <p className="text-xs text-gray-500 mb-4">Net inventory cost value added (+) or consumed (−)</p>
             <div className="flex items-center gap-2 h-28">
               {keys379.map(k => {
@@ -2850,7 +2850,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxM = Math.max(...rows.map(r => r.margin), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Category Margin Analysis</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kategori Kâr Marjı Analizi' : 'Category Margin Analysis'}</h3>
             <div className="space-y-2">
               {rows.map(r => (
                 <div key={r.cat} className="flex items-center gap-2">
@@ -2880,7 +2880,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const total = inventory.length;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory Health Summary</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Stok Sağlığı Özeti' : 'Inventory Health Summary'}</h3>
             <div className="flex h-3 rounded-full overflow-hidden mb-3">
               <div style={{width: `${(inStock/total)*100}%`, background: '#22c55e'}} />
               <div style={{width: `${(lowStock/total)*100}%`, background: '#f59e0b'}} />
@@ -2920,7 +2920,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxT = Math.max(...rows.map(r => r.turnover), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Stock Turnover by Category</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok Devir Hızı' : 'Stock Turnover by Category'}</h3>
             <div className="space-y-2">
               {rows.map(r => (
                 <div key={r.cat} className="flex items-center gap-2">
@@ -2953,7 +2953,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const palette = ['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#6b7280'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory Value by Category</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok Değeri' : 'Inventory Value by Category'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([cat, val], i) => (
                 <div key={cat} style={{width: `${(val/total)*100}%`, background: palette[i]}} title={cat} />
@@ -2989,7 +2989,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxProfit = products[0].potentialProfit;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Products by Potential Profit</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Potansiyel Kâra Göre En İyi Ürünler' : 'Top Products by Potential Profit'}</h3>
             <div className="space-y-2">
               {products.map((p, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -3063,7 +3063,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxItems = rows[0][1].items;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">SKUs per Category</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kategori Başına SKU' : 'SKUs per Category'}</h3>
             <div className="space-y-2">
               {rows.map(([cat, d]) => (
                 <div key={cat} className="flex items-center gap-2">
@@ -3158,7 +3158,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const colors = ['#ff4000','#3b82f6','#22c55e','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">SKUs with Pricing by Tier</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kademeye Göre Fiyatlı SKU\'lar' : 'SKUs with Pricing by Tier'}</h3>
             <div className="space-y-2">
               {tierCounts.map((t, i) => (
                 <div key={t.tier} className="flex items-center gap-2">
@@ -3247,7 +3247,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const palette=['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Category Revenue from Orders</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Siparişlerden Kategori Cirosu' : 'Category Revenue from Orders'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([cat,rev],i)=><div key={cat} style={{width:`${(rev/totalRev)*100}%`,background:palette[i]}} title={cat} />)}
             </div>
@@ -3280,7 +3280,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...months.flatMap(m=>[byMonth[m].in,byMonth[m].out]),1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory In vs Out by Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aya Göre Stok Giriş/Çıkış' : 'Inventory In vs Out by Month'}</h3>
             <div className="flex items-end gap-2 h-24 mb-1">
               {months.map(m=>(
                 <div key={m} className="flex-1 flex items-end gap-0.5">
@@ -3313,7 +3313,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const net30 = totalIn30 - totalOut30;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory Movement Summary</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Stok Hareketi Özeti' : 'Inventory Movement Summary'}</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-[10px] text-gray-500 mb-2">All Time</p>
@@ -3349,7 +3349,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const profitPotential = totalRetail - totalCost;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory Cost vs Retail Value</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Stok Maliyeti ve Perakende Değeri' : 'Inventory Cost vs Retail Value'}</h3>
             <div className="relative h-8 bg-gray-100 rounded-full overflow-hidden mb-3">
               <div className="absolute inset-y-0 left-0 rounded-full" style={{width:`${(totalCost/totalRetail)*100}%`,background:'#6b7280'}} />
               <div className="absolute inset-y-0 rounded-full" style={{left:`${(totalCost/totalRetail)*100}%`,right:0,background:'#22c55e'}} />
@@ -3448,7 +3448,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const totalStock=inventory.reduce((s,i)=>s+((i.stock as number|undefined)??0),0);
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-3">Inventory Totals</h3>
+              <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Stok Toplamları' : 'Inventory Totals'}</h3>
               <div className="grid grid-cols-2 gap-2 text-center">
                 <div className="rounded-xl p-3 bg-blue-50"><p className="text-2xl font-bold text-blue-600">{totalItems}</p><p className="text-[10px] text-gray-500">SKUs</p></div>
                 <div className="rounded-xl p-3 bg-green-50"><p className="text-2xl font-bold text-green-600">{totalStock.toLocaleString('tr-TR')}</p><p className="text-[10px] text-gray-500">Total Units</p></div>
@@ -3459,7 +3459,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxCount=rows[0][1].count;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Items by Storage Location</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Depo Konumuna Göre Ürünler' : 'Items by Storage Location'}</h3>
             <div className="space-y-2">
               {rows.map(([loc,d])=>(
                 <div key={loc} className="flex items-center gap-2">
@@ -3491,7 +3491,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Inventory Data Completeness</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Stok Verisi Eksiksizliği' : 'Inventory Data Completeness'}</h3>
             <div className="space-y-2">
               {fields.map(f=>(
                 <div key={f.label} className="flex items-center gap-2">
@@ -3521,7 +3521,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxEvents=top[0][1].events;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Most Active Products</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'En Hareketli Ürünler' : 'Most Active Products'}</h3>
             <div className="space-y-2">
               {top.map(([pid,d])=>{
                 const name=inventory.find(i=>i.id===pid)?.name??pid;
@@ -3682,7 +3682,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const maxValue = Math.max(...tierData.map(t => t.value), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Inventory Ageing Pyramid</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Yaşlandırma Piramidi' : 'Inventory Ageing Pyramid'}</h3>
             <p className="text-xs text-gray-500 mb-4">Stock value by days since last sale — total: {fmtAna(totalValue)}</p>
             <div className="space-y-2">
               {tierData.map((t, i) => (

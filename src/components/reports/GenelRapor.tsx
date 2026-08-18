@@ -1577,7 +1577,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxRev = Math.max(...data.map(d => d.revenue));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue Quartile Analysis</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ciro Çeyreklik Analizi' : 'Revenue Quartile Analysis'}</h3>
             <p className="text-xs text-gray-500 mb-4">Orders split into 4 equal quartiles by order value</p>
             <div className="space-y-3">
               {data.map((d, i) => (
@@ -1611,7 +1611,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const bestDay = dayRevenue.indexOf(maxRev);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Sales Velocity by Day of Week</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Haftanın Gününe Göre Satış Hızı' : 'Sales Velocity by Day of Week'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue and order count per weekday — best day: <span className="font-bold text-green-600">{dayLabels[bestDay]}</span></p>
             <div className="flex items-end gap-2 h-28">
               {dayLabels.map((label, i) => (
@@ -1691,7 +1691,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const totalLoss = withMargin.reduce((s,o) => s + Math.abs(o.margin), 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Loss-Making Orders Alert</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Zarar Eden Sipariş Uyarısı' : 'Loss-Making Orders Alert'}</h3>
             <p className="text-xs text-gray-500 mb-3">Orders where cost {'>'}  revenue — total exposure: {fmtAna(totalLoss,'full',0)}</p>
             <div className="space-y-2">
               {withMargin.map((o,i) => (
@@ -1770,7 +1770,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Comprehensive Financial Ratios</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Kapsamlı Finansal Oranlar' : 'Comprehensive Financial Ratios'}</h3>
             <div className="grid grid-cols-3 gap-3">
               {ratios.map((r,i) => (
                 <div key={i} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -1907,7 +1907,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Working Capital Cycle</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'İşletme Sermayesi Döngüsü' : 'Working Capital Cycle'}</h3>
             <p className="text-xs text-gray-500 mb-4">CCC = DSO + DIO − DPO · Lower is better · target: under 45 days</p>
             <div className="space-y-3">
               {wcMetrics.map((m,i) => (
@@ -1985,7 +1985,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const peakMonth = seasonality.reduce((best, val, i) => val !== null && (best === -1 || (seasonality[best] || 0) < val) ? i : best, -1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue Seasonality Index</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ciro Mevsimsellik Endeksi' : 'Revenue Seasonality Index'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly avg vs overall avg · peak: <span className="font-bold text-green-600">{monthNames[peakMonth]}</span></p>
             <div className="flex items-end gap-1 h-24">
               {seasonality.map((s, i) => (
@@ -2151,7 +2151,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxAov = Math.max(...partData.map(p => p.aov), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">AOV by Time of Day</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Saate Göre Ortalama Sepet' : 'AOV by Time of Day'}</h3>
             <div className="grid grid-cols-2 gap-3">
               {partData.map((p, i) => (
                 <div key={i} className="rounded-xl p-4" style={{background: `${p.color}15`}}>
@@ -2191,7 +2191,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const overdueRev = overdue.reduce((s, o) => s + o.totalPrice, 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Invoice Payment Status</h3>
+            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Fatura Ödeme Durumu' : 'Invoice Payment Status'}</h3>
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-green-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-black text-green-600">{paid.length}</div>
@@ -2237,7 +2237,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxRev = Math.max(...cities325.map(c => c.revenue), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Top Cities by Order Volume</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Hacmine Göre En İyi Şehirler' : 'Top Cities by Order Volume'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue and order count by shipping destination</p>
             <div className="space-y-2">
               {cities325.map((c, i) => (
@@ -2269,7 +2269,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const colors328 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#ef4444','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Payment Method Mix</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ödeme Yöntemi Dağılımı' : 'Payment Method Mix'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue share by payment type across {orders.length} orders</p>
             <div className="space-y-2">
               {methods.map((m, i) => {
@@ -2312,7 +2312,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const avgGM = gmData.reduce((s, d) => s + d.gm, 0) / gmData.length;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Gross Margin Trend</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Brüt Kâr Marjı Eğilimi' : 'Gross Margin Trend'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly gross margin % · Avg: {avgGM.toFixed(1)}%</p>
             <div className="flex items-end gap-2 h-24">
               {gmData.map((d, i) => (
@@ -2343,7 +2343,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const avg341 = vals341.reduce((s, v) => s + v, 0) / vals341.length;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Value Percentile Bands</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Tutarı Yüzdelik Dilimleri' : 'Order Value Percentile Bands'}</h3>
             <p className="text-xs text-gray-500 mb-4">{vals341.length} orders · Avg: {fmtAna(avg341,'full',0)}</p>
             <div className="space-y-1.5">
               {bands.map((b, i) => (
@@ -2375,7 +2375,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const topCustomers = Object.entries(custRev346).map(([c, v]) => ({c, v, pct: (v / totalRev346) * 100})).sort((a, b) => b.v - a.v).slice(0, 5);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue Concentration</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ciro Yoğunlaşması' : 'Revenue Concentration'}</h3>
             <div className="flex items-center gap-4 mb-4">
               <div className="text-center">
                 <p className="text-2xl font-black" style={{color: concColor}}>{hhiPct}%</p>
@@ -2420,7 +2420,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const modal = buckets350.reduce((a, b) => b.count > a.count ? b : a);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Invoice Amount Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Fatura Tutarı Dağılımı' : 'Invoice Amount Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Most common range: <span className="font-bold text-[#ff4000]">{modal.label}</span> · {vals350.length} invoices</p>
             <div className="flex items-end gap-3 h-20">
               {buckets350.map((b, i) => (
@@ -2460,7 +2460,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         if (totalCells < 3) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Weekly Revenue Heatmap</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Haftalık Ciro Isı Haritası' : 'Weekly Revenue Heatmap'}</h3>
             <p className="text-xs text-gray-500 mb-3">Last 8 weeks · darker = more revenue</p>
             <div className="overflow-x-auto">
               <div className="flex gap-1 min-w-[300px]">
@@ -2505,7 +2505,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const colors361 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#ef4444','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue by Product Category</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ürün Kategorisine Göre Ciro' : 'Revenue by Product Category'}</h3>
             <p className="text-xs text-gray-500 mb-4">Line-item revenue share · Total: {fmtAna(totalRev361,'full',0)}</p>
             <div className="space-y-2">
               {cats361.map((c, i) => (
@@ -2563,7 +2563,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         }
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue Activity Streak</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ciro Süreklilik Serisi' : 'Revenue Activity Streak'}</h3>
             <div className="flex gap-6 mb-4">
               <div className="text-center"><p className="text-2xl font-black text-[#ff4000]">{streak}</p><p className="text-[10px] text-gray-400">current streak</p></div>
               <div className="text-center"><p className="text-2xl font-black text-indigo-600">{maxStreak}</p><p className="text-[10px] text-gray-400">longest streak</p></div>
@@ -2640,7 +2640,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxDay = top5[0][1];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Top Revenue Days This Year</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Bu Yılın En Yüksek Ciro Günleri' : 'Top Revenue Days This Year'}</h3>
             <p className="text-xs text-gray-500 mb-4">Highest single-day revenue in {thisYear}</p>
             <div className="space-y-2">
               {top5.map(([date, rev], i) => (
@@ -2730,7 +2730,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxAbs = Math.max(...growthRows.map(r => Math.abs(r.pct)), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Month-over-Month Revenue Growth</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aylık Ciro Artışı' : 'Month-over-Month Revenue Growth'}</h3>
             <div className="relative h-28">
               <div className="absolute inset-x-0" style={{top: '50%', height: 1, background: '#e5e7eb'}} />
               <div className="flex items-center h-full gap-2">
@@ -2795,7 +2795,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         };
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-1">This Month vs Last Month</h3>
+            <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Bu Ay ve Geçen Ay' : 'This Month vs Last Month'}</h3>
             <div className="flex items-center gap-4">
               <svg width="120" height="70" viewBox="0 0 120 70">
                 <path d={arc(1, '#e5e7eb')} fill="none" stroke="#e5e7eb" strokeWidth="10" strokeLinecap="round" />
@@ -2917,7 +2917,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold text-sm">Weekly Orders Trend</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Haftalık Sipariş Eğilimi' : 'Weekly Orders Trend'}</h3>
               <span className="text-xs text-gray-500">avg {avg.toFixed(0)}/wk</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height: 60}}>
@@ -2956,7 +2956,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Executive KPI Summary</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Yönetici KPI Özeti' : 'Executive KPI Summary'}</h3>
             <div className="grid grid-cols-2 gap-2">
               {kpis.map(k => (
                 <div key={k.label} className="rounded-xl p-3" style={{background: `${k.color}12`}}>
@@ -2991,7 +2991,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const orderPct = prevC > 0 ? ((currC - prevC) / prevC) * 100 : 0;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Last 90d vs Prior 90d</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Son 90 Gün ve Önceki 90 Gün' : 'Last 90d vs Prior 90d'}</h3>
             <div className="grid grid-cols-2 gap-3">
               {[{label:'Revenue', curr, prev, pct: revPct, fmt: (v:number) => `₺${(v/1000).toFixed(1)}k`},
                 {label:'Orders', curr: currC, prev: prevC, pct: orderPct, fmt: (v:number) => String(v)}].map(r => (
@@ -3034,7 +3034,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const label = overall >= 75 ? 'Healthy' : overall >= 50 ? 'Moderate' : 'At Risk';
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Business Health Score</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İş Sağlığı Puanı' : 'Business Health Score'}</h3>
             <div className="flex items-center gap-4">
               <div className="relative w-20 h-20 flex-shrink-0">
                 <svg width="80" height="80" viewBox="0 0 80 80">
@@ -3087,7 +3087,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Product Revenue Pareto</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Ürün Cirosu Pareto' : 'Product Revenue Pareto'}</h3>
               <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">Top 20% → {top20Pct}% rev</span>
             </div>
             <div className="space-y-2">
@@ -3161,7 +3161,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold text-sm">Cumulative Revenue Trajectory</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Kümülatif Ciro Seyri' : 'Cumulative Revenue Trajectory'}</h3>
               <span className="text-xs font-bold text-brand">{fmtAna(maxV,'K',0)} total</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>
@@ -3204,7 +3204,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">All-Time Records</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Tüm Zamanların Rekorları' : 'All-Time Records'}</h3>
             <div className="grid grid-cols-2 gap-2">
               {records.map(r=>(
                 <div key={r.label} className="rounded-xl p-3 bg-gray-50">
@@ -3242,7 +3242,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         });
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Revenue Growth Rates</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Ciro Artış Oranları' : 'Revenue Growth Rates'}</h3>
             <div className="grid grid-cols-3 gap-2">
               {results.map(r=>(
                 <div key={r.label} className="rounded-xl p-3 text-center" style={{background:r.pct>=0?'#22c55e12':'#ef444412'}}>
@@ -3280,7 +3280,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Year-over-Year Revenue</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Yıllık Ciro Karşılaştırması' : 'Year-over-Year Revenue'}</h3>
             <div className="flex items-end gap-1 h-24 mb-1">
               {Array.from({length:monthsToShow},(_,i)=>(
                 <div key={i} className="flex-1 flex items-end gap-0.5">
@@ -3319,7 +3319,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxIdx = Math.max(...indices,1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Seasonality Index</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Mevsimsellik Endeksi' : 'Seasonality Index'}</h3>
             <div className="overflow-x-auto">
               <div className="flex items-end gap-0.5 h-16 min-w-full">
                 {indices.map((idx,i)=>(
@@ -3350,7 +3350,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const colors=['#94a3b8','#3b82f6','#f59e0b','#ff4000','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Revenue by Order Size</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Büyüklüğüne Göre Ciro' : 'Revenue by Order Size'}</h3>
             <div className="space-y-2">
               {data.map((b,i)=>b.count>0&&(
                 <div key={b.label} className="flex items-center gap-2">
@@ -3453,7 +3453,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const cancelRate = total>0 ? Math.round((cancelled/total)*100) : 0;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Order Fulfillment Rate</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Karşılama Oranı' : 'Order Fulfillment Rate'}</h3>
             <div className="flex items-center gap-4 mb-3">
               <div className="relative w-20 h-20 flex-shrink-0">
                 <svg width="80" height="80" viewBox="0 0 80 80">
@@ -3494,7 +3494,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const palette=['#ff4000','#3b82f6','#22c55e'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Category Revenue Trend</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'En İyi Kategori Ciro Eğilimi' : 'Top Category Revenue Trend'}</h3>
             <div className="space-y-2">
               {topCats.map(([cat,monthMap],ci)=>{
                 const vals=allMonths.map(m=>monthMap[m]??0);
@@ -3540,7 +3540,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-start mb-3">
-              <h3 className="font-semibold text-sm">Revenue Concentration</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Ciro Yoğunlaşması' : 'Revenue Concentration'}</h3>
               <span className="text-xs rounded-full px-2 py-0.5 font-medium" style={{background:`${color}20`,color}}>{label}</span>
             </div>
             <div className="text-center mb-3">
@@ -3604,7 +3604,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const maxRev=top5[0][1];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Products This Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Bu Ayın En İyi Ürünleri' : 'Top Products This Month'}</h3>
             <div className="space-y-2">
               {top5.map(([name,rev],i)=>(
                 <div key={name} className="flex items-center gap-2">
@@ -3637,7 +3637,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         ];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Cross-Module Overview</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Modüller Arası Genel Bakış' : 'Cross-Module Overview'}</h3>
             <div className="grid grid-cols-3 gap-2">
               {stats.map(s=>(
                 <div key={s.label} className="rounded-xl p-2 text-center" style={{background:`${s.color}10`}}>
@@ -3664,7 +3664,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold text-sm">Monthly Order Volume</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Aylık Sipariş Hacmi' : 'Monthly Order Volume'}</h3>
               <span className="text-xs" style={{color:trend>=0?'#22c55e':'#ef4444'}}>{trend>=0?'+':''}{trend} MoM</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height:60}}>

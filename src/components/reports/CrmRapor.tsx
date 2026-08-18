@@ -1854,7 +1854,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxC = Math.max(...months.map(m => monthCounts[m]));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Customer Acquisition by Month</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Aya Göre Müşteri Kazanımı' : 'Customer Acquisition by Month'}</h3>
             <p className="text-xs text-gray-500 mb-4">New customers (first order) per month — last 12 months</p>
             <div className="flex items-end gap-1 h-28">
               {months.map(m => (
@@ -1891,7 +1891,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const totalRevenue = tierData.reduce((s,t) => s+t.revenue, 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Customer Tier Revenue Matrix</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Müşteri Kademesi Ciro Matrisi' : 'Customer Tier Revenue Matrix'}</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -1943,7 +1943,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxMargin = Math.max(...reps.map(r => r.margin));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Gross Margin by Sales Rep</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Satış Temsilcisine Göre Brüt Marj' : 'Gross Margin by Sales Rep'}</h3>
             <div className="space-y-2">
               {reps.map((r,i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -1982,7 +1982,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         if (data.length === 0) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Customer Segment Profitability</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Müşteri Segmenti Kârlılığı' : 'Customer Segment Profitability'}</h3>
             <div className="space-y-4">
               {data.map((d,i) => (
                 <div key={i} className="border border-gray-100 rounded-xl p-4">
@@ -2028,7 +2028,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxRev = Math.max(...regions.map(r=>r.revenue));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Revenue Concentration by Region</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Bölgeye Göre Ciro Yoğunlaşması' : 'Revenue Concentration by Region'}</h3>
             <div className="space-y-2">
               {regions.map((r,i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -2071,7 +2071,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...data.map(d => Math.max(d.new, d.lost)), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Customer Gain/Loss Balance</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Kazanç/Kayıp Dengesi' : 'Customer Gain/Loss Balance'}</h3>
             <p className="text-xs text-gray-500 mb-4">New vs churned customers per month (MoM)</p>
             <div className="flex items-center justify-center gap-1 mb-2">
               <span className="w-3 h-3 rounded-sm bg-green-400 inline-block"></span><span className="text-xs text-gray-500 mr-4">New</span>
@@ -2113,7 +2113,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const under30 = timings.filter(t=>t<=30).length;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Quote-to-Cash Timeline</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Tekliften Tahsilata Zaman Çizelgesi' : 'Quote-to-Cash Timeline'}</h3>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <div className="text-2xl font-black text-blue-700">{avg.toFixed(1)}d</div>
@@ -2167,7 +2167,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         if (custData.length === 0) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Customer Loyalty Index</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Sadakat Endeksi' : 'Customer Loyalty Index'}</h3>
             <p className="text-xs text-gray-500 mb-3">Composite score: order freq, tenure, recency, revenue (0-100)</p>
             <div className="space-y-2">
               {custData.map((c,i) => (
@@ -2251,7 +2251,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const now = new Date();
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Top Customers by Order Frequency</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Sipariş Sıklığına Göre En İyi Müşteriler' : 'Top Customers by Order Frequency'}</h3>
             <div className="space-y-2">
               {top.map((c,i) => {
                 const daysSince = Math.floor((now.getTime() - c.lastDate.getTime())/86400000);
@@ -2290,7 +2290,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const totalOpportunity = staleQuotes.reduce((s,q)=>s+q.value,0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Stale Quote Recovery Opportunities</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Bekleyen Teklif Kurtarma Fırsatları' : 'Stale Quote Recovery Opportunities'}</h3>
             <p className="text-xs text-gray-500 mb-3">Unconverted quotes (7+ days old) — {fmtAna(totalOpportunity,'full',0)} total opportunity</p>
             <div className="space-y-2">
               {staleQuotes.map((q,i) => (
@@ -2324,7 +2324,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const npsProxy = Math.round(((promoters - detractors) / total) * 100);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">NPS Proxy Score</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Tahmini NPS Puanı' : 'NPS Proxy Score'}</h3>
             <p className="text-xs text-gray-500 mb-4">Based on repeat purchase behaviour — not survey data</p>
             <div className="flex items-center justify-center mb-4">
               <div className="text-5xl font-black" style={{ color: npsProxy >= 50 ? '#10b981' : npsProxy >= 0 ? '#f59e0b' : '#ef4444' }}>{npsProxy >= 0 ? '+' : ''}{npsProxy}</div>
@@ -2368,7 +2368,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         if (totalCusts === 0) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-3">Customer Spend Bucket Segmentation</h3>
+            <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Müşteri Harcama Aralığı Segmentasyonu' : 'Customer Spend Bucket Segmentation'}</h3>
             <div className="space-y-3">
               {bucketData.map((b,i) => (
                 <div key={i}>
@@ -2418,7 +2418,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...responseGroups.map(g=>g.count));
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Quotation Age Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Teklif Yaşı Dağılımı' : 'Quotation Age Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">{total} quotations — age from creation date</p>
             <div className="space-y-2">
               {responseGroups.map((g,i) => (
@@ -2527,7 +2527,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...bucketCounts.map(b => b.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Customer Re-Order Gap Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Tekrar Sipariş Aralığı Dağılımı' : 'Customer Re-Order Gap Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Days between consecutive orders per customer · avg: {avg.toFixed(0)} days</p>
             <div className="flex items-end gap-3 h-20">
               {bucketCounts.map((b, i) => (
@@ -2556,7 +2556,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const convRate = total322 > 0 ? ((converted322 / total322) * 100).toFixed(1) : '0';
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Quotation Conversion Funnel</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Teklif Dönüşüm Hunisi' : 'Quotation Conversion Funnel'}</h3>
             <p className="text-xs text-gray-500 mb-4">End-to-end pipeline from quote creation to order · Overall conversion: {convRate}%</p>
             <div className="flex items-end gap-2 h-28">
               {stages.map((s, i) => {
@@ -2595,7 +2595,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...buckets.map(b => b.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Customer LTV Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Yaşam Boyu Değer Dağılımı' : 'Customer LTV Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Lifetime value buckets across {ltvValues.length} customers</p>
             <div className="flex items-end gap-3 h-24">
               {buckets.map((b, i) => (
@@ -2631,7 +2631,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...keys331.map(k => monthData[k].newC + monthData[k].ret), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">New vs Returning Customers</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Yeni ve Geri Dönen Müşteriler' : 'New vs Returning Customers'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly breakdown — stacked bars by customer type</p>
             <div className="flex items-end gap-2 h-28 mb-2">
               {keys331.map(k => {
@@ -2675,7 +2675,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const colors333 = ['#f59e0b','#6366f1','#3b82f6','#10b981','#f97316','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Top Sales Representatives</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'En İyi Satış Temsilcileri' : 'Top Sales Representatives'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue and order count by assigned sales rep</p>
             <div className="space-y-2">
               {reps333.map((r, i) => (
@@ -2711,7 +2711,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const totalRev336 = bData.reduce((s, b) => s + b.rev, 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Size Distribution</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Büyüklüğü Dağılımı' : 'Order Size Distribution'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue share by order value tier · {orders.length} orders total</p>
             <div className="flex items-end gap-3 h-24 mb-2">
               {bData.map((b, i) => (
@@ -2748,7 +2748,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const convPct = totalRev340 > 0 ? ((acceptedRev / totalRev340) * 100).toFixed(1) : '0';
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Quotation Status Breakdown</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Teklif Durumu Dağılımı' : 'Quotation Status Breakdown'}</h3>
             <p className="text-xs text-gray-500 mb-4">{quotations.length} quotes · Accepted/Converted revenue: {convPct}% of pipeline</p>
             <div className="space-y-2">
               {stages340.map((s, i) => (
@@ -2778,7 +2778,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         if (custQ343.length < 2) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Quote Win Rate by Customer</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteriye Göre Teklif Kazanma Oranı' : 'Quote Win Rate by Customer'}</h3>
             <p className="text-xs text-gray-500 mb-4">Accepted ÷ total quotes per customer</p>
             <div className="space-y-2">
               {custQ343.map((c, i) => (
@@ -2823,7 +2823,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxGap = Math.max(...gaps.map(g => g.avgGap), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Avg Days Between Orders</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Siparişler Arası Ortalama Gün' : 'Avg Days Between Orders'}</h3>
             <p className="text-xs text-gray-500 mb-4">Repeat customer purchase cadence — shorter gap = higher loyalty</p>
             <div className="space-y-2">
               {gaps.map((g, i) => (
@@ -2856,7 +2856,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal357 = Math.max(...pipelineData.map(d => d.value), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Quote Value Pipeline</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Teklif Tutarı Hattı' : 'Quote Value Pipeline'}</h3>
             <p className="text-xs text-gray-500 mb-4">Total pipeline: {fmtAna(totalPipeline,'full',0)}</p>
             <div className="space-y-2">
               {pipelineData.map((d, i) => (
@@ -2892,7 +2892,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const repeatPct = ((counts.filter(c => c > 1).length / totalCusts) * 100).toFixed(0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Orders per Customer</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Başına Sipariş' : 'Orders per Customer'}</h3>
             <p className="text-xs text-gray-500 mb-4">{totalCusts} unique customers · <span className="font-bold text-[#ff4000]">{repeatPct}%</span> repeat buyers</p>
             <div className="flex items-end gap-3 h-20">
               {buckets359.map((b, i) => (
@@ -2930,7 +2930,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxAvg362 = Math.max(...avgData.map(d => d.avg), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Avg Quote Value Over Time</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Zaman İçinde Ortalama Teklif Tutarı' : 'Avg Quote Value Over Time'}</h3>
             <p className="text-xs text-gray-500 mb-4">Monthly average quotation value trend</p>
             <div className="flex items-end gap-2 h-24">
               {avgData.map((d, i) => (
@@ -2957,7 +2957,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const colors370 = ['#6366f1','#10b981','#f59e0b','#3b82f6','#f97316','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Revenue by Customer Segment</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Segmentine Göre Ciro' : 'Revenue by Customer Segment'}</h3>
             <p className="text-xs text-gray-500 mb-4">Total: {fmtAna(totalRev370,'full',0)}</p>
             <div className="space-y-2">
               {segs370.map((s, i) => (
@@ -2989,7 +2989,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const colors373 = ['#6366f1','#10b981','#f59e0b','#3b82f6','#f97316','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Order Source Mix</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Kaynağı Dağılımı' : 'Order Source Mix'}</h3>
             <p className="text-xs text-gray-500 mb-4">Revenue share by acquisition channel</p>
             <div className="space-y-2">
               {sources.map((s, i) => (
@@ -3029,7 +3029,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const totalNew = keys377.reduce((s, k) => s + monthNew[k], 0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">New Customer Acquisition</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Yeni Müşteri Kazanımı' : 'New Customer Acquisition'}</h3>
             <p className="text-xs text-gray-500 mb-4">{totalNew} new customers across shown period</p>
             <div className="flex items-end gap-2 h-24">
               {keys377.map(k => (
@@ -3065,7 +3065,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const overallAvg378 = avgPerCust.reduce((s, d) => s + d.avg, 0) / avgPerCust.length;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">Avg Orders per Customer / Month</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Başına Aylık Ortalama Sipariş' : 'Avg Orders per Customer / Month'}</h3>
             <p className="text-xs text-gray-500 mb-4">Purchase frequency trend · Avg: {overallAvg378.toFixed(2)} orders/customer</p>
             <div className="flex items-end gap-2 h-24">
               {avgPerCust.map((d, i) => (
@@ -3106,7 +3106,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxC = Math.max(...tierBuckets.map(t => t.count), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Customer Lifetime Value Tiers</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Yaşam Boyu Değer Kademeleri' : 'Customer Lifetime Value Tiers'}</h3>
             <div className="space-y-2">
               {tierBuckets.map(t => (
                 <div key={t.label} className="flex items-center gap-2">
@@ -3191,7 +3191,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-sm">Order Cancellation Rate</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Sipariş İptal Oranı' : 'Order Cancellation Rate'}</h3>
               <span className="text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5">{overallRate}% overall</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -3235,7 +3235,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Avg Days Between Orders</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Siparişler Arası Ortalama Gün' : 'Avg Days Between Orders'}</h3>
               <span className="text-xs bg-purple-100 text-purple-700 rounded-full px-2 py-0.5">{avg.toFixed(0)}d avg</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -3269,7 +3269,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxC = top5[0][1].count;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top 5 Customers by Order Count</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Adedine Göre İlk 5 Müşteri' : 'Top 5 Customers by Order Count'}</h3>
             <div className="space-y-2">
               {top5.map(([name, d], i) => (
                 <div key={name} className="flex items-center gap-2">
@@ -3314,7 +3314,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(avgFirst, avgRepeat, 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">First vs Repeat Order Value</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İlk ve Tekrar Sipariş Tutarı' : 'First vs Repeat Order Value'}</h3>
             <div className="space-y-3">
               {[{label:'1st Order Avg', val: avgFirst, color: '#3b82f6', n: firstOrderVals.length},
                 {label:'Repeat Avg', val: avgRepeat, color: '#22c55e', n: repeatOrderVals.length}].map(r => (
@@ -3395,7 +3395,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxSize = top[0][1].size;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Products by Customer Reach</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Erişimine Göre Ürünler' : 'Products by Customer Reach'}</h3>
             <div className="space-y-2">
               {top.map(([name, custSet]) => (
                 <div key={name} className="flex items-center gap-2">
@@ -3476,7 +3476,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Orders by Hour</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Saate Göre Siparişler' : 'Orders by Hour'}</h3>
               <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">Peak: {peakHour}:00</span>
             </div>
             <div className="flex items-end gap-0.5 h-16">
@@ -3524,7 +3524,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold text-sm">Revenue Pareto</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Ciro Pareto' : 'Revenue Pareto'}</h3>
               <span className="text-xs bg-purple-100 text-purple-700 rounded-full px-2 py-0.5">Top 20% → {top20Pct}% revenue</span>
             </div>
             <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{height: 60}}>
@@ -3595,7 +3595,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...allMonths.map(m => Math.max(ordersByMonth[m]??0, quotesByMonth[m]??0)), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Orders vs Quotations by Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aya Göre Sipariş ve Teklifler' : 'Orders vs Quotations by Month'}</h3>
             <div className="flex items-end gap-2 h-24 mb-1">
               {allMonths.map(m => (
                 <div key={m} className="flex-1 flex items-end gap-0.5">
@@ -3648,7 +3648,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         });
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Repeat Purchase Rate</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Tekrar Satın Alma Oranı' : 'Repeat Purchase Rate'}</h3>
             <div className="flex items-center gap-4 mb-3">
               <div className="text-center">
                 <p className="text-3xl font-bold text-brand">{rate}%</p>
@@ -3684,7 +3684,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
           const avg = sizes.length > 0 ? (sizes.reduce((a,b)=>a+b,0)/sizes.length).toFixed(1) : '0';
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">Order Size Summary</h3>
+              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Sipariş Büyüklüğü Özeti' : 'Order Size Summary'}</h3>
               <p className="text-3xl font-bold text-brand">{avg}</p>
               <p className="text-xs text-gray-500">avg line items per order ({orders.length} orders)</p>
             </div>
@@ -3694,7 +3694,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const palette = ['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Revenue by Customer Segment</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Segmentine Göre Ciro' : 'Revenue by Customer Segment'}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([seg,d],i)=><div key={seg} style={{width:`${(d.revenue/totalRev)*100}%`,background:palette[i]}} title={seg} />)}
             </div>
@@ -3733,7 +3733,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Quotation Pipeline</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Teklif Hattı' : 'Quotation Pipeline'}</h3>
               <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{active.length} active • {fmtAna(totalValue,'K',0)}</span>
             </div>
             <div className="grid grid-cols-2 gap-1">
@@ -3765,7 +3765,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...months.map(m=>byMonth[m].value),1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Quotation Volume & Value by Month</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Aya Göre Teklif Adedi ve Tutarı' : 'Quotation Volume & Value by Month'}</h3>
             <div className="flex items-end gap-2 h-20 mb-1">
               {months.map(m=>(
                 <div key={m} className="flex-1 flex flex-col items-center gap-0.5">
@@ -3798,7 +3798,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxOrders = Math.max(...topCusts.flatMap(([,m])=>Object.values(m)),1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Customer Order Frequency</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'En İyi Müşteri Sipariş Sıklığı' : 'Top Customer Order Frequency'}</h3>
             <table className="w-full text-xs">
               <thead>
                 <tr>
@@ -3839,7 +3839,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxVal = Math.max(...rows.map(r=>r.avgQty),1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Avg Items per Order</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Başına Ortalama Kalem' : 'Avg Items per Order'}</h3>
             <div className="flex items-end gap-2 h-20 mb-1">
               {rows.map(r=>(
                 <div key={r.month} className="flex-1 flex flex-col items-center gap-0.5">
@@ -3871,7 +3871,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxRev = top10[0][1].revenue;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Top Customers by Lifetime Value</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Yaşam Boyu Değere Göre En İyi Müşteriler' : 'Top Customers by Lifetime Value'}</h3>
             <div className="space-y-2">
               {top10.map(([name,d],i)=>(
                 <div key={name} className="flex items-center gap-2">
@@ -3903,7 +3903,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const maxCount = topPairs[0][1];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Frequently Co-Ordered Products</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Birlikte Sıkça Sipariş Edilen Ürünler' : 'Frequently Co-Ordered Products'}</h3>
             <div className="space-y-2">
               {topPairs.map(([pair,count])=>(
                 <div key={pair} className="flex items-center gap-2">
@@ -3980,7 +3980,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const dowLabels=['M','T','W','T','F','S','S'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Order Activity Calendar</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Sipariş Hareket Takvimi' : 'Order Activity Calendar'}</h3>
             <div className="flex gap-0.5 mb-1">{dowLabels.map((l,i)=><span key={i} className="flex-1 text-center text-[9px] text-gray-400">{l}</span>)}</div>
             <div className="space-y-0.5">
               {grid.map((week,wi)=>(
@@ -4018,7 +4018,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">New Customer Acquisition</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Yeni Müşteri Kazanımı' : 'New Customer Acquisition'}</h3>
               <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{totalNew} total</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">
@@ -4077,7 +4077,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         const avgGap=totalReEngagements>0?Math.round(Object.values(custOrders).flatMap(a=>a.map(e=>e.gap)).reduce((a,b)=>a+b,0)/totalReEngagements):0;
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">Customer Re-Engagement</h3>
+            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Yeniden Kazanımı' : 'Customer Re-Engagement'}</h3>
             <div className="grid grid-cols-3 gap-2 text-center">
               {[{label:'Total Re-engaged',val:String(totalReEngagements),color:'#22c55e'},{label:'Recent (90d)',val:String(reEngaged),color:'#3b82f6'},{label:'Avg Gap',val:`${avgGap}d`,color:'#f59e0b'}].map(s=>(
                 <div key={s.label} className="rounded-xl p-3" style={{background:`${s.color}12`}}>
@@ -4102,7 +4102,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">Quotation Approval Rate</h3>
+              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Teklif Onay Oranı' : 'Quotation Approval Rate'}</h3>
               <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{approvalRate}%</span>
             </div>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">

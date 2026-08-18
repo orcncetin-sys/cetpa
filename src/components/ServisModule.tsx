@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useToast } from './Toast';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query
@@ -124,6 +125,7 @@ const emptyTeknisyen: Omit<Teknisyen, 'id'> = {
 };
 
 export default function ServisModule({ currentLanguage: _lang, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('Servis Talepleri');
   const [talepler, setTalepler] = useState<ServisTalebi[]>([]);
   const [garantiler, setGarantiler] = useState<Garanti[]>([]);
@@ -168,7 +170,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
 
   async function closeTalep() {
     if (!closingTalep) return;
-    if (!cozumAciklama.trim()) { alert(_lang === 'tr' ? 'Çözüm açıklaması zorunlu.' : 'Resolution note required.'); return; }
+    if (!cozumAciklama.trim()) { toast(_lang === 'tr' ? 'Çözüm açıklaması zorunlu.' : 'Resolution note required.', 'warning'); return; }
     await updateDoc(doc(db, 'servisTalepleri', closingTalep.id), {
       durum: 'Çözüldü',
       cozumAciklamasi: cozumAciklama,

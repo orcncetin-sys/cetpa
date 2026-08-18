@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useToast } from './Toast';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query
@@ -124,6 +125,7 @@ const emptyAriza: Omit<Ariza, 'id'> = {
 };
 
 export default function BakimModule({ currentLanguage: _lang, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('Ekipmanlar');
   const [ekipmanlar, setEkipmanlar] = useState<Ekipman[]>([]);
   const [isEmirleri, setIsEmirleri] = useState<IsEmri[]>([]);
@@ -168,9 +170,9 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
     // İlişkili iş emri / arıza varsa silme (orphan engeli).
     const refCount = isEmirleri.filter(i => i.ekipmanId === id).length + arizalar.filter(a => a.ekipmanId === id).length;
     if (refCount > 0) {
-      alert(_lang === 'tr'
+      toast(_lang === 'tr'
         ? `Bu ekipmana bağlı ${refCount} iş emri/arıza var. Önce onları kaldırın.`
-        : `${refCount} work orders/faults reference this equipment. Remove them first.`);
+        : `${refCount} work orders/faults reference this equipment. Remove them first.`, 'warning');
       return;
     }
     const ekipman = ekipmanlar.find(e => e.id === id);
