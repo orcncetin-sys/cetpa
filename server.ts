@@ -5991,7 +5991,20 @@ async function startServer() {
               // ISNULL(...,-1): COUNT(DISTINCT) NULL'ları görmezden gelir — bir
               // satırın gerçek orana (ör. %20) diğerinin NULL/çözülemeyen orana
               // sahip olduğu fatura, ISNULL olmadan "tek oran" gibi görünürdü.
-              'COUNT(DISTINCT ISNULL(sth_vergi_pntr, -1)) AS oranSayisi ' +
+              // CAST ONCE, ISNULL SONRA — sirasi KRITIK.
+              // SQL Server'da ISNULL(kolon, deger) donus tipini KOLONDAN alir.
+              // sth_vergi_pntr tinyint (0-255) oldugu icin `ISNULL(col, -1)`
+              // -1'i tinyint'e cevirmeye calisiyor ve TUM SORGU
+              // "Arithmetic overflow error for data type tinyint, value = -1"
+              // ile oluyordu — yani fatura import'u komple calismiyordu
+              // (2026-08-18 canli bildirimi; hatayi 2026-08-17'de karma-KDV
+              // duzeltmesinde ben eklemistim).
+              // Once INT'e cast edilince nobet degeri sorunsuz sigiyor.
+              // NOT: COUNT(DISTINCT) NULL'lari saymaz; bu yuzden NULL'u ayri
+              // bir deger olarak isaretlemek SART — aksi halde "bir gercek
+              // oran + NULL satirlar" tek oranmis gibi gorunur ve fatura
+              // yanlislikla karma-KDV sayilmaz.
+              'COUNT(DISTINCT ISNULL(CAST(sth_vergi_pntr AS INT), -1)) AS oranSayisi ' +
               'FROM STOK_HAREKETLERI WHERE sth_evraktip IN (3, 4) ' +
               'GROUP BY sth_evrakno_seri, sth_evrakno_sira, sth_evraktip' +
             ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri ' +
