@@ -130,7 +130,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   async function handleStartMiktar() {
     setMiktarStarting(true);
     try {
-      const r = await fetch('/api/mikro/import/stok-miktar', { method: 'POST', headers: await authHeaders() });
+      // body ZORUNLU: govdesiz POST'ta Content-Length olmadigi icin uretimdeki
+      // IIS istegi Node'a hic iletmeden `411 Length Required` ile reddediyor —
+      // dugme sessizce oluyordu (2026-08-18 canli olcum). Bu dosyadaki diger
+      // TUM POST'lar zaten `JSON.stringify({})` gonderiyor; yalniz burasi
+      // atlanmisti.
+      const r = await fetch('/api/mikro/import/stok-miktar', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
       const d = await r.json() as { success: boolean; started?: boolean; alreadyRunning?: boolean; error?: string };
       if (!d.success) throw new Error(d.error || 'Hata');
     } catch (e) {
@@ -196,14 +201,21 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const [showLog, setShowLog] = useState(false);
 
   // ── Live syncLog subscription ──────────────────────────────────────────────
+  // Okuma hatasi ARTIK SESSIZ DEGIL: onSnapshot'in hata geri cagrisi yoktu,
+  // dolayisiyla yetki/ag hatasinda ekran "Henuz senkronizasyon kaydi yok."
+  // gosteriyordu — yani "hic kayit yok" ile "kayitlari okuyamadim" ayirt
+  // edilemiyordu (2026-08-18 kullanici sorusu: "gecmisi de mi sildik?").
+  const [syncLogError, setSyncLogError] = useState<string | null>(null);
   useEffect(() => {
     const q = query(
       collection(db, 'syncLog'),
       limit(30)
     );
-    const unsub = onSnapshot(q, snap => {
-      setSyncLog(snap.docs.map(d => ({ id: d.id, ...d.data() } as SyncLogEntry)));
-    });
+    const unsub = onSnapshot(
+      q,
+      snap => { setSyncLogError(null); setSyncLog(snap.docs.map(d => ({ id: d.id, ...d.data() } as SyncLogEntry))); },
+      err => { console.error('[syncLog] okunamadi:', err); setSyncLogError(err instanceof Error ? err.message : String(err)); },
+    );
     return () => unsub();
   }, []);
 
@@ -588,6 +600,16 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             {miktarJob?.running ? (t ? 'Çalışıyor…' : 'Running…') : miktarStarting ? '…' : (t ? 'Miktarları Çek' : 'Pull Quantities')}
           </button>
         </div>
+        {/* Hata-only durum ESKIDEN HIC CIZILMIYORDU: kosul yalniz
+            running||processed'e bakiyordu, dolayisiyla istek basarisiz
+            oldugunda kullaniciya hicbir sey gosterilmiyordu (dugme "bozuk"
+            goruntusunun ikinci yarisi). */}
+        {miktarJob?.error && !miktarJob.running && (
+          <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+            {t ? 'Miktar çekme başlatılamadı: ' : 'Could not start quantity pull: '}
+            <b>{miktarJob.error}</b>
+          </p>
+        )}
         {miktarJob && (miktarJob.running || miktarJob.processed) ? (
           <div className="space-y-1.5">
             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -905,9 +927,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
 
         {showLog && (
           <div className="border-t border-gray-100 overflow-x-auto">
-            {syncLog.length === 0 ? (
+            {syncLogError ? (
+              <p className="text-center text-sm text-red-600 py-8">
+                {t ? 'Senkronizasyon geçmişi okunamadı: ' : 'Could not read sync history: '}
+                <b>{syncLogError}</b>
+              </p>
+            ) : syncLog.length === 0 ? (
               <p className="text-center text-sm text-gray-400 py-8">
-                {t ? 'Henüz senkronizasyon kaydı yok.' : 'No sync records yet.'}
+                {t ? 'Henüz senkronizasyon kaydı yok. (Kayıtlar yalnız Mikro içe/dışa aktarımı çalıştığında oluşur.)' : 'No sync records yet. (Records are only created when a Mikro import/export runs.)'}
               </p>
             ) : (
               <table className="w-full text-left text-xs">
