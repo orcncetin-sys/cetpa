@@ -141,7 +141,12 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       variant: 'danger',
     });
     if (!ok) return;
-    await deleteDoc(doc(db, 'wmsLocations', id));
+    try {
+      await deleteDoc(doc(db, 'wmsLocations', id));
+    } catch (e) {
+      console.error('Konum silinemedi:', e);
+      setLocFormError(tr ? 'Konum silinemedi.' : 'Could not delete location.');
+    }
   };
 
   // Barcode / SKU scan handler

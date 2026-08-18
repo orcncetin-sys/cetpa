@@ -557,8 +557,13 @@ export default function DealerCommissionPanel({
                               variant: 'danger',
                             });
                             if (!ok) return;
-                            await deleteDoc(doc(db, 'commissionRules', rule.id));
-                            showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
+                            try {
+                              await deleteDoc(doc(db, 'commissionRules', rule.id));
+                              showToast(currentLanguage === 'tr' ? 'Kural silindi.' : 'Rule deleted.');
+                            } catch (err) {
+                              logFirestoreError(err, OperationType.DELETE, `commissionRules/${rule.id}`);
+                              showToast(currentLanguage === 'tr' ? 'Kural silinemedi.' : 'Could not delete rule.', 'error');
+                            }
                           }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
                         ><Trash2 size={14} /></button>

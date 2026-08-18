@@ -169,7 +169,13 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
       variant: 'danger',
     });
     if (!ok) return;
-    await deleteDoc(doc(db, 'bom', id));
+    try {
+      await deleteDoc(doc(db, 'bom', id));
+    } catch (e) {
+      // Yetki/ag hatasinda silme sessizce basarisiz oluyordu: kart
+      // ekranda kaliyor, kullaniciya hicbir sey soylenmiyordu.
+      console.error('BOM delete error:', e);
+    }
   };
 
   // ── Component form helpers ─────────────────────────────────────────────────
