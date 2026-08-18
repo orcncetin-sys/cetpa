@@ -200,7 +200,7 @@ function IcpSection({ isTR, d, darkMode }: SectionProps) {
 
   return (
     <section className={cn('py-24', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
-      <div className="max-w-5xl mx-auto px-6">
+      <div className="w-full max-w-5xl mx-auto px-6">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
           <div className="text-center mb-12">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
@@ -307,7 +307,7 @@ function CellIcon({ val, isTR }: { val: string; isTR: boolean }) {
 function CompetitorSection({ isTR, d }: SectionProps) {
   return (
     <section className="py-24">
-      <div className="max-w-5xl mx-auto px-6">
+      <div className="w-full max-w-5xl mx-auto px-6">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
           <div className="text-center mb-12">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">
@@ -383,7 +383,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
 
   return (
     <section className={cn('py-24', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
-      <div className="max-w-5xl mx-auto px-6">
+      <div className="w-full max-w-5xl mx-auto px-6">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
           <div className="text-center mb-12">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">ROI</p>
@@ -762,7 +762,7 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
           'radial-gradient(ellipse at 15% 55%, rgba(124,58,237,0.04) 0%, transparent 55%)'
         )}} />
 
-      <div className="max-w-6xl mx-auto px-6 relative z-10">
+      <div className="w-full max-w-6xl mx-auto px-6 relative z-10">
         {/* Eyebrow + title */}
         <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
           <p className="text-xs font-bold tracking-widest text-brand mb-3">
@@ -960,7 +960,7 @@ function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ct
 
   return (
     <section className="py-20">
-      <div className="max-w-6xl mx-auto px-6">
+      <div className="w-full max-w-6xl mx-auto px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-14 items-center">
           {reverse ? <>{content}{visual}</> : <>{visual}{content}</>}
         </div>
@@ -1018,7 +1018,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
 
   return (
     <section id="partners" className={cn('py-24', d('bg-white/[0.025]', 'bg-[#fff8f5]'))}>
-      <div className="max-w-5xl mx-auto px-6">
+      <div className="w-full max-w-5xl mx-auto px-6">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
           <div className="text-center mb-12">
             <div className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-bold tracking-wide mb-6 uppercase', d('bg-white/4 border-white/10 text-white/70', 'bg-brand/8 border-brand/20 text-brand'))}>
@@ -1374,7 +1374,7 @@ export default function LandingPage({
           style={{ background: d('rgba(255,140,0,0.06)', 'rgba(255,140,0,0.04)') }} />
         <SparkleField count={22} color={d('#ff4000', '#ff6020')} />
 
-        <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
+        <div className="relative z-10 w-full max-w-5xl mx-auto px-6 text-center">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
             className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-bold tracking-wide mb-8 uppercase', d('bg-white/4 border-white/10 text-white/70', 'bg-black/4 border-black/10 text-black/60'))}>
             <div className="relative">
@@ -1549,7 +1549,7 @@ export default function LandingPage({
 
       {/* ── Integrations logos ─────────────────────────────────────────────── */}
       <section className="py-20">
-        <div className="max-w-5xl mx-auto px-6 text-center">
+        <div className="w-full max-w-5xl mx-auto px-6 text-center">
           <p className={cn('text-xs font-bold uppercase tracking-widest mb-10', d('text-white/25', 'text-black/25'))}>
             {isTR ? 'Entegre olduğumuz platformlar' : 'Platforms we integrate with'}
           </p>
@@ -1577,7 +1577,7 @@ export default function LandingPage({
       {/* ── How it works ──────────────────────────────────────────────────── */}
       <section id="how" className={cn('py-32 relative overflow-hidden', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
         <SparkleField count={8} color={brand} />
-        <div className="max-w-5xl mx-auto px-6 relative z-10">
+        <div className="w-full max-w-5xl mx-auto px-6 relative z-10">
           <div className="text-center mb-20">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Nasıl Çalışır' : 'How It Works'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
@@ -1652,7 +1652,7 @@ export default function LandingPage({
 
       {/* ── Features ─────────────────────────────────────────────────────── */}
       <section id="features" className="py-32">
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-6xl mx-auto px-6">
           <div className="text-center mb-20">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Tüm Modüller' : 'All Modules'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
@@ -1704,7 +1704,7 @@ export default function LandingPage({
       <section id="demo" className={cn('py-32 relative overflow-hidden', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: d('radial-gradient(ellipse at center, rgba(255,64,0,0.06) 0%, transparent 70%)', 'radial-gradient(ellipse at center, rgba(255,64,0,0.04) 0%, transparent 70%)') }} />
-        <div className="max-w-5xl mx-auto px-6 text-center relative z-10">
+        <div className="w-full max-w-5xl mx-auto px-6 text-center relative z-10">
           <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Ürün Demosu' : 'Product Demo'}</p>
           <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
             {isTR ? 'CETPA\'yı aksiyonda görün' : 'See CETPA in action'}
@@ -1748,7 +1748,7 @@ export default function LandingPage({
 
       {/* ── Testimonials ─────────────────────────────────────────────────── */}
       <section className="py-32">
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-6xl mx-auto px-6">
           <div className="text-center mb-16">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Müşteri Hikayeleri' : 'Customer Stories'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
@@ -1766,7 +1766,7 @@ export default function LandingPage({
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section id="pricing" className={cn('py-32 relative overflow-hidden', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
         <SparkleField count={10} color={brand} />
-        <div className="max-w-5xl mx-auto px-6 relative z-10">
+        <div className="w-full max-w-5xl mx-auto px-6 relative z-10">
           <div className="text-center mb-16">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Fiyatlandırma' : 'Pricing'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
@@ -1852,7 +1852,7 @@ export default function LandingPage({
 
       {/* ── Industries ───────────────────────────────────────────────────── */}
       <section id="solutions" className="py-32">
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-6xl mx-auto px-6">
           <div className="text-center mb-16">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Sektörler' : 'Industries'}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
@@ -1892,7 +1892,7 @@ export default function LandingPage({
 
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
       <section className={cn('py-32', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>
-        <div className="max-w-2xl mx-auto px-6">
+        <div className="w-full max-w-2xl mx-auto px-6">
           <div className="text-center mb-16">
             <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">FAQ</p>
             <h2 className="text-3xl md:text-4xl font-black tracking-tight">
@@ -1907,7 +1907,7 @@ export default function LandingPage({
 
       {/* ── Bold Statement (Zera-inspired) ───────────────────────────── */}
       <section className="py-24 overflow-hidden">
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-6xl mx-auto px-6">
           <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
             className={cn('relative rounded-[2.5rem] overflow-hidden p-14 md:p-20 cetpa-noise cetpa-grid-bg', d('bg-[#0b0b14]','bg-white border border-black/8 shadow-xl'))}>
             <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 20% 50%, rgba(255,64,0,0.12) 0%, transparent 65%)' }} />
@@ -2046,7 +2046,7 @@ export default function LandingPage({
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className={cn('border-t pt-16 pb-10', d('border-white/6', 'border-black/6'))}>
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-6xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-12">
             <div className="col-span-2 md:col-span-1">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 mb-4" />
