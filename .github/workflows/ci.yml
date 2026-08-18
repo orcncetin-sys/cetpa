@@ -22,6 +22,13 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN'a en az yetki (CodeQL "Workflow does not contain permissions").
+# Varsayilan token genis yazma kapsamiyla geliyor; bu workflow depoya HIC
+# yazmiyor: build sadece checkout+tsc+test+build, deploy ise yalnizca SSH ile
+# VDS'e baglaniyor. Ust duzeyde tanimli - eklenecek yeni is'ler de devralir.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Typecheck & Build

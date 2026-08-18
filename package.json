@@ -95,6 +95,7 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "websocket-driver": "^0.7.5"
+    "websocket-driver": "^0.7.5",
+    "uuid": "^11.1.1"
   }
 }
