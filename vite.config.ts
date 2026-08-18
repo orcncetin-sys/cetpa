@@ -92,7 +92,7 @@ export default defineConfig(({mode}) => {
             // BarcodeScanner.tsx içinde React.lazy ile de ertelendi; kendi
             // chunk'ında olması o ertelemenin gerçekten işe yaramasını sağlar
             // (aksi halde ortak vendor'a karışıp yine erken inerdi).
-            if (id.includes('node_modules/react-qr-barcode-scanner') || id.includes('node_modules/@zxing')) {
+            if (id.includes('node_modules/@zxing')) {
               return 'vendor-barcode';
             }
             if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {

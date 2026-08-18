@@ -3,12 +3,18 @@ import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Scan, Keyboard, Camera } from 'lucide-react';
 
-// react-qr-barcode-scanner (ZXing) TEK BAŞINA 427 kB — ölçüldü (2026-08-17,
-// "sistem çok yavaş açılıyor" şikayeti). Statik import olduğu için bu bileşeni
-// kullanan HER ekran (Envanter, Siparişler/AddOrderModal, QR Transfer) o 427
-// kB'ı kullanıcı kamerayı hiç açmasa bile indiriyordu. Artık yalnız kamera
-// modu SEÇİLİNCE indiriliyor; manuel giriş modu hiç indirmez.
-const BarcodeScannerComponent = React.lazy(() => import('react-qr-barcode-scanner'));
+// ZXing TEK BAŞINA ~400 kB. Yalnız kamera modu SEÇİLİNCE indirilir; manuel
+// giriş modu hiç indirmez.
+//
+// 2026-08-18: burada `react-qr-barcode-scanner` vardı ve React.lazy'ye rağmen
+// paket İLK AÇILIŞTA iniyordu. Sebep: o paketin bağımlısı `react-webcam` CJS
+// ve rolldown, CJS'in `require('react/jsx-runtime')` çağrısı için ayrı bir
+// jsx-runtime kopyası üretip barkod chunk'ına yapıştırıyordu — böylece JSX
+// render eden 79 chunk o chunk'ı statik import ediyordu. Beş ayrı vite
+// yapılandırması denendi, hiçbiri ölçümde işe yaramadı. Çözüm: react-webcam
+// bağımlılığını tamamen kaldırıp ZXing'in ESM build'ini kullanan kendi
+// bileşenimize geçmek (BarcodeScannerCamera).
+const BarcodeScannerCamera = React.lazy(() => import('./BarcodeScannerCamera'));
 
 interface BarcodeScannerProps {
   isOpen: boolean;
@@ -88,15 +94,9 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
                   {currentLanguage === 'tr' ? 'Kamera yükleniyor…' : 'Loading camera…'}
                 </div>
               }>
-                <BarcodeScannerComponent
-                  width="100%"
-                  height="100%"
-                  onUpdate={(err, result) => {
-                    if (result) {
-                      onScan(result.getText());
-                      onClose();
-                    }
-                  }}
+                <BarcodeScannerCamera
+                  currentLanguage={currentLanguage}
+                  onScan={(text) => { onScan(text); onClose(); }}
                 />
               </Suspense>
               <div className="absolute inset-0 border-2 border-brand opacity-30 pointer-events-none m-12 rounded-lg" />
