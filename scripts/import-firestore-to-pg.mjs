@@ -16,7 +16,10 @@
  *   --backup-only   Firestore'u hiç deneme, doğrudan yedekten yükle
  *   --dry-run       Yazma yapma, sadece sayıları raporla
  */
-import admin from 'firebase-admin';
+// firebase-admin 14 namespace API'sini kaldirdi (admin.credential / admin.storage /
+// admin.firestore artik yok) — moduler alt-yol importlari sart.
+import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import pg from 'pg';
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -66,11 +69,11 @@ async function tryFirestore() {
   const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const fbKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
   if (!fbEmail || !fbKey) throw new Error('FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY eksik.');
-  const app = admin.initializeApp({
-    credential: admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
+  const app = initializeApp({
+    credential: cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
     projectId: PROJECT_ID,
   });
-  const db = app.firestore();
+  const db = getFirestore(app);
   db.settings({ databaseId: DB_ID });
 
   const collections = await db.listCollections();

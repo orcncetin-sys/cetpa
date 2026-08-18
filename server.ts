@@ -21,7 +21,12 @@ import multer from "multer";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cron from "node-cron";
-import admin from "firebase-admin";
+// firebase-admin 14 NAMESPACE API'sini KALDIRDI (admin.auth(), admin.firestore(),
+// admin.storage(), admin.credential artik yok) — moduler alt-yol importlari sart.
+import { initializeApp, cert, type Credential, type App } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore, FieldValue, type Firestore, type Timestamp } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
@@ -132,7 +137,7 @@ const AiChatSchema = z.object({
 // adminDb is assigned after the PgFirestore class definition below: PostgreSQL
 // shim when DATABASE_URL is set, real Firestore otherwise (local-dev fallback).
 let adminDb: PgFirestore | null = null;
-let adminFirestoreFallback: admin.firestore.Firestore | null = null;
+let adminFirestoreFallback: Firestore | null = null;
 // Gemini anahtar önbelleği (settings/aiConfig kaynaklı) — modül düzeyinde ki
 // hem çözümleyici (resolveGeminiClient) hem de /api/db settings yazma yolu
 // erişebilsin. UI'dan yeni anahtar kaydedilince invalidateGeminiKeyCache()
@@ -146,24 +151,30 @@ const FIRESTORE_DB_ID = "ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7";
 const PROJECT_ID = "gen-lang-client-0628151245";
 
 try {
-  let credential: admin.credential.Credential | undefined;
+  let credential: Credential | undefined;
 
   // Option 1: explicit env-var credentials (VDS / any server without ADC)
   const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const fbKey   = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
   if (fbEmail && fbKey) {
-    credential = admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey });
+    credential = cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey });
     console.log("Firebase Admin: using FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY ✓");
   }
   // Option 2: GOOGLE_APPLICATION_CREDENTIALS file (local dev / Cloud Run ADC)
   // Falls through to ADC automatically when credential is undefined
 
-  const adminApp = credential
-    ? admin.initializeApp({ credential, projectId: PROJECT_ID })
-    : admin.initializeApp({ projectId: PROJECT_ID });
+  const adminApp: App = credential
+    ? initializeApp({ credential, projectId: PROJECT_ID })
+    : initializeApp({ projectId: PROJECT_ID });
 
-  adminFirestoreFallback = adminApp.firestore();
-  adminFirestoreFallback.settings({ databaseId: FIRESTORE_DB_ID });
+  // v13'te adminApp.firestore() vardi; v14'te App uzerinde boyle bir metod yok.
+  //
+  // databaseId ARTIK ACIK IMZAYLA veriliyor: eskiden `.settings({ databaseId })`
+  // ile gecirilliyordu ki bu hicbir zaman belgelenmis bir Firestore ayari
+  // degildi. v14 `getFirestore(app, databaseId)` asiri yuklemesini sunuyor —
+  // sessizce VARSAYILAN veritabanina baglanma ihtimalini tamamen kaldirir.
+  // Yanlis veritabani, hicbir hata vermeden bos/yanlis veri okumak demekti.
+  adminFirestoreFallback = getFirestore(adminApp, FIRESTORE_DB_ID);
   console.log("Firebase Admin SDK initialised ✓");
 } catch (e) {
   console.warn("Firebase Admin SDK not initialised:", (e as Error).message);
@@ -188,7 +199,7 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
     return;
   }
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await getAuth().verifyIdToken(token);
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).uid = decoded.uid;
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).userEmail = decoded.email;
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).emailVerified = decoded.email_verified === true;
@@ -870,7 +881,7 @@ const MIKRO_V17_YOK = new Set([
 
 /** Drop-in for admin.firestore.FieldValue.serverTimestamp() — resolved by resolveSentinels. */
 function pgServerTimestamp(): any {
-  return pgPool ? { __op: 'serverTimestamp' } : admin.firestore.FieldValue.serverTimestamp();
+  return pgPool ? { __op: 'serverTimestamp' } : FieldValue.serverTimestamp();
 }
 
 class PgTimestampValue {
@@ -1751,7 +1762,7 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
     ['backup_uploads', 'uploads-backups/', 200],
   ] as const) {
     try {
-      const [files] = await admin.storage().bucket(OPS_STORAGE_BUCKET).getFiles({ prefix });
+      const [files] = await getStorage().bucket(OPS_STORAGE_BUCKET).getFiles({ prefix });
       let newest: { name: string; updated: number; size: number } | null = null;
       for (const f of files) {
         const updated = opsToMs(f.metadata.updated || f.metadata.timeCreated);
@@ -1780,7 +1791,7 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
         ].filter((v, i, a) => a.indexOf(v) === i);
         const bulunan: string[] = [];
         for (const b of adaylar) {
-          try { const [varMi] = await admin.storage().bucket(b).exists(); if (varMi) bulunan.push(b); }
+          try { const [varMi] = await getStorage().bucket(b).exists(); if (varMi) bulunan.push(b); }
           catch { /* bu aday sinanamadi */ }
         }
         ipucu = bulunan.length
@@ -3159,7 +3170,7 @@ async function startServer() {
       // geçerli bir oturum token'ı varsa okunur; çıkışı asla başarısız yapma.
       try {
         const uid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
-        if (uid) await admin.auth().revokeRefreshTokens(uid);
+        if (uid) await getAuth().revokeRefreshTokens(uid);
       } catch (e) { console.warn('[logout] revokeRefreshTokens başarısız:', (e as Error).message); }
       res.json({ ok: true });
     });
@@ -3270,7 +3281,7 @@ async function startServer() {
       // Geriye-uyumluluk: çerez yoksa query idToken (yine lokal verifyIdToken).
       let streamUid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
       if (!streamUid) {
-        try { const d = await admin.auth().verifyIdToken(String(req.query.token || '')); streamUid = d.uid; } catch { /* düş */ }
+        try { const d = await getAuth().verifyIdToken(String(req.query.token || '')); streamUid = d.uid; } catch { /* düş */ }
       }
       if (!streamUid) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
       // MFA açıksa stream de doğrulanmış oturum ister.
@@ -8192,7 +8203,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
 
       const orders = ordersSnap.docs.map(d => {
         const o = d.data() as Record<string, unknown>;
-        const ts = (o.createdAt as admin.firestore.Timestamp);
+        const ts = (o.createdAt as Timestamp);
         return {
           id:           d.id,
           orderNo:      (o.shopifyOrderId || o.trendyolOrderNo || o.mikroEvrakNo || d.id.substring(0,8)) as string,
@@ -9502,7 +9513,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       const rows: Record<string, unknown>[] = [];
       for (const doc of snap.docs) {
         const o = doc.data() as Record<string, unknown>;
-        const createdMs = (o.createdAt as admin.firestore.Timestamp)?.toMillis?.() ?? now;
+        const createdMs = (o.createdAt as Timestamp)?.toMillis?.() ?? now;
         const ageD = Math.floor((now - createdMs) / 86400000);
         const amount = Number(o.totalPrice ?? o.totalAmount ?? 0);
         if (ageD <= 30)      buckets.current += amount;
@@ -9510,7 +9521,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         else if (ageD <= 90) buckets.d60     += amount;
         else if (ageD <= 120) buckets.d90    += amount;
         else                  buckets.over90 += amount;
-        rows.push({ id: doc.id, customerName: o.customerName, amount, ageD, status: o.status, createdAt: (o.createdAt as admin.firestore.Timestamp)?.toDate?.()?.toISOString() });
+        rows.push({ id: doc.id, customerName: o.customerName, amount, ageD, status: o.status, createdAt: (o.createdAt as Timestamp)?.toDate?.()?.toISOString() });
       }
       res.json({ success: true, buckets, rows });
     } catch (e) {

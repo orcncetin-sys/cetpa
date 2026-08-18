@@ -16,7 +16,10 @@ import { promisify } from 'util';
 import { mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import dotenv from 'dotenv';
-import admin from 'firebase-admin';
+// firebase-admin 14 namespace API'sini kaldirdi (admin.credential / admin.storage /
+// admin.firestore artik yok) — moduler alt-yol importlari sart.
+import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
+import { getStorage } from 'firebase-admin/storage';
 
 dotenv.config();
 
@@ -43,10 +46,10 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const fbKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const credential = fbEmail && fbKey
-  ? admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey })
+  ? cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey })
   : undefined;
-admin.initializeApp({ credential, projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
-const bucket = admin.storage().bucket();
+initializeApp({ credential, projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
+const bucket = getStorage().bucket();
 
 // ── 1) PostgreSQL pg_dump ────────────────────────────────────────────────────
 const dbFileName = `cetpa_db_${stamp}.dump`;

@@ -10,7 +10,10 @@
  * Çalıştırma: docker exec cetpa-app node scripts/migrate-customers-to-leads.mjs
  */
 
-import admin from 'firebase-admin';
+// firebase-admin 14 namespace API'sini kaldirdi (admin.credential / admin.storage /
+// admin.firestore artik yok) — moduler alt-yol importlari sart.
+import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const PROJECT_ID = 'gen-lang-client-0628151245';
 const DB_ID = 'ai-studio-d243947a-133d-4934-af2e-eff3bb6aeea7';
@@ -19,11 +22,11 @@ const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const fbKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 if (!fbEmail || !fbKey) { console.error('Firebase env eksik'); process.exit(1); }
 
-const app = admin.initializeApp({
-  credential: admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
+const app = initializeApp({
+  credential: cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
   projectId: PROJECT_ID,
 });
-const db = app.firestore();
+const db = getFirestore(app);
 db.settings({ databaseId: DB_ID });
 
 const customersSnap = await db.collection('customers').get();
@@ -68,7 +71,7 @@ for (const d of customersSnap.docs) {
     customerType:'B2B',
     source:      'customers_migration',
     companyId:   ownerUid,
-    createdAt:   c.createdAt ?? admin.firestore.FieldValue.serverTimestamp(),
+    createdAt:   c.createdAt ?? FieldValue.serverTimestamp(),
   });
   await d.ref.update({ migrated: true });
   migrated++;

@@ -9,7 +9,10 @@
  * 7 günden eski yedekleri siler.
  */
 
-import admin from 'firebase-admin';
+// firebase-admin 14 namespace API'sini kaldirdi (admin.credential / admin.storage /
+// admin.firestore artik yok) — moduler alt-yol importlari sart.
+import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { mkdirSync, writeFileSync, readdirSync, rmSync } from 'fs';
 import { join } from 'path';
 
@@ -33,11 +36,11 @@ if (!fbEmail || !fbKey) {
   process.exit(1);
 }
 
-const app = admin.initializeApp({
-  credential: admin.credential.cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
+const app = initializeApp({
+  credential: cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey }),
   projectId: PROJECT_ID,
 });
-const db = app.firestore();
+const db = getFirestore(app);
 db.settings({ databaseId: DB_ID });
 
 const today = new Date().toISOString().slice(0, 10);
