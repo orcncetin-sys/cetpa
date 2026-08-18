@@ -10,6 +10,11 @@ import { authedFetch } from '../lib/dbClient';
 
 interface OpsCheck { key: string; ok: boolean; detail: string }
 interface OpsResult { date: string; ok: boolean; checks: OpsCheck[] }
+/** GET /api/ops/runtime — firebase-admin 14 yükseltmesi Node 22 istiyor. */
+interface RuntimeInfo {
+  node: string; nodeMajor: number; platform: string;
+  firebaseAdmin: string | null; firebaseAdmin14Uyumlu: boolean;
+}
 
 const KEY_LABEL: Record<string, { tr: string; en: string }> = {
   backup_db: { tr: 'DB yedeği (offsite)', en: 'DB backup (offsite)' },
@@ -30,6 +35,7 @@ export default function OpsWatchdogCard({ currentLanguage, toast }: Props) {
   const [results, setResults] = useState<OpsResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -40,6 +46,19 @@ export default function OpsWatchdogCard({ currentLanguage, toast }: Props) {
     } catch { /* sessiz — kart boş kalır */ } finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+
+  // Calisma ortami: uretimdeki Node surumu baska hicbir yerden gorunmuyordu ve
+  // firebase-admin 13->14 yukseltmesi (Node >=22 sarti) bu bilgi olmadan
+  // planlanamiyordu. Uc korumali (super-admin) — tarayiciya adres yazarak
+  // okunamaz, bu yuzden panelde gosteriliyor.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await authedFetch('/api/ops/runtime');
+        if (r.ok) setRuntime(await r.json() as RuntimeInfo);
+      } catch { /* sessiz — satir gizli kalir */ }
+    })();
+  }, []);
 
   const runNow = async () => {
     setRunning(true);
@@ -83,6 +102,19 @@ export default function OpsWatchdogCard({ currentLanguage, toast }: Props) {
           </button>
         </div>
       </div>
+
+      {runtime && (
+        <div className="mb-3 text-[11px] rounded-xl px-3 py-2 bg-gray-50 text-[#1D1D1F] flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span><b>Node</b> {runtime.node}</span>
+          <span className="text-[#86868B]">{runtime.platform}</span>
+          <span><b>firebase-admin</b> {runtime.firebaseAdmin ?? '—'}</span>
+          <span className={runtime.firebaseAdmin14Uyumlu ? 'text-emerald-600 font-semibold' : 'text-amber-700 font-semibold'}>
+            {runtime.firebaseAdmin14Uyumlu
+              ? (tr ? '✓ firebase-admin 14 yükseltmesine uygun' : '✓ ready for firebase-admin 14')
+              : (tr ? `⚠ firebase-admin 14 için Node ≥22 gerekli (şu an ${runtime.nodeMajor})` : `⚠ firebase-admin 14 needs Node ≥22 (now ${runtime.nodeMajor})`)}
+          </span>
+        </div>
+      )}
 
       {latest && (
         <div className="space-y-1.5">
