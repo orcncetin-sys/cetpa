@@ -77,6 +77,31 @@ else
     fail "health erişilemedi: $BASE_URL/api/health"
   fi
 
+  # 2b) KİMLİK DOĞRULAMA ZİNCİRİ CANLI MI? (kimlik bilgisi GEREKTİRMEZ)
+  #
+  # NEDEN VAR: 2026-08-18'de firebase-admin 13 -> 14 yükseltildi ve v14
+  # namespace API'sini kaldırdığı için auth yolu (admin.auth() -> getAuth())
+  # baştan yazıldı. verify-deploy bunu HİÇ test etmiyordu — yalnız "401
+  # dönüyor mu" bakıyordu, ki bu başlık yokken firebase'e hiç uğramadan da
+  # dönüyor. Yükseltmeyi kullanıcıya ELLE doğrulatmak zorunda kaldık.
+  #
+  # Hile şu: iki farklı 401'in MESAJI farklı.
+  #   başlık yok      -> "Missing Authorization header."  (firebase'e uğramaz)
+  #   geçersiz token  -> "Invalid or expired token."      (verifyIdToken ÇALIŞTI)
+  # İkinci mesaj, Firebase Admin'in gerçekten yüklü ve token doğrulayabilir
+  # durumda olduğunun kanıtıdır. Kimlik bilgisi saklamaya gerek yok.
+  AUTH_URL="$BASE_URL/api/ops/runtime"
+  AUTH_BODY=$(curl -s -k --max-time 20 -H "Authorization: Bearer gecersiz.token.degeri" "$AUTH_URL" 2>/dev/null)
+  AUTH_CODE=$(curl -s -k --max-time 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer gecersiz.token.degeri" "$AUTH_URL" 2>/dev/null)
+  case "$AUTH_BODY" in
+    *"Invalid or expired token"*)
+      pass "auth zinciri canlı (geçersiz token -> $AUTH_CODE, verifyIdToken çalıştı)" ;;
+    *"Missing Authorization"*)
+      fail "auth zinciri: token GÖRÜLMEDİ — istek firebase'e hiç ulaşmamış" ;;
+    *)
+      fail "auth zinciri: beklenmeyen yanıt ($AUTH_CODE) — Firebase Admin bozuk olabilir: ${AUTH_BODY:0:120}" ;;
+  esac
+
   # 3) Bu push'ta EKLENEN requireAuth'lu route'lar auth'suz 401/403 dönmeli.
   #    404 = route deploy'a hiç girmemiş demektir.
   git fetch -q origin main 2>/dev/null

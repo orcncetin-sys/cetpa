@@ -5811,8 +5811,10 @@ async function startServer() {
     ilkTarih: string,
     sonTarih: string,
     actor: { uid: string; email: string },
-  ): Promise<{ ok: boolean; total: number; note: string | null; truncated: boolean; error?: string; duration: number }> {
+  ): Promise<{ ok: boolean; total: number; note: string | null; truncated: boolean; error?: string; duration: number; guidsizSatir?: number }> {
     const t0 = Date.now();
+    // Kararli kimligi (GUID) olmayan satir sayisi — mukerrer kayit riski.
+    let guidsizSatir = 0;
     const SAYFA = 500;
     const MAKS_SAYFA = 40; // 20.000 satır tavanı — sessiz değil, yanıtta bildirilir
     if (!adminDb) return { ok: false, total: 0, note: null, truncated: false, error: 'Firebase Admin başlatılamadı.', duration: 0 };
@@ -5877,8 +5879,16 @@ async function startServer() {
         let batch = adminDb.batch(); let ops = 0;
         for (const row of rows) {
           const guidKey = findKey(row, /_Guid$/i);
-          const docId = guidKey && row[guidKey]
-            ? String(row[guidKey])
+          // KARARLI KIMLIK YOKSA MUKERRER KAYIT URETILIR.
+          // docId GUID'den turetilir; GUID yoksa RASTGELE id atanir ve bu
+          // durumda import her calistirildiginda AYNI Mikro satiri YENI bir
+          // dokuman olarak eklenir — 5 kosuda 5 kopya. Hicbir hata vermez,
+          // yalnizca kayit sayisi sessizce sisip raporlari bozar. Bu yuzden
+          // sayiliyor ve ozette YUKSEK SESLE bildiriliyor (2026-08-18).
+          const kararliId = !!(guidKey && row[guidKey]);
+          if (!kararliId) guidsizSatir++;
+          const docId = kararliId
+            ? String(row[guidKey as string])
             : adminDb.collection(opts.collection).doc().id;
           batch.set(adminDb.collection(opts.collection).doc(docId), {
             ...row, companyId, source: 'mikro_sql', syncedAt: pgServerTimestamp(),
@@ -5901,12 +5911,16 @@ async function startServer() {
       const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}` +
         `${dusenKolonlar.length ? ` — şemada olmayan kolonlar atlandı: ${dusenKolonlar.join(', ')}` : ''}` +
         `${siralama !== opts.siralama ? ` — sıralama kolonu '${opts.siralama}' bulunamadı, '${siralama}' kullanıldı` : ''}` +
-        `${postNote ? ` — ${postNote}` : ''}`;
+        `${postNote ? ` — ${postNote}` : ''}` +
+        (guidsizSatir
+          ? ` — ⚠ ${guidsizSatir} satırda GUID yok: bu satırlar her çalıştırmada MÜKERRER kayıt oluşturur`
+            + `${guidsizSatir === total ? ' (TÜM satırlar — tabloda GUID kolonu yok, import tekrarlanmamalı)' : ''}`
+          : '');
       // Senkronizasyon Geçmişi bu koleksiyonu okur — import'lar 2026-07-31'e
       // kadar buraya HİÇ yazmıyordu, panel bu yüzden boş görünüyordu.
       await writeSyncLog(`SQL:${opts.tablo}`, opts.collection, ozet, true, null, null, duration, actor);
       await writeAuditLog(actor, opts.label, `${ozet} (SQL: ${opts.tablo})`);
-      return { ok: true, total, note: postNote, truncated: tavanaCarpti, duration };
+      return { ok: true, total, note: postNote, truncated: tavanaCarpti, duration, guidsizSatir };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[sqlImport ${opts.tablo}]`, msg);
@@ -5943,7 +5957,7 @@ async function startServer() {
         reqActor(req),
       );
       if (!sonuc.ok) return res.status(502).json({ success: false, error: sonuc.error });
-      res.json({ success: true, total: sonuc.total, note: sonuc.note, tablo: opts.tablo,
+      res.json({ success: true, total: sonuc.total, note: sonuc.note, tablo: opts.tablo, guidsizSatir: sonuc.guidsizSatir ?? 0,
                  ...(sonuc.truncated ? { truncated: true, limit: 40 * 500 } : {}), duration: sonuc.duration });
     });
   }
