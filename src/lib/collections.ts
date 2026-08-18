@@ -29,7 +29,18 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'demandRequests', 'productionOrders', 'projectCosts', 'projectTimelines',
   'capacityLines', 'letterOfCredit', 'intercompanyTxns', 'approvalRequests',
   'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
-  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'mikroCariHareketler', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri', 'transfers',
+  'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'mikroCariHareketler',
+  // 2026-08-18: 'mikroSiparisler' ve 'stockCounts' BU LISTEDE DEGILDI —
+  // capraz-kiraci sizintisi. Her ikisi de companyId ile DOGRU yaziliyordu
+  // (mikroSiparisler'i makeMikroSqlImport, stockCounts'u istemci), ama liste
+  // disinda kaldiklari icin OKURKEN hic filtrelenmiyorlardi: B kiracisinin
+  // istemcisi A kiracisinin Mikro siparislerini ve sayim kayitlarini
+  // gorebiliyordu. Kardes koleksiyonlar (mikroFaturalar, mikroCariHareketler)
+  // listedeydi, bu ikisi atlanmisti.
+  // Ikinci fayda: injectTenant artik companyId'yi SUNUCUDA zorla dogrusuyla
+  // damgaliyor — stockCounts istemcide `companyId: user?.uid` yaziyordu ve
+  // davetle baska kiraciya katilmis kullanicida bu deger YANLIS oluyordu.
+  'mikroSiparisler', 'stockCounts', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
   'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
   // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi
