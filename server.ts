@@ -27,6 +27,7 @@ import { initializeApp, cert, type Credential, type App } from "firebase-admin/a
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, type Firestore, type Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { bucketAdaylari, bucketCoz } from "./src/lib/storageBucket.js";
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
@@ -1739,7 +1740,22 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
 // yazmadan dönmesi gibi) restore/rapor gününde değil ertesi sabah yakalamak.
 // Sonuç opsChecks/<YYYY-MM-DD> dokümanına yazılır (global, tenant-dışı) ve
 // süper-admin panelindeki karttan + GET /api/ops/watchdog'dan okunur.
-const OPS_STORAGE_BUCKET = 'gen-lang-client-0628151245.firebasestorage.app';
+// Bucket adi SABIT DEGIL — calisma aninda cozuluyor (bkz. src/lib/storageBucket.ts).
+// 2026-08-18: sabit ad `<proje>.firebasestorage.app` idi ve Storage
+// "bucket does not exist" veriyordu; iki bicim de mumkun oldugu icin dogru
+// olani sinayarak buluyoruz. Bir kez cozulup onbellege alinir.
+let opsBucketOnbellek: { ad: string | null; ts: number } | null = null;
+async function opsBucketAdi(): Promise<{ ad: string | null; denenen: string[] }> {
+  const denenen = bucketAdaylari(PROJECT_ID, process.env.FIREBASE_STORAGE_BUCKET);
+  // Bulunmus adi 1 saat onbellekle; bulunamadiysa her kosuda yeniden dene
+  // (kullanici Storage'i yeni etkinlestirmis olabilir).
+  if (opsBucketOnbellek?.ad && Date.now() - opsBucketOnbellek.ts < 3_600_000) {
+    return { ad: opsBucketOnbellek.ad, denenen };
+  }
+  const r = await bucketCoz(denenen, (ad) => getStorage().bucket(ad));
+  opsBucketOnbellek = { ad: r.ad, ts: Date.now() };
+  return { ad: r.ad, denenen };
+}
 interface OpsCheckResult { key: string; ok: boolean; detail: string }
 
 function opsToMs(v: unknown): number {
@@ -1762,7 +1778,13 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
     ['backup_uploads', 'uploads-backups/', 200],
   ] as const) {
     try {
-      const [files] = await getStorage().bucket(OPS_STORAGE_BUCKET).getFiles({ prefix });
+      const { ad: bucketAdi, denenen } = await opsBucketAdi();
+      if (!bucketAdi) {
+        add(key, false, `Storage bucket bulunamadi — denenen adlar: ${denenen.join(', ')}. `
+          + 'Firebase konsolunda Storage etkin mi? Ya da FIREBASE_STORAGE_BUCKET ile dogru adi verin.');
+        continue;
+      }
+      const [files] = await getStorage().bucket(bucketAdi).getFiles({ prefix });
       let newest: { name: string; updated: number; size: number } | null = null;
       for (const f of files) {
         const updated = opsToMs(f.metadata.updated || f.metadata.timeCreated);
@@ -1774,31 +1796,11 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
         `${newest.name} — ${age.toFixed(1)} saat önce, ${(newest.size / 1024).toFixed(0)} KB`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // "The specified bucket does not exist" TESHIS EDILEBILIR bir hata:
-      // Firebase projelerinde bucket adi iki bicimde olabilir — eski projeler
-      // `<proje>.appspot.com`, yeniler `<proje>.firebasestorage.app`. Yanlis
-      // olani yapilandirilmissa yedek gorevi de bekci de sessizce basarisiz
-      // olur ve OFF-SITE YEDEK HIC ALINMAZ. Hangi adin gercekte var oldugunu
-      // BURADA (uretim kimligiyle) sinayip mesaja yaziyoruz — aksi halde
-      // disaridan tespit edilemiyor (2026-08-18: lokalde servis hesabi yok,
-      // ADC ile yapilan deneme kanit sayilmaz).
-      let ipucu = '';
-      if (/bucket does not exist|notFound|404/i.test(msg)) {
-        const adaylar = [
-          OPS_STORAGE_BUCKET,
-          `${PROJECT_ID}.appspot.com`,
-          `${PROJECT_ID}.firebasestorage.app`,
-        ].filter((v, i, a) => a.indexOf(v) === i);
-        const bulunan: string[] = [];
-        for (const b of adaylar) {
-          try { const [varMi] = await getStorage().bucket(b).exists(); if (varMi) bulunan.push(b); }
-          catch { /* bu aday sinanamadi */ }
-        }
-        ipucu = bulunan.length
-          ? ` — GERCEKTE VAR OLAN bucket: ${bulunan.join(', ')} (yapilandirilan: ${OPS_STORAGE_BUCKET})`
-          : ` — denenen adlarin HICBIRI yok (${adaylar.join(', ')}); Firebase Storage projede hic etkinlestirilmemis olabilir`;
-      }
-      add(key, false, 'Storage listelenemedi: ' + msg + ipucu);
+      // Bucket ADI sorunu buraya gelmez: opsBucketAdi() yukarida gercekten var
+      // olan adi cozuyor, bulunamazsa zaten ayri ve acik bir mesajla cikiyoruz.
+      // Buraya dusen hata baska bir sey demektir (yetki, ag, kota) — o yuzden
+      // ham mesaji oldugu gibi gosteriyoruz, uydurma bir teshis eklemiyoruz.
+      add(key, false, 'Storage listelenemedi: ' + msg);
     }
   }
 

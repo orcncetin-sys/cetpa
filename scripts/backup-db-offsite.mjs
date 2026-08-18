@@ -29,7 +29,10 @@ const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) { console.error('DATABASE_URL eksik.'); process.exit(1); }
 
 const PROJECT_ID = 'gen-lang-client-0628151245';
-const STORAGE_BUCKET = 'gen-lang-client-0628151245.firebasestorage.app';
+// Bucket adi SABIT DEGIL: iki bicim de olabilir (<proje>.appspot.com /
+// <proje>.firebasestorage.app) ve yanlis olani yazilirsa yedek SESSIZCE
+// alinmaz — 2026-08-18'de tam bu oldu. Ad calisma aninda cozuluyor.
+const STORAGE_BUCKET_ENV = process.env.FIREBASE_STORAGE_BUCKET;
 const PG_DUMP = process.env.PG_DUMP_PATH || 'pg_dump';
 const LOCAL_DIR = process.env.BACKUP_DIR || 'C:\\cetpa\\backups';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads');
@@ -48,8 +51,34 @@ const fbKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const credential = fbEmail && fbKey
   ? cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey })
   : undefined;
-initializeApp({ credential, projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
-const bucket = getStorage().bucket();
+initializeApp({ credential, projectId: PROJECT_ID });
+
+// NOT: bu gorev Windows Task Scheduler'da DUZ `node.exe` ile kosuyor
+// (deploy/windows/register-backup-task.ps1), yani .ts import EDEMEZ. Mantik
+// src/lib/storageBucket.ts'te testli olarak duruyor (storageBucket.test.ts,
+// 7 test) ve buraya bilerek kucuk bir kopya alindi. Mantik degisirse IKISI de
+// guncellenmeli — kopya 6 satir, .ts derleme zinciri eklemekten ucuz.
+const adaylar = [
+  STORAGE_BUCKET_ENV,
+  `${PROJECT_ID}.firebasestorage.app`,
+  `${PROJECT_ID}.appspot.com`,
+].filter((v, i, a) => !!v && a.indexOf(v) === i);
+
+let bucketAdi = null;
+for (const ad of adaylar) {
+  try { const [varMi] = await getStorage().bucket(ad).exists(); if (varMi) { bucketAdi = ad; break; } }
+  catch { /* bu aday sinanamadi */ }
+}
+const cozum = { ad: bucketAdi };
+if (!cozum.ad) {
+  // YUKSEK SESLE OL: bucket yoksa yedek alinamaz. Sessizce devam etmek,
+  // "yedek var" sanip veri kaybetmek demektir.
+  console.error('Storage bucket bulunamadi. Denenen adlar: ' + adaylar.join(', '));
+  console.error('Firebase konsolunda Storage etkin mi? Ya da FIREBASE_STORAGE_BUCKET ile dogru adi verin.');
+  process.exit(1);
+}
+console.log('Storage bucket: ' + cozum.ad);
+const bucket = getStorage().bucket(cozum.ad);
 
 // ── 1) PostgreSQL pg_dump ────────────────────────────────────────────────────
 const dbFileName = `cetpa_db_${stamp}.dump`;
