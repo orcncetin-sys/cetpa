@@ -1062,8 +1062,18 @@ function ImportCard({
               {result.fiyatliUrun != null && (
                 result.fiyatliUrun === 0 ? (
                   <div className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5 mt-1">
-                    ⚠ {t ? 'Hiçbir üründe satış fiyatı yok — Mikro stok kartlarında fiyat tanımlı değil. Ürünler "0 TL" görünür.'
-                         : 'No sale prices found — Mikro stock cards have no price defined.'}
+                    {/* Uyari DOGRU ama eskiden CIKMAZ SOKAKTI: Mikro stok
+                        kartlarinda fiyat zaten hicbir zaman olmuyor, fiyatlar
+                        AYRI bir kaynaktan ("Satis Fiyatlari" karti) geliyor.
+                        Kullanici ne yapacagini bilmeden "0 TL" uyarisiyla
+                        kaliyordu; simdi cozum dogrudan yaziyor. */}
+                    ⚠ {t
+                      ? 'Mikro stok kartlarında fiyat alanı yok — bu normaldir. Fiyatlar ayrı gelir: aşağıdaki '
+                      : 'Mikro stock cards carry no price field — this is normal. Prices come separately: run '}
+                    <b>{t ? '"Satış Fiyatları → Çek"' : '"Sales Prices → Pull"'}</b>
+                    {t
+                      ? ' adımını çalıştırın, ürünler "0 TL" görünmekten çıkar.'
+                      : ' below and the "0 TL" display resolves.'}
                   </div>
                 ) : (
                   <div className="text-[11px] mt-1">

@@ -6775,7 +6775,26 @@ async function startServer() {
       if (ops > 0) await batch.commit();
       const eksik = [!ad && 'ad', !tarih && 'alisTarihi', !bedel && 'alisBedeli', !omur && 'faydaliOmur', !grup && 'kategori']
         .filter(Boolean).join(', ');
-      return `${yazilan} demirbaş sabitKiymetler'e yazıldı` + (eksik ? ` — kolonu çözülemeyen alanlar: ${eksik} (ham veri mikroHam'da)` : '');
+      if (!eksik) return `${yazilan} demirbaş sabitKiymetler'e yazıldı`;
+
+      // ÇIKMAZ SOKAK DEĞİL, KANIT ÜRET: eskiden mesaj yalnız "şu alanlar
+      // çözülemedi" diyordu ve DEMIRBASLAR'ın 135 kolonundan hangilerinin
+      // aday olduğu hiç görünmüyordu — desenleri düzeltmek için elde kanıt
+      // yoktu (2026-08-18). Artık çözülemeyen her alan için, adı o alana
+      // benzeyen GERÇEK kolonlar listeleniyor. Kolon adı hâlâ TAHMİN
+      // EDİLMİYOR; yalnızca aday isimler gösteriliyor ki desen kanıta
+      // dayanarak yazılabilsin.
+      const adaylar = (desen: RegExp) => cols.filter(c => desen.test(c)).slice(0, 8);
+      const ipucu = [
+        !tarih && `alisTarihi adayları: ${adaylar(/tarih|date/i).join(', ') || '(yok)'}`,
+        !bedel && `alisBedeli adayları: ${adaylar(/bedel|tutar|fiyat|maliyet|deger/i).join(', ') || '(yok)'}`,
+        !omur  && `faydaliOmur adayları: ${adaylar(/omur|sure|yil|amort/i).join(', ') || '(yok)'}`,
+        !grup  && `kategori adayları: ${adaylar(/grup|kategori|tip|cins|sinif/i).join(', ') || '(yok)'}`,
+        !ad    && `ad adayları: ${adaylar(/isim|ad|aciklama|tanim/i).join(', ') || '(yok)'}`,
+      ].filter(Boolean).join(' · ');
+
+      return `${yazilan} demirbaş sabitKiymetler'e yazıldı — kolonu çözülemeyen alanlar: ${eksik}`
+        + ` (ham veri mikroHam'da). Toplam ${cols.length} kolon. ${ipucu}`;
     },
   });
 
