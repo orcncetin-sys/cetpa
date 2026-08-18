@@ -19,6 +19,7 @@
  * runTransaction/writeBatch are emulated as sequential writes (NOT atomic).
  */
 import { auth } from '../firebase';
+import { reportSilentError } from './errorSink';
 import { PUBLIC_WRITE_COLLECTIONS } from './rbac';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -305,6 +306,8 @@ class StreamManager {
   private ready = new Set<string>();
   private listeners = new Map<string, Set<CollListener>>();
   private es: EventSource | null = null;
+  /** Ust uste SSE kopma sayisi — basarili baglantida sifirlanir. */
+  private ardArdaHata = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private retryDelay = 1000;
   private connectedColls = '';
@@ -426,6 +429,7 @@ class StreamManager {
     }
 
     const es = new EventSource(url, { withCredentials: true });
+    es.addEventListener('open', () => { this.ardArdaHata = 0; });
     this.es = es;
     es.addEventListener('init', ev => {
       this.retryDelay = 1000;
@@ -473,6 +477,17 @@ class StreamManager {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => void this.connect(true), this.retryDelay);
     this.retryDelay = Math.min(this.retryDelay * 2, 30000);
+
+    // KALICI KOPMAYI BILDIR: tek bir kopma normaldir (ag dalgalanmasi) ve
+    // sessizce yeniden baglanmak dogru. Ama ust uste basarisizlik, veri
+    // akisinin gercekten oldugu anlamina gelir — bu durumda uygulama sonsuza
+    // kadar BAYAT veri gosterir ve eskiden bunun hicbir izi kalmazdi.
+    this.ardArdaHata = (this.ardArdaHata ?? 0) + 1;
+    if (this.ardArdaHata === 4) {
+      reportSilentError('sse-stream-down',
+        `Veri akisi ${this.ardArdaHata} kez ust uste koptu — ekrandaki veriler bayat olabilir.`,
+        undefined, { retryDelayMs: this.retryDelay });
+    }
   }
 
   /** Apply a local write immediately so UI updates without waiting for SSE. */
@@ -551,7 +566,18 @@ export function onSnapshot(
       (next as (s: QuerySnapshot) => void)(makeQuerySnap(coll, docs));
     });
   } catch (e) {
-    error?.(e as Error);
+    // Geri cagri VERILMEMISSE hata eskiden tamamen yutuluyordu: ekran "kayit
+    // yok" gosterir, kullanici da gelistirici de sorunu HIC gormezdi. 234
+    // onSnapshot cagrisinin 87'sinde geri cagri yok (2026-08-18 taramasi).
+    // Artik en kotu ihtimalle merkezi kanala dusuyor ve Operasyon Bekcisi'nin
+    // client_errors kontrolune yansiyor.
+    if (error) error(e as Error);
+    else {
+      const coll = (target as Query).type === 'query'
+        ? (target as Query).coll
+        : ((target as DocumentReference).coll ?? (target as CollectionReference).path);
+      reportSilentError('firestore-listener', (e as Error).message, (e as Error).stack, { coll });
+    }
     return () => {};
   }
 }

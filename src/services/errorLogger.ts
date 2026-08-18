@@ -9,6 +9,7 @@
 import { addDoc, collection, serverTimestamp } from '../lib/dbClient';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
+import { setErrorReporter } from '../lib/errorSink';
 
 const recent = new Map<string, number>();
 const DEDUP_MS = 5 * 60 * 1000;
@@ -35,6 +36,11 @@ function report(kind: string, message: string, stack?: string, extra?: Record<st
 }
 
 export function initErrorLogger(): void {
+  // Yutulan hatalari da bu hatta bagla (dbClient -> errorSink -> burasi):
+  // boylece listener/akis arizalari da clientErrors'a dusup Operasyon
+  // Bekcisi'nin client_errors kontrolunde gorunur olur.
+  setErrorReporter((kind, message, stack, extra) => report(kind, message, stack, extra));
+
   window.addEventListener('error', (e) => {
     report('error', e.message || 'Unknown error', e.error?.stack, {
       source: `${e.filename ?? ''}:${e.lineno ?? 0}`,
