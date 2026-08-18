@@ -4525,6 +4525,32 @@ async function startServer() {
     }
     return out;
   }
+  // ── Calisma ortami bilgisi (super-admin) ──────────────────────────────────
+  // NEDEN VAR: firebase-admin 14 `node >=22` istiyor; CI Node 20'de, uretim
+  // sunucusu ise chocolatey 'nodejs-lts' ile kuruldu ve GERCEK surumu hicbir
+  // yerden gorunmuyordu. Yukseltme plani tahmine dayanamaz — bu uc olcumu
+  // saglar. /api/health'e KONMADI: orasi kimliksiz erisilebiliyor ve tam
+  // calisma-zamani surumunu disariya bildirmek gereksiz bilgi sizintisidir.
+  app.get('/api/ops/runtime', requireAuth, requireSuperAdmin, (_req: Request, res: Response) => {
+    let firebaseAdminSurum: string | null = null;
+    try {
+      firebaseAdminSurum = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'node_modules', 'firebase-admin', 'package.json'), 'utf8'),
+      ).version as string;
+    } catch { /* paket okunamazsa null */ }
+
+    const majör = Number(process.versions.node.split('.')[0]);
+    res.json({
+      node: process.version,
+      nodeMajor: majör,
+      platform: `${process.platform} ${process.arch}`,
+      firebaseAdmin: firebaseAdminSurum,
+      // firebase-admin 14 engines: { node: '>=22' }
+      firebaseAdmin14Uyumlu: majör >= 22,
+      uptimeSaat: Math.round((process.uptime() / 3600) * 10) / 10,
+    });
+  });
+
   app.get('/api/ops/module-status', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
     try {
       const root = process.cwd();
