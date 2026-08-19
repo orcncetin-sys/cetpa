@@ -3322,8 +3322,17 @@ async function startServer() {
       res.write('retry: 3000\n\n');
       // Kiracı/kullanıcı görünürlüğü (lenient — etiketsiz legacy görünür).
       const streamCid = await getUserCompanyId(streamUid);
+      // ROL KONTROLU (2026-08-19). Bu akis eskiden YALNIZ companyId/userId
+      // filtreliyordu; REST yolu ise ayni veride `denied()` -> isAllowed() ile
+      // rol kontrolu yapiyordu. Sonuc: `GET /api/db/payrolls` bir Sales
+      // kullanicisina 403 donerken, AYNI kullanici SSE'ye abone olarak butun
+      // bordroyu alabiliyordu. Abonelik listesi ISTEMCIDEN geldigi icin bu
+      // teorik degil: devtools'tan `?init=payrolls,bankAccounts` demek yetiyordu.
+      // Ayni fonksiyon (isAllowed) kullaniliyor ki iki yol asla ayrisamasin.
+      const streamRole = await getUserRole(streamUid);
       const rowVisible = (coll: string, data: Record<string, unknown> | undefined): boolean => {
         if (SERVER_ONLY_COLLECTIONS.has(coll)) return false; // sunucuya özel — stream'e asla çıkmaz
+        if (!isAllowed(streamRole, coll, 'read')) return false; // rol yetmiyorsa hiç gösterme
         if (!data) return true;
         if (TENANT_COLLECTIONS.has(coll)) { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; }
         if (USER_SCOPED_COLLECTIONS.has(coll)) { const du = data.userId as string | undefined; return !du || du === streamUid; }
@@ -3338,13 +3347,18 @@ async function startServer() {
         // rowVisible ikinci kapı olarak KALIR (derinlemesine savunma + settings
         // gibi SQL'e taşınmayan özel kurallar orada).
         // Yalnız istemcinin önbelleğinde OLMAYAN koleksiyonlar sorgulanır.
-        const tenantColls = initColls.filter(c => TENANT_COLLECTIONS.has(c));
-        const userColls   = initColls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
+        // Rolun okuyamadigi koleksiyonlar diske hic gitmesin. rowVisible ikinci
+        // kapi olarak kalir (derinlemesine savunma) ama bos init eventi yine
+        // gonderilir ki istemci o koleksiyon icin sonsuza kadar beklemede
+        // kalmasin — yetkisizlik "veri yok" gibi gorunur, sizinti olmaz.
+        const izinliColls = initColls.filter(c => isAllowed(streamRole, c, 'read'));
+        const tenantColls = izinliColls.filter(c => TENANT_COLLECTIONS.has(c));
+        const userColls   = izinliColls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
         // SERVER_ONLY hiç sorgulanmaz (rowVisible zaten eliyordu; artık diske de
         // gitmiyor). initColls'ta KALIR ki istemci o koleksiyon için boş bir init
         // eventi alsın ve beklemede kalmasın.
-        const otherColls  = initColls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
-        const { rows } = initColls.length
+        const otherColls  = izinliColls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
+        const { rows } = izinliColls.length
           ? await docsDb.query(
               `SELECT coll, id, data FROM docs WHERE
                  (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
