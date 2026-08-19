@@ -45,40 +45,81 @@ mkdirSync(LOCAL_DIR, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
-// ── Firebase Admin init (bir kere) ──────────────────────────────────────────
-const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const fbKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-const credential = fbEmail && fbKey
-  ? cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey })
-  : undefined;
-initializeApp({ credential, projectId: PROJECT_ID });
+// ── Off-site hedefi: rclone (Google Drive vb.) ya da Firebase Storage ───────
+//
+// 2026-08-19: Firebase Storage bu projede HIC etkinlestirilmemis (bekci iki
+// aday bucket adini da denedi, ikisi de yok) ve yeni projelerde Storage
+// acmak Blaze plani/kredi karti istiyor — kullanici kart vermek istemiyor.
+// Kullanicinin Google hesabinda 5 TB alan ZATEN var (33 GB dolu), bu yuzden
+// yedekler rclone ile Google Drive'a gidiyor.
+//
+// rclone SAGLAYICI-BAGIMSIZ secildi: Drive, Mega, pCloud, OneDrive, Dropbox
+// hepsi ayni komutlarla calisir. Saglayici degistirmek = RCLONE_REMOTE
+// degerini degistirmek. Firebase yolu SILINMEDI; RCLONE_REMOTE bos birakilip
+// Storage acilirsa eski davranis aynen surer.
+//
+//   RCLONE_REMOTE ornek: "gdrive:cetpa-backups"
+//   RCLONE_PATH   ornek: "C:\\rclone\\rclone.exe" (PATH'te degilse)
+const RCLONE_REMOTE = (process.env.RCLONE_REMOTE || '').trim();
+const RCLONE = process.env.RCLONE_PATH || 'rclone';
 
-// NOT: bu gorev Windows Task Scheduler'da DUZ `node.exe` ile kosuyor
-// (deploy/windows/register-backup-task.ps1), yani .ts import EDEMEZ. Mantik
-// src/lib/storageBucket.ts'te testli olarak duruyor (storageBucket.test.ts,
-// 7 test) ve buraya bilerek kucuk bir kopya alindi. Mantik degisirse IKISI de
-// guncellenmeli — kopya 6 satir, .ts derleme zinciri eklemekten ucuz.
-const adaylar = [
-  STORAGE_BUCKET_ENV,
-  `${PROJECT_ID}.firebasestorage.app`,
-  `${PROJECT_ID}.appspot.com`,
-].filter((v, i, a) => !!v && a.indexOf(v) === i);
+async function rclone(args) {
+  const { stdout } = await execFileAsync(RCLONE, args, { maxBuffer: 32 * 1024 * 1024 });
+  return stdout;
+}
 
-let bucketAdi = null;
-for (const ad of adaylar) {
-  try { const [varMi] = await getStorage().bucket(ad).exists(); if (varMi) { bucketAdi = ad; break; } }
-  catch { /* bu aday sinanamadi */ }
+/** Yukle + DOGRULA: yukledim demek yetmez, uzakta gercekten var mi ve boyutu tutuyor mu. */
+async function rcloneYukleVeDogrula(yerelYol, uzakYol, beklenenBayt) {
+  await rclone(['copyto', yerelYol, `${RCLONE_REMOTE}/${uzakYol}`]);
+  const cikti = await rclone(['lsjson', `${RCLONE_REMOTE}/${uzakYol}`]);
+  const kayitlar = JSON.parse(cikti || '[]');
+  const uzak = Array.isArray(kayitlar) ? kayitlar[0] : null;
+  if (!uzak) throw new Error(`yukleme sonrasi dosya uzakta BULUNAMADI: ${uzakYol}`);
+  if (Number(uzak.Size) !== Number(beklenenBayt)) {
+    throw new Error(`boyut UYUSMUYOR: yerel ${beklenenBayt} B, uzak ${uzak.Size} B — yukleme yarim kalmis olabilir`);
+  }
+  return Number(uzak.Size);
 }
-const cozum = { ad: bucketAdi };
-if (!cozum.ad) {
-  // YUKSEK SESLE OL: bucket yoksa yedek alinamaz. Sessizce devam etmek,
-  // "yedek var" sanip veri kaybetmek demektir.
-  console.error('Storage bucket bulunamadi. Denenen adlar: ' + adaylar.join(', '));
-  console.error('Firebase konsolunda Storage etkin mi? Ya da FIREBASE_STORAGE_BUCKET ile dogru adi verin.');
-  process.exit(1);
+
+let bucket = null;          // Firebase modunda dolar
+const MOD = RCLONE_REMOTE ? 'rclone' : 'firebase';
+
+if (MOD === 'rclone') {
+  console.log(`Off-site hedef: rclone -> ${RCLONE_REMOTE}`);
+  try {
+    await rclone(['lsd', RCLONE_REMOTE]);   // erisim testi (klasor listele)
+  } catch (e) {
+    console.error(`rclone hedefine erisilemedi (${RCLONE_REMOTE}): ${e?.message || e}`);
+    console.error('Kurulum: rclone config -> Google Drive -> yetkilendir. Detay: docs/YEDEK-RCLONE.md');
+    process.exit(1);
+  }
+} else {
+  const fbEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const fbKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const credential = fbEmail && fbKey
+    ? cert({ projectId: PROJECT_ID, clientEmail: fbEmail, privateKey: fbKey })
+    : undefined;
+  initializeApp({ credential, projectId: PROJECT_ID });
+
+  const adaylar = [
+    STORAGE_BUCKET_ENV,
+    `${PROJECT_ID}.firebasestorage.app`,
+    `${PROJECT_ID}.appspot.com`,
+  ].filter((v, i, a) => !!v && a.indexOf(v) === i);
+
+  let bucketAdi = null;
+  for (const ad of adaylar) {
+    try { const [varMi] = await getStorage().bucket(ad).exists(); if (varMi) { bucketAdi = ad; break; } }
+    catch { /* bu aday sinanamadi */ }
+  }
+  if (!bucketAdi) {
+    console.error('Storage bucket bulunamadi. Denenen adlar: ' + adaylar.join(', '));
+    console.error('Ya Firebase konsolunda Storage etkinlestirin, ya da RCLONE_REMOTE ile rclone hedefi verin.');
+    process.exit(1);
+  }
+  console.log('Off-site hedef: Firebase Storage -> ' + bucketAdi);
+  bucket = getStorage().bucket(bucketAdi);
 }
-console.log('Storage bucket: ' + cozum.ad);
-const bucket = getStorage().bucket(cozum.ad);
 
 // ── 1) PostgreSQL pg_dump ────────────────────────────────────────────────────
 const dbFileName = `cetpa_db_${stamp}.dump`;
@@ -86,15 +127,20 @@ const dbLocalPath = join(LOCAL_DIR, dbFileName);
 console.log(`pg_dump baslatiliyor -> ${dbLocalPath}`);
 await execFileAsync(PG_DUMP, [DATABASE_URL, '-Fc', '-f', dbLocalPath]);
 console.log('pg_dump tamamlandi, boyut:', (statSync(dbLocalPath).size / 1024 / 1024).toFixed(2), 'MB');
-console.log(`Firebase Storage'a yukleniyor -> ${DB_PREFIX}${dbFileName}`);
+console.log(`Off-site yukleniyor -> ${DB_PREFIX}${dbFileName}`);
 // Off-site upload basarisiz olsa bile (or. Storage etkin degil / bucket yok)
 // SCRIPT COKMEZ: yerel pg_dump zaten alindi ve asagidaki yerel-retention
 // calismali (yoksa yerel yedekler birikip diski doldurur). Uploads bolumu
 // zaten try/catch'liydi; DB upload'i ve uzak-retention'i da sardik.
 let offsiteOk = true;
 try {
-  await bucket.upload(dbLocalPath, { destination: `${DB_PREFIX}${dbFileName}` });
-  console.log('DB yedegi yuklendi.');
+  if (MOD === 'rclone') {
+    const bayt = await rcloneYukleVeDogrula(dbLocalPath, `${DB_PREFIX}${dbFileName}`, statSync(dbLocalPath).size);
+    console.log(`DB yedegi yuklendi ve DOGRULANDI (${(bayt / 1024 / 1024).toFixed(2)} MB uzakta).`);
+  } else {
+    await bucket.upload(dbLocalPath, { destination: `${DB_PREFIX}${dbFileName}` });
+    console.log('DB yedegi yuklendi.');
+  }
 } catch (e) {
   offsiteOk = false;
   console.error('DB OFF-SITE upload BASARISIZ (yerel yedek guvende):', e?.message || e);
@@ -110,9 +156,14 @@ if (existsSync(UPLOAD_DIR) && readdirSync(UPLOAD_DIR).length > 0) {
     // -C parent + relatif klasor adi: arsivde "uploads/..." yolu korunur.
     await execFileAsync('tar', ['-czf', upLocalPath, '-C', dirname(UPLOAD_DIR), basename(UPLOAD_DIR)]);
     console.log('tar tamamlandi, boyut:', (statSync(upLocalPath).size / 1024 / 1024).toFixed(2), 'MB');
-    console.log(`Firebase Storage'a yukleniyor -> ${UPLOADS_PREFIX}${upFileName}`);
-    await bucket.upload(upLocalPath, { destination: `${UPLOADS_PREFIX}${upFileName}` });
-    console.log('uploads yedegi yuklendi.');
+    console.log(`Off-site yukleniyor -> ${UPLOADS_PREFIX}${upFileName}`);
+    if (MOD === 'rclone') {
+      const bayt = await rcloneYukleVeDogrula(upLocalPath, `${UPLOADS_PREFIX}${upFileName}`, statSync(upLocalPath).size);
+      console.log(`uploads yedegi yuklendi ve DOGRULANDI (${(bayt / 1024 / 1024).toFixed(2)} MB uzakta).`);
+    } else {
+      await bucket.upload(upLocalPath, { destination: `${UPLOADS_PREFIX}${upFileName}` });
+      console.log('uploads yedegi yuklendi.');
+    }
   } catch (e) {
     // uploads yedegi basarisiz olsa bile DB yedegi zaten alindi — is'i cokertme.
     console.error('uploads yedegi ALINAMADI (DB yedegi guvende):', e?.message || e);
@@ -135,6 +186,14 @@ for (const f of readdirSync(LOCAL_DIR)) {
 // Off-site erisilmiyorsa (Storage etkin degil) atla — script cokmesin.
 if (offsiteOk) {
   try {
+    if (MOD === 'rclone') {
+      for (const prefix of [DB_PREFIX, UPLOADS_PREFIX]) {
+        // rclone kendi yas suzgecini kullanir — dosya dosya metadata cekmeye gerek yok.
+        await rclone(['delete', '--min-age', `${REMOTE_RETENTION_DAYS}d`, `${RCLONE_REMOTE}/${prefix}`]);
+      }
+      console.log(`Uzak retention uygulandi (${REMOTE_RETENTION_DAYS} gunden eski dosyalar silindi).`);
+      throw { __atla: true };
+    }
     const remoteCutoff = Date.now() - REMOTE_RETENTION_DAYS * 86400_000;
     for (const prefix of [DB_PREFIX, UPLOADS_PREFIX]) {
       const [files] = await bucket.getFiles({ prefix });
@@ -147,14 +206,14 @@ if (offsiteOk) {
       }
     }
   } catch (e) {
-    console.error('Uzak retention atlandi (off-site erisilemiyor):', e?.message || e);
+    if (!e?.__atla) console.error('Uzak retention atlandi (off-site erisilemiyor):', e?.message || e);
   }
 }
 
 // Off-site basarisizsa exit 1 ile bitir ki Task Scheduler/log fark etsin;
 // ama yerel yedek + retention ZATEN yapildi (veri korundu).
 if (!offsiteOk) {
-  console.error('UYARI: off-site yedek alinamadi (yerel yedek tamam). Firebase Storage etkin mi?');
+  console.error('UYARI: off-site yedek alinamadi (yerel yedek tamam). Hedef: ' + MOD);
   process.exitCode = 1;
 }
 console.log('Yedekleme tamamlandi (yerel kesin; off-site: ' + (offsiteOk ? 'OK' : 'BASARISIZ') + ').');
