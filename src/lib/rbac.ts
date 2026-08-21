@@ -15,7 +15,7 @@ export const STAFF_ROLES: AppRole[] = ['Admin', 'Manager', 'Sales', 'Logistics',
 export const EXTERNAL_ROLES: AppRole[] = ['B2B', 'Dealer'];
 
 /** Yalnız Admin/Manager'ın okuyup yazabileceği hassas koleksiyonlar. */
-export const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory']);
+export const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory', 'backupConfigs']);
 /** Append-only: yalnız ekleme (POST). Güncelleme/silme kimseye yok. */
 export const APPEND_ONLY_COLLECTIONS = new Set(['auditLog', 'syncLog', 'clientErrors']);
 /** Public write: Halka açık formlar (kimlik doğrulaması olmadan yazılabilir). */

@@ -1,8 +1,19 @@
 #requires -RunAsAdministrator
 # Cetpa - daily off-server backup via Windows Task Scheduler.
-# Runs scripts/backup-db-offsite.mjs (pg_dump + uploads/ tar.gz -> Firebase
-# Storage), independent of the VDS provider (ODEA) - protects against a repeat
-# of the 2026-07-02 "wrong server suspended" incident.
+# Runs scripts/backup-tenants.mjs: PER-TENANT backup. Each company exports ONLY
+# its own rows (companyId filter) + its own uploads folder, and uploads them to
+# THAT COMPANY'S OWN rclone remote (configured in the backupConfigs collection).
+#
+# 2026-08-21: previously a single pg_dump took ALL tenants together - not
+# acceptable for multi-tenant SaaS (handing one customer their backup would
+# hand them everyone else's data). Companies without a configured remote are
+# NOT skipped silently: they are counted, reported, and make the task exit 1.
+#
+# Off-server by design, independent of the VDS provider (ODEA) - protects
+# against a repeat of the 2026-07-02 "wrong server suspended" incident.
+#
+# NOTE: launched with `node --import tsx` because the planning logic lives in
+# src/lib/tenantBackup.ts (unit-tested); plain node cannot import .ts.
 #
 # NOTE (2026-07-05): deploy.ps1 now registers this SAME task idempotently on
 # EVERY deploy, so this standalone script is normally NOT needed - it stays as
@@ -31,10 +42,10 @@ if ($existing) {
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { throw 'node.exe not found in PATH - install Node.js first (see setup.ps1).' }
 
-$scriptPath = Join-Path $AppDir 'scripts\backup-db-offsite.mjs'
+$scriptPath = Join-Path $AppDir 'scripts\backup-tenants.mjs'
 if (-not (Test-Path $scriptPath)) { throw "Backup script not found: $scriptPath - deploy the repo first." }
 
-$action    = New-ScheduledTaskAction -Execute $node -Argument "`"$scriptPath`"" -WorkingDirectory $AppDir
+$action    = New-ScheduledTaskAction -Execute $node -Argument "--import tsx `"$scriptPath`"" -WorkingDirectory $AppDir
 $trigger   = New-ScheduledTaskTrigger -Daily -At $RunTime
 $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest

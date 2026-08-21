@@ -1,5 +1,22 @@
 # Off-site yedek — rclone kurulumu (Windows Server)
 
+> **HER ŞİRKET KENDİ SETUP'INI YAPAR (2026-08-21).**
+> Zamanlanmış görev `scripts/backup-tenants.mjs` çalıştırır: her kiracı
+> **yalnız kendi verisiyle** (`companyId` filtresi) **kendi rclone hedefine**
+> yedeklenir. Bir müşteriye yedeğini vermek artık diğerlerinin verisini vermek
+> anlamına gelmiyor.
+>
+> **Yeni müşteri onboarding'i şu adım olmadan tamamlanmış sayılmaz:**
+> 1. Sunucuda o firmaya ÖZEL bir rclone remote oluşturun (aşağıdaki adımlar,
+>    remote adını firmayla ilişkilendirin: `gdrive-musteri-a`)
+> 2. Yönetim → Müşteri Yönetimi → firmayı açın → **Yedek Hedefi** alanına
+>    `gdrive-musteri-a:cetpa-yedek` yazıp kaydedin
+> 3. Kiracı listesinde o firmanın **Yedek** sütunu kırmızı "KURULUM YOK"
+>    olmaktan çıkmalı
+>
+> Kurulum yapılmamış kiracı Operasyon Bekçisi'nde **FAIL** üretir ve yedek
+> görevi `exit 1` ile biter — sessizce atlanmaz.
+
 ## Neden rclone
 
 2026-08-19: Firebase Storage bu projede hiç etkinleştirilmemişti (bekçi iki aday

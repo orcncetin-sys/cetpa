@@ -40,7 +40,12 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   // Ikinci fayda: injectTenant artik companyId'yi SUNUCUDA zorla dogrusuyla
   // damgaliyor — stockCounts istemcide `companyId: user?.uid` yaziyordu ve
   // davetle baska kiraciya katilmis kullanicida bu deger YANLIS oluyordu.
-  'mikroSiparisler', 'stockCounts', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri', 'transfers',
+  'mikroSiparisler', 'stockCounts',
+  // Her kiracinin KENDI yedek hedefi (2026-08-21 karari: "her sirket kendi
+  // hesabina yedeklesin"). Kiracı-bazli olmak ZORUNDA — A firmasinin yedek
+  // ayari B firmasina gorunmemeli. Icerdigi rclone remote ADI sir degildir
+  // (jeton sunucudaki rclone.conf'ta durur) ama yine de Admin-only.
+  'backupConfigs', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri', 'transfers',
   'checks', 'budgets', 'waybills', 'services', 'accountingPeriods', 'taxSummary',
   'productionMetrics', // Phase 615 üretim kalite metrikleri (yerelden kalıcıya, 2026-07-21)
   // Demo→kalıcı göçü batch 2 (2026-07-21): satın alma bütçe/risk, tedarikçi

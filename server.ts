@@ -27,7 +27,6 @@ import { initializeApp, cert, type Credential, type App } from "firebase-admin/a
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, type Firestore, type Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
-import { bucketAdaylari, bucketCoz } from "./src/lib/storageBucket.js";
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
@@ -1740,22 +1739,6 @@ async function getMikroCreds(): Promise<MikroCreds | null> {
 // yazmadan dönmesi gibi) restore/rapor gününde değil ertesi sabah yakalamak.
 // Sonuç opsChecks/<YYYY-MM-DD> dokümanına yazılır (global, tenant-dışı) ve
 // süper-admin panelindeki karttan + GET /api/ops/watchdog'dan okunur.
-// Bucket adi SABIT DEGIL — calisma aninda cozuluyor (bkz. src/lib/storageBucket.ts).
-// 2026-08-18: sabit ad `<proje>.firebasestorage.app` idi ve Storage
-// "bucket does not exist" veriyordu; iki bicim de mumkun oldugu icin dogru
-// olani sinayarak buluyoruz. Bir kez cozulup onbellege alinir.
-let opsBucketOnbellek: { ad: string | null; ts: number } | null = null;
-async function opsBucketAdi(): Promise<{ ad: string | null; denenen: string[] }> {
-  const denenen = bucketAdaylari(PROJECT_ID, process.env.FIREBASE_STORAGE_BUCKET);
-  // Bulunmus adi 1 saat onbellekle; bulunamadiysa her kosuda yeniden dene
-  // (kullanici Storage'i yeni etkinlestirmis olabilir).
-  if (opsBucketOnbellek?.ad && Date.now() - opsBucketOnbellek.ts < 3_600_000) {
-    return { ad: opsBucketOnbellek.ad, denenen };
-  }
-  const r = await bucketCoz(denenen, (ad) => getStorage().bucket(ad));
-  opsBucketOnbellek = { ad: r.ad, ts: Date.now() };
-  return { ad: r.ad, denenen };
-}
 interface OpsCheckResult { key: string; ok: boolean; detail: string }
 
 function opsToMs(v: unknown): number {
@@ -1772,36 +1755,55 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
   const add = (key: string, ok: boolean, detail: string) => { checks.push({ key, ok, detail }); };
   const hoursAgo = (t: number) => (Date.now() - t) / 3_600_000;
 
-  // 1) Offsite yedek tazeliği — dün geceki yedek Firebase Storage'a düşmüş mü?
-  for (const [key, prefix, minBytes] of [
-    ['backup_db', 'db-backups/', 10_000],
-    ['backup_uploads', 'uploads-backups/', 200],
-  ] as const) {
-    try {
-      const { ad: bucketAdi, denenen } = await opsBucketAdi();
-      if (!bucketAdi) {
-        add(key, false, `Storage bucket bulunamadi — denenen adlar: ${denenen.join(', ')}. `
-          + 'Firebase konsolunda Storage etkin mi? Ya da FIREBASE_STORAGE_BUCKET ile dogru adi verin.');
-        continue;
+  // 1) Offsite yedek tazeliği — KİRACI BAZINDA (2026-08-21).
+  //
+  // Eskiden tek bir Firebase Storage bucket'ı listeleniyordu, çünkü yedek de
+  // tekti (tüm kiracılar birlikte). Artık her kiracı KENDİ rclone remote'una
+  // yedekleniyor, dolayısıyla tek bir yer listelemek anlamsız — kontrol
+  // backupConfigs'teki her kiracının SON KOŞU damgasına bakıyor.
+  //
+  // KURULUM YAPMAMIŞ KİRACI DA ARIZADIR: "yedeklendiğini sanan ama
+  // yedeklenmeyen müşteri" bu projedeki en pahalı hata sınıfının (sessiz
+  // başarısızlık) tam örneği. O yüzden ayrıca sayılıp FAIL üretiyor.
+  try {
+    if (!pgPool) add('backup_tenants', true, 'pgPool yok, atlandı');
+    else {
+      const { rows: kiracilar } = await pgPool.query(
+        "SELECT DISTINCT data->>'companyId' AS cid FROM docs WHERE data ? 'companyId' AND data->>'companyId' <> ''",
+      );
+      const { rows: ayarlar } = await pgPool.query(
+        "SELECT data FROM docs WHERE coll = 'backupConfigs'",
+      );
+      const ayarMap = new Map(
+        ayarlar.map((r: { data: Record<string, unknown> }) => [String(r.data.companyId ?? ''), r.data]),
+      );
+
+      const kurulumYok: string[] = [];
+      const bayat: string[] = [];
+      const hatali: string[] = [];
+      let taze = 0;
+
+      for (const { cid } of kiracilar as Array<{ cid: string }>) {
+        const a = ayarMap.get(cid);
+        const remote = a?.rcloneRemote as string | undefined;
+        if (!remote || !String(remote).includes(':')) { kurulumYok.push(cid); continue; }
+        if (a?.enabled === false) continue;              // bilerek kapatılmış
+        if (a?.lastStatus === 'error') { hatali.push(cid); continue; }
+        const son = opsToMs(a?.lastRunAt);
+        if (!son || hoursAgo(son) >= 26) bayat.push(cid); else taze++;
       }
-      const [files] = await getStorage().bucket(bucketAdi).getFiles({ prefix });
-      let newest: { name: string; updated: number; size: number } | null = null;
-      for (const f of files) {
-        const updated = opsToMs(f.metadata.updated || f.metadata.timeCreated);
-        if (!newest || updated > newest.updated) newest = { name: f.name, updated, size: Number(f.metadata.size) || 0 };
-      }
-      if (!newest) { add(key, false, `${prefix} altında hiç dosya yok — yedek görevi hiç koşmamış olabilir`); continue; }
-      const age = hoursAgo(newest.updated);
-      add(key, age < 26 && newest.size >= minBytes,
-        `${newest.name} — ${age.toFixed(1)} saat önce, ${(newest.size / 1024).toFixed(0)} KB`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Bucket ADI sorunu buraya gelmez: opsBucketAdi() yukarida gercekten var
-      // olan adi cozuyor, bulunamazsa zaten ayri ve acik bir mesajla cikiyoruz.
-      // Buraya dusen hata baska bir sey demektir (yetki, ag, kota) — o yuzden
-      // ham mesaji oldugu gibi gosteriyoruz, uydurma bir teshis eklemiyoruz.
-      add(key, false, 'Storage listelenemedi: ' + msg);
+
+      const sorunlu = kurulumYok.length + bayat.length + hatali.length;
+      const detay = [
+        `${taze} kiracı taze`,
+        kurulumYok.length ? `${kurulumYok.length} KURULUM YOK (${kurulumYok.slice(0, 3).join(', ')}${kurulumYok.length > 3 ? '…' : ''})` : '',
+        bayat.length ? `${bayat.length} BAYAT/hiç koşmamış (${bayat.slice(0, 3).join(', ')}${bayat.length > 3 ? '…' : ''})` : '',
+        hatali.length ? `${hatali.length} HATA (${hatali.slice(0, 3).join(', ')}${hatali.length > 3 ? '…' : ''})` : '',
+      ].filter(Boolean).join(' · ');
+      add('backup_tenants', sorunlu === 0, detay || 'kiracı yok');
     }
+  } catch (e) {
+    add('backup_tenants', false, e instanceof Error ? e.message : String(e));
   }
 
   // 2) Mikro ayna tazeliği — saatlik sync mikro_stoklar.guncelleme'yi ilerletiyor mu?
@@ -11071,6 +11073,39 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   });
 
   /** Tüm kiracı firmaları istatistikleriyle listeler. */
+  // Kiracinin KENDI yedek hedefini kaydet (super-admin onboarding adimi).
+  // rclone remote'un KENDISI sir degil (jeton sunucudaki rclone.conf'ta durur),
+  // ama yine de super-admin disina acilmaz: hangi musterinin nereye
+  // yedekledigi operasyonel bir bilgidir.
+  app.post('/api/superadmin/tenants/:companyId/backup', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
+    const cid = String(req.params.companyId || '').trim();
+    if (!cid) return res.status(400).json({ success: false, error: 'companyId gerekli.' });
+    const { rcloneRemote, enabled, retentionDays } = (req.body ?? {}) as
+      { rcloneRemote?: string; enabled?: boolean; retentionDays?: number };
+
+    const remote = String(rcloneRemote ?? '').trim();
+    // "ad:yol" bicimi — iki nokta ZORUNLU. Bicimi burada dogrulamak, yedek
+    // gorevinin gece yarisi sessizce patlamasindan iyidir.
+    if (remote && !(remote.indexOf(':') > 0)) {
+      return res.status(400).json({ success: false, error: "rclone hedefi 'ad:yol' biciminde olmali (or. gdrive:cetpa-yedek)." });
+    }
+    const gun = Number(retentionDays);
+    try {
+      await adminDb.collection('backupConfigs').doc(cid).set({
+        companyId: cid,
+        rcloneRemote: remote,
+        enabled: enabled !== false,
+        ...(Number.isFinite(gun) && gun > 0 ? { retentionDays: Math.floor(gun) } : {}),
+        updatedAt: pgServerTimestamp(),
+      }, { merge: true });
+      void writeAuditLog(reqActor(req), 'Kiraci yedek ayari', `${cid} -> ${remote || '(temizlendi)'}`);
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get('/api/superadmin/tenants', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     try {
@@ -11114,7 +11149,28 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
         } catch { /* ignore */ }
         if (!amount) amount = planAmount(plan, cycle);
         const status = await getCompanyStatus(cid);
+        // YEDEK DURUMU (2026-08-21): her kiraci KENDI hesabina yedeklenir.
+        // Kurulum yapilmamis kiraci onboarding'i TAMAMLANMAMIS sayilir —
+        // panelde gorunur olmasi sart, aksi halde "yedeklendigini sanan ama
+        // yedeklenmeyen musteri" ortaya cikar.
+        let backup: { yapilandirildi: boolean; enabled: boolean; lastRunAt: unknown; lastStatus: string | null; remote: string | null } =
+          { yapilandirildi: false, enabled: true, lastRunAt: null, lastStatus: null, remote: null };
+        try {
+          const bSnap = await adminDb!.collection('backupConfigs').doc(cid).get();
+          if (bSnap.exists) {
+            const b = bSnap.data() as Record<string, unknown>;
+            const remote = (b.rcloneRemote as string) || '';
+            backup = {
+              yapilandirildi: !!remote && remote.includes(':'),
+              enabled: b.enabled !== false,
+              lastRunAt: b.lastRunAt ?? null,
+              lastStatus: (b.lastStatus as string) ?? null,
+              remote: remote || null,
+            };
+          }
+        } catch { /* ayar okunamadi — yapilandirilmamis say */ }
         return {
+          backup,
           companyId: cid,
           companyName: companyName || g.ownerName || g.ownerEmail || cid,
           ownerEmail: g.ownerEmail,

@@ -109,13 +109,13 @@ if ($depsChanged) {
 # here (e.g. non-elevated SSH token) must not fail the deploy.
 try {
     $bkTask = 'CetpaDbBackupOffsite'
-    $bkScript = Join-Path $AppDir 'scripts\backup-db-offsite.mjs'
+    $bkScript = Join-Path $AppDir 'scripts\backup-tenants.mjs'
     $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
     if ($nodeExe -and (Test-Path $bkScript)) {
         if (Get-ScheduledTask -TaskName $bkTask -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName $bkTask -Confirm:$false
         }
-        $bkAction    = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$bkScript`"" -WorkingDirectory $AppDir
+        $bkAction    = New-ScheduledTaskAction -Execute $nodeExe -Argument "--import tsx `"$bkScript`"" -WorkingDirectory $AppDir
         $bkTrigger   = New-ScheduledTaskTrigger -Daily -At '03:30'
         $bkSettings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
         $bkPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest

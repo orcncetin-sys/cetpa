@@ -2,14 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Building2, Users, RefreshCw, Search, ShieldOff, ShieldCheck, Crown, X,
   CreditCard, Link2, Mail, Copy, Check, Calendar, Phone, MapPin, Receipt, FileText,
-  UserPlus, UserMinus,
+  UserPlus, UserMinus, Activity,
 } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
 import OpsWatchdogCard from './OpsWatchdogCard';
 import ModuleStatusBoard from './ModuleStatusBoard';
 
+/** Kiracının KENDİ yedek kurulumu (2026-08-21: "her şirket kendi setup'ı"). */
+interface TenantBackup {
+  yapilandirildi: boolean;
+  enabled: boolean;
+  lastRunAt: unknown;
+  lastStatus: string | null;
+  remote: string | null;
+}
+
 interface Tenant {
+  backup?: TenantBackup;
   companyId: string;
   companyName: string;
   ownerEmail: string;
@@ -118,6 +128,9 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
   // Kullanıcı yönetimi (ekle/rol değiştir/sil)
   const [userBusy, setUserBusy] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
+  // Kiracının KENDİ yedek hedefi — onboarding'in zorunlu adımı.
+  const [backupRemote, setBackupRemote] = useState('');
+  const [backupSaving, setBackupSaving] = useState(false);
   const [inviteRole, setInviteRole] = useState('Sales');
   const [inviting, setInviting] = useState(false);
   const USER_ROLES = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'B2B', 'Dealer', 'Legal', 'Corporate', 'Quality'];
@@ -207,6 +220,34 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       } else { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
     } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
     setSavingBilling(false);
+  };
+
+  const saveBackup = async () => {
+    if (!detailId) return;
+    const v = backupRemote.trim();
+    // Biçim kontrolü BURADA da yapılır (sunucu ayrıca doğruluyor): yanlış
+    // hedef, yedek görevinin gece yarısı sessizce patlaması demektir.
+    if (v && !(v.indexOf(':') > 0)) {
+      toast(tr ? "Hedef 'ad:yol' biçiminde olmalı (ör. gdrive:cetpa-yedek)." : "Target must be 'name:path'.", 'error');
+      return;
+    }
+    setBackupSaving(true);
+    try {
+      const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/backup`, {
+        method: 'POST', body: JSON.stringify({ rcloneRemote: v }),
+      });
+      const d = await res.json().catch(() => ({})) as { success?: boolean; error?: string };
+      if (res.ok && d.success) {
+        toast(tr ? 'Yedek hedefi kaydedildi.' : 'Backup target saved.', 'success');
+        setTenants(prev => prev.map(x => x.companyId === detailId
+          ? { ...x, backup: { ...(x.backup ?? { enabled: true, lastRunAt: null, lastStatus: null }), yapilandirildi: !!v, remote: v || null } as TenantBackup }
+          : x));
+      } else {
+        toast(d.error || (tr ? 'Kaydedilemedi.' : 'Save failed.'), 'error');
+      }
+    } catch {
+      toast(tr ? 'Kaydedilemedi.' : 'Save failed.', 'error');
+    } finally { setBackupSaving(false); }
   };
 
   const saveProfile = async () => {
@@ -362,13 +403,14 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                 <th className="px-4 py-3 font-medium text-center">{tr ? 'Kull.' : 'Users'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Plan' : 'Plan'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Sonraki Ödeme' : 'Next Payment'}</th>
+                <th className="px-4 py-3 font-medium">{tr ? 'Yedek' : 'Backup'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Durum' : 'Status'}</th>
                 <th className="px-4 py-3 font-medium text-right">{tr ? 'İşlem' : 'Action'}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</td></tr>}
-              {!loading && filtered.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Kayıt bulunamadı.' : 'No records.'}</td></tr>}
+              {loading && <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</td></tr>}
+              {!loading && filtered.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Kayıt bulunamadı.' : 'No records.'}</td></tr>}
               {!loading && filtered.map(t => (
                 <tr key={t.companyId} className="border-b border-[#f7f7f8] last:border-0 hover:bg-gray-50/60 cursor-pointer" onClick={() => void openDetail(t)}>
                   <td className="px-4 py-3">
@@ -379,6 +421,20 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                   <td className="px-4 py-3 text-center font-medium">{t.userCount}</td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planBadge(t.plan)}`}>{planText(t.plan)}</span></td>
                   <td className="px-4 py-3 text-xs text-[#1D1D1F]">{fmtDate(t.nextPaymentDate, currentLanguage)}</td>
+                  {/* YEDEK — onboarding kapısı. Kurulum yapılmamış kiracı
+                      KIRMIZI görünür: "yedeklendiğini sanan ama yedeklenmeyen
+                      müşteri" bu projedeki en pahalı hata sınıfı. */}
+                  <td className="px-4 py-3">
+                    {!t.backup?.yapilandirildi
+                      ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600" title={tr ? 'Bu firma için yedek hedefi tanımlı değil — verisi hiç yedeklenmiyor.' : 'No backup target configured — this company is not backed up.'}>{tr ? 'KURULUM YOK' : 'NOT SET UP'}</span>
+                      : t.backup.enabled === false
+                        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-500">{tr ? 'Kapalı' : 'Disabled'}</span>
+                        : t.backup.lastStatus === 'error'
+                          ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">{tr ? 'HATA' : 'ERROR'}</span>
+                          : !t.backup.lastRunAt
+                            ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">{tr ? 'Hiç koşmadı' : 'Never ran'}</span>
+                            : <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600" title={String(t.backup.remote ?? '')}>{fmtDate(t.backup.lastRunAt, currentLanguage)}</span>}
+                  </td>
                   <td className="px-4 py-3">
                     {t.status === 'suspended'
                       ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">{tr ? 'Askıda' : 'Suspended'}</span>
@@ -540,6 +596,37 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       <UserPlus className="w-3.5 h-3.5" />{inviting ? (tr ? 'Gönderiliyor...' : 'Sending...') : (tr ? 'Davet Et' : 'Invite')}
                     </button>
                   </div>
+                </section>
+
+                {/* ── Yedek kurulumu — ZORUNLU onboarding adımı ── */}
+                <section className="apple-card p-4">
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-1 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5" />{tr ? 'Yedek Hedefi' : 'Backup Target'}
+                  </h4>
+                  <p className="text-[11px] text-[#86868B] mb-3 leading-relaxed">
+                    {tr
+                      ? 'Bu firma YALNIZ kendi verisiyle, KENDİ hesabına yedeklenir. Hedef tanımlanmadan firmanın hiçbir yedeği alınmaz.'
+                      : 'This company is backed up with ONLY its own data, to ITS OWN account. Without a target, nothing is backed up.'}
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={backupRemote}
+                      onChange={e => setBackupRemote(e.target.value)}
+                      placeholder="gdrive-musteri-a:cetpa-yedek"
+                      aria-label={tr ? 'rclone hedefi' : 'rclone target'}
+                      className="apple-input flex-1 text-sm py-1.5 font-mono"
+                    />
+                    <button
+                      onClick={() => void saveBackup()}
+                      disabled={backupSaving}
+                      className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-50 shrink-0"
+                    >{backupSaving ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-2">
+                    {tr
+                      ? 'Sunucuda önce `rclone config` ile bu firma için ayrı bir remote oluşturulmalı. Kurulum: docs/YEDEK-RCLONE.md'
+                      : 'Create a separate rclone remote for this company on the server first. See docs/YEDEK-RCLONE.md'}
+                  </p>
                 </section>
 
                 {/* Ödeme geçmişi */}

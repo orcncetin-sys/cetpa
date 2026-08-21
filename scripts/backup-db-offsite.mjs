@@ -1,15 +1,20 @@
 /**
- * backup-db-offsite.mjs — cetpa_db'nin tam pg_dump yedegini + sunucu diskindeki
- * uploads/ klasorunu (tahsilat makbuzlari vb.) alir, sunucuda zaten kurulu
- * Firebase Admin servis hesabiyla Firebase Storage'a yukler.
+ * backup-db-offsite.mjs — OPERATOR seviyesi TAM yedek (tum kiracilar birlikte).
  *
- * Windows Task Scheduler ile gunluk calistirilir (bkz. deploy/windows/register-backup-task.ps1):
- *   node scripts/backup-db-offsite.mjs
- * "Start in": C:\cetpa  (server.ts ile ayni sekilde .env'i cwd'den yukler)
+ * ⚠️ ARTIK ZAMANLANMIS GOREV BU DEGIL. 2026-08-21'den itibaren Task Scheduler
+ * `scripts/backup-tenants.mjs` calistiriyor: her kiraci KENDI hesabina, yalniz
+ * KENDI verisiyle yedekleniyor (karar: "her yeni sirket kendi setup'ini
+ * gerektirsin").
  *
- * ODEA'nin (VDS saglayicisi) yanlislikla sunucuyu askiya almasi/kaybetmesi
- * senaryosuna karsi yedek BASKA BIR SAGLAYICIDA (Google Cloud/Firebase) durur.
- * Yerel kopya 3 gun, Storage kopyasi 30 gun saklanir.
+ * BU SCRIPT NEDEN DURUYOR: kiraci-bazli export `companyId` etiketi olan
+ * satirlari alir. Etiketsiz/global satirlar (ayarlar, opsChecks vb.) hicbir
+ * kiracinin yedegine girmez — onlari almanin tek yolu tam dump'tir. Elle
+ * calistirilir; felaket kurtarma icin operatorun kendi deposuna gider.
+ *
+ * ⚠️ CIKTISI TUM KIRACILARIN VERISINI ICERIR. Bir musteriye ASLA verilmez.
+ *
+ * Calistirma (tsx SART — .ts modul import ediyor):
+ *   node --import tsx scripts/backup-db-offsite.mjs
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -101,17 +106,13 @@ if (MOD === 'rclone') {
     : undefined;
   initializeApp({ credential, projectId: PROJECT_ID });
 
-  const adaylar = [
-    STORAGE_BUCKET_ENV,
-    `${PROJECT_ID}.firebasestorage.app`,
-    `${PROJECT_ID}.appspot.com`,
-  ].filter((v, i, a) => !!v && a.indexOf(v) === i);
-
-  let bucketAdi = null;
-  for (const ad of adaylar) {
-    try { const [varMi] = await getStorage().bucket(ad).exists(); if (varMi) { bucketAdi = ad; break; } }
-    catch { /* bu aday sinanamadi */ }
-  }
+  // Bucket adi cozumu TEK KAYNAKTAN (src/lib/storageBucket.ts, 7 test).
+  // Onceki surumde burada 6 satirlik bir kopya vardi cunku bu script duz
+  // node ile kosuyordu; artik `node --import tsx` ile kostugu icin .ts
+  // dogrudan import edilebiliyor ve kopyaya gerek kalmadi.
+  const { bucketAdaylari, bucketCoz } = await import('../src/lib/storageBucket.ts');
+  const adaylar = bucketAdaylari(PROJECT_ID, STORAGE_BUCKET_ENV);
+  const { ad: bucketAdi } = await bucketCoz(adaylar, (ad) => getStorage().bucket(ad));
   if (!bucketAdi) {
     console.error('Storage bucket bulunamadi. Denenen adlar: ' + adaylar.join(', '));
     console.error('Ya Firebase konsolunda Storage etkinlestirin, ya da RCLONE_REMOTE ile rclone hedefi verin.');
