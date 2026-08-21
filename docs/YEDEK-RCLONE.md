@@ -38,6 +38,33 @@ choco install rclone -y
 rclone version
 ```
 
+### 1.5) Kendi OAuth client_id'nizi oluşturun — ATLAMAYIN
+
+rclone'un paylaşımlı client_id'si **2026 içinde emekliye ayrılıyor** (rclone
+config ekranı bunu kendisi uyarıyor). Boş bırakırsanız bugün çalışır, yıl
+içinde sessizce durur — aylardır çalışmayan bir yedek sistemini yeni onardık,
+aynı tuzağa düşmeyelim.
+
+1. [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+   → proje: `gen-lang-client-0628151245`
+2. **+ CREATE CREDENTIALS** → **OAuth client ID** → Application type: **Desktop app**
+   (Firebase'in otomatik oluşturduğu *Web client* İŞE YARAMAZ — rclone Desktop
+   tipi ister)
+3. Client ID + Client Secret'i kopyalayın
+4. [Google Drive API'yi etkinleştirin](https://console.cloud.google.com/apis/library/drive.googleapis.com)
+
+#### ⚠️ Yayın durumu "In production" olmalı
+
+OAuth consent screen **"Testing"** modundaysa Google refresh token'ı **7 günde
+bir geçersiz kılar** — yani yedekleriniz her hafta sessizce durur. Bu, tam da
+bu projede tekrar tekrar yaşanan sessiz-başarısızlık sınıfı.
+
+**OAuth consent screen → Publishing status → PUBLISH APP** yapın.
+
+`drive.file` kapsamı hassas sayılmadığı için doğrulama (verification) süreci
+gerekmez; "unverified app" uyarısı görürseniz kendi hesabınız için
+*Advanced → Go to ... (unsafe)* ile geçebilirsiniz.
+
 ### 2) Google Drive bağlantısını yetkilendir
 
 Sunucu başsız (headless) olduğu için tarayıcı adımı **kendi bilgisayarınızda**
@@ -49,8 +76,12 @@ rclone config
 #   n) New remote
 #   name> gdrive
 #   Storage> drive
-#   client_id / client_secret> (boş bırakın)
-#   scope> 1  (full access)
+#   client_id>     <- 1.5'te oluşturduğunuz Client ID
+#   client_secret> <- 1.5'te oluşturduğunuz Secret
+#   scope> 3       <- drive.file: SADECE rclone'un kendi oluşturduğu dosyalar
+#                     (full access DEĞİL — yedek almak için gereksiz geniş yetki;
+#                      ayrıca full access "restricted scope" sayılır ve Google
+#                      doğrulaması ister)
 #   Edit advanced config> n
 #   Use auto config?> n        <-- ÖNEMLİ: sunucuda tarayıcı yok
 #   -> ekranda bir komut verir, onu KENDİ MAC'İNİZDE çalıştırın:
@@ -69,6 +100,10 @@ rclone authorize "drive"
 rclone mkdir gdrive:cetpa-backups
 rclone lsd gdrive:
 ```
+
+> `drive.file` kapsamında rclone **yalnız kendi oluşturduğu** dosya/klasörleri
+> görür. Bu yüzden hedef klasörü Drive arayüzünden değil, yukarıdaki gibi
+> **rclone ile** oluşturun — aksi halde "klasör yok" der.
 
 ### 4) Ortam değişkenini ayarla
 
