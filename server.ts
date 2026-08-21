@@ -27,6 +27,10 @@ import { initializeApp, cert, type Credential, type App } from "firebase-admin/a
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, type Firestore, type Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+// Mikro kolon eslestirme: projenin en tehlikeli mantigi, artik TESTLI tek
+// kaynakta (src/lib/mikroKolon.ts, 10 test). Eskiden startServer()
+// icinde, 9000 satirin ortasinda ve testsizdi.
+import { findKey, kolonSec } from "./src/lib/mikroKolon.js";
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "crypto";
 import { generateSecret as totpSecret, generateURI as totpURI, verifySync as totpVerifyRaw } from "otplib";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
@@ -5754,10 +5758,6 @@ async function startServer() {
   void firstArrayIn;
 
   /** Satırda regex ile alan anahtarı bul (örnek satırdan tespit) */
-  function findKey(row: Record<string, unknown>, re: RegExp): string | null {
-    for (const k of Object.keys(row)) if (re.test(k)) return k;
-    return null;
-  }
 
   /** Kolon seç: desenleri SIRAYLA dener, ilk eşleşeni döndürür. En SPESİFİK desen
    *  başa yazılır.
@@ -5772,14 +5772,6 @@ async function startServer() {
    *  Ek koruma: değer alanı ararken `*_Guid` kolonları atlanır (kimlik alanı asla
    *  tutar/ad/kod değildir). `guidDahil` ile bilinçli olarak açılabilir.
    */
-  function kolonSec(cols: string[], desenler: RegExp[], guidDahil = false): string | null {
-    const aday = guidDahil ? cols : cols.filter(c => !/_guid$/i.test(c));
-    for (const re of desenler) {
-      const k = aday.find(c => re.test(c));
-      if (k) return k;
-    }
-    return null;
-  }
 
   /** SqlVeriOkuV2 tabanlı liste import — V17'de karşılığı OLMAYAN liste
    *  metotlarının yerine geçer.
