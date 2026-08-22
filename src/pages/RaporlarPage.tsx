@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { pdfBaslik } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { Download, FileText } from 'lucide-react';
@@ -122,15 +123,12 @@ export default function RaporlarPage({
                 await registerTurkishFont(pdf);
                 const tr63 = currentLanguage === 'tr';
                 const today63 = new Date().toLocaleDateString(tr63 ? 'tr-TR' : 'en-US');
-                // Cover
-                pdf.setFillColor(26, 58, 92);
-                pdf.rect(0, 0, 210, 40, 'F');
-                pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(18); pdf.setFont('Roboto', 'bold');
-                pdf.text('CETPA', 14, 18);
-                pdf.setFontSize(10); pdf.setFont('Roboto', 'normal');
-                pdf.text(tr63 ? 'Yönetim Raporu' : 'Management Report', 14, 26);
-                pdf.text(today63, 14, 34);
+                // Kapak — ORTAK tema (src/utils/pdfTheme.ts). 2026-08-21'e kadar
+                // LACİVERT (#1a3a5c) idi; teklif/sipariş marka kırmızısıydı.
+                pdfBaslik(pdf, {
+                  belgeAdi: tr63 ? 'YÖNETİM RAPORU' : 'MANAGEMENT REPORT',
+                  meta: today63,
+                });
                 pdf.setTextColor(0, 0, 0);
                 // Section 1: Orders
                 pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');

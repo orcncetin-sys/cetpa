@@ -40,7 +40,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
-import { KpiCard, KpiGrid } from './ReportKit';
+import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function CrmRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -49,17 +49,64 @@ export default function CrmRapor(ctx: ReportsCtx) {
     <>
       {reportsTab === 'crm' && (
         <div className="space-y-6">
-          {/* KPIs — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
-          <KpiGrid>
-            {([
-              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10' },
-              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Bekleyen':'Pending', value: String(orders.filter(o=>o.status==='Pending').length), icon: Calendar, accent: 'text-yellow-600', accentBg: 'bg-yellow-50' },
-              { label: currentLanguage==='tr'?'İptal':'Cancelled', value: String(orders.filter(o=>o.status==='Cancelled').length), icon: AlertCircle, accent: 'text-red-500', accentBg: 'bg-red-50' },
-            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string }[]).map((k,i) => (
-              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg} />
-            ))}
-          </KpiGrid>
+          {/* KPIs — KONUYA UYGUN METRİKLER (2026-08-21).
+              Burada eskiden SİPARİŞ DURUMU sayıları vardı (Toplam Sipariş /
+              Teslim Edilen / Bekleyen / İptal). Bunlar bir CRM raporunun konusu
+              değil — sipariş hattı zaten Lojistik ve Genel raporlarında var.
+              Kullanıcı: "rapor çekerken gelen veriler o konuyla ilgili olmalı."
+              CRM'in konusu MÜŞTERİ; metrikler sipariş verisinden müşteri
+              bazında türetiliyor (ayrı veri kaynağı gerekmedi). */}
+          {(() => {
+            const musteriAdi = (o: typeof orders[number]) => (o.customerName || '—').trim();
+            const gecerli = orders.filter(o => o.status !== 'Cancelled');
+            const musteriler = new Map<string, { adet: number; ciro: number; ilk: number }>();
+            for (const o of gecerli) {
+              const ad = musteriAdi(o);
+              const ms = (() => {
+                const raw = o.createdAt as { toDate?: () => Date } | string | undefined;
+                try { const d = (raw as { toDate?: () => Date })?.toDate?.() ?? new Date(raw as string); return d.getTime(); }
+                catch { return NaN; }
+              })();
+              const m = musteriler.get(ad) ?? { adet: 0, ciro: 0, ilk: Number.POSITIVE_INFINITY };
+              m.adet += 1;
+              m.ciro += Number(o.totalPrice) || 0;
+              if (Number.isFinite(ms)) m.ilk = Math.min(m.ilk, ms);
+              musteriler.set(ad, m);
+            }
+            const toplamMusteri = musteriler.size;
+            const otuzGunOnce = Date.now() - 30 * 86_400_000;
+            // "Yeni" = İLK siparişi son 30 günde olan müşteri (yalnız sipariş
+            // vereni değil) — aksi halde 5 yıllık müşteri de "yeni" sayılırdı.
+            const yeni = [...musteriler.values()].filter(m => Number.isFinite(m.ilk) && m.ilk >= otuzGunOnce).length;
+            const tekrarEden = [...musteriler.values()].filter(m => m.adet > 1).length;
+            const toplamCiro = [...musteriler.values()].reduce((s, m) => s + m.ciro, 0);
+            const ortDeger = toplamMusteri ? toplamCiro / toplamMusteri : 0;
+            const sadakatYuzde = toplamMusteri ? Math.round((tekrarEden / toplamMusteri) * 100) : 0;
+
+            const kartlar = [
+              { label: currentLanguage==='tr'?'Toplam Müşteri':'Total Customers', value: String(toplamMusteri),
+                hint: currentLanguage==='tr'?'sipariş vermiş tekil müşteri':'unique customers with orders',
+                icon: Users, accent: 'text-brand', accentBg: 'bg-brand/10', money: false },
+              { label: currentLanguage==='tr'?'Yeni Müşteri (30g)':'New Customers (30d)', value: String(yeni),
+                hint: currentLanguage==='tr'?'ilk siparişi son 30 günde':'first order in last 30 days',
+                icon: UserCheck, accent: 'text-green-600', accentBg: 'bg-green-50', money: false },
+              { label: currentLanguage==='tr'?'Tekrar Eden':'Repeat Customers', value: `${tekrarEden} (%${sadakatYuzde})`,
+                hint: currentLanguage==='tr'?'birden fazla sipariş veren':'more than one order',
+                icon: CheckCircle2, accent: 'text-violet-600', accentBg: 'bg-violet-50', money: false },
+              { label: currentLanguage==='tr'?'Ort. Müşteri Değeri':'Avg Customer Value', value: formatInCurrency(ortDeger, revenueCurrency, exchangeRates),
+                hint: currentLanguage==='tr'?'iptaller hariç toplam ciro / müşteri':'revenue excl. cancelled / customer',
+                icon: CreditCard, accent: 'text-amber-600', accentBg: 'bg-amber-50', money: true },
+            ];
+            return (
+              <KpiGrid>
+                {kartlar.map((k, i) => (
+                  <KpiCard key={i} index={i} label={k.label} value={k.value} hint={k.hint}
+                    icon={k.icon} accent={k.accent} accentBg={k.accentBg}
+                    action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
+                ))}
+              </KpiGrid>
+            );
+          })()}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Status Dağılımı */}

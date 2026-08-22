@@ -9,6 +9,7 @@
  */
 
 import { useState } from 'react';
+import { pdfBaslik } from '../utils/pdfTheme';
 import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -53,21 +54,16 @@ async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 20;
 
-  // ── Header bar ───────────────────────────────────────────────────────────
-  doc.setFillColor(26, 58, 92); // #1a3a5c
-  doc.rect(0, 0, pageW, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
-  doc.setFont('Roboto', 'bold');
-  doc.text('CETPA', margin, 12);
-  doc.setFontSize(10);
-  doc.setFont('Roboto', 'normal');
-  doc.text(t ? 'Cari Hesap Mutabakat Mektubu' : 'Account Balance Reconciliation', margin, 20);
-
-  // Date top-right
-  doc.setFontSize(9);
+  // ── Marka başlığı — ORTAK tema (src/utils/pdfTheme.ts) ───────────────────
+  // Bu belge 2026-08-21'e kadar LACİVERT (#1a3a5c) 28 mm bant kullanıyordu;
+  // teklif ve sipariş ise marka kırmızısı 32 mm. Aynı firmanın aynı gün
+  // ürettiği iki belge farklı kurumsal kimlik taşıyordu.
   const dateStr = new Date(data.generatedAt).toLocaleDateString('tr-TR');
-  doc.text(dateStr, pageW - margin - doc.getTextWidth(dateStr), 18);
+  pdfBaslik(doc, {
+    belgeAdi: t ? 'MUTABAKAT' : 'RECONCILIATION',
+    altBaslik: t ? 'CARİ HESAP MUTABAKAT MEKTUBU' : 'ACCOUNT BALANCE RECONCILIATION',
+    meta: `${t ? 'Tarih' : 'Date'}: ${dateStr}`,
+  });
 
   // ── Period ───────────────────────────────────────────────────────────────
   doc.setTextColor(80, 80, 80);
