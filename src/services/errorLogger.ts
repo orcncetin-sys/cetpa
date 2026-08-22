@@ -25,7 +25,13 @@ function report(kind: string, message: string, stack?: string, extra?: Record<st
       kind,
       message: message.slice(0, 1000),
       stack: (stack ?? '').slice(0, 3000),
-      url: window.location.href,
+      // SORGU DIZESI BILEREK ATILIYOR (2026-08-21). Adres cubugunda hassas
+      // parametreler dolasiyor: `?invite=<token>` (davet kodu — okuyan biri
+      // baskasinin davetini kullanabilir) ve `?track=<siparisNo>`. Hata
+      // kaydini Admin/Manager okuyabiliyor; token'i oraya yazmak yetki
+      // asimina kapi acardi. Yol (pathname) hata ayiklamaya yetiyor ve
+      // Admin arayuzu zaten yalniz yolu gosteriyordu.
+      url: window.location.origin + window.location.pathname,
       userAgent: navigator.userAgent,
       userId: getAuth().currentUser?.uid ?? null,
       userEmail: getAuth().currentUser?.email ?? null,

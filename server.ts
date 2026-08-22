@@ -1810,6 +1810,30 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
     add('backup_tenants', false, e instanceof Error ? e.message : String(e));
   }
 
+  // 1b) KVKK saklama sureleri gercekten uygulaniyor mu?
+  //
+  // Cron'un kosmasi yetmez — silme sessizce basarisiz olursa (yetki, kilit,
+  // sema degisikligi) musterilere VAAT EDILEN sure asilir ve kimse fark etmez.
+  // Burada dogrudan VERIYE bakiyoruz: suresi gecmis kayit KALDI MI?
+  try {
+    if (!pgPool) add('kvkk_saklama', true, 'pgPool yok, atlandı');
+    else {
+      const asanlar: string[] = [];
+      for (const { coll, gun } of SAKLAMA_KURALLARI) {
+        const { rows } = await pgPool.query(
+          `SELECT count(*)::int AS n FROM docs WHERE coll = $1 AND updated_at < now() - ($2 || ' days')::interval`,
+          [coll, String(gun)],
+        );
+        const n = rows[0]?.n ?? 0;
+        if (n > 0) asanlar.push(`${coll}: ${n} kayıt >${gun} gün`);
+      }
+      add('kvkk_saklama', asanlar.length === 0,
+        asanlar.length
+          ? `SÜRESİ AŞAN KAYIT VAR — ${asanlar.join(' · ')} (KVKK metninde bu süreler müşteriye vaat ediliyor)`
+          : SAKLAMA_KURALLARI.map(k => `${k.coll} ≤${k.gun}g`).join(' · '));
+    }
+  } catch (e) { add('kvkk_saklama', false, e instanceof Error ? e.message : String(e)); }
+
   // 2) Mikro ayna tazeliği — saatlik sync mikro_stoklar.guncelleme'yi ilerletiyor mu?
   //    (Yaşanan arıza sınıfı: cron haftalarca "başarıyla" koşup veri yazmamıştı.)
   try {
@@ -2082,6 +2106,50 @@ async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: 
 
 // Saatte bir — Bekçi'den bağımsız, PostgreSQL gerektirmez.
 cron.schedule('7 * * * *', () => { void diskNobetcisi(); });
+
+/** ── KVKK saklama sureleri — VAAT EDILEN GERCEKTEN UYGULANIR ────────────────
+ *
+ * BULGU (2026-08-21): LegalModule'deki KVKK aydinlatma metni musterilere
+ * saklama sureleri VAAT EDIYOR —
+ *     "Hata kayitlari (clientErrors): 90 gun"
+ *     "Denetim/erisim kayitlari (auditLog): 2 yil"
+ * — ama bunlari silen HICBIR KOD YOKTU. Yani kamuya acik bir uyumluluk
+ * iddiasi karsiliksizdi. KVKK acisindan "gerekli sureden uzun saklamama"
+ * yukumlulugu ihlal ediliyordu; ayrica clientErrors kullanici e-postasi ve
+ * gezinti yolu tasiyor, yani suresiz biriken bir kisisel veri yigini.
+ *
+ * TICARI KAYITLARA DOKUNULMAZ: fatura/siparis/cari 10 yil (VUK/TTK) — bu is
+ * yalnizca yukaridaki IKI koleksiyonu temizler, baskasina genisletilmemeli.
+ */
+const SAKLAMA_KURALLARI: Array<{ coll: string; gun: number }> = [
+  { coll: 'clientErrors', gun: 90 },
+  { coll: 'auditLog', gun: 730 },
+];
+
+async function saklamaSuresiUygula(): Promise<Array<{ coll: string; silinen: number }>> {
+  const sonuc: Array<{ coll: string; silinen: number }> = [];
+  if (!pgPool) return sonuc;
+  for (const { coll, gun } of SAKLAMA_KURALLARI) {
+    try {
+      // updated_at kolonu uzerinden: dokuman icindeki timestamp bicimleri
+      // (Firestore Timestamp / ISO string / epoch) tutarsiz olabiliyor,
+      // updated_at ise her yazimda sunucu tarafindan set ediliyor.
+      const { rowCount } = await pgPool.query(
+        `DELETE FROM docs WHERE coll = $1 AND updated_at < now() - ($2 || ' days')::interval`,
+        [coll, String(gun)],
+      );
+      if (rowCount) console.log(`[saklama] ${coll}: ${rowCount} kayit silindi (>${gun} gun)`);
+      sonuc.push({ coll, silinen: rowCount ?? 0 });
+    } catch (e) {
+      console.error(`[saklama] ${coll} temizlenemedi:`, (e as Error).message);
+      sonuc.push({ coll, silinen: -1 });   // -1 = hata, bekci bunu gorur
+    }
+  }
+  return sonuc;
+}
+
+// Gunde bir, bekciden once (bekci sonucu raporlayabilsin).
+cron.schedule('15 8 * * *', () => { void saklamaSuresiUygula(); });
 // Açılışta bir kez: sunucu dolu diskle ayağa kalkmışsa hemen haber ver.
 setTimeout(() => { void diskNobetcisi(); }, 30_000);
 
