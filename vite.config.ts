@@ -98,6 +98,38 @@ export default defineConfig(({mode}) => {
             if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {
               return 'vendor-motion';
             }
+            // ⚠️ vendor-markdown (96 kB) EAGER KALIYOR — ÇÖZÜLEMEDİ, TEKRAR DENEME.
+            //
+            // Tüketicilerinin ikisi de (DashboardAnalysis→DashboardPage,
+            // QualityModule) React.lazy ile erteleniyor, yani react-markdown'ın
+            // KENDİSİ eager değil. Chunk'ı eager yapan şey içine düşen
+            // `react/jsx-runtime` CJS SARMALAYICISI: react'in jsx-runtime.js
+            // dosyası CommonJS ve ESM tarafından import edildiğinde rolldown
+            // bir interop kopyası üretiyor. Bu kopya chunk-birleştirme
+            // aşamasında oluştuğu için `manualChunks` atamasını YOK SAYIYOR ve
+            // onu ilk çeken chunk'a yapışıyor; sonra JSX render eden her chunk
+            // o chunk'ı statik import etmek zorunda kalıyor.
+            //
+            // KANIT: vendor-markdown çıktısının içinde `react.transitional.element`,
+            // `e.jsx=r`, `e.Fragment=n` var ve hem `index` hem `vendor-motion`
+            // ondan AYNI sembolü (`n`) çekiyor — react-markdown'ı değil.
+            //
+            // ÖLÇÜMLE BAŞARISIZ OLAN ALTI YAKLAŞIM (2026-08-18 / 08-21):
+            //   1. jsx-runtime kuralını en başa almak
+            //   2. react-webcam'i kendi chunk'ına almak
+            //   3. motion/framer-motion'ı vendor-react'e taşımak
+            //   4. manualChunks sırasını değiştirmek
+            //   5. hoistTransitiveImports: false
+            //   6. framer-motion'ı ESM build'ine alias'lamak
+            //
+            // Kopyayı vendor-markdown'dan çıkarmak onu BAŞKA bir lazy chunk'a
+            // taşıyor (barkod paketi kaldırılınca tam bunu yaptı: kopya
+            // vendor-barcode'dan buraya geçti) — whack-a-mole.
+            //
+            // Maliyet bilinçli kabul edildi: 96 kB eager. Gerçek çözüm rolldown
+            // tarafında (interop modülüne chunk ataması) ya da react'in
+            // jsx-runtime'ı ESM yayınlamasında.
+            //
             // react-markdown + remark/micromark ağacı — yalnız AI/not ekranları
             if (id.includes('node_modules/react-markdown') || id.includes('node_modules/remark')
                 || id.includes('node_modules/micromark') || id.includes('node_modules/mdast')
