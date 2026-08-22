@@ -10,6 +10,7 @@
  * elle yazıp senkron tutma yükü yok.
  */
 import React, { useState, useEffect, useMemo } from 'react';
+import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../../utils/pdfTheme';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area,
@@ -209,18 +210,28 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   const exportPDF = async () => {
     const doc = new jsPDF();
     await registerTurkishFont(doc);
-    doc.text(currentT.report_title, 14, 15);
+    // Marka basligi + tablo stili ORTAK temadan (src/utils/pdfTheme.ts).
+    // Bu belge 2026-08-22'ye kadar duz metin baslik ve autoTable'in VARSAYILAN
+    // MAVI tablo basligiyla cikiyordu — teklif/siparis kirmizi kurumsal
+    // kimlikteyken bu rapor bambaska gorunuyordu.
+    const govdeY = pdfBaslik(doc, {
+      belgeAdi: currentT.report_title || 'SATIŞ RAPORU',
+      meta: format(new Date(), 'dd.MM.yyyy'),
+    });
     autoTable(doc, {
-      styles: { font: 'Roboto' },
+      ...pdfTabloStili(),
       head: [[currentT.customer, currentT.amount, currentT.status, currentT.date]],
       body: orders.map(o => [
         o.customerName,
-        `${Number(o.totalPrice).toLocaleString()} TL`,
+        // toLocaleString() locale/ondalik verilmeden cagriliyordu: tarayici
+        // yerel ayarina gore 3 ondalik basiyordu ("80.000,016 TL").
+        `${(Number(o.totalPrice) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`,
         currentT[o.status.toLowerCase()] || o.status,
         o.syncedAt ? format(typeof (o.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (o.syncedAt as { toDate: () => Date }).toDate() : new Date(o.syncedAt as unknown as string | number | Date), 'dd.MM.yyyy') : ''
       ]),
-      startY: 25,
+      startY: govdeY,
     });
+    pdfAltBilgi(doc);
     doc.save(`cetpa-rapor-${format(new Date(), 'dd-MM-yyyy')}.pdf`);
   };
 

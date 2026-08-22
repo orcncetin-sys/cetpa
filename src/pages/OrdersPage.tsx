@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -617,14 +618,23 @@ export default function OrdersPage({
                         import('jspdf-autotable').then(async ({ default: autoTable }) => {
                           const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                           await registerTurkishFont(pdf);
-                          pdf.setFontSize(14);
-                          pdf.text(currentLanguage === 'tr' ? 'Sipariş Listesi' : 'Order List', 14, 20);
-                          autoTable(pdf, {
-                            startY: 28,
-                            head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
-                            body: sel.map(o => [o.shopifyOrderId ?? o.id.slice(0,8), o.customerName, o.status, `₺${o.totalPrice.toLocaleString('tr-TR')}`]),
-                            styles: { font: 'Roboto', fontSize: 9 },
+                          // Marka basligi + ortak tablo stili (src/utils/pdfTheme.ts).
+                          // Bu belge duz metin baslik ve autoTable'in VARSAYILAN
+                          // MAVI tablosuyla cikiyordu.
+                          const govdeY = pdfBaslik(pdf, {
+                            belgeAdi: currentLanguage === 'tr' ? 'SİPARİŞ LİSTESİ' : 'ORDER LIST',
+                            meta: new Date().toLocaleDateString('tr-TR'),
                           });
+                          autoTable(pdf, {
+                            ...pdfTabloStili(),
+                            startY: govdeY,
+                            head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
+                            // Para 2 ondalik: locale verilse de ondalik verilmezse
+                            // tarayici 3 haneye kadar basabiliyor.
+                            body: sel.map(o => [o.shopifyOrderId ?? o.id.slice(0,8), o.customerName, o.status,
+                              `₺${(Number(o.totalPrice) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]),
+                          });
+                          pdfAltBilgi(pdf);
                           pdf.save(`siparisler_${new Date().toISOString().split('T')[0]}.pdf`);
                         });
                       });

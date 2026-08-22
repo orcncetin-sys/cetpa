@@ -173,7 +173,10 @@ export function exportMonthlySummaryCSV(rows: MonthlySummaryRow[], lang: string 
   const mapped = rows.map(r => ({
     [tr ? 'Ay'               : 'Month']:            r.month,
     [tr ? 'Sipariş Sayısı'   : 'Order Count']:      r.orderCount,
-    [tr ? 'Ciro (₺)'        : 'Revenue (₺)']:      r.revenue,
+    // 2 ONDALIK ZORUNLU: ham sayi yazilinca hem gereksiz basamak hem de
+    // KAYAN NOKTA HATASI CSV'ye siziyordu — canli ciktida "1174042.1400000001"
+    // gorundu (2026-08-22). Para her zaman 2 hane.
+    [tr ? 'Ciro (₺)'        : 'Revenue (₺)']:      Number(r.revenue.toFixed(2)),
     [tr ? 'Yeni Müşteri'     : 'New Leads']:         r.newLeads,
     [tr ? 'Teslim Edilen'    : 'Delivered']:         r.delivered,
   }));

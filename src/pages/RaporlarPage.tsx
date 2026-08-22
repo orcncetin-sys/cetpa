@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { pdfBaslik } from '../utils/pdfTheme';
+import { pdfBaslik, pdfTabloStili } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { Download, FileText } from 'lucide-react';
@@ -135,6 +135,7 @@ export default function RaporlarPage({
                 pdf.text(tr63 ? 'Sipariş Özeti' : 'Order Summary', 14, 52);
                 const totalRev = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 autoTable(pdf, {
+                  ...pdfTabloStili(),
                   startY: 56,
                   head: [[tr63 ? 'Durum' : 'Status', tr63 ? 'Adet' : 'Count', tr63 ? 'Oran' : 'Share']],
                   body: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].map(s => [
@@ -151,6 +152,7 @@ export default function RaporlarPage({
                 for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + (o.totalPrice || 0); }
                 const top5 = Object.entries(custMap).sort(([, a], [, b]) => b - a).slice(0, 5);
                 autoTable(pdf, {
+                  ...pdfTabloStili(),
                   startY: finalY + 4,
                   head: [[tr63 ? 'Müşteri' : 'Customer', tr63 ? 'Ciro' : 'Revenue', tr63 ? 'Pay' : 'Share']],
                   body: top5.map(([name, rev]) => [name, `₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
@@ -162,6 +164,7 @@ export default function RaporlarPage({
                 pdf.text(tr63 ? 'Kritik Stok Uyarıları' : 'Critical Stock Alerts', 14, finalY2);
                 const lowStock = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).slice(0, 10);
                 autoTable(pdf, {
+                  ...pdfTabloStili(),
                   startY: finalY2 + 4,
                   head: [['SKU', tr63 ? 'Ürün' : 'Product', tr63 ? 'Stok' : 'Stock', tr63 ? 'Min' : 'Min']],
                   body: lowStock.map(i => [i.sku, i.name, i.stockLevel ?? 0, i.lowStockThreshold ?? 5]),
@@ -177,28 +180,54 @@ export default function RaporlarPage({
         </button>
         <button
           onClick={() => {
+            // Tarih çözümü — çözülemeyen kayıt SAYILMAZ.
+            // Eskiden `?? new Date()` vardı: tarihi olmayan her kayıt sessizce
+            // İÇİNDE BULUNULAN AYA yazılıyor ve o ayı şişiriyordu.
+            const ayOf = (raw: unknown): string | null => {
+              if (!raw) return null;
+              try {
+                const d = typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.();
+                if (!d || !Number.isFinite(d.getTime())) return null;
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+              } catch { return null; }
+            };
+            const bosSatir = (month: string): MonthlySummaryRow =>
+              ({ month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 });
+
             const monthMap = new Map<string, MonthlySummaryRow>();
+            let tarihsiz = 0;
             for (const o of orders) {
-              const raw = o.createdAt;
-              const date = raw
-                ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
-                : new Date();
-              const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-              const row = monthMap.get(month) ?? { month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 };
+              const month = ayOf(o.createdAt);
+              if (!month) { tarihsiz++; continue; }
+              const row = monthMap.get(month) ?? bosSatir(month);
               row.orderCount++;
-              row.revenue += o.totalPrice;
+              row.revenue += Number(o.totalPrice) || 0;
               if (o.status === 'Delivered') row.delivered++;
               monthMap.set(month, row);
             }
-            for (const l of leads) {
-              const raw = l.createdAt;
-              const date = raw
-                ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
-                : new Date();
-              const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-              const row = monthMap.get(month) ?? { month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 };
+
+            // "Yeni Müşteri" = o ay İLK SİPARİŞİNİ veren müşteri.
+            //
+            // Eskiden lead kaydının `createdAt`'i sayılıyordu ve bu bir İŞ
+            // GERÇEĞİ DEĞİL, IMPORT ARTEFAKTIYDI: Mikro cari aktarımı 2026-06'da
+            // koştuğu için o ay 188 "yeni müşteri" görünüyor, ondan önceki beş
+            // ay 23-38 sipariş almasına rağmen 0 gösteriyordu. Müşterinin ilk
+            // siparişi, gerçekten ne zaman kazanıldığının ölçüsüdür.
+            const ilkSiparisAyi = new Map<string, string>();
+            for (const o of orders) {
+              const month = ayOf(o.createdAt);
+              if (!month) continue;
+              const ad = (o.customerName || '—').trim();
+              const mevcut = ilkSiparisAyi.get(ad);
+              if (!mevcut || month < mevcut) ilkSiparisAyi.set(ad, month);
+            }
+            for (const month of ilkSiparisAyi.values()) {
+              const row = monthMap.get(month) ?? bosSatir(month);
               row.newLeads++;
               monthMap.set(month, row);
+            }
+            if (tarihsiz > 0) {
+              console.warn(`[aylık özet] ${tarihsiz} sipariş tarihi çözülemedi ve RAPORA DAHİL EDİLMEDİ.`);
             }
             exportMonthlySummaryCSV(
               [...monthMap.values()].sort((a, b) => a.month.localeCompare(b.month)),
