@@ -44,7 +44,14 @@ interface Order {
   customerEmail?: string;
   totalPrice?: number;
   status?: string;
-  syncedAt?: { toDate?: () => Date } | string | number;
+  // Zaman damgasi bicimi SABIT DEGIL: Timestamp ornegi, ISO string veya epoch
+  // olabilir (bkz. src/utils/zaman.ts). `unknown` birakip cozumlemeyi
+  // zamanMs/ayAnahtari'na birakiyoruz - dar bir tip, gercekte gelen bicimleri
+  // gizleyip `new Date(x)` gibi yanlis kullanimlari mesrulastiriyordu.
+  syncedAt?: unknown;
+  // Pazaryeri siparislerinde (Shopify/Trendyol/Hepsiburada) syncedAt YOK,
+  // yalniz createdAt var - donem filtresi buna dusuyor.
+  createdAt?: unknown;
 }
 
 interface DealerCommissionPanelProps {
