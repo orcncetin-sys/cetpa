@@ -16,7 +16,17 @@ fail() { printf 'FAIL  %s\n' "$1"; FAIL=1; }
 cd "$(dirname "$0")/.." || exit 1
 
 if [ "$PHASE" = pre ]; then
-  CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null; git diff --name-only HEAD 2>/dev/null)
+  # IZLENMEYEN (yeni) DOSYALAR DA DAHIL — 2026-08-24'te bulundu.
+  # Eskiden yalnizca `git diff` kullaniliyordu; heniiz `git add` edilmemis YENI
+  # bir .ps1 dosyasi listeye HIC girmiyor ve ASCII kapisi sessizce atlaniyordu
+  # (PS1_FILES bos -> kontrol calismiyor -> "TUM KONTROLLER GECTI" yaziyor).
+  # Yeni dosya, ASCII disi karakterin en cok girdigi yerdir; tam da orada
+  # korumasizdik.
+  CHANGED=$(
+    git diff --name-only origin/main...HEAD 2>/dev/null
+    git diff --name-only HEAD 2>/dev/null
+    git ls-files --others --exclude-standard 2>/dev/null
+  )
 
   # 1) Tip kontrolü
   if npx tsc --noEmit >/tmp/verify-tsc.log 2>&1; then
@@ -38,6 +48,11 @@ if [ "$PHASE" = pre ]; then
     done)
     if [ -z "$NONASCII" ]; then pass "ps1 salt-ASCII"; else fail "ps1 ASCII dışı karakter:
 $NONASCII"; fi
+  else
+    # SESSIZ ATLAMA YOK: "kontrol edilecek .ps1 yok" ile "kontrol gecti" ayni
+    # gorunmemeli. Ozette gorunsun ki bir dahaki sefere kapinin calisip
+    # calismadigi belli olsun.
+    echo "  --  ps1 salt-ASCII: degisen .ps1 yok, atlandi"
   fi
 
   # 3) server.ts değiştiyse lokal boot testi (build server'ı derlemez — tek kanıt boot)
