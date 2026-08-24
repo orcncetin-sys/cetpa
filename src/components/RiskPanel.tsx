@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { zamanMs } from '../utils/zaman';
 import { motion } from 'motion/react';
 import { AlertTriangle, TrendingUp, ShieldCheck, DollarSign, Users } from 'lucide-react';
 import { collection, onSnapshot } from '../lib/dbClient';
@@ -18,7 +19,12 @@ interface CustomerRisk {
 type ExchangeRates = Record<string, number>;
 
 interface RiskPanelProps {
-  orders: { id: string, customerName: string, status: string, totalPrice: number, dueDate?: string | { toDate?: () => Date }, syncedAt?: string | { toDate?: () => Date }, shopifyOrderId?: string, leadId?: string }[];
+  // Zaman damgalari `unknown`: gercek bicimler bu dar tipten GENIS (Timestamp
+  // ornegi, revive edilmemis {_seconds} zarfi, epoch sayi). Dar tip
+  // `new Date(x)` gibi yanlis kullanimlari mesrulastiriyordu; cozumleme
+  // src/utils/zaman.ts'in isi. createdAt eklendi: pazaryeri siparislerinde
+  // syncedAt YOK (2026-08-24 tarih denetimi).
+  orders: { id: string, customerName: string, status: string, totalPrice: number, dueDate?: unknown, syncedAt?: unknown, createdAt?: unknown, shopifyOrderId?: string, leadId?: string }[];
   leads: { id: string, name: string, company?: string, paymentTerms?: string }[];
   currentLanguage: 'tr' | 'en';
   userRole: string | null;
@@ -185,10 +191,13 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
         const match = lead.paymentTerms.match(/\d+/);
         if (match) daysAllowed = parseInt(match[0], 10);
       }
-      const orderDate = (o.syncedAt && typeof o.syncedAt === 'object' && 'toDate' in o.syncedAt && typeof o.syncedAt.toDate === 'function')
-        ? o.syncedAt.toDate()
-        : new Date((o.syncedAt as string) || now);
-      const dueDate = new Date(orderDate);
+      // Bkz. App.tsx / useDataSync.ts'teki ayni hesap: tarih cozulemezse
+      // siparis GECIKMIS SAYILMAZ. `|| now` yedegi, syncedAt'i olmayan
+      // pazaryeri siparislerini "bugun verilmis" yapip vadesini hep gelecege
+      // atiyordu; hicbiri gecikmis listesine girmiyordu (2026-08-24).
+      const siparisMs = zamanMs(o.createdAt) ?? zamanMs(o.syncedAt);
+      if (siparisMs === null) return false;
+      const dueDate = new Date(siparisMs);
       dueDate.setDate(dueDate.getDate() + daysAllowed);
       return now > dueDate;
     });

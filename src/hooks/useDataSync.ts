@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { zamanMs } from '../utils/zaman';
 import {
   collection, query, where, limit, orderBy, onSnapshot,
   addDoc, serverTimestamp, doc, setDoc, getDocs
@@ -54,11 +55,25 @@ export function useDataSync({
     setBranchNames, setVehicles, setLocationStocks
   } = useDataStore();
 
-  const sortByCreatedAt = (arr: any[]) =>
+  // `a.createdAt?.seconds || Date.now()/1000` KALDIRILDI (2026-08-24 tarih denetimi).
+  // Iki sorun birden vardi:
+  //  1. `.seconds` YALNIZ Timestamp/zarf bicimini taniyordu; ISO string olarak
+  //     yazilmis createdAt'lerde undefined donuyor ve kayit "az once olusturuldu"
+  //     sayilip listenin BASINA cikiyordu.
+  //  2. Iki cagiran (bankAccounts, sabitKiymetler) dokumanlari `createdAt`
+  //     ICERMEYEN nesnelere donusturup oyle veriyordu -> her iki taraf da
+  //     Date.now() oluyor, karsilastirici ~0 donuyor ve siralama SESSIZCE HIC
+  //     CALISMIYORDU (liste rastgele SSE onbellek sirasinda kaliyordu).
+  // zamanMs tum bicimleri cozer; cozemedigi kayit ("bilmiyorum") EN SONA gider,
+  // basa degil.
+  const sortByCreatedAt = <T,>(arr: T[]): T[] =>
     arr.sort((a, b) => {
-      const ta = a.createdAt?.seconds || Date.now() / 1000;
-      const tb = b.createdAt?.seconds || Date.now() / 1000;
-      return tb - ta;
+      const ta = zamanMs((a as { createdAt?: unknown }).createdAt);
+      const tb = zamanMs((b as { createdAt?: unknown }).createdAt);
+      if (ta === null && tb === null) return 0;
+      if (ta === null) return 1;    // tarihsiz -> sona
+      if (tb === null) return -1;
+      return tb - ta;               // yeniden eskiye
     });
 
   // ── Phase 649: Subscribe to webhookConfigs collection ────────────────────
@@ -402,12 +417,19 @@ export function useDataSync({
           }
           const overdueCount = customerOrders.filter(o => {
             if (o.status === 'Delivered' || o.status === 'Cancelled') return false;
+            // TARIH COZULEMEZSE SIPARIS GECIKMIS SAYILMAZ, "BUGUN" SAYILMAZ
+            // (2026-08-24 tarih denetimi). Eskiden `new Date(syncedAt || now)`
+            // vardi: pazaryeri siparislerinde (Shopify/Trendyol/Hepsiburada)
+            // syncedAt ALANI YOK, dolayisiyla siparis tarihi BUGUN oluyordu ->
+            // vade her zaman gelecekte -> 120 gun gecikmis bir siparis bile
+            // ASLA gecikmis sayilmiyordu. Bu sayi kalici `customerRisks`
+            // riskScore'una yaziliyor, yani hata veritabanina isleniyordu.
+            // Ayrica `createdAt` bir Timestamp ORNEGI oldugunda `new Date(x)`
+            // Invalid Date verir (sinifin toString/valueOf'u yok).
             const oAny = o as unknown as Record<string, unknown>;
-            const createdAt = oAny.createdAt;
-            const orderDate = createdAt && typeof createdAt === 'object' && 'toDate' in createdAt
-              ? (createdAt as { toDate: () => Date }).toDate()
-              : new Date((oAny.syncedAt as string) || now);
-            const due = new Date(orderDate);
+            const siparisMs = zamanMs(oAny.createdAt) ?? zamanMs(oAny.syncedAt);
+            if (siparisMs === null) return false;   // tarihi bilinmiyor -> gecikmis SAYMA
+            const due = new Date(siparisMs);
             due.setDate(due.getDate() + daysAllowed);
             return now > due;
           }).length;

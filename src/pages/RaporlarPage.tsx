@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { zamanMs } from '../utils/zaman';
 import { pdfBaslik, pdfTabloStili } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
@@ -253,9 +254,19 @@ export default function RaporlarPage({
         const tr570 = currentLanguage === 'tr';
         const now570 = new Date();
         const monthStart570 = new Date(now570.getFullYear(), now570.getMonth(), 1);
+        // `new Date(o.createdAt as string)` KALDIRILDI (2026-08-24 tarih denetimi).
+        // Bu dizi iki kaynagi birlestiriyor: Cetpa-native siparislerde createdAt
+        // bir `Timestamp` ORNEGI, Mikro sozde-siparislerinde ISO string. Timestamp
+        // sinifinin toString/valueOf'u YOK, dolayisiyla `new Date(ornek)` HER ZAMAN
+        // Invalid Date verir ve `d >= monthStart` sessizce false doner: bu KPI
+        // paneli (Aylik Ciro / Siparis Adedi / Ort. Siparis Degeri) ayin BUTUN
+        // native siparislerini sayimdan dusuruyordu, yalniz Mikro faturalarini
+        // sayiyordu. Ayni dosyadaki `ayOf` zaten dogru yapiyordu — tek sayfada
+        // iki farkli ciro tanimi vardi.
+        const ayBasiMs570 = monthStart570.getTime();
         const monthOrders570 = orders.filter(o => {
-          const d = o.createdAt ? new Date(o.createdAt as string) : null;
-          return d && d >= monthStart570;
+          const ms = zamanMs(o.createdAt);
+          return ms !== null && ms >= ayBasiMs570;
         });
         const actRevenue570 = monthOrders570.reduce((s, o) => s + (o.totalPrice || 0), 0);
         const actOrders570 = monthOrders570.length;

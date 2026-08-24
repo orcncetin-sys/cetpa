@@ -10,6 +10,7 @@
  * elle yazıp senkron tutma yükü yok.
  */
 import React, { useState, useEffect, useMemo } from 'react';
+import { zamanMs } from '../../utils/zaman';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../../utils/pdfTheme';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -150,9 +151,16 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   const salesByDate = useMemo(() => orders.reduce((acc: Record<string, { label: string; total: number }>, o) => {
     let dateKey = 'unknown';
     let label = currentT.unknown;
-    if (o.syncedAt) {
+    // syncedAt YOKSA createdAt'e dus (2026-08-24 tarih denetimi): pazaryeri
+    // siparisleri (Shopify/Trendyol/Hepsiburada) sunucuda `syncedAt` alani
+    // OLMADAN yaziliyor. Eskiden yalniz syncedAt'e bakildigi icin bu siparislerin
+    // TAMAMI — gecerli bir createdAt'leri oldugu halde — tek bir 'unknown'
+    // kovasina dokuluyordu: gunluk ciro trendinde kalici, sisirilmis bir
+    // "bilinmeyen" cubugu, gercek gunler ise eksik gorunuyordu.
+    const ms = zamanMs(o.syncedAt) ?? zamanMs(o.createdAt);
+    if (ms !== null) {
       try {
-        const d = typeof (o.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (o.syncedAt as { toDate: () => Date }).toDate() : new Date(o.syncedAt as unknown as string | number | Date);
+        const d = new Date(ms);
         dateKey = format(d, 'yyyy-MM-dd');
         label = format(d, 'dd MMM', { locale: currentLanguage === 'tr' ? tr : enUS });
       } catch (e) {

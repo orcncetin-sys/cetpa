@@ -16,6 +16,7 @@
  * olduğu (pozitif kalan) kalemler tahsilat listesine girer.
  */
 import { useState, useEffect, useMemo } from 'react';
+import { gunFarki } from '../utils/zaman';
 import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 
@@ -49,7 +50,15 @@ interface HamHareket {
   aciklama: string;
 }
 
-const gun = (a: Date, b: Date) => Math.floor((a.getTime() - b.getTime()) / 86_400_000);
+// KALDIRILDI (2026-08-24 tarih denetimi): `Math.floor((a - b) / 86400000)`
+// iki tarafi FARKLI zaman diliminde okuyordu. `bugun` YEREL gece yarisi
+// (setHours(0,0,0,0)) ama `new Date("YYYY-MM-DD")` UTC gece yarisi — TR'de
+// (UTC+3) aradaki 3 saat bir gun farkina donusuyordu:
+//   * BUGUN vadesi gelen fatura  -> gecikmeGun = -1
+//   * BIR GUN gecikmis fatura    -> gecikmeGun = 0  -> durum "Bekliyor"
+// Ayni satir, "Gecikmis Bakiye" KPI'sinda (parseISO = yerel) GECIKMIS
+// gorunurken durum sutununda "Bekliyor" yaziyordu. gunFarki iki tarafi da
+// yerel gune indirger.
 
 /** mikroCariHareketler'i dinleyip FIFO mahsuplaşmayla açık alacakları döndür. */
 export function useMikroTahsilat(enabled: boolean): { acikAlacaklar: AcikAlacak[]; yuklendi: boolean } {
@@ -121,7 +130,6 @@ export function useMikroTahsilat(enabled: boolean): { acikAlacaklar: AcikAlacak[
       for (const b of acikBorclar) {
         // Kuruş altı kalıntılar mahsuplaşma yuvarlamasından gelir — gerçek borç değil.
         if (b.kalan < 0.01) continue;
-        const vd = new Date(b.h.vade);
         sonuc.push({
           id: b.h.id,
           cariKod: b.h.cariKod,
@@ -132,7 +140,7 @@ export function useMikroTahsilat(enabled: boolean): { acikAlacaklar: AcikAlacak[
           tutar: Math.abs(b.h.meblag),
           tahsilEdilen: Math.abs(b.h.meblag) - b.kalan,
           acik: b.kalan,
-          gecikmeGun: Number.isNaN(vd.getTime()) ? 0 : gun(bugun, vd),
+          gecikmeGun: gunFarki(bugun, b.h.vade) ?? 0,
         });
       }
     }

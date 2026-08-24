@@ -1,4 +1,5 @@
 import KpiCurrencyToggle from './components/KpiCurrencyToggle';
+import { zamanMs } from './utils/zaman';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import MuhasebeGroupNav from './components/MuhasebeGroupNav';
@@ -2733,12 +2734,19 @@ function AppContent() {
           }
           const overdueCount = customerOrders.filter(o => {
             if (o.status === 'Delivered' || o.status === 'Cancelled') return false;
+            // TARIH COZULEMEZSE SIPARIS GECIKMIS SAYILMAZ, "BUGUN" SAYILMAZ
+            // (2026-08-24 tarih denetimi). Eskiden `new Date(syncedAt || now)`
+            // vardi: pazaryeri siparislerinde (Shopify/Trendyol/Hepsiburada)
+            // syncedAt ALANI YOK, dolayisiyla siparis tarihi BUGUN oluyordu ->
+            // vade her zaman gelecekte -> 120 gun gecikmis bir siparis bile
+            // ASLA gecikmis sayilmiyordu. Bu sayi kalici `customerRisks`
+            // riskScore'una yaziliyor, yani hata veritabanina isleniyordu.
+            // Ayrica `createdAt` bir Timestamp ORNEGI oldugunda `new Date(x)`
+            // Invalid Date verir (sinifin toString/valueOf'u yok).
             const oAny = o as unknown as Record<string, unknown>;
-            const createdAt = oAny.createdAt;
-            const orderDate = createdAt && typeof createdAt === 'object' && 'toDate' in createdAt
-              ? (createdAt as { toDate: () => Date }).toDate()
-              : new Date((oAny.syncedAt as string) || now);
-            const due = new Date(orderDate);
+            const siparisMs = zamanMs(oAny.createdAt) ?? zamanMs(oAny.syncedAt);
+            if (siparisMs === null) return false;   // tarihi bilinmiyor -> gecikmis SAYMA
+            const due = new Date(siparisMs);
             due.setDate(due.getDate() + daysAllowed);
             return now > due;
           }).length;

@@ -80,7 +80,23 @@ Info "Creating database '$DbName' if missing"
 $exists = & psql -U $pgUser -h $pgHost -p $pgPort -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
 if ($exists -ne '1') {
   & createdb -U $pgUser -h $pgHost -p $pgPort $DbName
-  if ($LASTEXITCODE -ne 0) { throw "createdb failed for '$DbName' (exit $LASTEXITCODE). Does user '$pgUser' have CREATEDB?" }
+  if ($LASTEXITCODE -ne 0) {
+    # En sik sebep: uygulama kullanicisinin CREATEDB yetkisi yok (dogru ve
+    # istenen bir varsayilan - uygulama kullanicisi veritabani yaratabilmemeli).
+    # Bu TEK SEFERLIK bir yetki adimi; super kullanici gerektirir.
+    Write-Host ''
+    Write-Host "createdb basarisiz: '$pgUser' kullanicisinin CREATEDB yetkisi yok." -ForegroundColor Yellow
+    Write-Host 'Bu TEK SEFERLIK bir adim. postgres super kullanici parolasi biliniyorsa:' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host "  psql -U postgres -h $pgHost -p $pgPort -c `"ALTER ROLE $pgUser CREATEDB;`"" -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host 'Parola bilinmiyorsa once pgpass dosyasina bak:' -ForegroundColor Yellow
+    Write-Host '  Get-Content "$env:APPDATA\postgresql\pgpass.conf"' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host 'Yetki verildikten sonra bu scripti TEKRAR CALISTIR - kaldigi yerden devam eder.' -ForegroundColor Yellow
+    Write-Host ''
+    throw "createdb failed for '$DbName' (exit $LASTEXITCODE) - yukaridaki tek seferlik yetki adimini uygula."
+  }
   Ok "Database '$DbName' created (EMPTY - restore a backup into it if you want realistic data)"
 } else {
   Ok "Database '$DbName' already exists"
