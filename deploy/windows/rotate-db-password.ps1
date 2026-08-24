@@ -113,6 +113,30 @@ if ($bozuk) {
 }
 Ok '.env dogrulandi (DATABASE_URL disindaki satirlar aynen korundu)'
 
+# BAYAT SIR AVI: ESKI parolayi hala tasiyan BASKA satir var mi?
+# Kullanici parolayi bir kez de .env'in sonuna AYRI SATIR olarak eklemisti.
+# Boyle bir satir hicbir ise yaramaz (kod onu okumaz; parola zaten
+# DATABASE_URL'in icinde) ama donus sonrasi ESKI parolayi duz metin tutmaya
+# devam eder. Sessizce birakmak, donusun amacini kismen bosa cikarir.
+$bayat = @()
+for ($i = 0; $i -lt $geriOkunan.Count; $i++) {
+  $satir = $geriOkunan[$i]
+  if ($satir -match '^DATABASE_URL=') { continue }
+  if ($satir -match '^\s*#') { continue }
+  if ($pgOld -and $satir.Contains($pgOld)) {
+    $anahtar = if ($satir -match '^([A-Za-z0-9_]+)=') { $Matches[1] } else { '(anahtarsiz satir)' }
+    $bayat += "  satir $($i + 1): $anahtar"
+  }
+}
+if ($bayat.Count -gt 0) {
+  Warn 'DIKKAT: asagidaki satirlar ESKI parolayi hala icierigi icinde tasiyor:'
+  $bayat | ForEach-Object { Warn $_ }
+  Warn 'Bu satirlar kod tarafindan OKUNMUYOR olabilir ama duz metin bayat sir'
+  Warn 'birakirlar. Gerekli olmadiklarini dogrulayip .env'"'"'den SIL.'
+} else {
+  Ok 'Eski parolayi tasiyan baska satir yok'
+}
+
 
 # -- 5) Servisi yeniden baslat ve DOGRULA -----------------------------------
 Info "Servis yeniden baslatiliyor: $ServiceName"
