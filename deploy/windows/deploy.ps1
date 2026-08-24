@@ -5,8 +5,20 @@
 param(
     [string]$AppDir  = 'C:\cetpa',
     [int]   $AppPort = 5173,
-    [string]$Branch  = 'main'
+    [string]$Branch  = 'main',
+    # Servis adi ve IIS adimlari PARAMETRIK (2026-08-24): ayni script hem
+    # production hem STAGING icin kullanilsin diye. Staging'de:
+    #   -AppDir C:\cetpa-staging -AppPort 5174 -ServiceName cetpa-staging -SkipIis
+    # Once servis adi 9 yerde sabit kodluydu ve staging'e deploy edilemiyordu;
+    # staging kurulum scripti (setup-staging.ps1) yazilmisti ama CI'a hic
+    # baglanamamisti - her degisiklik dogrudan canliya gidiyordu.
+    [string]$ServiceName = 'cetpa',
+    # IIS ters-proxy self-heal'i YALNIZ production icin anlamli: staging'in
+    # public DNS'i / HTTPS binding'i bilerek yok (bkz. setup-staging.ps1).
+    [switch]$SkipIis
 )
+# Log dizini AppDir'den turetilir - boylece staging kendi loguna bakar.
+$LogDir = Join-Path $AppDir 'logs'
 $ErrorActionPreference = 'Stop'
 # CI/CD runs this over SSH (no console buffer) -> suppress progress bars.
 $ProgressPreference = 'SilentlyContinue'
@@ -41,8 +53,8 @@ Info 'Cleaning up ROTATED logs (active files are left alone on purpose)...'
 # bounded by NSSM rotation (50 MB each) and are pruned hourly by the app's
 # donmusLoglariBuda() once rotated.
 try {
-    if (Test-Path "C:\cetpa\logs") {
-        Get-ChildItem -Path "C:\cetpa\logs" -File -Recurse -ErrorAction SilentlyContinue |
+    if (Test-Path $LogDir) {
+        Get-ChildItem -Path $LogDir -File -Recurse -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -ne 'service-err.log' -and $_.Name -ne 'service-out.log' } |
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
@@ -86,14 +98,14 @@ if ($depsChanged) {
     # SLOW PATH - unavoidable downtime. Also taken on the very first run under
     # this script (no stamp yet), which guarantees node_modules matches the lock.
     Info 'package-lock.json changed -> full path (service stops for npm ci)'
-    Stop-Service cetpa -Force -ErrorAction SilentlyContinue
+    Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     Info 'npm ci --legacy-peer-deps'
     npm ci --legacy-peer-deps
     Info 'npm run build'
     npm run build
-    Info 'Starting cetpa service'
-    Restart-Service cetpa -Force
+    Info "Starting $ServiceName service"
+    Restart-Service $ServiceName -Force
 } else {
     Info 'Dependencies unchanged -> fast path (build first, service stays up)'
     Info 'npm run build -> dist.new (current build keeps serving meanwhile)'
@@ -103,7 +115,7 @@ if ($depsChanged) {
         exit 1
     }
     Info 'Swapping dist (service is down only for the swap + restart)'
-    Stop-Service cetpa -Force -ErrorAction SilentlyContinue
+    Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     if (Test-Path $distPath) { Rename-Item $distPath 'dist.old' -Force }
     # If the old dist could not be moved (open handle), renaming dist.new over it
@@ -111,13 +123,13 @@ if ($depsChanged) {
     # while the health check still passes - a green deploy serving old code.
     # Fail loudly instead, after putting the service back up.
     if (Test-Path $distPath) {
-        Restart-Service cetpa -Force
+        Restart-Service $ServiceName -Force
         Write-Error 'Could not move the old dist aside - service restarted on the PREVIOUS build. Deploy failed.'
         exit 1
     }
     Rename-Item $distNew 'dist' -Force
-    Info 'Starting cetpa service'
-    Restart-Service cetpa -Force
+    Info "Starting $ServiceName service"
+    Restart-Service $ServiceName -Force
     Remove-Item $distOld -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -146,9 +158,9 @@ try {
     # service-err.log hit 1.6 GB from a pg-boss error loop and helped fill
     # the disk, taking the app down. 50 MB per file, rotate while running.
     try {
-        nssm set cetpa AppRotateFiles 1  | Out-Null
-        nssm set cetpa AppRotateOnline 1 | Out-Null
-        nssm set cetpa AppRotateBytes 52428800 | Out-Null
+        nssm set $ServiceName AppRotateFiles 1  | Out-Null
+        nssm set $ServiceName AppRotateOnline 1 | Out-Null
+        nssm set $ServiceName AppRotateBytes 52428800 | Out-Null
         Info 'Service log rotation ensured (50 MB per file).'
     } catch {
         Info 'WARN: could not set NSSM log rotation - continuing.'
@@ -169,8 +181,13 @@ try {
 # Non-fatal (try/catch): the client X-Cetpa-Method tunnel already keeps writes
 # working, so a failure here must never fail the deploy.
 try {
-    $appCmd = "$env:windir\System32\inetsrv\appcmd.exe"
-    if (Test-Path $appCmd) {
+    # STAGING'DE ATLA: staging'in public DNS'i ve HTTPS binding'i bilerek yok,
+    # dolayisiyla app.cetpa.com.tr'nin IIS yapilandirmasina dokunmasi hem
+    # anlamsiz hem tehlikeli olurdu (bu kutu bir kez IIS degisikligiyle tum
+    # Plesk panelini kirmisti).
+    $appCmd = if ($SkipIis) { $null } else { "$env:windir\System32\inetsrv\appcmd.exe" }
+    if ($SkipIis) { Info 'IIS reverse-proxy self-heal atlandi (-SkipIis).' }
+    if ($appCmd -and (Test-Path $appCmd)) {
         # EXACT match only - "cetpa" alone would also match the live root site
         # "cetpa.com.tr". Never loosen this (see setup-iis-proxy.ps1).
         $siteMatch = (& $appCmd list sites) | Select-String -Pattern 'SITE "(app\.cetpa\.com\.tr)"'
@@ -239,6 +256,6 @@ if ($ok) {
     Info 'Health OK (HTTP 200). Deploy succeeded.'
     exit 0
 } else {
-    Write-Error 'Health check failed - inspect C:\cetpa\logs\service-err.log'
+    Write-Error "Health check failed - inspect $LogDir\service-err.log"
     exit 1
 }

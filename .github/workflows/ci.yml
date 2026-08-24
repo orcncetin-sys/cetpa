@@ -2,7 +2,10 @@ name: CI & Deploy
 
 on:
   push:
-    branches: [main]
+    # main -> PRODUCTION. staging/** -> STAGING (ayri servis, ayri veritabani,
+    # public DNS yok). 2026-08-24'e kadar staging kurulum scripti vardi ama
+    # CI'a hic baglanmamisti: her degisiklik dogrudan canliya gidiyordu.
+    branches: [main, 'staging/**']
   pull_request:
     branches: [main]
 
@@ -85,3 +88,61 @@ jobs:
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://app.cetpa.com.tr/api/health)
           echo "Health: HTTP $code"
           [ "$code" = "200" ] || exit 1
+
+  # ── STAGING ────────────────────────────────────────────────────────────────
+  # `staging/**` dalina push -> ayni deploy.ps1, farkli parametrelerle:
+  # ayri dizin, ayri port, ayri NSSM servisi, IIS'e DOKUNMAZ (-SkipIis).
+  # Saglik yoklamasi SSH tuneli uzerinden LOCALHOST'a yapilir; staging'in
+  # public adresi bilerek yok (bkz. deploy/windows/setup-staging.ps1).
+  #
+  # ONKOSUL: sunucuda bir kez `setup-staging.ps1` calistirilmis olmali.
+  # Calistirilmadiysa is temiz bir mesajla atlanir, CI'i kirmaz.
+  deploy-staging:
+    name: Deploy to STAGING
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/staging/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH anahtari var mi
+        id: check
+        run: |
+          if [ -n "${{ secrets.VDS_SSH_KEY }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VDS_SSH_KEY tanimli degil - staging deploy atlandi."
+          fi
+
+      - name: Setup SSH
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Staging kurulu mu
+        id: kurulu
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          var=$(ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -Command \"if (Test-Path C:\\cetpa-staging\\server.ts) { 'VAR' } else { 'YOK' }\"" || echo YOK)
+          echo "$var" | grep -q VAR && echo "hazir=true" >> "$GITHUB_OUTPUT" || {
+            echo "hazir=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Staging kurulu degil. Sunucuda bir kez calistir: powershell -ExecutionPolicy Bypass -File C:\\cetpa\\deploy\\windows\\setup-staging.ps1"
+          }
+
+      - name: Deploy (SSH -> PowerShell)
+        if: steps.kurulu.outputs.hazir == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -ExecutionPolicy Bypass -File C:\\cetpa\\deploy\\windows\\deploy.ps1 -AppDir C:\\cetpa-staging -AppPort 5174 -ServiceName cetpa-staging -Branch ${{ github.ref_name }} -SkipIis"
+
+      - name: Health check (sunucu icinden localhost)
+        if: steps.kurulu.outputs.hazir == 'true'
+        run: |
+          sleep 10
+          kod=$(ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -Command \"try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 http://localhost:5174/api/health).StatusCode } catch { 0 }\"" | tr -d '\r')
+          echo "Staging health: HTTP $kod"
+          [ "$kod" = "200" ] || exit 1

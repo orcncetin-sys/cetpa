@@ -1,0 +1,128 @@
+name: Dis Nobetci (uptime)
+
+# SUNUCUNUN DISINDA calisan tek saglik kontrolu.
+#
+# NEDEN VAR (2026-08-24, ucuncu kesinti): Operasyon Bekcisi (runOpsWatchdog) ve
+# disk nobetcisi UYGULAMANIN ICINDE kosuyor. Kutu tikandiginda — disk %100,
+# servis yanit vermiyor — onlar da kosamiyor, dolayisiyla kesintiyi tam da
+# haber vermeleri gereken anda haber veremiyorlar. Uc kesintinin ucunde de
+# durumu kullanici tesadufen fark etti.
+#
+# NEDEN GITHUB ACTIONS: ucretsiz, kart gerektirmiyor (kullanici acikca kart
+# bilgisi vermek istemiyor), yeni hesap/servis yok, ve zaten deploy'u yapan
+# altyapinin kendisi. Sunucudan tamamen bagimsiz kosar.
+#
+# NASIL HABER VERIR: GitHub Issue acar. GitHub issue'yu e-posta olarak zaten
+# gonderiyor, yani ek bir posta altyapisi (Resend alan adi dogrulamasi vb.)
+# gerekmiyor. Site geri gelince ayni issue'ya yorum dusup KAPATIR — yani acik
+# issue = su an kesinti var demek.
+
+on:
+  schedule:
+    # Her 10 dakikada bir. (GitHub cron'u "en erken" garantisi verir; birkac
+    # dakika gecikebilir. Kesinti tespiti icin bu cozunurluk yeterli.)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:        # elle de tetiklenebilsin (test icin)
+
+permissions:
+  issues: write             # kesinti issue'sunu acmak/kapatmak icin
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  kontrol:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sagligi olc
+        id: olc
+        run: |
+          URL="https://app.cetpa.com.tr/api/health"
+          # Iki deneme: tek seferlik ag hiccup'i kesinti sayilmasin.
+          # -k KULLANMIYORUZ: sertifika hatasi da gercek bir arizadir
+          # (2026-07'de Plesk varsayilan sertifikasi CI health-check'i kirmisti).
+          durum="DOWN"; detay=""
+          for deneme in 1 2; do
+            cikti=$(curl -s -o /dev/null --max-time 25 \
+              -w '%{http_code}|%{time_connect}|%{time_appconnect}|%{time_starttransfer}' \
+              "$URL" 2>&1) || true
+            kod="${cikti%%|*}"
+            if [ "$kod" = "200" ]; then durum="UP"; detay="$cikti"; break; fi
+            detay="$cikti"
+            [ "$deneme" = "1" ] && sleep 20
+          done
+          echo "durum=$durum" >> "$GITHUB_OUTPUT"
+          # Zamanlamalar teshis icin kritik: TCP/TLS acik ama TTFB gelmiyorsa
+          # kutu tikanmis demektir (disk dolu sinifi); hic baglanamiyorsa ag/kapali.
+          echo "detay=$detay" >> "$GITHUB_OUTPUT"
+          echo "Sonuc: $durum ($detay)"
+
+      - name: Kesintiyi bildir / kapat
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const durum = '${{ steps.olc.outputs.durum }}';
+            const detay = '${{ steps.olc.outputs.detay }}';
+            const ETIKET = 'kesinti';
+            const BASLIK = 'KESINTI: app.cetpa.com.tr yanit vermiyor';
+
+            const { data: acikIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: ETIKET,
+            });
+            const mevcut = acikIssues.find(i => i.title === BASLIK);
+
+            // detay biciminde: http_code|time_connect|time_appconnect|time_starttransfer
+            const [kod, conn, tls, ttfb] = detay.split('|');
+            const teshis = (kod === '000' && parseFloat(tls || '0') > 0)
+              ? 'TLS el sikisiyor ama TTFB gelmiyor -> KUTU TIKANMIS (disk dolu sinifi). '
+                + 'Saglayici konsolundan gir; disk-nerede.ps1 calistir.'
+              : (kod === '000')
+                ? 'Hic baglanti kurulamadi -> sunucu kapali veya ag sorunu.'
+                : `HTTP ${kod} dondu (200 bekleniyordu).`;
+
+            if (durum === 'DOWN') {
+              const govde = [
+                `**app.cetpa.com.tr/api/health iki denemede de saglikli yanit vermedi.**`,
+                ``,
+                `- HTTP kodu: \`${kod}\``,
+                `- TCP baglanti: \`${conn}s\`  |  TLS: \`${tls}s\`  |  ilk bayt (TTFB): \`${ttfb}s\``,
+                ``,
+                `**Teshis:** ${teshis}`,
+                ``,
+                `Bu kontrol sunucunun DISINDA (GitHub Actions) kosar; uygulama icindeki`,
+                `bekci kutu tikandiginda haber veremedigi icin eklendi.`,
+                ``,
+                `Site geri geldiginde bu issue otomatik kapanir.`,
+              ].join('\n');
+
+              if (mevcut) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: mevcut.number,
+                  body: `Hala kapali. HTTP \`${kod}\`, TTFB \`${ttfb}s\`. ${teshis}`,
+                });
+                core.setFailed(`Kesinti suruyor (issue #${mevcut.number}).`);
+              } else {
+                const { data: yeni } = await github.rest.issues.create({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  title: BASLIK, body: govde, labels: [ETIKET],
+                });
+                core.setFailed(`KESINTI tespit edildi, issue #${yeni.number} acildi.`);
+              }
+            } else if (mevcut) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: mevcut.number,
+                body: `Site geri geldi (HTTP 200, TTFB \`${ttfb}s\`). Otomatik kapatiliyor.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: mevcut.number, state: 'closed',
+              });
+              console.log(`Issue #${mevcut.number} kapatildi.`);
+            } else {
+              console.log('Saglikli, acik kesinti issue yok.');
+            }
