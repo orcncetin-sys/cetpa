@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ayAnahtari } from '../utils/zaman';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   TrendingUp, Target, Award, Plus, Edit2, Trash2, X,
@@ -62,13 +63,13 @@ const TIER_COLORS: Record<string, string> = {
   'Retail': '#059669',
 };
 
-const toDate = (val: unknown): Date => {
-  if (!val) return new Date();
-  if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
-    return (val as { toDate: () => Date }).toDate();
-  }
-  return new Date(val as string | number);
-};
+// toDate KALDIRILDI (2026-08-24 tarih denetimi): `if (!val) return new Date()`
+// yedegi "tarih yok"u "BUGUN"e ceviriyordu. Pazaryeri siparisleri (Shopify,
+// Trendyol, Hepsiburada) sunucuda `syncedAt` ALANI OLMADAN yaziliyor, dolayisiyla
+// o siparislerin HEPSI — gercek tarihleri ne olursa olsun — icinde bulunulan
+// aya sayiliyordu: bayiinin hedef gerceklesmesi ve KOMISYONU sisiyordu.
+// Paylasilan zamanMs cozemedigi degere null doner; asagida o kayit donem
+// filtresine GIRMEZ (sessizce bu aya yazilmaz).
 
 export default function DealerCommissionPanel({
   currentLanguage, isAuthenticated, userRole, leads = [], orders = [], exchangeRates
@@ -192,8 +193,10 @@ export default function DealerCommissionPanel({
         const matches = (o.customerEmail && o.customerEmail === dealer.email) ||
                         (o.customerName && o.customerName === (dealer.company || dealer.name));
         if (!matches) return false;
-        const d = toDate(o.syncedAt);
-        return d.getFullYear() === year && d.getMonth() + 1 === month;
+        // syncedAt YOKSA createdAt'e dus (pazaryeri siparislerinde syncedAt yok).
+        // Ikisi de cozulemiyorsa kayit bu doneme SAYILMAZ — "bilmiyorum" != "bu ay".
+        const anahtar = ayAnahtari(o.syncedAt) ?? ayAnahtari(o.createdAt);
+        return anahtar === `${year}-${String(month).padStart(2, '0')}`;
       });
 
       const actualSales = dealerOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);

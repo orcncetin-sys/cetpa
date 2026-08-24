@@ -49,25 +49,60 @@ Pop-Location
 
 # 2) Separate database - staging must NEVER share the live database.
 #    A wrong DATABASE_URL here would let a test delete real customer data.
+#
+# CREDENTIALS COME FROM PRODUCTION'S OWN .env (2026-08-24).
+# This block used to do `$env:PGPASSWORD = $env:POSTGRES_PASSWORD` and then
+# `psql -U postgres`. POSTGRES_PASSWORD is not set in a normal admin shell, so
+# PGPASSWORD ended up EMPTY, psql fell back to an interactive prompt and the
+# whole setup died with "password authentication failed for user postgres".
+# Worse, step 3 then wrote a staging DATABASE_URL with no password at all, so
+# even a manually created database would not have connected at runtime.
+# Production already holds a working DATABASE_URL - parse it and reuse the same
+# user/host/port, changing ONLY the database name. No new secret, no prompt.
+$prodEnvPath = 'C:\cetpa\.env'
+if (-not (Test-Path $prodEnvPath)) { throw "Production .env not found at $prodEnvPath - cannot derive DB credentials." }
+$prodDbLine = (Get-Content $prodEnvPath | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1)
+if (-not $prodDbLine) { throw "DATABASE_URL missing from $prodEnvPath - cannot derive DB credentials." }
+$prodDbUrl = $prodDbLine -replace '^DATABASE_URL=', ''
+$prodDbUrl = $prodDbUrl.Trim().Trim('"').Trim("'")
+
+# postgresql://user:pass@host:port/dbname  (pass/port optional)
+$m = [regex]::Match($prodDbUrl, '^postgres(?:ql)?://([^:/@]+)(?::([^@]*))?@([^:/]+)(?::(\d+))?/(.+?)(?:\?.*)?$')
+if (-not $m.Success) { throw "Could not parse DATABASE_URL from production .env (expected postgresql://user:pass@host/db)." }
+$pgUser = $m.Groups[1].Value
+$pgPass = $m.Groups[2].Value
+$pgHost = $m.Groups[3].Value
+$pgPort = if ($m.Groups[4].Success) { $m.Groups[4].Value } else { '5432' }
+Info "Using DB credentials from production .env (user '$pgUser' on ${pgHost}:$pgPort)"
+
+$env:PGPASSWORD = $pgPass
 Info "Creating database '$DbName' if missing"
-$env:PGPASSWORD = $env:POSTGRES_PASSWORD
-$exists = & psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
+$exists = & psql -U $pgUser -h $pgHost -p $pgPort -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
 if ($exists -ne '1') {
-  & createdb -U postgres $DbName
+  & createdb -U $pgUser -h $pgHost -p $pgPort $DbName
+  if ($LASTEXITCODE -ne 0) { throw "createdb failed for '$DbName' (exit $LASTEXITCODE). Does user '$pgUser' have CREATEDB?" }
   Ok "Database '$DbName' created (EMPTY - restore a backup into it if you want realistic data)"
 } else {
   Ok "Database '$DbName' already exists"
 }
 
+# Staging connection string: same credentials, DIFFERENT database.
+$stagingDbUrl = if ($pgPass) {
+  "postgresql://${pgUser}:${pgPass}@${pgHost}:${pgPort}/$DbName"
+} else {
+  "postgresql://${pgUser}@${pgHost}:${pgPort}/$DbName"
+}
+
 # 3) .env - copied from production but with the DB and port overridden.
 #    Secrets are reused so integrations behave the same; if you would rather
 #    keep staging fully isolated from Mikro/Resend/Stripe, blank those keys.
-$prodEnv    = 'C:\cetpa\.env'
 $stagingEnv = Join-Path $StagingDir '.env'
-if ((Test-Path $prodEnv) -and (-not (Test-Path $stagingEnv))) {
+if (-not (Test-Path $stagingEnv)) {
   Info 'Deriving staging .env from production .env'
-  $lines = Get-Content $prodEnv | Where-Object { $_ -notmatch '^(DATABASE_URL|PORT|APP_URL)=' }
-  $lines += "DATABASE_URL=postgresql://postgres@localhost/$DbName"
+  $lines = Get-Content $prodEnvPath | Where-Object { $_ -notmatch '^(DATABASE_URL|PORT|APP_URL)=' }
+  # Parolayi TASIYAN baglanti dizesi - onceki surum parolasiz yaziyordu ve
+  # staging servisi veritabanina hic baglanamazdi.
+  $lines += "DATABASE_URL=$stagingDbUrl"
   $lines += "PORT=$StagingPort"
   $lines += "APP_URL=http://localhost:$StagingPort"
   # Backups from staging would overwrite real backups - disable outright.
