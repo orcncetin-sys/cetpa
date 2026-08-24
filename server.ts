@@ -2160,6 +2160,45 @@ async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: Op
       `boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(0)}) — eşik: >10 GB ve >%8`);
   } catch (e) { add('disk_space', false, 'statfs başarısız: ' + (e instanceof Error ? e.message : String(e))); }
 
+  // ── Veritabani super kullanici VARSAYILAN parolasi ────────────────────────
+  //
+  // NEDEN (2026-08-24): PostgreSQL bu kutuya Chocolatey ile `/Password:postgres`
+  // ile kuruldu ve GECICI varsayilan parola hic degistirilmedi. Projenin kendi
+  // RUNBOOK'u bunu iki ayri yerde yazmisti ("gecici postgres/postgres parolasini
+  // guclu bir parolayla degistir" ve "gecici parola OLMADIGINI dogrula") — iki
+  // ay boyunca kimse fark etmedi. Yazili bir talimat, KONTROL EDILMIYORSA
+  // yapilmis sayilmaz; bu yuzden bekciye tasindi.
+  //
+  // Bu kontrol parola SAKLAMAZ. Yalnizca BILINEN-KOTU varsayilanla baglanmayi
+  // dener: baglanti BASARILI olursa varsayilan hala yururlukte demektir ve
+  // kontrol FAIL verir. Basarisiz olursa (beklenen durum) her sey yolundadir.
+  // 5432 su an disariya kapali, yani uzaktan somurulemez; ama kutuda herhangi
+  // bir yer edinen biri dogrudan veritabani super kullanicisi olur.
+  try {
+    const dbHost = process.env.PGHOST || 'localhost';
+    const dbPort = Number(process.env.PGPORT || 5432);
+    const deneme = new pg.Client({
+      host: dbHost, port: dbPort, user: 'postgres', password: 'postgres',
+      database: 'postgres', connectionTimeoutMillis: 4000,
+    });
+    let varsayilanGecerli = false;
+    try {
+      await deneme.connect();
+      varsayilanGecerli = true;              // BAGLANDI => varsayilan parola hala aktif
+      await deneme.end();
+    } catch {
+      varsayilanGecerli = false;             // reddedildi => beklenen, iyi
+      try { await deneme.end(); } catch { /* zaten kapali */ }
+    }
+    add('db_default_password', !varsayilanGecerli,
+      varsayilanGecerli
+        ? "postgres super kullanicisi VARSAYILAN 'postgres' parolasiyla giris kabul ediyor — "
+          + "ALTER USER postgres WITH PASSWORD '<guclu>' ile degistir (uygulama etkilenmez, o 'cetpa' ile baglaniyor)"
+        : 'varsayilan super kullanici parolasi kullanimda degil');
+  } catch (e) {
+    add('db_default_password', false, 'kontrol edilemedi: ' + (e instanceof Error ? e.message : String(e)));
+  }
+
   // 10) Client hata birikimi — son 24 saatte anormal frontend hatası =
   //     kullanıcıların yaşadığı ama bildirmediği kırıklık sinyali.
   try {
