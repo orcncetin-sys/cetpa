@@ -7,7 +7,7 @@ import MikroPushButton from './MikroPushButton';
 import { teklifPayload } from '../services/mikroEvrak';
 import autoTable from 'jspdf-autotable';
 import { registerTurkishFont } from '../utils/pdfFont';
-import { formatInCurrency } from '../utils/currency';
+import { formatAmount } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -149,9 +149,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         tr(item.name || ''),
         item.sku || '',
         String(item.quantity || 0),
-        formatInCurrency(item.price || 0, quotation.currency),
+        formatAmount(item.price || 0, quotation.currency),
         `%${item.vatRate ?? 0}`,
-        formatInCurrency((item.price || 0) * (item.quantity || 0), quotation.currency),
+        formatAmount((item.price || 0) * (item.quantity || 0), quotation.currency),
       ]);
 
       autoTable(doc, {
@@ -201,8 +201,8 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFont('Roboto', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...DARK);
-      doc.text(formatInCurrency(subTotal, quotation.currency), W - 16, totalsY + 4, { align: 'right' });
-      doc.text(formatInCurrency(vatTotal, quotation.currency), W - 16, totalsY + 12, { align: 'right' });
+      doc.text(formatAmount(subTotal, quotation.currency), W - 16, totalsY + 4, { align: 'right' });
+      doc.text(formatAmount(vatTotal, quotation.currency), W - 16, totalsY + 12, { align: 'right' });
 
       // Grand total row
       doc.setFillColor(...BRAND);
@@ -211,7 +211,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
       doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
-      doc.text(formatInCurrency(total, quotation.currency), W - 16, totalsY + 23, { align: 'right' });
+      doc.text(formatAmount(total, quotation.currency), W - 16, totalsY + 23, { align: 'right' });
 
       // ── Notes ────────────────────────────────────────────────────────────
       if (quotation.notes) {
@@ -365,9 +365,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
                         <p className="text-xs text-gray-500">{item.sku}</p>
                       </td>
                       <td className="p-4 text-center text-sm font-medium text-gray-900">{item.quantity}</td>
-                      <td className="p-4 text-right text-sm font-medium text-gray-900">{formatInCurrency(item.price, quotation.currency)}</td>
+                      <td className="p-4 text-right text-sm font-medium text-gray-900">{formatAmount(item.price, quotation.currency)}</td>
                       <td className="p-4 text-center text-sm font-medium text-gray-500">%{item.vatRate}</td>
-                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatInCurrency(item.price * item.quantity * (1 + item.vatRate / 100), quotation.currency)}</td>
+                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatAmount(item.price * item.quantity * (1 + item.vatRate / 100), quotation.currency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -385,15 +385,15 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
             <div className="w-full md:w-64 space-y-3">
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">{t.subtotal || 'Ara Toplam'}</span>
-                <span className="font-bold text-gray-900">{formatInCurrency(quotation.totalAmount / 1.2, quotation.currency)}</span>
+                <span className="font-bold text-gray-900">{formatAmount(quotation.totalAmount / 1.2, quotation.currency)}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">{t.vat_total || 'KDV Toplam'}</span>
-                <span className="font-bold text-gray-900">{formatInCurrency(quotation.totalAmount - (quotation.totalAmount / 1.2), quotation.currency)}</span>
+                <span className="font-bold text-gray-900">{formatAmount(quotation.totalAmount - (quotation.totalAmount / 1.2), quotation.currency)}</span>
               </div>
               <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
                 <span className="text-sm font-bold text-gray-900">{t.grand_total || 'Genel Toplam'}</span>
-                <span className="text-xl font-black text-brand">{formatInCurrency(quotation.totalAmount, quotation.currency)}</span>
+                <span className="text-xl font-black text-brand">{formatAmount(quotation.totalAmount, quotation.currency)}</span>
               </div>
             </div>
           </div>

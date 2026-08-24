@@ -13,6 +13,7 @@
  * tekrar eklenmez (aynı ekstre iki kez yüklenirse kopya olmaz).
  */
 import { useState, useMemo, useEffect } from 'react';
+import { parseTRNumber, parseTRDate } from '../utils/trParse';
 import { motion } from 'motion/react';
 import Papa from 'papaparse';
 import { X, Upload, Check, AlertCircle, Landmark } from 'lucide-react';
@@ -43,40 +44,10 @@ const HEADER_HINTS: Record<FieldKey, string[]> = {
   reference: ['referans', 'fiş no', 'fis no', 'dekont', 'işlem no', 'islem no', 'reference'],
 };
 
-/** "1.234,56" → 1234.56 (Türk biçimi). "5.000" → 5000 (binlik), "5,75" → 5.75. */
-function parseTRNumber(raw: string): number {
-  if (!raw) return 0;
-  let s = String(raw).trim().replace(/[^\d.,-]/g, '');
-  if (s.includes('.') && s.includes(',')) {
-    // Hem . hem , varsa: son gelen ayraç ondalıktır (Türk: 1.234,56 / EN: 1,234.56).
-    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
-    else s = s.replace(/,/g, '');
-  } else if (s.includes(',')) {
-    s = s.replace(',', '.'); // sadece virgül → ondalık
-  } else if (s.includes('.')) {
-    // Sadece nokta: birden fazla nokta VEYA son gruptan sonra tam 3 hane ise
-    // binlik ayracı (Türk: 5.000 / 1.234.567), aksi halde ondalık (5.75 / 12.5).
-    const afterDot = s.slice(s.lastIndexOf('.') + 1);
-    const dotCount = (s.match(/\./g) || []).length;
-    if (dotCount > 1 || afterDot.length === 3) s = s.replace(/\./g, '');
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-/** "DD.MM.YYYY" / "DD/MM/YYYY" / "YYYY-MM-DD" → "YYYY-MM-DD". */
-function parseTRDate(raw: string): string {
-  const s = String(raw || '').trim();
-  const dm = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})/);
-  if (dm) {
-    const d = dm[1].padStart(2, '0'); const m = dm[2].padStart(2, '0');
-    let y = dm[3]; if (y.length === 2) y = '20' + y;
-    return `${y}-${m}-${d}`;
-  }
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  return s;
-}
+// parseTRNumber / parseTRDate artik src/utils/trParse.ts'te — TEK KAYNAK.
+// Buradaki yerel kopyalar disa aktarilmadigi icin AccountingModule'un banka
+// CSV import'u ayni isi düz parseFloat ile yapiyordu ve tutarlari 1000x kucuk
+// yaziyordu (2026-08-22 denetim bulgusu C1).
 
 function autoDetect(headers: string[]): Record<FieldKey, string> {
   const map = {} as Record<FieldKey, string>;

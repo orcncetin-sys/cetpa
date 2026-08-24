@@ -2992,7 +2992,15 @@ function AppContent() {
               });
             }
           } catch (journalErr) {
-            console.warn('Yevmiye kaydı oluşturulamadı:', journalErr);
+            // SESSİZ DEĞİL (2026-08-22 denetim bulgusu P5→CONFIRMED): faturalı
+            // satışın yevmiye kaydı MUHASEBE verisidir; console.warn'u kimse
+            // görmez ve fiş eksik kalınca mizan/KDV raporu sessizce yanlış olur.
+            // Sipariş oluşturmayı DÜŞÜRMÜYORUZ (satış gerçekleşti) ama kullanıcı
+            // fişin oluşmadığını ve elle girmesi gerektiğini görüyor.
+            console.error('Yevmiye kaydı oluşturulamadı:', journalErr);
+            toast(currentLanguage === 'tr'
+              ? `DİKKAT: ${shopifyOrderId} siparişinin yevmiye fişi OLUŞMADI — muhasebeye elle girin.`
+              : `WARNING: journal entry for order ${shopifyOrderId} was NOT created — enter it manually.`, 'error');
           }
 
           // ── Resmi (faturalı) satış → Mikro'ya sipariş kaydı ─────────────────
@@ -3038,7 +3046,8 @@ function AppContent() {
   // Sipariş kalemlerine göre stok hareketi uygular ve inventoryMovements'a loglar.
   // direction 'out' = sevkiyatta düş, 'in' = iptal/iade'de geri yükle. Idempotent
   // değil — çağıran stockApplied flag'iyle çift uygulamayı engeller.
-  const applyOrderStockMovement = async (order: Order, direction: 'out' | 'in', reason: string) => {
+  const applyOrderStockMovement = async (order: Order, direction: 'out' | 'in', reason: string): Promise<string[]> => {
+    const basarisiz: string[] = [];  // stoğu GÜNCELLENEMEYEN ürünler (P1)
     for (const li of (order.lineItems || []) as unknown as Array<Record<string, unknown>>) {
       const invId = li.inventoryId as string | undefined;
       const qty = Number(li.quantity) || 0;
@@ -3055,8 +3064,12 @@ function AppContent() {
           companyId: storeCompanyId ?? user?.uid ?? null,
           timestamp: serverTimestamp(),
         });
-      } catch (err) { console.error('[applyOrderStockMovement]', err); }
+      } catch (err) {
+        console.error('[applyOrderStockMovement]', err);
+        basarisiz.push(inv.name || String(invId));
+      }
     }
+    return basarisiz;
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
@@ -3075,12 +3088,25 @@ function AppContent() {
       {
         const ordStk = orders.find(o => o.id === orderId);
         const applied = (ordStk as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
+    // BAYRAK YALNIZ TAM BAŞARIDA (2026-08-22 denetim bulgusu P1→CONFIRMED):
+    // eskiden satır hatası yutulup (console.error) bayrak KOŞULSUZ true
+    // yapılıyordu — stok hiç düşmemişken sipariş "stok uygulandı" sayılıyor,
+    // idempotency bayrağı da yeniden denemeyi sonsuza dek engelliyordu.
+    // Kısmi başarıda bayrağı yine set ediyoruz (başarılı satırları ikinci kez
+    // düşmemek için) ama kullanıcıya YÜKSEK SESLE hangi satırların düşmediğini
+    // söylüyoruz — sessiz yanlış stok, gürültülü eksik stoktan kötüdür.
         if (ordStk && !applied && (status === 'Shipped' || status === 'Delivered')) {
-          await applyOrderStockMovement(ordStk, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+          const hatalilar = await applyOrderStockMovement(ordStk, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
           await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
+          if (hatalilar.length) toast(currentLanguage === 'tr'
+            ? `DİKKAT: ${hatalilar.length} ürünün stoğu düşürülemedi: ${hatalilar.join(', ')} — elle düzeltin.`
+            : `WARNING: stock not decremented for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'error');
         } else if (ordStk && applied && status === 'Cancelled') {
-          await applyOrderStockMovement(ordStk, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+          const hatalilar = await applyOrderStockMovement(ordStk, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
           await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
+          if (hatalilar.length) toast(currentLanguage === 'tr'
+            ? `DİKKAT: ${hatalilar.length} ürünün stoğu geri yüklenemedi: ${hatalilar.join(', ')} — elle düzeltin.`
+            : `WARNING: stock not restored for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'error');
         }
       }
 
@@ -3120,15 +3146,19 @@ function AppContent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               shipment: {
-                mikroCariKod: lead?.cariKod || lead?.taxId || order.customerName,
+                mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
                 customerName: order.customerName,
                 destination: order.shippingAddress || '',
                 trackingNo: order.trackingNumber || orderId.slice(0, 8),
                 cargoFirm: order.cargoCompany || '',
+                // Alan adları SUNUCU ŞEMASIYLA (IrsaliyeKaydetSchema) aynı olmalı:
+                // 2026-08-22 denetim bulgusu C15/P2 — eskiden qty/unitPrice
+                // gönderiliyordu, şema quantity/price bekliyor → her istek 400,
+                // Shipped'te otomatik e-İrsaliye tamamen sessiz çalışmıyordu.
                 items: (order.lineItems || []).map(l => ({
                   name: l.title || l.name || l.sku,
-                  qty: l.quantity,
-                  unitPrice: l.price,
+                  quantity: l.quantity,
+                  price: l.price,
                 })),
                 date: new Date().toISOString(),
               },
@@ -3198,13 +3228,14 @@ function AppContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order: {
-            mikroCariKod: lead?.cariKod || lead?.taxId || order.customerName,
+            mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
             customerName: order.customerName,
+            // quantity/price: sunucu FaturaKaydetSchema bunları bekliyor (C15).
             lineItems: (order.lineItems || []).map(l => ({
               name: l.title || l.name || l.sku,
-              qty: l.quantity,
-              unitPrice: l.price,
-              vatRate: l.vatRate ?? order.kdvOran ?? 20,
+              sku: l.sku,
+              quantity: l.quantity,
+              price: l.price,
             })),
             totalPrice: order.totalPrice,
             faturaTipi: order.faturaTipi || 'e-arsiv',

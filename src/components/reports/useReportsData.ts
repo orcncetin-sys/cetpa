@@ -195,14 +195,21 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   ).sort((a, b) => b.total - a.total).slice(0, 8), [orders]);
 
   // --- Inventory sub-data ---
-  const totalInventoryValueTRY = useMemo(() => inventory.reduce((s, i) => s + (i.stockLevel * ((i.prices?.['Retail']) || 0)), 0), [inventory]);
+  // itemPriceTRY ŞART (2026-08-22 denetim bulgusu C3): buradaki iki toplam
+  // `prices['Retail']`i ham okuyup priceCurrency'yi yok sayıyordu — fiyatı
+  // USD/EUR tutulan ürünlerde envanter değeri "TRY" diye etiketlenip döviz
+  // RAKAMIYLA toplanıyordu (ör. $100 → ₺100 sayılır, ~40× küçük). Aynı
+  // dosyada zaten kur çeviren itemPriceTRY vardı; kullanılmıyordu.
+  const totalInventoryValueTRY = useMemo(
+    () => inventory.reduce((s, i) => s + (i.stockLevel * itemPriceTRY(i, 'Retail', exchangeRates)), 0),
+    [inventory, exchangeRates]);
   const categoryValueData = useMemo(() => inventory.reduce((acc: Record<string, { name: string; count: number; value: number }>, item) => {
     const cat = item.category || 'Diğer';
     if (!acc[cat]) acc[cat] = { name: cat, count: 0, value: 0 };
     acc[cat].count += item.stockLevel;
-    acc[cat].value += item.stockLevel * ((item.prices?.['Retail']) || 0);
+    acc[cat].value += item.stockLevel * itemPriceTRY(item, 'Retail', exchangeRates);
     return acc;
-  }, {}), [inventory]);
+  }, {}), [inventory, exchangeRates]);
   const categoryValueChartData = useMemo(() => Object.values(categoryValueData), [categoryValueData]);
 
   const COLORS = ['#ff4000', '#007AFF', '#34C759', '#FF9500', '#AF52DE', '#00C7BE', '#FF2D55'];

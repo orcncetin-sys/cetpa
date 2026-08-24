@@ -51,11 +51,14 @@ describe('formatInCurrency', () => {
     expect(result).toBe('0 USD');
   });
 
-  it('returns amount unchanged if no rate for currency', () => {
-    // No rate for XYZ — amount stays 1000, formatted (with or without commas)
-    const result = formatInCurrency(1000, 'XYZ', rates);
-    // Check it contains 1000 in some form (1,000 or 1000)
-    expect(result.replace(',', '')).toContain('1000');
+  it("kur yoksa '—' döner — TL tutarı yabancı sembolle GÖSTERİLMEZ", () => {
+    // Eski davranış "tutarı aynen döndür"dü ve bu test onu kilitliyordu —
+    // yani ₺1000, XYZ para birimi etiketiyle 1000 diye basılıyordu (~40×
+    // şişkin gösterim, 2026-08-22 denetim bulgusu C4). Doğrusu: güvenilir
+    // çevrilemeyen rakam yerine '—' (CLAUDE.md: sahte kesinlik gösterme).
+    expect(formatInCurrency(1000, 'XYZ', rates)).toBe('—');
+    expect(formatInCurrency(1000, 'USD', undefined)).toBe('—');  // kur tablosu hiç yok
+    expect(formatInCurrency(1000, 'TRY', undefined)).not.toBe('—'); // TRY kur istemez
   });
 
   it('handles missing rates gracefully', () => {

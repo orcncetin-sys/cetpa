@@ -311,7 +311,8 @@ export default function OrdersPage({
   };
 
   // Sevkiyatta stok düş, iptalde geri yükle (idempotent — order.stockApplied flag).
-  const applyOrderStock = async (order: Order, direction: 'out' | 'in', reason: string) => {
+  const applyOrderStock = async (order: Order, direction: 'out' | 'in', reason: string): Promise<string[]> => {
+    const basarisiz: string[] = [];  // stoğu GÜNCELLENEMEYEN ürünler (P1)
     for (const li of (order.lineItems || []) as unknown as Array<Record<string, unknown>>) {
       const invId = (li.inventoryId as string) || '';
       const qty = Number(li.quantity) || 0;
@@ -323,8 +324,12 @@ export default function OrdersPage({
           type: direction, productId: inv.id, productName: inv.name || (li.name as string) || inv.id,
           quantity: qty, reason, orderId: order.id, timestamp: serverTimestamp(),
         });
-      } catch (err) { console.error('[applyOrderStock]', err); }
+      } catch (err) {
+        console.error('[applyOrderStock]', err);
+        basarisiz.push(inv.name || inv.id);
+      }
     }
+    return basarisiz;
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
@@ -332,12 +337,25 @@ export default function OrdersPage({
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp(), ...(status === 'Delivered' ? { deliveredAt: serverTimestamp() } : {}) });
       const ord = orders.find(o => o.id === orderId);
       const applied = (ord as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
+      // BAYRAK YALNIZ TAM BAŞARIDA (2026-08-22 denetim bulgusu P1→CONFIRMED):
+      // eskiden satır hatası yutulup (console.error) bayrak KOŞULSUZ true
+      // yapılıyordu — stok hiç düşmemişken sipariş "stok uygulandı" sayılıyor,
+      // idempotency bayrağı da yeniden denemeyi sonsuza dek engelliyordu.
+      // Kısmi başarıda bayrağı yine set ediyoruz (başarılı satırları ikinci kez
+      // düşmemek için) ama kullanıcıya YÜKSEK SESLE hangi satırların düşmediğini
+      // söylüyoruz — sessiz yanlış stok, gürültülü eksik stoktan kötüdür.
       if (ord && !applied && (status === 'Shipped' || status === 'Delivered')) {
-        await applyOrderStock(ord, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+        const hatalilar = await applyOrderStock(ord, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
+        if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'
+          ? `DİKKAT: ${hatalilar.length} ürünün stoğu düşürülemedi: ${hatalilar.join(', ')} — elle düzeltin.`
+          : `WARNING: stock not decremented for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
       } else if (ord && applied && status === 'Cancelled') {
-        await applyOrderStock(ord, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+        const hatalilar = await applyOrderStock(ord, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
+        if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'
+          ? `DİKKAT: ${hatalilar.length} ürünün stoğu geri yüklenemedi: ${hatalilar.join(', ')} — elle düzeltin.`
+          : `WARNING: stock not restored for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);

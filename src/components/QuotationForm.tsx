@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { X, Plus, Trash2, Save, Search, Package, User, DollarSign, Calendar, FileText } from 'lucide-react';
 import { collection, addDoc, setDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
-import { formatInCurrency } from '../utils/currency';
+import { formatAmount } from '../utils/currency';
 import { type Lead, type InventoryItem, type Quotation, type QuotationItem } from '../types';
 
 interface QuotationFormProps {
@@ -239,7 +239,7 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
                         <p className="text-xs text-gray-500">SKU: {product.sku} • Stok: {product.stockLevel}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold text-brand">{formatInCurrency((selectedLead?.priceTier ? product.prices?.[selectedLead.priceTier as keyof typeof product.prices] : undefined) ?? product.prices?.['Retail'] ?? product.price ?? 0, currency)}</span>
+                        <span className="text-sm font-bold text-brand">{formatAmount((selectedLead?.priceTier ? product.prices?.[selectedLead.priceTier as keyof typeof product.prices] : undefined) ?? product.prices?.['Retail'] ?? product.price ?? 0, currency)}</span>
                         <button
                           type="button"
                           onClick={() => addLineItem(product)}
@@ -309,7 +309,7 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
                       </td>
                       <td className="p-4 text-right">
                         <p className="text-sm font-bold text-gray-900">
-                          {formatInCurrency(item.price * item.quantity * (1 + item.vatRate / 100), currency)}
+                          {formatAmount(item.price * item.quantity * (1 + item.vatRate / 100), currency)}
                         </p>
                       </td>
                       <td className="p-4 text-center">
@@ -340,15 +340,15 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
           <div className="flex gap-8">
             <div className="text-center md:text-left">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t.subtotal || 'Ara Toplam'}</p>
-              <p className="text-lg font-bold text-gray-900">{formatInCurrency(totalAmount, currency)}</p>
+              <p className="text-lg font-bold text-gray-900">{formatAmount(totalAmount, currency)}</p>
             </div>
             <div className="text-center md:text-left">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t.vat_total || 'KDV Toplam'}</p>
-              <p className="text-lg font-bold text-gray-900">{formatInCurrency(totalVat, currency)}</p>
+              <p className="text-lg font-bold text-gray-900">{formatAmount(totalVat, currency)}</p>
             </div>
             <div className="text-center md:text-left">
               <p className="text-xs font-bold text-brand uppercase tracking-wider">{t.grand_total || 'Genel Toplam'}</p>
-              <p className="text-2xl font-black text-brand">{formatInCurrency(grandTotal, currency)}</p>
+              <p className="text-2xl font-black text-brand">{formatAmount(grandTotal, currency)}</p>
             </div>
           </div>
           <div className="flex gap-3 w-full md:w-auto">

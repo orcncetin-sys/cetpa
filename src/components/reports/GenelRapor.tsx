@@ -1742,8 +1742,14 @@ export default function GenelRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const now = new Date();
-        const totalRevenue = orders.reduce((s,o) => s+o.totalPrice, 0);
-        const totalCost = orders.reduce((s,o) => s + (o.lineItems||[]).reduce((sc, li) => {
+        // İPTALLER DIŞARIDA (2026-08-22 denetim bulgusu C6): bu blok `orders`ı
+        // ham kullanıyordu — sayfanın ana ciro KPI'sı ve bu dosyadaki diğer 10+
+        // hesap iptalleri dışlarken, buradaki finansal oran kartları (brüt marj,
+        // stok devri, aylık ortalama ciro) iptal edilen siparişleri de sayıyordu.
+        // Aynı sayfada iki farklı ciro tanımı = güvenilmez rapor.
+        const gecerliSiparisler = orders.filter(o => o.status !== 'Cancelled');
+        const totalRevenue = gecerliSiparisler.reduce((s,o) => s+o.totalPrice, 0);
+        const totalCost = gecerliSiparisler.reduce((s,o) => s + (o.lineItems||[]).reduce((sc, li) => {
           const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
           return sc + (inv ? itemCostTRY(inv, exchangeRates) : (li.costPrice||0)) * li.quantity;
         }, 0), 0);
@@ -1752,7 +1758,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const inventoryValue = inventory.reduce((s,i) => s + i.stockLevel * itemCostTRY(i, exchangeRates), 0);
         const monthlyRevArr = Array.from({length:12}, (_,i) => {
           const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
-          return orders.filter(o => {
+          return gecerliSiparisler.filter(o => {
             const od = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
             return od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
           }).reduce((s,o)=>s+o.totalPrice,0);
@@ -1791,6 +1797,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         });
         const monthData = months.map(m => {
           const mOrders = orders.filter(o => {
+            if (o.status === 'Cancelled') return false; // iptaller marj trendine girmez (C6)
             const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
             return d.getFullYear() === m.year && d.getMonth() === m.month;
           });
@@ -1832,11 +1839,14 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const now = new Date();
         const prevMonth = new Date(now.getFullYear(), now.getMonth()-1, 1);
         const currMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        // İptaller gelir köprüsüne girmez (C6) — ana KPI ile aynı ciro tanımı.
         const prevOrders = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
           const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
           return d >= prevMonth && d < currMonth;
         });
         const currOrders = orders.filter(o => {
+          if (o.status === 'Cancelled') return false;
           const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
           return d >= currMonth;
         });

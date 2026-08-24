@@ -224,10 +224,20 @@ export default function DealerCommissionPanel({
   const totalSales = dealerPerformance.reduce((s, d) => s + d.actualSales, 0);
   const onTargetCount = dealerPerformance.filter(d => d.achievementRate >= 100).length;
 
-  const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+  // Kur yoksa `|| 1` İLE BÖLME YOK (2026-08-22 denetim bulgusu C5): rate=1,
+  // ₺500.000'i "$500.000" diye gösteriyordu. Kur gelmediyse rakam yerine '—'
+  // basılır (CLAUDE.md: sahte kesinlik gösterme). kurluBicim tek biçimleyici.
+  const kpiKur = kpiCurrency === 'TRY' ? 1 : (kpiCurrency === 'USD' ? exchangeRates?.USD : exchangeRates?.EUR);
   const currencySymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-  const convertedTotalSales = kpiCurrency === 'TRY' ? totalSales : totalSales / rate;
-  const convertedTotalCommission = kpiCurrency === 'TRY' ? totalCommission : totalCommission / rate;
+  // Grafik, KPI kartlarından farklı davranır: kart '—' basabilir ama bir grafik
+  // "veri yok" diye boş kalamaz. Bu yüzden kur yoksa TL'ye düşer — ve ekseni de
+  // TL etiketler. Kritik olan RAKAM ile BİRİMİN aynı para biriminde olması.
+  const grafikKur    = (kpiKur && isFinite(kpiKur) && kpiKur > 0) ? kpiKur : 0;
+  const grafikSembol = grafikKur > 0 ? currencySymbol : '₺';
+  const kurluBicim = (tryTutar: number): string =>
+    (kpiKur && isFinite(kpiKur) && kpiKur > 0)
+      ? `${currencySymbol}${(tryTutar / kpiKur).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`
+      : '—';
 
   const tabs = [
     { id: 'performance', label: currentLanguage === 'tr' ? 'Performans' : 'Performance', icon: TrendingUp },
@@ -329,7 +339,7 @@ export default function DealerCommissionPanel({
                     ))}
                   </div>
                 </div>
-                <p className="text-2xl font-bold text-brand">{currencySymbol}{convertedTotalSales.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                <p className="text-2xl font-bold text-brand">{kurluBicim(totalSales)}</p>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mt-1">{currentLanguage === 'tr' ? 'Toplam Satış' : 'Total Sales'}</p>
               </div>
 
@@ -348,7 +358,7 @@ export default function DealerCommissionPanel({
                     ))}
                   </div>
                 </div>
-                <p className="text-2xl font-bold text-purple-600">{currencySymbol}{convertedTotalCommission.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                <p className="text-2xl font-bold text-purple-600">{kurluBicim(totalCommission)}</p>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mt-1">{currentLanguage === 'tr' ? 'Toplam Komisyon' : 'Total Commission'}</p>
               </div>
 
@@ -376,7 +386,12 @@ export default function DealerCommissionPanel({
                     <BarChart
                       data={dealerPerformance.slice(0, 8).map(d => ({
                         ...d,
-                        convertedSales: kpiCurrency === 'TRY' ? d.actualSales : d.actualSales / rate,
+                        // Kur yoksa TL tutarını çizip ekseni '$' ile etiketlemek,
+                        // KPI kartlarında kaldırdığımız YANILTICI sayının aynısını
+                        // grafikte geri getiriyordu (₺500.000 → "$500K", ~40× şişkin;
+                        // code-review bulgusu). Kur yoksa grafik TL'ye düşer ve
+                        // etiket de TL olur — birim ile rakam her zaman tutarlı.
+                        convertedSales: grafikKur > 0 ? d.actualSales / grafikKur : d.actualSales,
                       }))}
                       margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
                     >
@@ -385,11 +400,11 @@ export default function DealerCommissionPanel({
                       <YAxis
                         axisLine={false} tickLine={false}
                         tick={{ fontSize: 10, fill: '#86868B' }}
-                        tickFormatter={v => `${currencySymbol}${(v / 1000).toFixed(0)}K`}
+                        tickFormatter={v => `${grafikSembol}${(v / 1000).toFixed(0)}K`}
                       />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        formatter={(value: number) => [`${currencySymbol}${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Satış' : 'Sales']}
+                        formatter={(value: number) => [`${grafikSembol}${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Satış' : 'Sales']}
                       />
                       <Bar dataKey="convertedSales" radius={[6, 6, 0, 0]} name={currentLanguage === 'tr' ? 'Satış' : 'Sales'}>
                         {dealerPerformance.slice(0, 8).map((d, i) => (
@@ -451,12 +466,12 @@ export default function DealerCommissionPanel({
                               {tierLabel(d.tier)}
                             </span>
                           </td>
-                          <td className="py-3.5 px-5 text-right text-gray-500 text-xs">{currencySymbol}{(kpiCurrency === 'TRY' ? d.targetAmount : d.targetAmount / rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
-                          <td className="py-3.5 px-5 text-right font-bold text-gray-900">{currencySymbol}{(kpiCurrency === 'TRY' ? d.actualSales : d.actualSales / rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="py-3.5 px-5 text-right text-gray-500 text-xs">{kurluBicim(d.targetAmount)}</td>
+                          <td className="py-3.5 px-5 text-right font-bold text-gray-900">{kurluBicim(d.actualSales)}</td>
                           <td className="py-3.5 px-5 text-center hidden md:table-cell">
                             <span className="text-xs font-bold text-gray-500">%{d.effectiveRate.toFixed(1)}</span>
                           </td>
-                          <td className="py-3.5 px-5 text-right font-bold text-brand">{currencySymbol}{(kpiCurrency === 'TRY' ? d.commissionEarned : d.commissionEarned / rate).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                          <td className="py-3.5 px-5 text-right font-bold text-brand">{kurluBicim(d.commissionEarned)}</td>
                           <td className="py-3.5 px-5 hidden lg:table-cell">
                             <div className="flex items-center gap-2">
                               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -482,9 +497,9 @@ export default function DealerCommissionPanel({
                     <tfoot>
                       <tr className="bg-gray-50 border-t border-gray-200">
                         <td colSpan={3} className="py-3 px-5 text-xs font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL'}</td>
-                        <td className="py-3 px-5 text-right font-bold text-gray-900">{currencySymbol}{convertedTotalSales.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                        <td className="py-3 px-5 text-right font-bold text-gray-900">{kurluBicim(totalSales)}</td>
                         <td className="hidden md:table-cell" />
-                        <td className="py-3 px-5 text-right font-bold text-brand">{currencySymbol}{convertedTotalCommission.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td className="py-3 px-5 text-right font-bold text-brand">{kurluBicim(totalCommission)}</td>
                         <td className="hidden lg:table-cell" />
                       </tr>
                     </tfoot>

@@ -3,7 +3,7 @@ import { PgBoss } from "pg-boss";
 import compression from "compression";
 import helmet from "helmet";
 import {
-  type AppRole, type DbOp, ADMIN_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
+  type AppRole, type DbOp, ADMIN_ROLES, STAFF_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
   isAllowed, isSelfDocAccess, blocksRoleEscalation,
 } from "./src/lib/rbac.js";
 import {
@@ -278,14 +278,23 @@ function isSafePublicUrl(raw: string): boolean {
 const PROTECTED_USER_FIELDS = ['companyId', 'role', 'status'] as const;
 async function pinProtectedUserFields(
   uid: string, data: Record<string, unknown>, before: Record<string, unknown> | undefined,
+  superAdmin = false,
 ): Promise<Record<string, unknown>> {
+  if (superAdmin) return data; // SaaS operatörü: kiracılar arası taşıma dahil her şey
   const role = await getUserRole(uid);
-  if (role === 'Admin') return data; // Admin kullanıcı yönetimi yapabilir
   const out = { ...data };
-  for (const f of PROTECTED_USER_FIELDS) {
-    if (before && f in before) out[f] = before[f];
-    else delete out[f];
+  const sabitle = (f: string) => { if (before && f in before) out[f] = before[f]; else delete out[f]; };
+  if (role !== 'Admin') {
+    for (const f of PROTECTED_USER_FIELDS) sabitle(f);
+    return out;
   }
+  // KİRACI ADMİN'İ (2026-08-22 denetim bulgusu C7/C19):
+  // Eskiden `if (role === 'Admin') return data;` — Admin HER alanı yazabiliyordu,
+  // companyId dahil. Bir kiracının Admin'i kendi users/{uid} dokümanına
+  // companyId: '<baska-kiraci>' yazıp o kiracının TÜM verisine geçebiliyordu
+  // (getUserCompanyId bu alanı okuyor). role/status kendi kiracısı içinde
+  // yönetilebilir; companyId ise yalnız süper-admin tarafından değiştirilir.
+  sabitle('companyId');
   return out;
 }
 
@@ -313,6 +322,31 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
   const role = uid ? await getUserRole(uid) : null;
   if (role && ADMIN_ROLES.includes(role)) { next(); return; }
   res.status(403).json({ error: 'Bu işlem için yönetici yetkisi gerekir.' });
+}
+
+/**
+ * Rol-bazlı uç koruması (2026-08-22 denetim bulgusu C20/C21/C22).
+ *
+ * requireAuth yalnız "giriş yapmış" demektir — B2B/Dealer (dış) roller dahil.
+ * Bazı uçlar YALNIZ requireAuth ile korunuyordu ve RBAC'ta dar yetkili veriyi
+ * (cari hareket, yaşlandırma, e-posta gönderimi) her role açıyordu.
+ * Bu fabrika, bir koleksiyon için isAllowed(rol, coll, op) kuralını uca
+ * uygular — böylece REST /api/db yolu ile özel uçlar AYNI politikayı paylaşır,
+ * kopya bir yetki listesi oluşmaz.
+ */
+function requireCollectionAccess(coll: string, op: DbOp) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const uid = (req as Request & { uid?: string }).uid || '';
+    if (isSuperAdmin(req) || await canAccessCollection(uid, coll, op)) { next(); return; }
+    res.status(403).json({ error: 'Bu veri için yetkiniz yok.' });
+  };
+}
+/** Yalnız iç personel (STAFF_ROLES) — dış roller (B2B/Dealer) giremez. */
+async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const uid = (req as Request & { uid?: string }).uid;
+  const role = uid ? await getUserRole(uid) : null;
+  if (isSuperAdmin(req) || (role && STAFF_ROLES.includes(role))) { next(); return; }
+  res.status(403).json({ error: 'Bu işlem için personel yetkisi gerekir.' });
 }
 
 /** Koleksiyon+operasyon için kullanıcının yetkili olup olmadığını döner. */
@@ -807,6 +841,113 @@ async function getUserCompanyId(uid: string): Promise<string> {
 // enjekte etmek için — /api/db dışı adminDb.collection().add/set çağrıları
 // injectTenant'ı atlar; bunlar bu helper ile etiketlenir). getUserCompanyId 60sn
 // cache'li, döngü içinde çağrılsa da ucuz.
+/**
+ * Kiracı-filtreli "snapshot" — `adminDb.collection(coll).get()` ile AYNI
+ * şekilde (docs[].id / data() / ref) döner ama YALNIZ verilen kiracının
+ * (+ etiketsiz legacy) kayıtlarını içerir.
+ *
+ * NEDEN (2026-08-22 denetim bulgusu C10): on iki ayrı yerde
+ * `adminDb.collection('inventory'|'leads').get()` TÜM kiracıları okuyup
+ * SKU/VKN/isim eşleşmesiyle yazıyordu. Saatlik Mikro cron'u, A kiracısıyla
+ * aynı SKU'ya sahip B kiracısının ürününü bulup ÜSTÜNE companyId=A yazıyor
+ * (ele geçirme) ve stok/maliyetini eziyordu. Import uçları da aynı.
+ * Bu yardımcı, mevcut `for (const d of snap.docs)` döngülerine dokunmadan
+ * okumayı kiracıya indirger.
+ */
+async function tenantSnap(coll: string, cid: string, daralt?: DocDaralt): Promise<{ docs: Array<{ id: string; data: () => Record<string, unknown>; ref: PgDocRef }> }> {
+  if (!adminDb) return { docs: [] };
+  const rows = await loadCompanyDocs(coll, cid, daralt);
+  return {
+    docs: rows.map(r => {
+      const { id, ...data } = r as Record<string, unknown> & { id: string };
+      return { id: String(id), data: () => data, ref: adminDb!.collection(coll).doc(String(id)) };
+    }),
+  };
+}
+
+/**
+ * Kiracı-farkında deterministik Mikro doc id'si (2026-08-22 denetim bulgusu C11).
+ *
+ * Import'lar dokümanı Mikro kodundan türetilmiş SABİT id ile yazıyordu:
+ * `mikro-<sku>`, `mikro-depo-<no>`, `mikro-<kod>`. docs tablosunun PK'sı
+ * (coll, id) — kiracı kolonu YOK. İki kiracı da kendi Mikro'sundan "depo 1"i
+ * import edince ikisi de `warehouses/mikro-depo-1`e yazıyor; ikincinin
+ * merge:true yazımı birincinin dokümanını (companyId dahil) ELE GEÇİRİYOR.
+ *
+ * Çözüm: id'ye kısa bir kiracı etiketi gir — `mikro-<tag8>-<kod>`. Ama MEVCUT
+ * kiracının verisi çiftlenmesin: bu kiracıya ait (ya da etiketsiz legacy) eski
+ * biçimli `mikro-<kod>` dokümanı zaten varsa ONU kullanmaya devam et. Bu
+ * karar import başına TEK sorguyla (loadCompanyDocs) alınır; satır başına
+ * ek okuma yok.
+ */
+function tenantTag(cid: string): string {
+  return createHash('sha1').update(cid).digest('hex').slice(0, 8);
+}
+/**
+ * Elde ZATEN bulunan doküman id'lerinden çözücü kurar — ek sorgu YOK.
+ *
+ * Çağıranların çoğu aynı koleksiyonu birkaç satır sonra `tenantSnap` ile
+ * tekrar çekiyordu; iki tam gövde taraması (SELECT id, data) tek istekte
+ * yapılıyordu. Zaten okunmuş id'ler varsa bunu kullan.
+ */
+function mikroIdCozucuIds(ids: Iterable<string>, cid: string): (anahtar: string) => string {
+  const eskiBicim = new Set<string>();
+  for (const raw of ids) {
+    const id = String(raw);
+    if (id.startsWith('mikro-')) eskiBicim.add(id);
+  }
+  const onek = `mikro-${tenantTag(cid)}-`;
+  return (anahtar: string) => {
+    const eski = `mikro-${anahtar}`;
+    return eskiBicim.has(eski) ? eski : onek + anahtar;
+  };
+}
+
+async function mikroIdCozucu(coll: string, cid: string): Promise<(anahtar: string) => string> {
+  try {
+    // Yalnız id gerekiyor — gövdeler okunmuyor.
+    return mikroIdCozucuIds((await loadCompanyDocs(coll, cid)).map(r => String((r as { id: string }).id)), cid);
+  } catch {
+    /* okunamazsa yeni biçime düş — veri ezmekten güvenli */
+    return mikroIdCozucuIds([], cid);
+  }
+}
+
+/**
+ * URL'den gelen bir doküman id'sini SAHİPLİK denetiminden geçirerek okur.
+ *
+ * `/api/db/*` yolunda sahiplik `ownsDoc` ile zorlanıyor, ama özel uçlar
+ * (mutabakat, cari-hareket, makbuz…) id'yi doğrudan URL'den alıp kendi
+ * kontrolünü elle yazıyordu — her biri "etiketsiz legacy kaydı kim görebilir"
+ * kuralını yeniden ve biraz farklı karara bağlıyordu (2026-08-22 denetim
+ * bulgusu). Tek yardımcı: yabancı kiracıda `null` döner; çağıran 404 verir,
+ * böylece kaydın VARLIĞI bile sızmaz.
+ */
+async function sahipliDoc(
+  req: Request, coll: string, id: string,
+): Promise<Record<string, unknown> | null> {
+  if (!adminDb) return null;
+  const snap = await adminDb.collection(coll).doc(id).get();
+  if (!snap.exists) return null;
+  const d = snap.data() as Record<string, unknown>;
+  const dc = (d.companyId as string) || '';
+  // Etiketsiz (companyId'siz) eski kayıt: /api/db'deki ownsDoc ile AYNI
+  // hoşgörü — göç öncesi veriyi erişilemez kılmamak için.
+  if (dc && dc !== await reqCompanyId(req)) return null;
+  return d;
+}
+
+/**
+ * İsteği yapan kullanıcının KİRACI kimliği. Import/yazma yollarında damga
+ * olarak HER ZAMAN bu kullanılır — ham `uid` DEĞİL.
+ *
+ * NEDEN (2026-08-22 denetim bulgusu C12/C18/C23): 7 import ucunda
+ * `companyId = uid` yazılıyordu. Firmanın kurucusu için ikisi aynı olduğundan
+ * hata yıllarca görünmedi; ama DAVETLE katılmış bir Admin/Accounting için
+ * uid ≠ companyId'dir. Onun çalıştırdığı import firmanın mevcut kayıtlarını
+ * "yabancı" sayıp tüm stok/cariyi GÖRÜNMEZ bir hayalet kiracıya yeniden
+ * yazıyordu — kullanıcı "import çalıştı" görüyor, ekranlar boş kalıyordu.
+ */
 const reqCompanyId = (req: Request): Promise<string> =>
   getUserCompanyId((req as Request & { uid?: string }).uid || '');
 
@@ -828,19 +969,60 @@ async function serverTenantId(): Promise<string> {
 // dokümanlarını getirir — filtreyi PG'ye iter (P8/P9). Tüm koleksiyonu belleğe
 // çekip JS'te elemenin yerine geçer; "lenient" anlam (companyId eşleşir VEYA
 // companyId yok) korunur, rapor sayıları değişmez. pgPool yoksa shim'e düşer.
-async function loadCompanyDocs(coll: string, cid: string): Promise<Array<Record<string, unknown>>> {
+/**
+ * `daralt` — SQL tarafında ek süzme/sıralama/tavan (yalnız pgPool yolunda).
+ *
+ * Varsayılan davranış (verilmezse) DEĞİŞMEZ: koleksiyonun tamamı. Ama bir
+ * rapor ucu "yalnız açık siparişlerin en yenisi 500 tanesi" istiyorsa, bunu
+ * tüm koleksiyonu Node'a çekip JS'te süzerek yapmak zorunda kalmasın
+ * (code-review: /api/aging kiracı düzeltmesiyle birlikte LIMIT'i kaybetmişti).
+ * `alanDurum`/`siralaAlan` KOD İÇİNDE sabit verilir — istemciden gelmez.
+ */
+type DocDaralt = {
+  /** data->>'status' bu kümede olsun. */
+  durumlar?: string[];
+  /** data->>'<alan>' DESC sırala (metinsel; ISO tarih ve epoch için doğru sıra). */
+  siralaAlanDesc?: string;
+  tavan?: number;
+};
+
+async function loadCompanyDocs(
+  coll: string, cid: string, daralt?: DocDaralt,
+): Promise<Array<Record<string, unknown>>> {
   if (pgPool) {
-    const { rows } = await pgPool.query(
-      "SELECT id, data FROM docs WHERE coll = $1 AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))",
-      [coll, cid],
-    );
+    const params: unknown[] = [coll, cid];
+    let sql = "SELECT id, data FROM docs WHERE coll = $1 AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))";
+    if (daralt?.durumlar?.length) {
+      params.push(daralt.durumlar);
+      sql += ` AND data->>'status' = ANY($${params.length}::text[])`;
+    }
+    if (daralt?.siralaAlanDesc) {
+      params.push(daralt.siralaAlanDesc);
+      sql += ` ORDER BY data->>$${params.length} DESC`;
+    }
+    if (daralt?.tavan) {
+      params.push(daralt.tavan);
+      sql += ` LIMIT $${params.length}`;
+    }
+    const { rows } = await pgPool.query(sql, params);
     return rows.map(r => ({ id: r.id, ...(r.data as Record<string, unknown>) }));
   }
   if (!adminDb) return [];
   const snap = await adminDb.collection(coll).get();
-  return snap.docs
+  let out = snap.docs
     .map(d => ({ id: d.id, ...d.data() } as Record<string, unknown>))
     .filter(x => { const dc = x.companyId as string | undefined; return !dc || dc === cid; });
+  // Firestore yedek yolunda aynı daraltma JS'te (lokal dev; veri kümesi küçük).
+  if (daralt?.durumlar?.length) {
+    const set = new Set(daralt.durumlar);
+    out = out.filter(x => set.has(String(x.status ?? '')));
+  }
+  if (daralt?.siralaAlanDesc) {
+    const k = daralt.siralaAlanDesc;
+    out = out.sort((a, b) => String(b[k] ?? '').localeCompare(String(a[k] ?? '')));
+  }
+  if (daralt?.tavan) out = out.slice(0, daralt.tavan);
+  return out;
 }
 
 // ── firebase-admin Firestore compatible shim over PostgreSQL ─────────────────
@@ -2755,7 +2937,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       });
       void mirrorMikroStoklar(stoklar);
       const vergiTablosu = await mikroVergiOranlari(); // döngü öncesi bir kez
-      const invSnap = await adminDb.collection('inventory').get();
+      const invSnap = await tenantSnap('inventory', companyId);
       const invBySku = new Map<string, { ref: PgDocRef; stockLevel: number; name: string; prices: Record<string, number> }>();
       for (const d of invSnap.docs) {
         const data = d.data();
@@ -2845,7 +3027,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         Sort: 'cari_kod',
       });
       void mirrorMikroCariler(cariler);
-      const leadSnap = await adminDb.collection('leads').get();
+      const leadSnap = await tenantSnap('leads', companyId);
       const leadByKod = new Map<string, PgDocRef>();
       const leadByVkn = new Map<string, PgDocRef>();
       const leadByName = new Map<string, PgDocRef>();
@@ -2912,7 +3094,11 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     if (!cronCreds || !adminDb) return;
     console.log('Mikro cron: gece stok miktar senkronu başlatıldı (V17)');
     try {
-      const invSnap = await adminDb.collection('inventory').get();
+      // Kiracı ÇÖZÜLÜYOR: bu cron eskiden tüm kiracıların envanterini okuyup
+      // hepsinin stok/maliyetini cron kiracısının Mikro'suyla eziyordu.
+      const companyId = await cronCompanyId();
+      if (!companyId) { console.warn('Mikro gece cron: hedef tenant belirsiz, atlandı.'); return; }
+      const invSnap = await tenantSnap('inventory', companyId);
       const items = invSnap.docs
         .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
         .filter(x => x.sku);
@@ -2975,10 +3161,16 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
       const d7   = new Date(now); d7.setDate(d7.getDate() - 7);
       const d14  = new Date(now); d14.setDate(d14.getDate() - 14);
 
+      // Kiracı-filtreli (C10 sınıfı, 2026-08-22): haftalık özet e-postası
+      // REPORT_RECIPIENT_EMAIL'e gidiyor — yani TEK kiracının sahibine. İçine
+      // başka kiracıların sipariş/müşteri/stok rakamlarını katmak hem yanlış
+      // rapor hem veri sızıntısı. Tenant, cron'larla aynı kuraldan çözülür.
+      const companyId = await serverTenantId();
+      if (!companyId) { console.warn('Weekly report: hedef tenant belirsiz, atlandı.'); return; }
       const [ordersSnap, leadsSnap, inventorySnap] = await Promise.all([
-        adminDb.collection('orders').get(),
-        adminDb.collection('leads').get(),
-        adminDb.collection('inventory').get(),
+        tenantSnap('orders', companyId),
+        tenantSnap('leads', companyId),
+        tenantSnap('inventory', companyId),
       ]);
 
       const orders    = ordersSnap.docs.map(d => d.data() as Record<string, unknown>);
@@ -3547,19 +3739,70 @@ async function startServer() {
       if (USER_SCOPED_COLLECTIONS.has(coll)) {
         return { sql: " AND (data->>'userId' = $2 OR NOT (data ? 'userId'))", params: [uid] };
       }
+      // `users` İKİ SETTE DE YOK, dolayısıyla buraya kadar düşüyordu ve
+      // boş filtre dönüyordu: GET /api/db/users HER kiracının kullanıcı
+      // kayıtlarını (ad, e-posta, rol, companyId) döküyordu — kiracılar arası
+      // PII sızıntısı (2026-08-22 denetim bulgusu; C7/C19'un listeleme yarısı).
+      // Süper-admin ayrıcalığı burada YOK: onun için ayrı /api/superadmin/*
+      // uçları var ve onlar bilerek global.
+      if (coll === 'users') {
+        // Kendi kaydı her koşulda görünür (companyId'si henüz damgalanmamış
+        // yeni davet edilen kullanıcı kendini okuyabilsin diye).
+        return {
+          sql: " AND (data->>'companyId' = $2 OR id = $3)",
+          params: [await getUserCompanyId(uid), uid],
+        };
+      }
       return { sql: '', params: [] };
     };
     // Yazmada companyId/userId enjekte et (client değerini geçersiz kıl).
     const injectTenant = async (req: Request, coll: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => {
       const uid = (req as Request & { uid?: string }).uid || '';
       if (TENANT_COLLECTIONS.has(coll)) return { ...data, companyId: await getUserCompanyId(uid) };
-      if (USER_SCOPED_COLLECTIONS.has(coll) && !('userId' in data)) return { ...data, userId: uid };
+      // KOŞULSUZ damgala (2026-08-22, P3 ile birlikte): eskiden `!('userId' in
+      // data)` şartı vardı — istemci userId'yi KENDİSİ gönderirse ona
+      // GÜVENİLİYORDU, yani bir kullanıcı başka birinin bildirim/tercih
+      // kaydını yazabilirdi. TENANT damgası (üstte) nasıl istemci companyId'sini
+      // her zaman eziyorsa, userId de öyle ezilir. Kod tabanındaki tüm meşru
+      // yazmalar zaten kendi uid'sini gönderiyor (App.tsx createNotification vb.).
+      if (USER_SCOPED_COLLECTIONS.has(coll)) return { ...data, userId: uid };
       return data;
     };
     // Mevcut doc sahibin mi? (etiketsiz legacy → erişilebilir)
-    const ownsDoc = async (req: Request, coll: string, docData: Record<string, unknown> | undefined): Promise<boolean> => {
+    /**
+     * Bir koleksiyonun SAHİPLİK denetimine tabi olup olmadığı — `ownsDoc` bu
+     * yüklem doğruyken çağrılır.
+     *
+     * NEDEN AYRI (2026-08-22 denetim bulgusu): koşul dört ayrı yerde
+     * (SET/DELETE/increment/update) elle `TENANT_COLLECTIONS.has(coll) ||
+     * USER_SCOPED_COLLECTIONS.has(coll)` diye yazılıydı. `users` ise İKİ SETTE
+     * DE YOK — bu yüzden C7/C19 için `ownsDoc` içine eklenen "users" dalı bu
+     * dört yolda HİÇ çağrılmıyordu: kiracı A'nın Admin'i
+     * DELETE /api/db/users/<B-uid> ile BAŞKA firmanın kullanıcısını
+     * silebiliyordu (aynı şekilde listeleme de filtresizdi). Yüklem tek yere
+     * alındı ve `users` açıkça dahil edildi.
+     */
+    const sahiplikDenetimli = (coll: string): boolean =>
+      TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll) || coll === 'users';
+
+    const ownsDoc = async (req: Request, coll: string, docData: Record<string, unknown> | undefined, docId?: string): Promise<boolean> => {
       const uid = (req as Request & { uid?: string }).uid || '';
       if (!docData) return true; // yeni kayıt
+      // users KİRACI-KAPSAMLI DEĞİL (TENANT_COLLECTIONS dışında) — bu yüzden
+      // eskiden buradan hep `true` dönüyor ve A kiracısının Admin'i B kiracısının
+      // kullanıcılarının rolünü/durumunu değiştirebiliyordu (denied() Admin'e
+      // users yazmayı veriyor, sahiplik kontrolü yoktu). Kural (2026-08-22):
+      //   kendi dokümanın → serbest; süper-admin → serbest;
+      //   aksi halde hedef dokümanın companyId'si SENİN kiracın olmalı.
+      // Etiketsiz (companyId'siz) bir users dokümanı BAŞKA bir kiracının
+      // sahibidir (companyId = kendi uid'i) — ona da dokunulamaz; bu yüzden
+      // burada TENANT koleksiyonlarındaki "etiketsiz → görünür" esnekliği YOK.
+      if (coll === 'users') {
+        if (docId && docId === uid) return true;
+        if (isSuperAdmin(req)) return true;
+        const hedefCid = (docData.companyId as string) || null;
+        return !!hedefCid && hedefCid === await getUserCompanyId(uid);
+      }
       if (TENANT_COLLECTIONS.has(coll)) {
         const dc = (docData.companyId as string) || null;
         return dc === null || dc === await getUserCompanyId(uid);
@@ -3612,7 +3855,7 @@ async function startServer() {
         if (!rows.length && perCompany) {
           ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]));
         }
-        if (!rows.length || !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) { res.status(404).json({ error: 'Not found.' }); return; }
+        if (!rows.length || !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) { res.status(404).json({ error: 'Not found.' }); return; }
         res.json({ data: await redactSettings(req, coll, rows[0].data as Record<string, unknown>) }); // P4-2
       } catch (e) { dbErr(e, res, 'GET', coll); }
     });
@@ -3660,7 +3903,7 @@ async function startServer() {
       try {
         const id = genDocId();
         let data = await injectTenant(req, coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
-        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, undefined); // companyId/role/status escalation engeli
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, undefined, isSuperAdmin(req)); // companyId/role/status escalation engeli
         if (coll === 'auditLog') {
           // Sahtecilik engeli: actor alanları sunucu-doğrulanmış kimlikle override (client "kim" diye yalan söyleyemez).
           const actor = reqActor(req);
@@ -3693,18 +3936,18 @@ async function startServer() {
         let data = incoming;
         let before: Record<string, unknown> = {};
         const audited = AUDITED_COLLECTIONS.has(coll);
-        const scoped = TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll);
+        const scoped = sahiplikDenetimli(coll);
         // Sahiplik: kapsamlı/audit/merge için mevcut kaydı çek
         if (req.query.merge === '1' || audited || scoped) {
           let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
           if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
           before = (rows[0]?.data as Record<string, unknown>) ?? {};
-          if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+          if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
           if (req.query.merge === '1') data = mergeDocData(before, incoming);
         }
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
         if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
-        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before); // companyId/role/status escalation engeli
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -3738,11 +3981,11 @@ async function startServer() {
         let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
-        if (rows.length && !(await ownsDoc(req, coll, before))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         let data = mergeDocData(before, patch);
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
         if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
-        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before); // companyId/role/status escalation engeli
+        if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -3771,8 +4014,8 @@ async function startServer() {
         const { rows: existing } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         const prevData = (existing[0]?.data as Record<string, unknown>) || {};
         // Sahiplik: başka firmanın kaydı silinemez
-        if (TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) {
-          if (existing.length && !(await ownsDoc(req, coll, prevData))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        if (sahiplikDenetimli(coll)) {
+          if (existing.length && !(await ownsDoc(req, coll, prevData, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         broadcastDocChange(coll, 'delete', id);
@@ -3801,7 +4044,7 @@ async function startServer() {
         // Sahiplik kontrolü
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) return res.status(404).json({ error: 'Not found.' });
-        if ((TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) {
+        if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
           return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
         }
         const floor = typeof min === 'number' && Number.isFinite(min) ? min : -1e18;
@@ -3837,7 +4080,7 @@ async function startServer() {
       try {
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) return res.status(404).json({ error: 'Not found.' });
-        if ((TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll)) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>))) {
+        if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
           return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
         }
         const upd = await docsDb.query(
@@ -4758,11 +5001,19 @@ async function startServer() {
   });
 
   // Korumalı makbuz servis — sadece kendi firmasının dosyalarına erişim.
-  app.get('/api/uploads/tahsilat/:uid/:file', requireAuth, (req: Request, res: Response) => {
+  app.get('/api/uploads/tahsilat/:uid/:file', requireAuth, async (req: Request, res: Response) => {
     const reqUid = (req as Request & { uid: string }).uid.replace(/[^A-Za-z0-9_-]/g, '');
     const uid = String(req.params.uid).replace(/[^A-Za-z0-9_-]/g, '');
     const file = String(req.params.file).replace(/[^A-Za-z0-9_.-]/g, '');
-    if (uid !== reqUid) return res.status(403).json({ error: 'Bu dosyaya erişim yetkiniz yok.' });
+    // SAHİPLİK FİRMA BAZINDA (2026-08-22 denetim bulgusu C24). Eskiden
+    // `uid !== reqUid → 403` idi: makbuzu yükleyen kişi dışında aynı firmadaki
+    // muhasebeci bile açamıyordu — oysa yukarıdaki yorum "kendi firmasının
+    // dosyaları" diyordu. Klasör uid'ye göre (yükleyen), yetki ise yükleyenin
+    // firması == isteyenin firması.
+    if (uid !== reqUid) {
+      const [sahipCid, isteyenCid] = await Promise.all([getUserCompanyId(uid), getUserCompanyId(reqUid)]);
+      if (!sahipCid || sahipCid !== isteyenCid) return res.status(403).json({ error: 'Bu dosyaya erişim yetkiniz yok.' });
+    }
     const filePath = path.join(TAHSILAT_UPLOAD_DIR, uid, file);
     // Path traversal koruması: çözülen yol klasörün içinde mi?
     if (!filePath.startsWith(path.join(TAHSILAT_UPLOAD_DIR, uid) + path.sep)) return res.status(400).json({ error: 'Geçersiz yol.' });
@@ -5070,7 +5321,7 @@ async function startServer() {
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
-      const success = ok && !r0?.IsError;
+      const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const mikroStoKod = stok.sto_kod;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
@@ -5200,7 +5451,7 @@ async function startServer() {
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
-      const success = ok && !r0?.IsError;
+      const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('CariKaydetV2', targetCollection === 'suppliers' ? 'supplier' : 'lead', firebaseId, success, cariKod, errorMsg, duration, reqActor(req));
@@ -5281,7 +5532,7 @@ async function startServer() {
       // kiracının aynı gerçek firmayla müşteri ilişkisi olması gayet olası.
       // Filtre yoksa Kiracı A'nın senkronu Kiracı B'nin cari kaydını sessizce
       // ele geçirirdi (stok import'unda bugün bulunan sınıfın aynısı).
-      const leadSnap = await adminDb.collection('leads').get();
+      const leadSnap = await tenantSnap('leads', companyId);
       const leadByKod = new Map<string, PgDocRef>();
       const leadByVkn = new Map<string, PgDocRef>();
       const leadByName = new Map<string, PgDocRef>();
@@ -5364,7 +5615,13 @@ async function startServer() {
 
       const satirlar = lineItems.map((item: Record<string, unknown>) => ({
         sip_tarih:        orderDate,
-        sip_tip:          '1',
+        // sip_tip='0' → SATIŞ (2026-08-22 denetim bulgusu C14). Eskiden '1' idi
+        // ('1' = ALIŞ/verilen sipariş). Bu uç bir MÜŞTERİ satış siparişini
+        // Mikro'ya yazıyor; okuma tarafı satışı tip 0 sayıyor
+        // (OrdersPage.tsx:209, DashboardPage.tsx:145), tip 1'i satın alma
+        // (PurchasingModule.tsx:76). '1' yazınca resmi satış Mikro'da alış
+        // siparişi oluyor VE Cetpa satış ekranında hiç görünmüyordu.
+        sip_tip:          '0',
         sip_cins:         '0',
         sip_evrakno_seri: 'T',
         sip_musteri_kod:  (order.mikroCariKod as string) || '',
@@ -5385,7 +5642,7 @@ async function startServer() {
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
-      const success = ok && !r0?.IsError;
+      const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
       const mikroEvrakNo = (md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
@@ -5422,7 +5679,22 @@ async function startServer() {
 
     // Data is scoped by companyId (= uid of the account owner) — the app's
     // inventory listener filters on it, so imports MUST set it or items are invisible.
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
+    // Snapshot'lar aşağıda zaten çekiliyor; çözücüler ONLARIN id'lerinden
+    // kurulur — aynı koleksiyonu istek başına iki kez tam gövdeyle taramamak
+    // için (2026-08-22 verimlilik bulgusu).
+    const invSnapOnce  = await tenantSnap('inventory', companyId);
+    const depoSnapOnce = await tenantSnap('warehouses', companyId);
+    const invId  = mikroIdCozucuIds(invSnapOnce.docs.map(d => d.id), companyId);
+    const depoId = mikroIdCozucuIds(depoSnapOnce.docs.map(d => d.id), companyId);
+    // ÇÖZÜCÜ, YAZILAN KOLEKSİYONUN KENDİSİNDEN kurulmalı: "eski biçimli id var mı"
+    // kararı o koleksiyonun id'lerine bakar. Aşağıda warehouseItems ve
+    // wmsLocations'a da yazılıyor; onlar için inventory/warehouses çözücüsünü
+    // kullanmak kararı YANLIŞ koleksiyona sordurur ve C11'in kapatmaya
+    // çalıştığı kiracılar-arası id çakışmasını geri getirir (code-review).
+    const whItemId = await mikroIdCozucu('warehouseItems', companyId);
+    const wmsId    = await mikroIdCozucu('wmsLocations', companyId);
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
@@ -5439,7 +5711,7 @@ async function startServer() {
       // bu kiracıya SESSİZCE devredilirdi (2026-08-11'de bulundu; en sık kullanılan
       // "Stokları İçeri Al" düğmesi). Yabancı SKU haritada yoksa YENİ doküman
       // açılır — kiracı başına ayrı kayıt, doğru multi-tenant davranışı.
-      const existingSnap = await adminDb.collection('inventory').get();
+      const existingSnap = invSnapOnce;   // yukarıda bir kez çekildi
       const existingBySku = new Map<string, PgDocRef>();
       for (const docSnap of existingSnap.docs) {
         const veri = docSnap.data() as Record<string, unknown>;
@@ -5458,7 +5730,7 @@ async function startServer() {
       // dokümanlar vardır. Yoksa harita boş kalır ve kod numarası gösterilir.
       const depoAdlari = new Map<string, string>();
       try {
-        const depoSnap = await adminDb.collection('warehouses').get();
+        const depoSnap = depoSnapOnce;    // yukarıda bir kez çekildi
         for (const d of depoSnap.docs) {
           const x = d.data() as Record<string, unknown>;
           const no = x.depoNo;
@@ -5589,7 +5861,7 @@ async function startServer() {
               ? (depoAdlari.get(yerKod) || `Depo ${yerKod}`)
               : 'Depo belirtilmemiş';
             const whItemRef = adminDb.collection('warehouseItems')
-              .doc(`mikro-${sku.replace(/[/\\]/g, '_')}`);
+              .doc(whItemId(sku.replace(/[/\\]/g, '_')));
             batch.set(whItemRef, {
               companyId,
               productName: item.name,
@@ -5618,7 +5890,7 @@ async function startServer() {
 
       // Depoları yaz: Depo sekmesi (warehouses) + Mobil WMS (wmsLocations)
       for (const [kod, itemCount] of depotCodes) {
-        await adminDb.collection('warehouses').doc(`mikro-depo-${kod}`).set({
+        await adminDb.collection('warehouses').doc(depoId(`depo-${kod}`)).set({
           companyId,
           name:      `Depo ${kod}`,
           code:      kod,
@@ -5626,7 +5898,7 @@ async function startServer() {
           itemCount,
           updatedAt: pgServerTimestamp(),
         }, { merge: true });
-        await adminDb.collection('wmsLocations').doc(`mikro-depo-${kod}`).set({
+        await adminDb.collection('wmsLocations').doc(wmsId(`depo-${kod}`)).set({
           companyId: await reqCompanyId(req),
           code:      `DEPO-${kod}`,
           aisle:     kod, rack: '00', level: '00',
@@ -5641,18 +5913,28 @@ async function startServer() {
       // (dummy seed) kategorileri kaldır. Chip listesi categories koleksiyonu +
       // envanterdeki gerçek kategorilerden türediği için bu güvenlidir.
       if (categorySet.size > 0) {
-        const catSnap = await adminDb.collection('categories').get();
+        // YALNIZ BU KİRACININ kategorileri (2026-08-22 denetim bulgusu C9).
+        // Eskiden `collection('categories').get()` TÜM kiracıların kategorilerini
+        // okuyor ve Mikro setinde olmayan HER kategoriyi siliyordu — B kiracısı
+        // import çalıştırınca A kiracısının elle açtığı kategoriler gidiyordu.
+        // Yeni kategoriler de companyId'siz yazılıyordu (herkese görünür).
+        const mevcutKats = await loadCompanyDocs('categories', companyId);
         const catBatch = adminDb.batch();
         const seen = new Set<string>();
-        for (const catDoc of catSnap.docs) {
-          const name = (catDoc.data().name as string) || '';
-          if (!categorySet.has(name)) catBatch.delete(catDoc.ref); // dummy/unused
-          else seen.add(name);
+        for (const cat of mevcutKats) {
+          const name = (cat.name as string) || '';
+          // Yalnız Mikro'dan gelmiş (source:'mikro_import') olup artık Mikro'da
+          // olmayanı sil — kullanıcının ELLE açtığı kategoriye dokunma. Eski
+          // davranış "Mikro setinde yoksa sil" idi ve elle açılanları da yutuyordu.
+          const mikroKaynakli = (cat.source as string) === 'mikro_import';
+          if (!categorySet.has(name)) {
+            if (mikroKaynakli) catBatch.delete(adminDb.collection('categories').doc(String(cat.id)));
+          } else seen.add(name);
         }
         for (const name of categorySet) {
           if (!seen.has(name)) {
             catBatch.set(adminDb.collection('categories').doc(), {
-              name, source: 'mikro_import',
+              name, source: 'mikro_import', companyId,
               createdAt: pgServerTimestamp(),
             });
           }
@@ -5684,7 +5966,8 @@ async function startServer() {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
     // Data is scoped by companyId — the app's leads listener filters on it.
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
@@ -5701,7 +5984,7 @@ async function startServer() {
       // haritaya girmez — VKN eşleşmesi özellikle riskli, iki farklı kiracının
       // aynı gerçek firmayla müşteri ilişkisi olması olası (2026-08-11'de bulundu).
       const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
-      const existingSnap = await adminDb.collection('leads').get();
+      const existingSnap = await tenantSnap('leads', companyId);
       const existingByKod = new Map<string, PgDocRef>();
       const existingByVkn = new Map<string, PgDocRef>();
       const existingByName = new Map<string, PgDocRef>();
@@ -5878,6 +6161,18 @@ async function startServer() {
     secimKolonlari?: string[];
     /** FROM'a eklenecek JOIN ifadesi. Kod içinde SABİT — istemciden gelmez. */
     fromEk?:      string;
+    /**
+     * İptal bayrağı kolonu (ör. 'cha_iptal', 'sth_iptal'). Verilirse import
+     * sonrası "iptal süpürgesi" koşar: aynı tarih penceresinde Mikro'da İPTAL
+     * EDİLMİŞ satırların GUID'leri çekilir ve yerel kopyaları silinir.
+     *
+     * NEDEN GEREKLİ (2026-08-22 denetim bulgusu C17): ekKosul iptalleri dışlar,
+     * yani bir kayıt önce geçerliyken inip SONRADAN Mikro'da iptal edilirse
+     * import onu bir daha HİÇ görmez — `merge: true` de asla silmez. Yerel kopya
+     * HAYALET olarak kalır ve ciro/KDV/stok rakamlarına sonsuza dek katılır.
+     * Filtre tek başına bu sınıfı çözmez; süpürge çözer.
+     */
+    iptalKolonu?: string;
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
   };
 
@@ -5983,11 +6278,98 @@ async function startServer() {
       let postNote: string | null = null;
       if (opts.postProcess && allRows.length > 0) postNote = await opts.postProcess(allRows, companyId);
 
+      // ── İptal süpürgesi (C17) ────────────────────────────────────────────
+      // Mikro'da SONRADAN iptal edilmiş satırların yerel hayalet kopyalarını
+      // sil. ekKosul onları çektiğimiz veriden çıkarır; bu adım daha önce
+      // çekilmiş olanları temizler. Süpürge başarısız olursa import'u
+      // düşürmüyoruz (veri zaten indi) ama özette YÜKSEK SESLE bildiriyoruz —
+      // sessizce atlarsak hayalet sorunu geri gelir ve kimse görmez.
+      let supurulen = 0; let supurgeHata: string | null = null;
+      if (opts.iptalKolonu && opts.tarihKolonu) {
+        try {
+          const anaTablo  = opts.tablo.trim().split(/\s+/)[0];
+          // TAKMA AD SOYULUR: fatura-listesi tanımı `tablo: 'CARI_HESAP_HAREKETLERI cha'`
+          // ve `tarihKolonu: 'cha.cha_tarihi'` kullanıyor. Süpürge sorgusu takma
+          // adsız FROM yazdığı için `cha.` öneki "The multi-part identifier
+          // could not be bound" hatası verirdi — süpürge her koşuda sessizce
+          // (aslında özette gürültülü) başarısız olurdu.
+          const tarihKol  = opts.tarihKolonu.includes('.')
+            ? opts.tarihKolonu.slice(opts.tarihKolonu.lastIndexOf('.') + 1)
+            : opts.tarihKolonu;
+          const iptalKol  = opts.iptalKolonu.includes('.')
+            ? opts.iptalKolonu.slice(opts.iptalKolonu.lastIndexOf('.') + 1)
+            : opts.iptalKolonu;
+          const semaCols  = await mikroKolonlar(anaTablo);
+          const guidKolon = semaCols.find(c => /_Guid$/i.test(c));
+          const semaSet = new Set(semaCols.map(c => c.toLowerCase()));
+          if (!guidKolon) {
+            supurgeHata = `${anaTablo}: GUID kolonu yok, iptal süpürgesi çalışamaz`;
+          } else if (semaCols.length && !semaSet.has(iptalKol.toLowerCase())) {
+            // CLAUDE.md: Mikro kolon adı TAHMİN ETME — şemada yoksa yüksek sesle
+            // başarısız ol, "hiç iptal yok" gibi sessiz bir sonuç üretme.
+            supurgeHata = `${anaTablo}.${iptalKol} şemada yok — iptal süpürgesi atlandı`;
+          } else {
+            const { ok: sOk, data: sData } = await mikroPost('SqlVeriOkuV2', {
+              SQLSorgu: `SELECT ${guidKolon} FROM ${anaTablo} WHERE ISNULL(${iptalKol}, 0) <> 0 `
+                + `AND ${tarihKol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`,
+            });
+            const sr0 = ((sData as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+            if (!sOk || !sr0 || sr0.IsError) {
+              supurgeHata = String(sr0?.ErrorMessage || 'Mikro iptal sorgusu başarısız');
+            } else {
+              const iptalRows = (sr0.Data ?? sr0.data ?? []) as Record<string, unknown>[];
+              // docId = GUID (yukarıdaki yazma ile AYNI türetim) — sapmaması şart.
+              const ids = iptalRows.map(r => String(r[guidKolon] ?? '')).filter(Boolean);
+
+              // SİLİNECEKLERİ TEK SORGUYLA BUL (satır başına `ref.get()` DEĞİL).
+              // Bir mali yıl penceresinde binlerce iptal satırı olabiliyor;
+              // her biri için ayrı SELECT, HTTP isteği içinde binlerce sıralı
+              // gidiş-dönüş demekti ve tamamı ZATEN SİLİNMİŞ olsa bile her
+              // import'ta tekrar koşuyordu (var-yok bilgisi ancak get() ile
+              // öğreniliyordu). Tek sorgu hem var olanı hem sahipliği süzer;
+              // etiketsiz (companyId'siz) eski kayıt yine eşleşir, yabancı
+              // kiracınınki hiç dönmez.
+              const silinecek: string[] = [];
+              if (pgPool) {
+                const PARCA = 1000;   // ANY($2) için makul parti boyu
+                for (let i = 0; i < ids.length; i += PARCA) {
+                  const { rows: bulunan } = await pgPool.query(
+                    `SELECT id FROM docs WHERE coll = $1 AND id = ANY($2::text[])
+                       AND (data->>'companyId' = $3 OR NOT (data ? 'companyId'))`,
+                    [opts.collection, ids.slice(i, i + PARCA), companyId],
+                  );
+                  for (const r of bulunan) silinecek.push(String((r as { id: string }).id));
+                }
+              } else {
+                // Firestore yedek yolu (lokal dev): toplu sorgu yok, tek tek bak.
+                for (const id of ids) {
+                  const mevcut = await adminDb.collection(opts.collection).doc(id).get();
+                  if (!mevcut.exists) continue;
+                  const dc = ((mevcut.data() as Record<string, unknown> | undefined)?.companyId as string) || '';
+                  if (dc && dc !== companyId) continue;
+                  silinecek.push(id);
+                }
+              }
+              let sBatch = adminDb.batch(); let sOps = 0;
+              for (const id of silinecek) {
+                sBatch.delete(adminDb.collection(opts.collection).doc(id)); supurulen++;
+                if (++sOps >= 450) { await sBatch.commit(); sBatch = adminDb.batch(); sOps = 0; }
+              }
+              if (sOps > 0) await sBatch.commit();
+            }
+          }
+        } catch (sErr) {
+          supurgeHata = sErr instanceof Error ? sErr.message : String(sErr);
+        }
+      }
+
       const duration = Date.now() - t0;
       const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}` +
         `${dusenKolonlar.length ? ` — şemada olmayan kolonlar atlandı: ${dusenKolonlar.join(', ')}` : ''}` +
         `${siralama !== opts.siralama ? ` — sıralama kolonu '${opts.siralama}' bulunamadı, '${siralama}' kullanıldı` : ''}` +
         `${postNote ? ` — ${postNote}` : ''}` +
+        `${supurulen ? ` — ${supurulen} iptal edilmiş kayıt silindi` : ''}` +
+        `${supurgeHata ? ` — ⚠ iptal süpürgesi başarısız: ${supurgeHata}` : ''}` +
         (guidsizSatir
           ? ` — ⚠ ${guidsizSatir} satırda GUID yok: bu satırlar her çalıştırmada MÜKERRER kayıt oluşturur`
             + `${guidsizSatir === total ? ' (TÜM satırlar — tabloda GUID kolonu yok, import tekrarlanmamalı)' : ''}`
@@ -6194,7 +6576,11 @@ async function startServer() {
     //
     // Not: import'un kendisi zaten tarih aralığıyla çalışıyor (tarihKolonu),
     // yani listelenen faturalar doğru; şüpheli olan yalnız cinsi=6 kapsamı.
-    ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))',
+    // ISNULL(cha.cha_iptal,0)=0: iptal edilmiş faturalar da geçerli fatura
+    // olarak iniyordu (2026-08-22 denetim bulgusu C17) — KDV/Ba-Bs/ciro
+    // rakamları iptal edilen her fatura kadar şişiyordu.
+    ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6)) AND ISNULL(cha.cha_iptal, 0) = 0',
+    iptalKolonu: 'cha_iptal',
     postProcess: async (rows) => {
       const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
       return `${kdvli}/${rows.length} faturada KDV eşleşti`;
@@ -6229,6 +6615,7 @@ async function startServer() {
                      'cha_vade_tarihi'],
     siralama: 'cha_tarihi DESC, cha_Guid',
     ekKosul: 'cha_iptal = 0',
+    iptalKolonu: 'cha_iptal',
     tarihKolonu: 'cha_tarihi',
     collection: 'mikroCariHareketler', label: 'Mikro Cari Hareketleri',
     postProcess: async (rows) => {
@@ -6243,6 +6630,11 @@ async function startServer() {
   // 3. Stok hareketleri → inventoryMovements  (eski: StokHareketListesiV2, V17'de YOK)
   makeMikroSqlImport({
     route: '/api/mikro/import/stok-hareket', tablo: 'STOK_HAREKETLERI', siralama: 'sth_Guid',
+    // İptal edilmiş stok hareketleri de iniyordu (C17): stok miktarı ve
+    // hareket dökümü iptal edilen her irsaliye/fatura kadar sapıyordu.
+    // Diğer STOK_HAREKETLERI sorguları zaten ISNULL(sth_iptal,0)=0 kullanıyor.
+    ekKosul: 'ISNULL(sth_iptal, 0) = 0',
+    iptalKolonu: 'sth_iptal',
     collection: 'inventoryMovements', label: 'Mikro Stok Hareketleri',
     tarihKolonu: 'sth_tarih',
     postProcess: async (rows) => {
@@ -6590,6 +6982,7 @@ async function startServer() {
     collection: 'mikroBankalar', label: 'Mikro Banka Listesi',
     postProcess: async (rows, companyId) => {
       if (!adminDb) return null;
+      const bankaId = await mikroIdCozucu('bankAccounts', companyId);
       // Alan adları çalışma anında bulunur — tahmin yok, bulunamazsa bildirilir.
       const ornek = rows[0];
       const adKey  = findKey(ornek, /ban_(adi|isim|ad)$/i) ?? findKey(ornek, /ban_.*ad/i);
@@ -6601,7 +6994,7 @@ async function startServer() {
         const guidKey = findKey(r, /_Guid$/i);
         const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
         if (!id) continue;
-        batch.set(adminDb.collection('bankAccounts').doc(`mikro-${id}`), {
+        batch.set(adminDb.collection('bankAccounts').doc(bankaId(id)), {
           companyId,
           bankName:      String(r[adKey] ?? '').trim() || `Banka ${noKey ? r[noKey] : ''}`.trim(),
           accountType:   'Vadesiz',
@@ -6628,6 +7021,7 @@ async function startServer() {
     collection: 'mikroKasalar', label: 'Mikro Kasa Listesi',
     postProcess: async (rows, companyId) => {
       if (!adminDb) return null;
+      const kasaId = await mikroIdCozucu('kasalar', companyId);
       const ornek = rows[0];
       const adKey = findKey(ornek, /kas_(adi|isim|ad)$/i) ?? findKey(ornek, /kas_.*ad/i);
       const noKey = findKey(ornek, /kas_no$/i) ?? findKey(ornek, /kas_kod/i);
@@ -6637,7 +7031,7 @@ async function startServer() {
         const guidKey = findKey(r, /_Guid$/i);
         const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
         if (!id) continue;
-        batch.set(adminDb.collection('kasalar').doc(`mikro-${id}`), {
+        batch.set(adminDb.collection('kasalar').doc(kasaId(id)), {
           companyId,
           kasaAdi:  String(r[adKey] ?? '').trim() || `Kasa ${noKey ? r[noKey] : ''}`.trim(),
           currency: 'TRY',
@@ -6673,6 +7067,7 @@ async function startServer() {
     collection: 'mikroDepolar', label: 'Mikro Depo Tanımları',
     postProcess: async (rows, companyId) => {
       if (!adminDb) return null;
+      const depoId = await mikroIdCozucu('warehouses', companyId);
       let batch = adminDb.batch(); let ops = 0, yazilan = 0;
       for (const r of rows) {
         const depoNo = Number(r.dep_no);
@@ -6685,7 +7080,7 @@ async function startServer() {
         const yetkili = String(r.dep_yetkili_email ?? '').trim();
         // Depo no'yu doc id yap: locationStocks ve QR transfer sistemi depo
         // kodlarını (1-5) kullanıyor, GUID değil — eşleşsinler.
-        batch.set(adminDb.collection('warehouses').doc(`mikro-depo-${depoNo}`), {
+        batch.set(adminDb.collection('warehouses').doc(depoId(`depo-${depoNo}`)), {
           companyId,
           name: ad || `Depo ${depoNo}`,
           depoNo,
@@ -6715,7 +7110,7 @@ async function startServer() {
       // KİRACI SINIRI (fiyat/BOM import'unda bugün bulunan sınıfın aynısı, burada
       // da vardı): companyId filtresi YOKTU — Tenant A'nın barkod senkronu Tenant
       // B'nin aynı SKU'lu ürününün barcode alanını sessizce ezebilirdi.
-      const invSnap = await adminDb.collection('inventory').get();
+      const invSnap = await tenantSnap('inventory', companyId);
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
@@ -6806,7 +7201,7 @@ async function startServer() {
       // fiyatı sessizce ezer (2026-08-11'de yakalandı). companyId'si BOŞ eski
       // kayıtlar bilerek dahil (SKU ile iyileştirme, mevcut stok import deseniyle
       // tutarlı).
-      const invSnap = await adminDb.collection('inventory').get();
+      const invSnap = await tenantSnap('inventory', companyId);
       let batch = adminDb.batch(); let ops = 0; let eslesen = 0; let yabanciAtlanan = 0;
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
@@ -6892,14 +7287,16 @@ async function startServer() {
       // Mevcut kayıtları bir kez oku: (a) YENİ dokümana zorunlu alanları varsayılanla
       // yaz (ekran çökmesin), (b) VAR OLAN dokümanda kullanıcının elle girdiği
       // durum/amortYontemi/departman gibi alanları EZME.
-      const mevcutSnap = await adminDb.collection('sabitKiymetler').get();
+      const mevcutSnap = await tenantSnap('sabitKiymetler', companyId);
+      // Aynı koleksiyonu ikinci kez ÇEKME — yukarıdaki snapshot'ın id'leri yeter.
+      const dbsId = mikroIdCozucuIds(mevcutSnap.docs.map(d => d.id), companyId);
       const mevcut = new Map(mevcutSnap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
 
       let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
       for (const r of rows) {
         const k = String(r[kod] ?? '').trim();
         if (!k) continue;
-        const docId = `mikro-${k.replace(/[/\\]/g, '_')}`;
+        const docId = dbsId(k.replace(/[/\\]/g, '_'));
         const eski = mevcut.get(docId);
         const grupHam = grup ? String(r[grup] ?? '').trim() : '';
         batch.set(adminDb.collection('sabitKiymetler').doc(docId), {
@@ -6966,6 +7363,7 @@ async function startServer() {
     label: 'Mikro Maliyet Merkezleri',
     postProcess: async (rows, companyId) => {
       if (!adminDb || !rows.length) return null;
+      const mmId = await mikroIdCozucu('maliyetMerkezleri', companyId);
       const cols = Object.keys(rows[0]);
       const kod  = kolonSec(cols, [/^som_kodu$/i, /^som_kod$/i, /^som_.*kodu$/i, /kodu$/i]);
       const ad   = kolonSec(cols, [/^som_adi$/i, /^som_isim$/i, /^som_.*(isim|adi)$/i, /(isim|adi)$/i]);
@@ -6983,7 +7381,7 @@ async function startServer() {
       for (const r of rows) {
         const k = String(r[kod] ?? '').trim();
         if (!k) continue;
-        batch.set(adminDb.collection('maliyetMerkezleri').doc(`mikro-${k.replace(/[/\\]/g, '_')}`), {
+        batch.set(adminDb.collection('maliyetMerkezleri').doc(mmId(k.replace(/[/\\]/g, '_'))), {
           companyId,
           kod: k,
           ad: ad ? String(r[ad] ?? '').trim() || k : k,
@@ -7114,6 +7512,7 @@ async function startServer() {
         const total = items.length;
         // companyId + depo listesi bir kez (döngü içinde tekrar tekrar değil).
         const companyId = await reqCompanyId(req);
+        const wiId = await mikroIdCozucu('warehouseItems', companyId);
         // Depo numaraları warehouses'tan (mikro-depo-<n>). Kart sto_yer_kod GÜVENİLMEZ
         // (hepsi HAVALIMANI); gerçek stok yeri per-depo miktarla bulunur.
         const depoSnap = await adminDb!.collection('warehouses').where('companyId', '==', companyId).get();
@@ -7240,7 +7639,7 @@ async function startServer() {
             // depoBreakdown'da (ekran her depoyu ayrı gösterir). Eski tek-depo atamasını
             // temizle (warehouseId:null) ki bayat HAVALIMANI kaydı kalmasın; depoBreakdown
             // güvenilirse onu yaz, değilse (guard) yalnız temizle.
-            batch.set(adminDb!.collection('warehouseItems').doc(`mikro-${r.it.sku.replace(/[/\\]/g, '_')}`), {
+            batch.set(adminDb!.collection('warehouseItems').doc(wiId(r.it.sku.replace(/[/\\]/g, '_'))), {
               companyId,
               quantity: r.qty,
               warehouseId: null,
@@ -7330,7 +7729,7 @@ async function startServer() {
    *  için kabul edilebilir bir ödün, aynı /api/reports/stok-fiyat-karsilastirma/:sku/detay
    *  deseniyle tutarlı.
    */
-  app.get('/api/mikro/cari-hareket/:cariKod', requireAuth, async (req: Request, res: Response) => {
+  app.get('/api/mikro/cari-hareket/:cariKod', requireAuth, requireCollectionAccess('mikroCariHareketler', 'read'), async (req: Request, res: Response) => {
     try {
       const cariKod = String(req.params['cariKod'] || '').trim();
       if (!cariKod) return res.status(400).json({ success: false, error: 'cariKod gerekli.' });
@@ -7365,7 +7764,7 @@ async function startServer() {
         }],
       }, true); // inMikro: V17 evrak kalıbı — alanlar Mikro objesi İÇİNDE
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-      const success = ok && !r0?.IsError;
+      const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
       await writeSyncLog('DekontKaydetV2', 'payment', String(hareket.cha_kod ?? 'unknown'), success, null, errorMsg, Date.now() - t0, reqActor(req));
       if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...hareket, __kaynak: 'hareket_push' }], CHA_COLS);
@@ -7531,7 +7930,8 @@ async function startServer() {
   app.post('/api/mikro/import/faturalar', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
     if (MIKRO_JUMP_SURUM < 17) {
       return res.status(501).json({
         success: false,
@@ -7625,12 +8025,21 @@ async function startServer() {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const dryRun = !!(req.body as { dryRun?: boolean })?.dryRun;
     try {
-      const snap = await adminDb.collection('inventory').get();
+      // YALNIZ ÇAĞIRANIN KİRACISI (2026-08-22 denetim bulgusu C8).
+      // Eskiden `adminDb.collection('inventory').get()` — TÜM kiracıların
+      // envanteri okunuyor ve `source` alanı olmayan HER ürün siliniyordu.
+      // Bu uç requireAdmin'li, yani herhangi bir kiracının Admin'i basabilir;
+      // basınca başka kiracıların elle girilmiş (source'suz) ürünleri de
+      // gidiyordu. Filtre artık SQL'de (loadCompanyDocs). Etiketsiz eski
+      // kayıtlar çağıranın kiracısına sayılır (legacy uyumu), ama yabancı
+      // kiracının etiketli verisi hiç okunmaz.
+      const cid = await reqCompanyId(req);
+      const docs = await loadCompanyDocs('inventory', cid);
       const dummies: { ref: PgDocRef; name: string }[] = [];
       const keptBySource = new Map<string, number>();
-      for (const d of snap.docs) {
-        const source = (d.data().source as string) || '';
-        if (!source) dummies.push({ ref: d.ref, name: (d.data().name as string) || d.id });
+      for (const d of docs) {
+        const source = (d.source as string) || '';
+        if (!source) dummies.push({ ref: adminDb.collection('inventory').doc(String(d.id)), name: (d.name as string) || String(d.id) });
         else keptBySource.set(source, (keptBySource.get(source) ?? 0) + 1);
       }
 
@@ -7819,7 +8228,7 @@ async function startServer() {
       const duration   = Date.now() - t0;
       const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0         = envelope?.[0] as Record<string, unknown> | undefined;
-      const success    = ok && !r0?.IsError;
+      const success    = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md         = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
       const mikroFaturaNo = (md?.faturaNo || md?.FaturaNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
       const ettn          = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
@@ -7943,7 +8352,7 @@ async function startServer() {
       const duration      = Date.now() - t0;
       const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0            = envelope?.[0] as Record<string, unknown> | undefined;
-      const success       = ok && !r0?.IsError;
+      const success       = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md            = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
       const irsaliyeNo    = (md?.irsaliyeNo || md?.IrsaliyeNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
       const irsaliyeEttn  = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
@@ -8000,7 +8409,12 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         SQLSorgu:
           'SELECT cha_kod, ' +
           'SUM(CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) AS bakiye ' +
-          'FROM CARI_HESAP_HAREKETLERI GROUP BY cha_kod',
+          // ISNULL(cha_iptal,0)=0 ZORUNLU (2026-08-22 denetim bulgusu C16):
+          // iptal edilmiş cari hareketler de toplama giriyordu — cari bakiyesi
+          // iptal edilen her fatura/tahsilat kadar yanlış çıkıyordu. Bu tablonun
+          // diğer okumaları (import/cari-hareket ekKosul, evrak_tip 63 listesi)
+          // zaten iptali dışlıyor; bu sorgu tek istisnaydı.
+          'FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) = 0 GROUP BY cha_kod',
       });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (!ok || !r0 || r0.IsError) {
@@ -8274,16 +8688,18 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
   // ── Mutabakat PDF Generation ─────────────────────────────────────────────────
   // GET /api/mutabakat/:leadId  — returns JSON data for client-side PDF generation
   // The client (MutabakatPanel) renders the PDF using jsPDF
-  app.get('/api/mutabakat/:leadId', requireAuth, async (req: Request, res: Response) => {
+  app.get('/api/mutabakat/:leadId', requireAuth, requireCollectionAccess('leads', 'read'), async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin başlatılamadı.' });
     try {
       const leadId = req.params.leadId as string;
       const period     = (req.query.period as string) || new Date().getFullYear().toString();
 
       // Fetch lead
-      const leadSnap = await adminDb.collection('leads').doc(leadId).get();
-      if (!leadSnap.exists) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
-      const lead = leadSnap.data() as Record<string, unknown>;
+      // KİRACI SAHİPLİĞİ (C21): leadId URL'den geliyor — başka firmanın müşteri
+      // id'siyle onun PII'si, bakiyesi ve sipariş geçmişi okunabiliyordu (IDOR).
+      // Yok VEYA yabancı → aynı 404, ki kaydın varlığı bile sızmasın.
+      const lead = await sahipliDoc(req, 'leads', leadId);
+      if (!lead) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
 
       // Fetch open orders
       const ordersSnap = await adminDb.collection('orders')
@@ -8499,7 +8915,9 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       // oluşur ve arama kutusuna yazılınca TypeError ile çöker (BOM'daki
       // `components` çökmesiyle aynı sınıf). Yalnız YENİ kayıtta '' varsayılanı
       // yaz; var olan kayda dokunma (mevcut değeri ezmeyelim).
-      const mevcutEmpSnap = await adminDb.collection('employees').get();
+      const mevcutEmpSnap = await tenantSnap('employees', companyId);
+      // Aynı koleksiyonu ikinci kez ÇEKME — yukarıdaki snapshot'ın id'leri yeter.
+      const empId = mikroIdCozucuIds(mevcutEmpSnap.docs.map(d => d.id), companyId);
       const mevcutEmpIds = new Set(mevcutEmpSnap.docs.map(d => d.id));
       let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
       for (const r of rows) {
@@ -8522,7 +8940,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
         const pos   = String(r.position ?? '').trim();
         const sal   = Number(r.salary);
         const start = String(r.startDate ?? '').trim();
-        const docId = `mikro-${kod.replace(/[/\\]/g, '_')}`;
+        const docId = empId(kod.replace(/[/\\]/g, '_'));
         const yeniKayit = !mevcutEmpIds.has(docId);
         batch.set(adminDb.collection('employees').doc(docId), {
           companyId,
@@ -8621,7 +9039,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       // Kiracı sınırı: fiyat import'unda yakalanan sızıntının aynısı — companyId'si
       // DOLU ve BAŞKA kiracıya ait kayıt eşlemede kullanılmaz.
       const companyId = await reqCompanyId(req);
-      const invSnap = await adminDb.collection('inventory').get();
+      const bomId = await mikroIdCozucu('bom', companyId);
+      const invSnap = await tenantSnap('inventory', companyId);
       const invBySku = new Map<string, { id: string; name: string }>();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
@@ -8634,7 +9053,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       let batch = adminDb.batch(); let ops = 0; let yazilan = 0;
       for (const [productSku, bilesenler] of gruplar) {
         const urun = invBySku.get(productSku);
-        batch.set(adminDb.collection('bom').doc(`mikro-${productSku.replace(/[/\\]/g, '_')}`), {
+        batch.set(adminDb.collection('bom').doc(bomId(productSku.replace(/[/\\]/g, '_'))), {
           companyId,
           productName: urun?.name || productSku,
           productSku,
@@ -9048,7 +9467,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid });
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0       = envelope?.[0] as Record<string, unknown> | undefined;
-      const isOk     = ok && !r0?.IsError;
+      const isOk     = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('GelenFaturalarKabulV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, reqActor(req));
@@ -9080,7 +9499,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       });
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0       = envelope?.[0] as Record<string, unknown> | undefined;
-      const isOk     = ok && !r0?.IsError;
+      const isOk     = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await writeSyncLog('GelenFaturalarRedV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, reqActor(req));
@@ -9180,12 +9599,13 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     const creds = await getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
     const t0 = Date.now();
     try {
       const contacts = await parasutGetAll(creds, 'contacts');
       // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
-      const leadSnap = await adminDb.collection('leads').get();
+      const leadSnap = await tenantSnap('leads', companyId);
       const byParasutId = new Map<string, PgDocRef>();
       const byVkn = new Map<string, PgDocRef>();
       const byName = new Map<string, PgDocRef>();
@@ -9248,7 +9668,8 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
     const creds = await getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
     const t0 = Date.now();
     try {
       const products = await parasutGetAll(creds, 'products');
@@ -9257,7 +9678,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
       // olarak çakışabilir (aynı fiziksel ürünü satan iki toptancı); bu uç ise
       // name/unit/vatRate/stockLevel/price/prices'ın HEPSİNİ güncelliyordu —
       // barkod/fiyattan daha geniş bir etki alanı.
-      const invSnap = await adminDb.collection('inventory').get();
+      const invSnap = await tenantSnap('inventory', companyId);
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
@@ -9591,21 +10012,49 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
   // Pure Firebase aggregation — no Mikro needed
 
   /** GET /api/aging — AR aging buckets for all customers (or ?customerId=X for one) */
-  app.get('/api/aging', requireAuth, async (req: Request, res: Response) => {
+  app.get('/api/aging', requireAuth, requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin not initialised' });
     try {
       const customerId = req.query.customerId as string | undefined;
-      let q = adminDb.collection('orders')
-        .where('status', 'in', ['Pending', 'Processing', 'Shipped'])
-        .orderBy('createdAt', 'desc');
-      if (customerId) q = q.where('leadId', '==', customerId) as typeof q;
-      const snap = await q.limit(500).get();
+      // KİRACI FİLTRESİ SORGUDA, DÖNGÜDE DEĞİL (2026-08-22 denetim bulgusu C21).
+      //
+      // Bu uç eskiden TÜM firmaların açık siparişlerini (müşteri adı, tutar)
+      // döndürüyordu. İlk düzeltme filtreyi döngüye koymuştu — ama `.limit(500)`
+      // filtreden ÖNCE çalıştığı için 500'lük pencere bütün kiracılar arasında
+      // paylaşılıyordu: ikinci kiracının hacmi arttığında A'nın ESKİ açık
+      // alacakları pencereden düşüyor ve A'nın yaşlandırma raporu sessizce
+      // eksik çıkıyordu (gecikmiş alacak olduğundan az görünür). tenantSnap
+      // kiracıyı SQL'de süzer; 500 tavanı artık yalnız çağıranın kendi
+      // siparişlerine uygulanır.
+      const cidAging = await reqCompanyId(req);
+      const ACIK_DURUMLAR = ['Pending', 'Processing', 'Shipped'];
+      // Durum + tavan SQL'DE: kiracı düzeltmesi yapılırken eski sorgunun
+      // `status IN (...) ORDER BY createdAt DESC LIMIT 500` kısmı düşmüştü ve
+      // uç, kiracının TÜM sipariş geçmişini (her satırın lineItems gövdesiyle)
+      // Node'a çekip JS'te süzüyordu (code-review bulgusu). Tavan yine 500 ama
+      // artık kiracı-içi ve DB tarafında.
+      const tumu = await tenantSnap('orders', cidAging, {
+        durumlar: ACIK_DURUMLAR, siralaAlanDesc: 'createdAt', tavan: 500,
+      });
       const now = Date.now();
+      const zaman = (v: unknown): number => {
+        const t = (v as Timestamp)?.toMillis?.();
+        if (typeof t === 'number') return t;
+        if (typeof v === 'number') return v;
+        const ms = Date.parse(String(v ?? ''));
+        return Number.isFinite(ms) ? ms : now;
+      };
+      // Durum/tavan yukarıda SQL'de uygulandı; burada yalnız isteğe bağlı
+      // müşteri süzgeci ve createdAt'in üç biçimini (Timestamp/ISO/epoch)
+      // doğru karşılaştıran kesin sıralama kalıyor.
+      const secili = tumu.docs
+        .filter(d => !customerId || d.data().leadId === customerId)
+        .sort((a, b) => zaman(b.data().createdAt) - zaman(a.data().createdAt));
       const buckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
       const rows: Record<string, unknown>[] = [];
-      for (const doc of snap.docs) {
+      for (const doc of secili) {
         const o = doc.data() as Record<string, unknown>;
-        const createdMs = (o.createdAt as Timestamp)?.toMillis?.() ?? now;
+        const createdMs = zaman(o.createdAt);
         const ageD = Math.floor((now - createdMs) / 86400000);
         const amount = Number(o.totalPrice ?? o.totalAmount ?? 0);
         if (ageD <= 30)      buckets.current += amount;
@@ -9665,7 +10114,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
 
   // POST /api/email/send — generic send (used by UI, requires auth)
   // Body: { to, subject, html }
-  app.post('/api/email/send', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/email/send', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
     const body = validate(EmailSendSchema, req.body, res);
     if (!body) return;
     const result = await sendEmail(body.to, body.subject, body.html, body.from, body.replyTo);
@@ -9896,7 +10345,7 @@ app.post('/api/mikro/pull/bakiye', requireAuth, requireMfaVerified, async (req: 
    * Rate-limited to 3 req/s to stay inside Resend free tier.
    * Returns: { sent, failed, notConfigured? }
    */
-  app.post('/api/email/bulk-campaign', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/email/bulk-campaign', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
     const { subject, body, recipients, campaignId } =
       req.body as { subject: string; body: string; recipients: { name: string; email: string }[]; campaignId?: string };
 
@@ -11841,14 +12290,15 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
     const t0 = Date.now();
     try {
       const items = await dynamicsGetAll(token, 'items');
       // KİRACI SINIRI: "Mikro/Paraşüt deseni" yorumu doğru — o desendeki aynı
       // eksik filtre buraya da kopyalanmış. GTIN/barkod gibi SKU'lar kiracılar
       // arasında çakışabilir; düzeltme Paraşüt/barkod/fiyat ile aynı.
-      const invSnap = await adminDb.collection('inventory').get();
+      const invSnap = await tenantSnap('inventory', companyId);
       const bySku = new Map<string, PgDocRef>();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
@@ -11900,12 +12350,13 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     const token = await getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    const companyId = (req as Request & { uid: string }).uid;
+    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    const companyId = await reqCompanyId(req);
     const t0 = Date.now();
     try {
       const customers = await dynamicsGetAll(token, 'customers');
       // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
-      const leadSnap = await adminDb.collection('leads').get();
+      const leadSnap = await tenantSnap('leads', companyId);
       const byDynId = new Map<string, PgDocRef>();
       const byVkn = new Map<string, PgDocRef>();
       const byName = new Map<string, PgDocRef>();

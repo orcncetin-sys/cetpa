@@ -5,6 +5,8 @@
  * geçilir. DB/IO içermez → birim testle kilitlenebilir (rbac.test.ts).
  */
 
+import { USER_SCOPED_COLLECTIONS } from './collections';
+
 export type AppRole = 'Admin' | 'Manager' | 'Sales' | 'Logistics' | 'Accounting'
   | 'HR' | 'Purchasing' | 'B2B' | 'Dealer' | 'Legal' | 'Corporate' | 'Quality';
 
@@ -256,6 +258,7 @@ export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean
   if (!role) return false;
   if (role === 'Admin') return true; // Admin her şeye yetkili
 
+
   // Append-only: güncelleme/silme kimseye yok (Admin hariç, yukarıda döndü)
   if (APPEND_ONLY_COLLECTIONS.has(coll)) {
     if (op === 'read') return ADMIN_ROLES.includes(role); // Okuma yalnız Admin/Manager
@@ -273,6 +276,28 @@ export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean
       return rules[op].includes(role);
     }
   }
+
+  // Kullanıcı-kapsamlı koleksiyonlar (userPrefs, notifications, aiConsents,
+  // userOnboarding): kişinin KENDİ verisi — her doğrulanmış rol okur/yazar.
+  // Sahiplik burada değil sunucuda zorlanır (injectTenant userId'yi damgalar,
+  // tenantWhere yalnız kendi kayıtlarını döndürür, ownsDoc yabancıyı reddeder).
+  //
+  // NEDEN (2026-08-22 denetim bulgusu P3→CONFIRMED): bu koleksiyonlar
+  // COLLECTION_PERMISSIONS'ta yoktu ve aşağıdaki zero-trust fallback yazmayı
+  // engelliyordu — Admin olmayan TÜM roller için karanlık mod, bildirim
+  // tercihleri, "son bakılanlar", hızlı not ve bildirim-okundu işareti
+  // SESSİZCE kayboluyordu (istemci .catch(() => {}) ile yutuyor). Bu, RBAC
+  // Zero-Trust sessiz-403 sınıfının (bkz. hafıza: 22 koleksiyon) devamıydı.
+  //
+  // KONUM ÖNEMLİ (2026-08-22, ikinci denetim turu): bu kontrol eskiden
+  // APPEND_ONLY / ADMIN_ONLY / COLLECTION_PERMISSIONS bloklarının ÜSTÜNDEYDİ
+  // ve koşulsuz `true` döndüğü için o tablolara kullanıcı-kapsamlı bir
+  // koleksiyon için kural yazmak SESSİZCE ETKİSİZ olurdu — ölü kural tuzağı.
+  // (Ölçüm: bugün kesişim boş, yani davranış değişmiyor; değişen tek şey,
+  // yarın "aiConsents append-only olsun" denildiğinde kuralın gerçekten
+  // uygulanacak olması.) Artık AÇIK kurallar önce, bu ise VARSAYILAN olarak
+  // en sonda.
+  if (USER_SCOPED_COLLECTIONS.includes(coll)) return true;
 
   // Eğer açıkça tanımlanmamış bir koleksiyon ise (güvenlik için fallback):
   // Staff rolleri okuyabilir, B2B/Dealer sadece okuyabilir.

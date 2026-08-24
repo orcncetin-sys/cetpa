@@ -1226,7 +1226,25 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                   </label>
                   {makbuzUrl ? (
                     <div className="flex items-center justify-between gap-2 apple-input px-3 py-2 text-sm">
-                      <a href={makbuzUrl} target="_blank" rel="noopener noreferrer" className="text-brand font-medium truncate hover:underline">
+                      {/* <a href> Bearer başlığı TAŞIMAZ: uç requireAuth'lu olduğu için
+                          doğrudan açmak HER ZAMAN 401 veriyordu — makbuz hiç açılmıyordu
+                          (2026-08-22 denetim bulgusu C24). Kimlikli fetch + blob. */}
+                      <a href={makbuzUrl} target="_blank" rel="noopener noreferrer" className="text-brand font-medium truncate hover:underline"
+                        onClick={async (e) => {
+                          if (!makbuzUrl.startsWith('/api/')) return; // harici/eski URL ise tarayıcıya bırak
+                          e.preventDefault();
+                          try {
+                            const r = await authFetch(makbuzUrl);
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                            const blob = await r.blob();
+                            const u = URL.createObjectURL(blob);
+                            window.open(u, '_blank', 'noopener');
+                            setTimeout(() => URL.revokeObjectURL(u), 60_000);
+                          } catch (err) {
+                            console.error('[makbuz] açılamadı:', err);
+                            showToast(currentLanguage === 'tr' ? 'Makbuz açılamadı.' : 'Could not open receipt.', 'error');
+                          }
+                        }}>
                         {currentLanguage === 'tr' ? '✓ Makbuz yüklendi — görüntüle' : '✓ Receipt uploaded — view'}
                       </a>
                       <button onClick={() => setMakbuzUrl('')} className="text-gray-300 hover:text-red-500 shrink-0">

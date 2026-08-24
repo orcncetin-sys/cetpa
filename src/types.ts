@@ -232,6 +232,15 @@ export interface Lead {
   priceTier?: string;
   voiceNotes?: VoiceNote[];
   nextFollowUpDate?: unknown;
+  /**
+   * Mikro cari kodu. GERÇEK alan adı `mikroCariKod` — cari import bunu yazıyor
+   * (server.ts, Mikro cari upsert'i). `cariKod` tipte duruyordu ama hiçbir
+   * yazıcı onu doldurmuyor: e-Fatura/e-İrsaliye gönderiminde `lead.cariKod`
+   * daima undefined kalıp cari kodu müşteri ADINA düşüyordu (2026-08-22
+   * denetim bulgusu C15). Eski adı geriye dönük uyumluluk için bıraktım.
+   */
+  mikroCariKod?: string;
+  /** @deprecated Yazılmıyor — `mikroCariKod` kullan. */
   cariKod?: string;
 }
 

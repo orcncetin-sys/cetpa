@@ -331,6 +331,13 @@ class StreamManager {
     return Array.from(m.entries()).map(([id, data]) => ({ id, data }));
   }
 
+  /** Tek dokümanın önbellek kopyası (yoksa undefined) — iyimser yazma geri
+   *  alması (P4) yazmadan ÖNCEKİ hali saklamak için kullanır. */
+  getDoc(coll: string, id: string): Record<string, unknown> | undefined {
+    const d = this.cache.get(coll)?.get(id);
+    return d ? { ...d } : undefined;
+  }
+
   isReady(coll: string): boolean { return this.ready.has(coll); }
 
   subscribe(coll: string, listener: CollListener): () => void {
@@ -610,18 +617,42 @@ export async function addDoc(coll: CollectionReference, data: DocData): Promise<
   return { type: 'doc', coll: coll.path, id, path: `${coll.path}/${id}` };
 }
 
+/**
+ * İyimser yazmanın GERİ ALINMASI (2026-08-22 denetim bulgusu P4→CONFIRMED).
+ *
+ * setDoc/updateDoc önce yerel önbelleğe yazar (UI anında tepki versin diye),
+ * sonra API'yi çağırır. Eskiden API hatasında (403 RBAC, ağ kopması, 500)
+ * iyimser değer önbellekte KALIYORDU: kullanıcı kaydedilmemiş veriyi
+ * "kaydedildi" olarak görüyor, sayfa yenilenene/SSE tam kare gelene kadar
+ * yalan sürüyordu. Artık hata anında yazmadan önceki hal geri konur ve hata
+ * çağırana fırlatılır (çağıranların catch/toast akışı zaten var).
+ */
 export async function setDoc(ref: DocumentReference, data: DocData, opts?: { merge?: boolean }): Promise<void> {
+  const onceki = stream.getDoc(ref.coll, ref.id);
   stream.applyLocal(ref.coll, opts?.merge ? 'merge' : 'set', ref.id, data);
-  const res = await api('PUT', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}?merge=${opts?.merge ? '1' : '0'}`, data);
-  stream.applyLocal(ref.coll, opts?.merge ? 'merge' : 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
+  try {
+    const res = await api('PUT', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}?merge=${opts?.merge ? '1' : '0'}`, data);
+    stream.applyLocal(ref.coll, opts?.merge ? 'merge' : 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
+  } catch (e) {
+    if (onceki) stream.applyLocal(ref.coll, 'set', ref.id, onceki);
+    else stream.applyLocal(ref.coll, 'delete', ref.id);
+    throw e;
+  }
 }
 
 export async function updateDoc(ref: DocumentReference, data: DocData): Promise<void> {
   // Optimistic: UI sunucu yanıtını beklemeden güncellenir (toggle'lar anında
   // tepki verir); yanıt gelince sunucunun birleştirdiği nihai veri yazılır.
+  const onceki = stream.getDoc(ref.coll, ref.id);
   stream.applyLocal(ref.coll, 'merge', ref.id, data);
-  const res = await api('PATCH', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}`, data);
-  stream.applyLocal(ref.coll, 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
+  try {
+    const res = await api('PATCH', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}`, data);
+    stream.applyLocal(ref.coll, 'set', ref.id, (res.data as Record<string, unknown>) ?? data);
+  } catch (e) {
+    if (onceki) stream.applyLocal(ref.coll, 'set', ref.id, onceki);
+    else stream.applyLocal(ref.coll, 'delete', ref.id);
+    throw e;
+  }
 }
 
 export async function deleteDoc(ref: DocumentReference): Promise<void> {

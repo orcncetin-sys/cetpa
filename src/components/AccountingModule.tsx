@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import Papa from 'papaparse';
+import { parseTRNumber, parseTRDate } from '../utils/trParse';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
 import DekontModal from './DekontModal';
@@ -711,42 +713,72 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (!file) return;
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (ext === 'csv') {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const text = ev.target?.result as string;
-          const lines = text.split('\n').filter(l => l.trim());
-          const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-          let imported = 0;
-          lines.slice(1).forEach(line => {
-            const cols = line.split(',').map(c => c.replace(/"/g, '').trim());
-            const entry: Record<string, string> = {};
-            headers.forEach((h, i) => { entry[h] = cols[i] || ''; });
-            const amount = parseFloat(entry['tutar'] || entry['amount'] || entry['borc'] || entry['alacak'] || '0');
-            if (!isNaN(amount) && amount !== 0) {
+      // BANKA EKSTRESİ CSV → MUHASEBE FİŞİ (2026-08-22'de üç hata düzeltildi)
+      //
+      // 1) TUTAR (C1, KRİTİK): düz `parseFloat` kullanılıyordu.
+      //    parseFloat('1.234,56') === 1.234 ve parseFloat('5.000') === 5 —
+      //    yani Türk biçimli her ekstre satırı muhasebeye 1000× KÜÇÜK
+      //    giriyordu. Artık `parseTRNumber` (src/utils/trParse.ts, testli).
+      // 2) CSV BÖLME: `line.split(',')` alıntı içindeki ondalık virgülü de
+      //    ayraç sayıp `"1.234,56"` alanını sayının ortasından bölüyordu;
+      //    üstelik sonraki tüm kolonlar bir sağa kayıyordu. Artık PapaParse
+      //    (projede zaten var, BankStatementImportModal onu kullanıyor).
+      // 3) ÇİFT TARAFLI KAYIT (C2): fiş tek taraflı yazılıyordu
+      //    (borc=X, alacak=0). Elle giriş formu `|borç-alacak| > 0.01` ise
+      //    reddediyor — yani import, formun dayattığı muhasebe kuralını
+      //    ihlal ediyordu: mizan asla denk gelmiyordu ve gelir tablosundaki
+      //    `e.alacak ?? e.borc` ifadesi alacak=0 SAYISAL olduğu için
+      //    ??'yi tetiklemiyor, tahsilatı 0 TL gelir sayıyordu.
+      Papa.parse<Record<string, string>>(file, {
+        header: true, skipEmptyLines: true, encoding: 'UTF-8',
+        transformHeader: (h: string) => h.replace(/"/g, '').trim().toLowerCase(),
+        complete: (sonuc) => {
+          try {
+            let imported = 0; let atlanan = 0;
+            for (const entry of sonuc.data) {
+              const rawTutar = entry['tutar'] || entry['amount'] || entry['borc'] || entry['borç'] || entry['alacak'] || '';
+              const amount = parseTRNumber(rawTutar);
+              if (!Number.isFinite(amount) || amount === 0) { if (rawTutar.trim()) atlanan++; continue; }
               const kategori = amount > 0 ? 'Tahsilat' : 'Ödeme';
+              const mutlak = Math.abs(amount);
+              const borcHesap   = amount > 0 ? '102 - Bankalar' : '320 - Satıcılar';
+              const alacakHesap = amount > 0 ? '600 - Yurt İçi Satışlar' : '102 - Bankalar';
               addDoc(collection(db, 'journalEntries'), {
-                date: entry['tarih'] || entry['date'] || format(new Date(), 'yyyy-MM-dd'),
-                fiş: entry['fiş'] || entry['belge'] || `IMP-${Date.now()}-${imported}`,
+                date: parseTRDate(entry['tarih'] || entry['date'] || format(new Date(), 'yyyy-MM-dd')),
+                fiş: entry['fiş'] || entry['fis'] || entry['belge'] || `IMP-${Date.now()}-${imported}`,
                 aciklama: entry['açıklama'] || entry['aciklama'] || entry['description'] || entry['işlem'] || t.importedLabel,
-                debitHesap: amount > 0 ? '102 - Bankalar' : '320 - Satıcılar',
-                alacakHesap: amount > 0 ? '600 - Yurt İçi Satışlar' : '102 - Bankalar',
-                borc: amount > 0 ? Math.abs(amount) : 0,
-                alacak: amount < 0 ? Math.abs(amount) : 0,
+                debitHesap: borcHesap,
+                alacakHesap,
+                // ÇİFT TARAFLI: borç == alacak == tutar. Elle giriş formunun
+                // dayattığı kuralın aynısı; hangi hesabın borç hangisinin
+                // alacak olduğu yukarıdaki debitHesap/alacakHesap'ta duruyor.
+                borc: mutlak,
+                alacak: mutlak,
                 kdvOran: 0,
                 kategori,
                 createdAt: serverTimestamp(),
+              }).catch(err => {
+                // Sessiz yutma YOK: yazma başarısız olursa kullanıcı görsün,
+                // yoksa "N kayıt aktarıldı" der ama kayıt yoktur.
+                console.error('[banka CSV] fiş yazılamadı:', err);
+                showToast(t.csvError, 'error');
               });
               imported++;
             }
-          });
-          setBankImportStatus(t.importedCount(imported));
-          showToast(t.csvSuccess(imported), 'success');
-        } catch {
-          showToast(t.csvError, 'error');
-        }
-      };
-      reader.readAsText(file, 'UTF-8');
+            setBankImportStatus(t.importedCount(imported));
+            const notlar = [
+              t.csvSuccess(imported),
+              atlanan ? (currentLanguage === 'tr'
+                ? `${atlanan} satır okunamadı (tutar çözülemedi)`
+                : `${atlanan} rows unreadable (amount could not be parsed)`) : '',
+            ].filter(Boolean).join(' — ');
+            showToast(notlar, atlanan ? 'error' : 'success');
+          } catch {
+            showToast(t.csvError, 'error');
+          }
+        },
+        error: () => showToast(t.csvError, 'error'),
+      });
     } else if (ext === 'pdf') {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -2067,7 +2099,20 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     return d.getMonth() + 1 === gelirMonth && d.getFullYear() === gelirYear;
   };
   const mikroGelirTutar = mikroFaturalar.filter(f => f.yon === 'giden' && mikroDonemFiltresi(f.tarih)).reduce((s, f) => s + f.matrah, 0);
-  const toplamGelir = gelirEntries.reduce((s, e) => s + (e.alacak ?? e.borc), 0) + mikroGelirTutar; // gelir = alacak (kredi) + Mikro
+  /**
+   * Bir gelir fişinin tutarı. `alacak ?? borc` DEĞİL, `alacak || borc`.
+   *
+   * NEDEN (2026-08-22 denetim bulgusu C2): `??` yalnız null/undefined'da
+   * devreye girer, SAYISAL 0'da girmez. 2026-08-22 öncesi banka CSV import'u
+   * fişleri TEK TARAFLI yazıyordu (borc=X, alacak=0) — o kayıtlar için
+   * `alacak ?? borc` → 0 dönüyor ve aktarılmış tahsilatlar gelir tablosunda
+   * 0 TL görünüyordu. Import artık dengeli yazıyor (borç=alacak) ama
+   * VERİTABANINDAKİ ESKİ KAYITLAR öyle kaldı; `||` onları da kurtarır.
+   * Dengeli fişte borç=alacak olduğundan `||` doğru sonucu değiştirmez.
+   */
+  const fisTutari = (e: { alacak?: number; borc?: number }) => e.alacak || e.borc || 0;
+
+  const toplamGelir = gelirEntries.reduce((s, e) => s + fisTutari(e), 0) + mikroGelirTutar; // gelir = alacak (kredi) + Mikro
   const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);               // gider = borç (debit) — yalnız native, bkz. yukarıdaki not
   const netKar = toplamGelir - toplamGider;
 
@@ -2079,7 +2124,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       const d = new Date(e.date);
       return d.getMonth() + 1 === month && d.getFullYear() === gelirYear;
     });
-    const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + (e.alacak ?? e.borc), 0);
+    const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + fisTutari(e), 0);
     const gider = mEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8')).reduce((s, e) => s + e.borc, 0);
     const mikroGelirAy = mikroFaturalar
       .filter(f => f.yon === 'giden' && (() => { const d = new Date(f.tarih); return d.getMonth() + 1 === month && d.getFullYear() === gelirYear; })())
@@ -2091,7 +2136,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Gelir breakdown by account
   const gelirBreakdown: Record<string, number> = {};
   if (mikroGelirTutar > 0) gelirBreakdown['600 - Yurt İçi Satışlar (Mikro)'] = mikroGelirTutar;
-  gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + (e.alacak ?? e.borc); });
+  gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + fisTutari(e); });
   const giderBreakdown: Record<string, number> = {};
   giderEntries.forEach(e => { giderBreakdown[e.debitHesap] = (giderBreakdown[e.debitHesap] || 0) + e.borc; });
 
@@ -2122,7 +2167,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const kdvOranBreakdown: Record<string, { matrah: number; kdv: number }> = {};
   kdvFilteredEntries.filter(e => e.alacakHesap.startsWith('6') && (e.kdvOran ?? 0) > 0).forEach(e => {
     const oran = e.kdvOran ?? 0;
-    const matrah = e.alacak ?? e.borc;
+    const matrah = fisTutari(e);
     if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
     kdvOranBreakdown[oran].matrah += matrah;
     kdvOranBreakdown[oran].kdv += matrah * (oran / 100);
