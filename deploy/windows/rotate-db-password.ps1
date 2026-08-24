@@ -35,7 +35,9 @@ function Warn($m){ Write-Host "    $m" -ForegroundColor Yellow }
 if (-not (Test-Path $EnvPath)) { throw ".env bulunamadi: $EnvPath" }
 
 # -- 1) Mevcut baglanti dizesini oku ----------------------------------------
-$satirlar = Get-Content $EnvPath
+# UTF-8 OKU: PS 5.1'in varsayilani Windows-1252'dir ve UTF-8 Turkce
+# karakterleri bozuk okur; sonra ayni bozuk hali geri yazardik.
+$satirlar = [System.IO.File]::ReadAllLines($EnvPath, [System.Text.UTF8Encoding]::new($false))
 $dbSatir  = $satirlar | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1
 if (-not $dbSatir) { throw "DATABASE_URL bulunamadi: $EnvPath" }
 $url = ($dbSatir -replace '^DATABASE_URL=', '').Trim().Trim('"').Trim("'")
@@ -79,8 +81,38 @@ $yeniUrl = "postgresql://${pgUser}:${p1}@${pgHost}:${pgPort}/$pgDb"
 $yeniSatirlar = $satirlar | ForEach-Object {
   if ($_ -match '^DATABASE_URL=') { "DATABASE_URL=$yeniUrl" } else { $_ }
 }
-$yeniSatirlar | Set-Content -Encoding ASCII $EnvPath
+# .env UTF-8 (BOM'suz) YAZILIR - ASCII DEGIL (2026-08-24 hatasi).
+# `Set-Content -Encoding ASCII` ASCII disi her karakteri '?' yapar. .env icinde
+# Turkce metin bulunan degerler (sirket adi, e-posta sablonu, adres) sessizce
+# BOZULUR - dosya "calisir" gorunur ama degerler kalicidir sekilde kaybolur.
+# PowerShell 5.1'in `-Encoding UTF8`'i BOM YAZAR; BOM ilk satirin anahtarina
+# yapisip `KEY` yerine `\ufeffKEY` yapar ve o degisken okunamaz. Bu yuzden
+# .NET ile BOM'suz UTF-8 yaziyoruz.
+[System.IO.File]::WriteAllLines($EnvPath, [string[]]$yeniSatirlar, (New-Object System.Text.UTF8Encoding($false)))
 Ok '.env guncellendi'
+
+# DOGRULA: DATABASE_URL DISINDAKI HER SATIR AYNEN KALMALI.
+# Bu kontrol, kodlama hatasiyla veri kaybina karsi son savunma. Bir kez
+# `-Encoding ASCII` ile yazip .env'deki Turkce degerleri '?' yapmistik; dosya
+# "calisir" gorunuyordu ama degerler kalici olarak kaybolmustu. Artik yazdiktan
+# sonra geri okuyup karsilastiriyoruz; sapma varsa YEDEKTEN GERI ALIP duruyoruz.
+$geriOkunan = [System.IO.File]::ReadAllLines($EnvPath, [System.Text.UTF8Encoding]::new($false))
+$oncekiDigerleri = @($satirlar     | Where-Object { $_ -notmatch '^DATABASE_URL=' })
+$sonrakiDigerleri = @($geriOkunan  | Where-Object { $_ -notmatch '^DATABASE_URL=' })
+$bozuk = $false
+if ($oncekiDigerleri.Count -ne $sonrakiDigerleri.Count) { $bozuk = $true }
+else {
+  for ($i = 0; $i -lt $oncekiDigerleri.Count; $i++) {
+    if ($oncekiDigerleri[$i] -cne $sonrakiDigerleri[$i]) { $bozuk = $true; break }
+  }
+}
+if ($bozuk) {
+  Copy-Item $yedek $EnvPath -Force
+  throw ".env yazimi diger satirlari DEGISTIRDI (kodlama sorunu) - yedekten geri alindi: $yedek. " +
+        "VERITABANI PAROLASI DEGISTI; .env'deki DATABASE_URL'i yeni parolayla elle guncelle."
+}
+Ok '.env dogrulandi (DATABASE_URL disindaki satirlar aynen korundu)'
+
 
 # -- 5) Servisi yeniden baslat ve DOGRULA -----------------------------------
 Info "Servis yeniden baslatiliyor: $ServiceName"

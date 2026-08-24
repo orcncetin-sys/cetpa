@@ -115,7 +115,9 @@ $stagingDbUrl = if ($pgPass) {
 $stagingEnv = Join-Path $StagingDir '.env'
 if (-not (Test-Path $stagingEnv)) {
   Info 'Deriving staging .env from production .env'
-  $lines = Get-Content $prodEnvPath | Where-Object { $_ -notmatch '^(DATABASE_URL|PORT|APP_URL)=' }
+  # UTF-8 OKU (bkz. yazma tarafindaki gerekce).
+  $lines = [System.IO.File]::ReadAllLines($prodEnvPath, [System.Text.UTF8Encoding]::new($false)) |
+    Where-Object { $_ -notmatch '^(DATABASE_URL|PORT|APP_URL)=' }
   # Parolayi TASIYAN baglanti dizesi - onceki surum parolasiz yaziyordu ve
   # staging servisi veritabanina hic baglanamazdi.
   $lines += "DATABASE_URL=$stagingDbUrl"
@@ -123,7 +125,14 @@ if (-not (Test-Path $stagingEnv)) {
   $lines += "APP_URL=http://localhost:$StagingPort"
   # Backups from staging would overwrite real backups - disable outright.
   $lines += 'RCLONE_REMOTE='
-  $lines | Set-Content -Encoding ASCII $stagingEnv
+  # .env UTF-8 (BOM'suz) YAZILIR - ASCII DEGIL (2026-08-24 hatasi).
+  # `Set-Content -Encoding ASCII` ASCII disi her karakteri '?' yapar. .env icinde
+  # Turkce metin bulunan degerler (sirket adi, e-posta sablonu, adres) sessizce
+  # BOZULUR - dosya "calisir" gorunur ama degerler kalicidir sekilde kaybolur.
+  # PowerShell 5.1'in `-Encoding UTF8`'i BOM YAZAR; BOM ilk satirin anahtarina
+  # yapisip `KEY` yerine `\ufeffKEY` yapar ve o degisken okunamaz. Bu yuzden
+  # .NET ile BOM'suz UTF-8 yaziyoruz.
+  [System.IO.File]::WriteAllLines($stagingEnv, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
   Ok "Wrote $stagingEnv (DATABASE_URL -> $DbName, backups disabled)"
 }
 
