@@ -2220,6 +2220,67 @@ cron.schedule('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
  */
 let diskUyariSon: { seviye: string; t: number } | null = null;
 
+/**
+ * DÖNDÜRÜLMÜŞ LOG DOSYALARINI BUDA — alanı deploy beklemeden geri al.
+ *
+ * NEDEN VAR (2026-08-24, üçüncü disk kesintisi):
+ * Log büyümesine karşı iki önlem vardı ve İKİSİ DE alanı geri veremiyordu:
+ *   1. NSSM `AppRotateFiles` dosyayı 50 MB'ta yeniden ADLANDIRIR — eskisini
+ *      SİLMEZ. Yani 1 tane 1,6 GB'lık dosya yerine sınırsız sayıda 50 MB'lık
+ *      dosya birikir. Daha yavaş dolar ama yine dolar.
+ *   2. Logları silen TEK yer `deploy.ps1` — yani alan ancak DEPLOY ederken
+ *      geri gelir. Disk dolduğunda ise deploy'un kendisi SSH adımında düşüyor
+ *      (sunucu yanıt veremiyor), dolayısıyla temizlik tam gerektiği anda
+ *      çalışamıyor. Kısır döngü: dolu disk → deploy yok → temizlik yok → dolu disk.
+ *      Bu döngüyü bugüne kadar hep ELLE yeniden başlatma kırdı.
+ * Bekçi de yalnız UYARIYORDU (e-posta), hiçbir şey silmiyordu.
+ *
+ * Bu işlev döngüyü içeriden kırar: bütçeyi aşan DÖNDÜRÜLMÜŞ dosyaları
+ * eskiden yeniye siler. AKTİF dosyaya (service-err.log / service-out.log)
+ * ASLA dokunmaz — NSSM onları açık tutuyor; silmek alanı geri vermez, yalnız
+ * canlı günlüğü kaybettirir.
+ */
+const LOG_DIZINI     = process.env.CETPA_LOG_DIR || 'C:\\cetpa\\logs';
+const LOG_BUTCE_MB   = Number(process.env.CETPA_LOG_BUDGET_MB || 500);
+
+async function donmusLoglariBuda(): Promise<{ silinen: number; kazanilanMB: number; hata?: string }> {
+  try {
+    if (!fs.existsSync(LOG_DIZINI)) return { silinen: 0, kazanilanMB: 0 };
+    const adlar = await fs.promises.readdir(LOG_DIZINI);
+    const aday: Array<{ yol: string; boyut: number; mtime: number }> = [];
+    for (const ad of adlar) {
+      // AKTİF log'u KORU: NSSM aktif dosyaları tam olarak bu iki adla tutar;
+      // döndürülmüşler ada zaman damgası ekler (service-err-2026....log).
+      if (ad === 'service-err.log' || ad === 'service-out.log') continue;
+      if (!/\.log$/i.test(ad)) continue;
+      const yol = path.join(LOG_DIZINI, ad);
+      try {
+        const st = await fs.promises.stat(yol);
+        if (st.isFile()) aday.push({ yol, boyut: st.size, mtime: st.mtimeMs });
+      } catch { /* okunamayanı atla */ }
+    }
+    const toplam = aday.reduce((t, a) => t + a.boyut, 0);
+    const butce  = LOG_BUTCE_MB * 1024 * 1024;
+    if (toplam <= butce) return { silinen: 0, kazanilanMB: 0 };
+
+    aday.sort((a, b) => a.mtime - b.mtime);   // en ESKİ önce gider
+    let kalan = toplam, silinen = 0, kazanilan = 0;
+    for (const a of aday) {
+      if (kalan <= butce) break;
+      try {
+        await fs.promises.unlink(a.yol);
+        kalan -= a.boyut; kazanilan += a.boyut; silinen++;
+      } catch { /* kilitliyse atla — bir sonraki turda dener */ }
+    }
+    if (silinen) {
+      console.warn(`[log-budama] ${silinen} döndürülmüş log silindi, ${(kazanilan / 1e6).toFixed(0)} MB geri alındı.`);
+    }
+    return { silinen, kazanilanMB: kazanilan / 1e6 };
+  } catch (e) {
+    return { silinen: 0, kazanilanMB: 0, hata: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: number; freePct: number; seviye: string; postaDenendi: boolean; hata?: string }> {
   const bos = { freeGB: 0, totalGB: 0, freePct: 0, seviye: 'BILINMIYOR', postaDenendi: false };
   try {
@@ -2228,24 +2289,43 @@ async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: 
     const freeGB  = (st.bavail * st.bsize) / 1e9;
     const freePct = totalGB > 0 ? (freeGB / totalGB) * 100 : 0;
 
-    const gercekSeviye = freePct < 8 ? 'KRITIK' : freePct < 15 ? 'UYARI' : 'OK';
+    // ÖNCE TEMİZLE, SONRA KARAR VER: bekçi eskiden yalnız uyarıyordu ve
+    // temizlik deploy'a bağlıydı (bkz. donmusLoglariBuda gerekçesi). Artık
+    // sıkışma anında alanı KENDİ geri alıyor; hâlâ yetersizse uyarı gider.
+    let budama = { silinen: 0, kazanilanMB: 0 } as { silinen: number; kazanilanMB: number; hata?: string };
+    let freeGB2 = freeGB, freePct2 = freePct;
+    if (freePct < 15) {
+      budama = await donmusLoglariBuda();
+      if (budama.silinen > 0) {
+        try {
+          const st2 = await fs.promises.statfs(process.platform === 'win32' ? 'C:\\' : '/');
+          freeGB2  = (st2.bavail * st2.bsize) / 1e9;
+          freePct2 = totalGB > 0 ? (freeGB2 / totalGB) * 100 : 0;
+        } catch { /* yeniden ölçülemezse ilk ölçümle devam */ }
+      }
+    }
+
+    const gercekSeviye = freePct2 < 8 ? 'KRITIK' : freePct2 < 15 ? 'UYARI' : 'OK';
     const seviye = zorla ? 'TEST' : gercekSeviye;
-    if (!zorla && gercekSeviye === 'OK') { diskUyariSon = null; return { freeGB, totalGB, freePct, seviye: gercekSeviye, postaDenendi: false }; }
+    if (!zorla && gercekSeviye === 'OK') { diskUyariSon = null; return { freeGB: freeGB2, totalGB, freePct: freePct2, seviye: gercekSeviye, postaDenendi: false }; }
 
     // Aynı seviyeyi 6 saatte bir kez bildir. (zorla=true bunu atlar — test yolu)
     const simdi = Date.now();
     if (!zorla && diskUyariSon && diskUyariSon.seviye === seviye && simdi - diskUyariSon.t < 6 * 3600_000) {
-      return { freeGB, totalGB, freePct, seviye, postaDenendi: false };
+      return { freeGB: freeGB2, totalGB, freePct: freePct2, seviye, postaDenendi: false };
     }
     if (!zorla) diskUyariSon = { seviye, t: simdi };
 
-    const mesaj = `Disk ${seviye}: boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(1)})`;
+    const mesaj = `Disk ${seviye}: boş ${freeGB2.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct2.toFixed(1)})`
+      + (budama.silinen ? ` — ${budama.silinen} eski log silindi, ${budama.kazanilanMB.toFixed(0)} MB geri alındı`
+         + ` (öncesi: %${freePct.toFixed(1)})` : '')
+      + (budama.hata ? ` — ⚠ log budama hatası: ${budama.hata}` : '');
     console.error('[disk-nobetcisi]', mesaj);
 
     const resendKey = process.env.RESEND_API_KEY;
     const recipient = process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL;
     if (!resendKey || !recipient) {
-      return { freeGB, totalGB, freePct, seviye, postaDenendi: false,
+      return { freeGB: freeGB2, totalGB, freePct: freePct2, seviye, postaDenendi: false,
                hata: `posta yolu yok (RESEND_API_KEY=${resendKey ? 'var' : 'YOK'}, alıcı=${recipient ? 'var' : 'YOK'})` };
     }
 
@@ -2276,9 +2356,9 @@ async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; totalGB: 
       const govde = await postaRes.text().catch(() => '');
       const hata = `Resend HTTP ${postaRes.status}: ${govde.slice(0, 300)}`;
       console.error('[disk-nobetcisi] posta REDDEDİLDİ —', hata);
-      return { freeGB, totalGB, freePct, seviye, postaDenendi: false, hata };
+      return { freeGB: freeGB2, totalGB, freePct: freePct2, seviye, postaDenendi: false, hata };
     }
-    return { freeGB, totalGB, freePct, seviye, postaDenendi: true };
+    return { freeGB: freeGB2, totalGB, freePct: freePct2, seviye, postaDenendi: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn('[disk-nobetcisi] çalışamadı:', msg);
