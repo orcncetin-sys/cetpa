@@ -65,5 +65,32 @@ foreach ($t in @('C:\Windows\Temp', $env:TEMP, 'C:\Windows\Minidump', 'C:\Window
   }
 }
 
+Write-Host '=== 7) GORUNMEYEN ALAN (silinmis-ama-acik dosya tanitici avi) ===' -ForegroundColor Cyan
+# 2026-08-24 kesintisinin ariza sinifi: deploy, NSSM hala calisirken aktif log
+# dosyasini siliyordu. Windows'ta NSSM loglari FILE_SHARE_DELETE ile actigi icin
+# silme BASARILI olur; dosya dizinden duser ama tanitici onu hayatta tutar.
+# Servis gorunmeyen dosyaya yazmaya devam eder, hic rotasyona girmez ve sinirsiz
+# buyur. Diskte 100 GB eksik ama hicbir klasorde gorunmez.
+# ASAGIDAKI FARK BUYUKSE (>5 GB) suphelen: gorunen dosyalarin toplami ile
+# surucunun gercekten kullandigi alan uyusmuyordur.
+try {
+  $drive = Get-PSDrive -Name C
+  $usedGB = [math]::Round($drive.Used/1GB,2)
+  $visible = (Get-ChildItem 'C:\' -Recurse -File -Force -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum).Sum
+  $visibleGB = [math]::Round(($visible/1GB),2)
+  $fark = [math]::Round($usedGB - $visibleGB, 2)
+  Write-Host ("  surucu kullanimi : {0} GB" -f $usedGB)
+  Write-Host ("  gorunen dosyalar : {0} GB" -f $visibleGB)
+  if ($fark -gt 5) {
+    Write-Host ("  FARK             : {0} GB  <-- SUPHELI" -f $fark) -ForegroundColor Red
+    Write-Host '  Muhtemelen silinmis-ama-acik tutulan dosya var. Dogrulamak icin:' -ForegroundColor Yellow
+    Write-Host '    handle.exe -a -u | findstr /i ".log"   (Sysinternals handle.exe)' -ForegroundColor Yellow
+    Write-Host '  Cozum: alani tutan servisi yeniden baslat (nssm restart cetpa).' -ForegroundColor Yellow
+  } else {
+    Write-Host ("  FARK             : {0} GB  (normal - VSS/MFT/sistem dosyalari)" -f $fark) -ForegroundColor Green
+  }
+} catch { Write-Host ('  olculemedi: ' + $_.Exception.Message) }
+
 Write-Host ''
 Write-Host 'Bitti. En buyuk kalemi bildir - bir dahaki sefere tahmin etmeyelim.' -ForegroundColor Green

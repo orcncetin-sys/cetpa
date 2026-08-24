@@ -19,12 +19,31 @@ Info "git fetch + reset --hard origin/$Branch"
 git fetch origin $Branch --quiet
 git reset --hard "origin/$Branch"
 
-Info 'Cleaning up logs to free disk space (deleting all files in C:\cetpa\logs)...'
-# Wrapped in try/catch: with $ErrorActionPreference='Stop' a Get-ChildItem list
-# error would otherwise abort the whole deploy. Log cleanup must NEVER break deploy.
+Info 'Cleaning up ROTATED logs (active files are left alone on purpose)...'
+# NEVER DELETE THE ACTIVE LOG WHILE THE SERVICE RUNS.
+#
+# This block used to delete EVERY file in C:\cetpa\logs - and it runs here, ~50
+# lines BEFORE 'Stop-Service cetpa'. NSSM opens service-err.log / service-out.log
+# with FILE_SHARE_DELETE (it must, for online rotation), so Remove-Item SUCCEEDS:
+# the file is unlinked from the directory but NSSM's handle keeps it alive.
+# The service then keeps appending to a file that:
+#   - does not appear in Get-ChildItem (the logs folder reads as "0 GB"),
+#   - still consumes disk space,
+#   - NEVER rotates (NSSM rotates by renaming the VISIBLE file; an unlinked file
+#     is never found, so AppRotateBytes stops applying),
+#   - grows without any bound until the process exits.
+# That is how the disk filled to 200/200 GB with nothing large visible anywhere,
+# and why a reboot alone freed ~105 GB on 2026-08-24 without deleting a thing.
+# It recurred because every deploy re-created the orphaned handle.
+#
+# Fix: only remove ROTATED files (NSSM appends a timestamp to their name). Those
+# are closed, so deleting them actually reclaims space. The two active files stay
+# bounded by NSSM rotation (50 MB each) and are pruned hourly by the app's
+# donmusLoglariBuda() once rotated.
 try {
     if (Test-Path "C:\cetpa\logs") {
         Get-ChildItem -Path "C:\cetpa\logs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne 'service-err.log' -and $_.Name -ne 'service-out.log' } |
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
 } catch {
