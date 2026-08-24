@@ -7227,7 +7227,19 @@ async function startServer() {
   makeMikroSqlImport({
     route: '/api/mikro/import/fiyat',
     tablo: 'STOK_SATIS_FIYAT_LISTELERI',
-    siralama: 'sfiyat_stokkod',
+    // SIRALAMA TEKİL OLMALI (2026-08-24 denetim bulgusu P6 → doğrulandı).
+    //
+    // Sayfalama `ORDER BY <siralama> OFFSET n ROWS FETCH NEXT 500` ile yapılıyor.
+    // SQL Server'da ORDER BY tekil DEĞİLSE sayfalar arası sıra GARANTİ EDİLMEZ:
+    // aynı satır iki sayfada çıkabilir, başka bir satır hiç çıkmayabilir.
+    // `sfiyat_stokkod` tekil değil — bu tablonun PK'sı
+    // (sfiyat_stokkod, sfiyat_listesirano) ve her SKU'nun 4 fiyat kademesi için
+    // 4 satırı var. Bir SKU'nun kademeleri sayfa sınırına denk geldiğinde bazı
+    // kademeler MÜKERRER inip bazıları HİÇ İNMİYORDU — yani ürün fiyatı sessizce
+    // yanlış/eksik güncelleniyordu. Diğer 11 import zaten _Guid ile sıralıyor;
+    // bu tablonun GUID'i (sfiyat_Guid) secimKolonlari'nda var ama sıralamada
+    // kullanılmıyordu. Tam PK ile sıralamak tekilliği garanti eder.
+    siralama: 'sfiyat_stokkod, sfiyat_listesirano',
     collection: 'mikroFiyatListeleri',
     label: 'Mikro Satış Fiyat Listeleri',
     // Kolon adları çalışma anında şemaya karşı süzülür (olmayan ad import'u öldürmez).
