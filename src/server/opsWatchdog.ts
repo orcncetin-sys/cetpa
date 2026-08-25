@@ -14,6 +14,7 @@
  * olurlardi. Getter ile her cagride guncel deger okunur ve veritabani
  * baslatma koduna HIC dokunmadan ayrilma yapilabildi.
  */
+import type { AdminDbLike } from './adminDbTypes.js';
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
@@ -24,7 +25,8 @@ export interface OpsDeps {
   // Sorgu sonucu server.ts'teki kullanimla ayni gevseklikte: satirlar dinamik
   // JSONB gövdeleri tasiyor, dar bir tip burada yalnizca cast gurultusu uretir.
   getPgPool: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> } | null;
-  getAdminDb: () => any;
+  /** `any` DEGIL: yapisal tip, tip denetimini korur (bkz. adminDbTypes.ts). */
+  getAdminDb: () => AdminDbLike | null;
   pgServerTimestamp: () => any;
   getMikroCreds: () => Promise<unknown>;
   /** Kur onbellegi - tazelik kontrolu icin. Sonradan atanan bir `let`, getter. */

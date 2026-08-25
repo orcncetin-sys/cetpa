@@ -14,12 +14,14 @@
  * duruyordu ama ayri bir sorumluluk; server.ts'te birakildi ve blok iki
  * aralik halinde (1827-1933 + 1965-2357) alindi.
  */
+import type { AdminDbLike } from './adminDbTypes.js';
 import { createHash } from 'crypto';
 
 export interface MikroDeps {
   /** `settings/mikro` dokumanini okumak icin. server.ts'te SONRADAN atanan bir
    *  `let` oldugundan deger degil GETTER geciyor (bkz. opsWatchdog.ts). */
-  getAdminDb: () => any;
+  /** `any` DEGIL: yapisal tip, tip denetimini korur (bkz. adminDbTypes.ts). */
+  getAdminDb: () => AdminDbLike | null;
 }
 
 let D: MikroDeps;
