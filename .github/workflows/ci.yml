@@ -148,25 +148,16 @@ jobs:
           [ "$kod" = "200" ] || exit 1
 
       # HTTP 200 SADECE "boot etti" der. 2026-08-24'te canliyi kiran hata da
-      # 200 dondururken olmustu: rota grubu express.json'dan ONCE kaydedilince
+      # 200 dondururken olusmustu: rota grubu express.json'dan ONCE kaydedilince
       # uygulama saglikli gorunur ama o grubun TUM POST uclarinda req.body
-      # undefined olur. Ayirt edici (kimlik gerektirmez): korumali bir POST'a
-      # BOZUK JSON gonder -> zincir saglamsa 400/500, kirilmissa 401.
-      # Her ayrilan grup KENDI cagrisiyla kaydoldugu icin grup basina sondalanir.
+      # undefined olur. Gercek ayirt edici ve neden grup basina sondalandigi
+      # deploy/windows/probe-chain.ps1'in basinda anlatiliyor.
+      #
+      # Sonda STAGING checkout'undan calisir (C:\cetpa-staging): boylece
+      # sondanin KENDISI de bu dalla birlikte gelir ve main'e girmeden once
+      # burada denenmis olur.
       - name: Ara katman zinciri (grup basina bozuk-JSON sondasi)
         if: steps.kurulu.outputs.hazir == 'true'
         run: |
-          hata=0
-          for u in /api/mikro/gelen-fatura/kabul /api/tracking/fedex \
-                   /api/ops/watchdog/run /api/dynamics/export/siparis \
-                   /api/superadmin/tenants/test/status; do
-            kod=$(ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
-              "powershell -Command \"try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Method POST -ContentType 'application/json' -Body '{bozuk' http://localhost:5174$u).StatusCode } catch { \$_.Exception.Response.StatusCode.value__ }\"" | tr -d '\r')
-            case "$kod" in
-              400|500) echo "  OK   $u -> $kod (govde ayristirma zincirde)" ;;
-              401|403) echo "  FAIL $u -> $kod ARA KATMAN ZINCIRI KIRIK: bu grup express.json'dan ONCE kayitli, tum POST uclari bozuk"; hata=1 ;;
-              404)     echo "  FAIL $u -> 404 rota deploy'da YOK (grup hic kaydolmamis)"; hata=1 ;;
-              *)       echo "  FAIL $u -> beklenmedik yanit: $kod"; hata=1 ;;
-            esac
-          done
-          exit $hata
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -ExecutionPolicy Bypass -File C:\\cetpa-staging\\deploy\\windows\\probe-chain.ps1 -Port 5174"
