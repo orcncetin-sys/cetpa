@@ -155,12 +155,33 @@ if (-not (Get-Service 'cetpa-staging' -ErrorAction SilentlyContinue)) {
 }
 
 Start-Service cetpa-staging
-Start-Sleep -Seconds 8
-try {
-  $r = Invoke-WebRequest "http://localhost:$StagingPort/api/health" -UseBasicParsing -TimeoutSec 20
-  Ok "Staging is UP: http://localhost:$StagingPort (HTTP $($r.StatusCode))"
-} catch {
-  Write-Host "[staging] health check FAILED - see $StagingDir\logs\service-err.log" -ForegroundColor Red
+
+# SOGUK BASLANGIC TEK DENEMEYLE OLCULMEZ (2026-08-25).
+# Onceki surum 8 sn bekleyip TEK istek atiyordu ve 'FAILED' yaziyordu; oysa
+# uygulama acilisinda veritabani tablolarini kuruyor, Mikro ayna semasini
+# hazirliyor ve ilk derlemeyi yukluyor - bu uretimde de saniyeler suruyor.
+# 'Hazir degil' ile 'bozuk' ayni gorunmemeli: 12 x 5 sn yeniden dene, sonra
+# HATA SEBEBINI dogrudan log'dan goster (kullanici ayrica aramasin).
+$saglikli = $false
+for ($i = 1; $i -le 12; $i++) {
+  try {
+    $r = Invoke-WebRequest "http://localhost:$StagingPort/api/health" -UseBasicParsing -TimeoutSec 10
+    if ($r.StatusCode -eq 200) { $saglikli = $true; break }
+  } catch { Start-Sleep -Seconds 5 }
+}
+if ($saglikli) {
+  Ok "Staging is UP: http://localhost:$StagingPort"
+} else {
+  Write-Host "[staging] health check FAILED (60 sn beklendi)" -ForegroundColor Red
+  $svc = (Get-Service cetpa-staging -ErrorAction SilentlyContinue).Status
+  Write-Host "  servis durumu: $svc" -ForegroundColor Yellow
+  $errLog = Join-Path $StagingDir 'logs\service-err.log'
+  if (Test-Path $errLog) {
+    Write-Host "  --- $errLog (son 25 satir) ---" -ForegroundColor Yellow
+    Get-Content $errLog -Tail 25 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+  } else {
+    Write-Host "  $errLog HENUZ YOK - servis hic baslamamis olabilir." -ForegroundColor Yellow
+  }
 }
 
 Write-Host ''
