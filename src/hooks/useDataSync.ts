@@ -1,3 +1,31 @@
+/* ============================================================================
+ * !! BU DOSYA KULLANILMIYOR — HICBIR YERDEN IMPORT EDILMIYOR (2026-08-24) !!
+ * ============================================================================
+ *
+ * Dogrulama:  grep -rn "useDataSync" src/ --include='*.ts' --include='*.tsx'
+ * Sonuc: yalnizca YORUMLARDA geciyor (App.tsx, RiskPanel, CRMPage,
+ * SatinAlmaPage, lazyCollections). Tek bir `import` yok.
+ *
+ * CANLI dinleyiciler `src/App.tsx` icindeki satir-ici effect'lerde (53 adet
+ * onSnapshot). Bu dosya, dinleyicileri hook'a tasima refactor'unun YARIM
+ * KALMIS hali: yazildi ama hicbir zaman baglanmadi.
+ *
+ * BU NEDEN TEHLIKELI:
+ *   - 2026-08-24 tarih denetiminde buradaki `sortByCreatedAt` ve gecikmis
+ *     siparis hesabi duzeltildi; ikisi de CANLIDA CALISMIYOR. Ayni duzeltmeler
+ *     App.tsx'teki canli kopyaya da yapildi - ama bu dosyanin varligi
+ *     "duzeltildi" yanilgisi uretiyor.
+ *   - `vehicles` ve `locationStocks` dinleyicileri YALNIZ burada vardi.
+ *     Sonuc: QR Depo/Arac Transfer sistemi (arac ekleme basariyla yaziyor ama
+ *     liste hic dolmuyor) aylarca sessizce olu kaldi. 2026-08-24'te o iki
+ *     dinleyici App.tsx'e eklendi.
+ *
+ * KARAR SENIN: ya bu hook App.tsx'e baglanip satir-ici effect'ler kaldirilmali
+ * (asil hedef buydu), ya da dosya SILINMELI. Ucuncu secenek - oldugu gibi
+ * birakmak - yukaridaki yanilgiyi uretmeye devam eder.
+ * ============================================================================
+ */
+
 import { useEffect, useRef } from 'react';
 import { zamanMs } from '../utils/zaman';
 import {

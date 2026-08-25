@@ -25,6 +25,17 @@ export default function StockCountModal({
   onError
 }: StockCountModalProps) {
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, number>>({});
+  // YALNIZ SAYISAL girdiler gercek bir degisikliktir. Taslak, kullanici alani
+  // bosaltinca gecici olarak bos dize tutabiliyor (girdinin geri sicramamasi
+  // icin); o deger ne sayaca ne de veritabanina gitmeli. Bir kez burada suzulur,
+  // asagidaki UC yer de bunu kullanir - filtreyi cagri basina tekrarlamak,
+  // birini atlayip DB'ye bos dize yazmaya acik kapi birakir.
+  const gecerliTaslak = React.useMemo(
+    () => Object.entries(stockCountDraft).filter(
+      ([, v]) => typeof v === 'number' && Number.isFinite(v),
+    ) as Array<[string, number]>,
+    [stockCountDraft],
+  );
   const [stockCountSaving, setStockCountSaving] = useState(false);
   const [stockCountSearch, setStockCountSearch] = useState('');
 
@@ -55,9 +66,9 @@ export default function StockCountModal({
                 className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand"
               />
             </div>
-            {Object.keys(stockCountDraft).length > 0 && (
+            {gecerliTaslak.length > 0 && (
               <p className="text-[10px] text-amber-600 font-bold mt-2">
-                ⚠ {Object.keys(stockCountDraft).length} {currentLanguage === 'tr' ? 'üründe değişiklik var' : 'items have pending changes'}
+                ⚠ {gecerliTaslak.length} {currentLanguage === 'tr' ? 'üründe değişiklik var' : 'items have pending changes'}
               </p>
             )}
           </div>
@@ -83,9 +94,19 @@ export default function StockCountModal({
                         min={0}
                         value={draft}
                         onChange={e => {
-                          const v = parseInt(e.target.value, 10);
+                          // BOS ALAN != "taslak yok" (2026-08-24 React denetimi).
+                          // Eskiden bosaltinca parseInt('') NaN donuyor, taslak
+                          // giris SILINIYOR ve `value={draft}` aninda mevcut stok
+                          // degerine geri sicriyordu: kullanici rakamlari silip
+                          // yeni bir deger YAZAMIYORDU. Artik bos dize, "kullanici
+                          // yaziyor" durumu olarak korunuyor. Bu deger DB'ye
+                          // GITMEMELI: asagidaki `gecerliTaslak` hem sayaci hem
+                          // kaydetmeyi yalnizca gercek sayilarla besliyor.
+                          const ham = e.target.value;
                           setStockCountDraft(prev => {
                             const next = { ...prev };
+                            if (ham === '') { next[item.id] = '' as unknown as number; return next; }
+                            const v = parseInt(ham, 10);
                             if (!isNaN(v) && v !== current) next[item.id] = v;
                             else delete next[item.id];
                             return next;
@@ -108,15 +129,15 @@ export default function StockCountModal({
                 {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
               </button>
               <button
-                disabled={Object.keys(stockCountDraft).length === 0 || stockCountSaving}
+                disabled={gecerliTaslak.length === 0 || stockCountSaving}
                 onClick={async () => {
-                  if (Object.keys(stockCountDraft).length === 0) return;
+                  if (gecerliTaslak.length === 0) return;
                   setStockCountSaving(true);
                   try {
-                    await Promise.all(Object.entries(stockCountDraft).map(([id, qty]) =>
+                    await Promise.all(gecerliTaslak.map(([id, qty]) =>
                       updateDoc(doc(db, 'inventory', id), { stockLevel: qty, updatedAt: serverTimestamp() })
                     ));
-                    onSuccess(currentLanguage === 'tr' ? `${Object.keys(stockCountDraft).length} ürün güncellendi ✓` : `${Object.keys(stockCountDraft).length} items updated ✓`);
+                    onSuccess(currentLanguage === 'tr' ? `${gecerliTaslak.length} ürün güncellendi ✓` : `${gecerliTaslak.length} items updated ✓`);
                     setStockCountDraft({});
                     onClose();
                   } catch (e) {
@@ -129,7 +150,7 @@ export default function StockCountModal({
                 className="apple-button-primary text-sm px-5 disabled:opacity-40"
               >
                 {stockCountSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                {currentLanguage === 'tr' ? `Kaydet (${Object.keys(stockCountDraft).length})` : `Save (${Object.keys(stockCountDraft).length})`}
+                {currentLanguage === 'tr' ? `Kaydet (${gecerliTaslak.length})` : `Save (${gecerliTaslak.length})`}
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Save, Eye, Settings2, Check, FileText,
@@ -69,8 +69,24 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
     return unsub;
   }, []);
 
-  // Sync draft when switching type or when template loads
+  // Taslagi YALNIZ tur degisince veya o turun sablonu ILK YUKLENDIGINDE kur.
+  //
+  // Eskiden bagimlilik dizisi [activeType, templates] idi ve `templates` her
+  // onSnapshot geri cagrisinda YENI bir nesne olarak uretiliyor. Yani
+  // documentTemplates koleksiyonuna gelen HERHANGI bir degisiklik (baska
+  // kullanicinin kaydi, kendi setDoc'unun sunucu yaniti, SSE yeniden
+  // baglanmasindaki init) effect'i tetikliyor ve kullanicinin O SIRADA
+  // YAZMAKTA OLDUGU taslagi kayitli surume geri donduruyordu - girilen metin
+  // sessizce kayboluyordu (2026-08-24 React denetimi).
+  //
+  // Cozum: yuklenmis sablonu bir kez uygula, sonra kullanicinin duzenlemesine
+  // KARISMA. Kaydedilmemis degisiklik varken gelen uzak guncelleme yok
+  // sayilir; kullanici kaydedince zaten kendi surumu yaziliyor.
+  const uygulananRef = useRef<string | null>(null);
   useEffect(() => {
+    const anahtar = `${activeType}:${templates[activeType] ? 'yuklu' : 'yok'}`;
+    if (uygulananRef.current === anahtar) return;   // bu tur icin zaten kuruldu
+    uygulananRef.current = anahtar;
     setDraft(templates[activeType] ?? defaultTemplate(activeType));
   }, [activeType, templates]);
 

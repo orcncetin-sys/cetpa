@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'motion/react';
 import BankStatementImportModal from '../components/BankStatementImportModal';
 import BankBalanceReport from '../components/BankBalanceReport';
@@ -332,12 +332,26 @@ export default function MuhasebePage(props: Props) {
     return () => { iptal = true; };
   }, [muhasebeTab, userRole, currentLanguage]);
 
+  // AYNI ANDA TEK ISTEK GECERLI (2026-08-24 React denetimi).
+  //
+  // Eskiden iptal bayragi yoktu: kullanici A SKU'suna tiklayip (Mikro uclari
+  // yavas, istek ucusta) modali kapatip hemen B'ye tiklayinca, B'nin yaniti
+  // once basiliyor, ardindan A'nin GEC gelen yaniti onun ustune yaziyordu.
+  // Modal basliginda B'nin kodu yazarken tabloda A urununun hareketleri
+  // gorunuyordu - kullanici yanlis urunun fiyat gecmisine bakiyordu.
+  // Ayni dosyadaki 319. satirdaki effect zaten `iptal` desenini dogru
+  // kullaniyor; bu handler'da eksikti.
+  const fkDetayIstekRef = useRef(0);
   const fkAcDetay = (sku: string) => {
+    const istekNo = ++fkDetayIstekRef.current;
     setFkDetaySku(sku); setFkDetayLoading(true); setFkDetaySatirlari([]);
     authFetch(`/api/reports/stok-fiyat-karsilastirma/${encodeURIComponent(sku)}/detay`)
       .then(r => r.json())
-      .then(json => { if (json.success) setFkDetaySatirlari(json.satirlar); })
-      .finally(() => setFkDetayLoading(false));
+      .then(json => {
+        if (istekNo !== fkDetayIstekRef.current) return;   // bayat yanit - yok say
+        if (json.success) setFkDetaySatirlari(json.satirlar);
+      })
+      .finally(() => { if (istekNo === fkDetayIstekRef.current) setFkDetayLoading(false); });
   };
 
   return (

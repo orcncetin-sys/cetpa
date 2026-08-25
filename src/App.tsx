@@ -1,4 +1,5 @@
 import KpiCurrencyToggle from './components/KpiCurrencyToggle';
+import { useShallow } from 'zustand/react/shallow';
 import { zamanMs } from './utils/zaman';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
@@ -143,7 +144,7 @@ import {
   type InventoryMovement,
   type Consignment,
   type StockDiscrepancy,
-  type Warehouse,
+  type Warehouse, Vehicle, LocationStock,
   type RouteStop,
   type LucaConfig,
   type MikroConfig,
@@ -524,6 +525,13 @@ function AppContent() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('tr');
   const [darkMode, setDarkMode] = useState(false); // synced from userPrefs/{uid} on login
   const darkModeFromServerRef = React.useRef(false); // listener'dan gelen değeri işaretler (echo-write engeli)
+  // GÜNCEL darkMode'u ref'te tut (2026-08-24 React denetimi). userPrefs
+  // dinleyicisinin bağımlılık dizisi darkMode'u İÇERMİYOR, dolayısıyla oradaki
+  // closure mount anındaki değerde (false) donuyordu. Karşılaştırma bayat
+  // değere göre yapılınca echo-koruma bayrağı yanlışlıkla açık kalıyor ve
+  // kullanıcının BİR SONRAKİ tercih değişikliği sunucuya hiç yazılmıyordu —
+  // tema kalıcı olmuyordu. Ref her zaman güncel olduğu için karşılaştırma doğru.
+  const darkModeRef = React.useRef(darkMode);
 
   // Onay diyalogunun "Vazgeç/Cancel" metni React ağacının dışındaki bir modülde
   // (lib/confirm.ts) üretiliyor — dili oraya bildirmezsek İngilizce kullanan
@@ -556,6 +564,7 @@ function AppContent() {
 
   React.useEffect(() => {
     const html = document.documentElement;
+    darkModeRef.current = darkMode;          // ref'i güncel tut (bkz. tanımı)
     if (darkMode) { html.classList.add('dark'); } else { html.classList.remove('dark'); }
     // Listener'dan gelen değer için Firestore'a echo-yazma yapma (yarış/loop engeli).
     if (darkModeFromServerRef.current) { darkModeFromServerRef.current = false; return; }
@@ -723,36 +732,132 @@ function AppContent() {
       return next;
     });
   };
+  // SEÇİCİ ŞART (2026-08-24 React denetimi): `useDataStore()` seçicisiz
+  // çağrılırsa zustand TÜM store'a abone olur — 160 alanın herhangi biri
+  // değişince bu kök bileşen ve altındaki tüm ağaç yeniden render olur.
+  // Mikro import'u/SSE akışı sırasında saniyede onlarca `change` olayı gelir
+  // (inventoryMovements, notifications…) ve kullanıcı o sırada form doldurup
+  // tabloda gezinirken arayüz donuklaşır.
+  //
+  // useShallow ile yalnız AŞAĞIDA OKUNAN 56 alan izlenir; geri kalan 104
+  // alanın değişimi artık render tetiklemez. Setter'lar sabit referans
+  // olduğundan sığ karşılaştırmayı bozmaz; state dizileri güncellenince
+  // kimlikleri değişir, yani gerçekten gerektiğinde render olur.
   const {
-    leads, setLeads,
-    orders, setOrders,
-    shipments, setShipments,
-    inventory, setInventory,
-    appQuotations, setAppQuotations,
-    warehouses, setWarehouses,
-    vehicles, setVehicles,
+    leads,
+    setLeads,
+    orders,
+    setOrders,
+    shipments,
+    setShipments,
+    inventory,
+    setInventory,
+    appQuotations,
+    setAppQuotations,
+    warehouses,
+    setWarehouses,
+    vehicles,
+    setVehicles,
     locationStocks,
-    inventoryMovements, setInventoryMovements,
-    consignments, setConsignments,
-    stockDiscrepancies, setStockDiscrepancies,
-    employees, setEmployees,
-    payrolls, setPayrolls,
-    commissionRules, setCommissionRules,
-    suppliers, setSuppliers,
-    userSubscription, setUserSubscription,
-    paymentHistory, setPaymentHistory,
-    notifications, setNotifications,
-    fxPos, setFxPos,
-    companySettings, setCompanySettings,
-    logoUrl, setLogoUrl,
-    geminiApiKeySetting, setGeminiApiKeySetting,
-    mikroSettings, setMikroSettings,
-    lucaSettings, setLucaSettings,
-    gibConnected, setGibConnected,
-    exchangeRates, setExchangeRates,
-    branchNames, setBranchNames,
-    notifPrefs, setNotifPrefs
-  } = useDataStore();
+    setLocationStocks,
+    inventoryMovements,
+    setInventoryMovements,
+    consignments,
+    setConsignments,
+    stockDiscrepancies,
+    setStockDiscrepancies,
+    employees,
+    setEmployees,
+    payrolls,
+    setPayrolls,
+    commissionRules,
+    setCommissionRules,
+    suppliers,
+    setSuppliers,
+    userSubscription,
+    setUserSubscription,
+    paymentHistory,
+    setPaymentHistory,
+    notifications,
+    setNotifications,
+    fxPos,
+    setFxPos,
+    companySettings,
+    setCompanySettings,
+    logoUrl,
+    setLogoUrl,
+    geminiApiKeySetting,
+    setGeminiApiKeySetting,
+    mikroSettings,
+    setMikroSettings,
+    lucaSettings,
+    setLucaSettings,
+    gibConnected,
+    setGibConnected,
+    exchangeRates,
+    setExchangeRates,
+    branchNames,
+    setBranchNames,
+    notifPrefs,
+    setNotifPrefs,
+  } = useDataStore(useShallow(s => ({
+    leads: s.leads,
+    setLeads: s.setLeads,
+    orders: s.orders,
+    setOrders: s.setOrders,
+    shipments: s.shipments,
+    setShipments: s.setShipments,
+    inventory: s.inventory,
+    setInventory: s.setInventory,
+    appQuotations: s.appQuotations,
+    setAppQuotations: s.setAppQuotations,
+    warehouses: s.warehouses,
+    setWarehouses: s.setWarehouses,
+    vehicles: s.vehicles,
+    setVehicles: s.setVehicles,
+    locationStocks: s.locationStocks,
+    setLocationStocks: s.setLocationStocks,
+    inventoryMovements: s.inventoryMovements,
+    setInventoryMovements: s.setInventoryMovements,
+    consignments: s.consignments,
+    setConsignments: s.setConsignments,
+    stockDiscrepancies: s.stockDiscrepancies,
+    setStockDiscrepancies: s.setStockDiscrepancies,
+    employees: s.employees,
+    setEmployees: s.setEmployees,
+    payrolls: s.payrolls,
+    setPayrolls: s.setPayrolls,
+    commissionRules: s.commissionRules,
+    setCommissionRules: s.setCommissionRules,
+    suppliers: s.suppliers,
+    setSuppliers: s.setSuppliers,
+    userSubscription: s.userSubscription,
+    setUserSubscription: s.setUserSubscription,
+    paymentHistory: s.paymentHistory,
+    setPaymentHistory: s.setPaymentHistory,
+    notifications: s.notifications,
+    setNotifications: s.setNotifications,
+    fxPos: s.fxPos,
+    setFxPos: s.setFxPos,
+    companySettings: s.companySettings,
+    setCompanySettings: s.setCompanySettings,
+    logoUrl: s.logoUrl,
+    setLogoUrl: s.setLogoUrl,
+    geminiApiKeySetting: s.geminiApiKeySetting,
+    setGeminiApiKeySetting: s.setGeminiApiKeySetting,
+    mikroSettings: s.mikroSettings,
+    setMikroSettings: s.setMikroSettings,
+    lucaSettings: s.lucaSettings,
+    setLucaSettings: s.setLucaSettings,
+    gibConnected: s.gibConnected,
+    setGibConnected: s.setGibConnected,
+    exchangeRates: s.exchangeRates,
+    setExchangeRates: s.setExchangeRates,
+    branchNames: s.branchNames,
+    setBranchNames: s.setBranchNames,
+    notifPrefs: s.notifPrefs,
+    setNotifPrefs: s.setNotifPrefs,
+  })));
 
   const [dateRange, setDateRange] = useState({
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
@@ -1114,12 +1219,19 @@ function AppContent() {
     window.location.hash = activeTab;
   }, [activeTab]);
 
-  // Redirect to dashboard if userRole changes and current tab is no longer accessible
+  // Erişilemeyen sekmeden panoya yönlendir.
+  //
+  // `activeTab` BAĞIMLILIĞA EKLENDİ (2026-08-24 React denetimi). Dizi yalnız
+  // [userRole] idi: rol değişmediği sürece effect hiç koşmuyordu, oysa sekme
+  // BAŞKA yollardan da değişiyor — klavye kısayolları (c/i/o/r), tarayıcı
+  // geri/ileri (useRouteSync) ve programatik setActiveTab. HR rolündeki bir
+  // kullanıcı 'c' tuşuna basınca crm'e geçiyor, yetkisi olmadığı halde panoya
+  // atılmıyor ve UnauthorizedView ekranında TAKILI kalıyordu.
   useEffect(() => {
     if (!canAccess(activeTab)) {
       setActiveTab('dashboard');
     }
-  }, [userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userRole, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Try local Express server first (dev), then fall back to Frankfurter public API
@@ -2545,6 +2657,29 @@ function AppContent() {
       setWarehouses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Warehouse)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'warehouses', auth.currentUser?.uid));
 
+    // ARAÇ + KONUM STOKLARI — 2026-08-24'e kadar HİÇ ABONE OLUNMUYORDU.
+    //
+    // QR Depo/Araç Transfer sistemi (Vehicle tipi, locationStocks koleksiyonu,
+    // TransferScanPanel, LocationStockReport) yazıldı ve sunucu tarafı çalışıyor:
+    // OrdersPage araç ekleyince `addDoc('vehicles')` BAŞARILI oluyor. Ama hiçbir
+    // dinleyici bu iki koleksiyonu okumadığı için liste boş kalıyor ve sayfa
+    // yenilense de asla dolmuyordu — özellik sessizce ölüydü.
+    //
+    // Neden gözden kaçtı: dinleyiciler `src/hooks/useDataSync.ts` içinde YAZILMIŞ
+    // ama o dosya HİÇBİR YERDEN import edilmiyor (ölü kod). Canlı dinleyiciler
+    // bu dosyada duruyor ve o ikisi buraya hiç kopyalanmamış.
+    //
+    // dbClient tarafında ek bir sonuç daha var: abonesi olmayan koleksiyon SSE
+    // `colls` listesine hiç girmediği için sunucu o koleksiyonun verisini zaten
+    // hiç göndermiyordu.
+    const unsubVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {
+      setVehicles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vehicle)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'vehicles', auth.currentUser?.uid));
+
+    const unsubLocationStocks = onSnapshot(collection(db, 'locationStocks'), (snapshot) => {
+      setLocationStocks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocationStock)));
+    }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'locationStocks', auth.currentUser?.uid));
+
     const unsubMovements = onSnapshot(query(collection(db, 'inventoryMovements'), where('companyId', '==', companyId), limit(200)), (snapshot) => {
       setInventoryMovements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryMovement)));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'inventoryMovements', auth.currentUser?.uid));
@@ -2620,7 +2755,10 @@ function AppContent() {
     const unsubUserPrefs = onSnapshot(doc(db, 'userPrefs', user.uid), (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
-      if (d.darkMode !== undefined && d.darkMode !== darkMode) { darkModeFromServerRef.current = true; setDarkMode(d.darkMode as boolean); }
+      // darkModeRef.current — closure'daki bayat `darkMode` DEĞİL. Böylece bayrak
+      // yalnız değer GERÇEKTEN farklıysa set edilir; setDarkMode state'i
+      // değiştirir, [darkMode] effect'i koşar ve bayrağı temizler.
+      if (d.darkMode !== undefined && d.darkMode !== darkModeRef.current) { darkModeFromServerRef.current = true; setDarkMode(d.darkMode as boolean); }
       if (d.notifPrefs) setNotifPrefs(d.notifPrefs as Record<string, boolean>);
       if (typeof d.quickNote === 'string') setQuickNote(d.quickNote);
       if (Array.isArray(d.recentlyViewed)) setRecentlyViewed(d.recentlyViewed);
@@ -2646,6 +2784,8 @@ function AppContent() {
       unsubOrders();
       unsubInventory();
       unsubWarehouses();
+      unsubVehicles();
+      unsubLocationStocks();
       unsubMovements();
       unsubConsignments();
       unsubProductionMetrics();
