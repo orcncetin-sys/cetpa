@@ -292,6 +292,34 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
       `boş ${freeGB.toFixed(1)} GB / ${totalGB.toFixed(0)} GB (%${freePct.toFixed(0)}) — eşik: >10 GB ve >%8`);
   } catch (e) { add('disk_space', false, 'statfs başarısız: ' + (e instanceof Error ? e.message : String(e))); }
 
+  // ── Mikro ayna tablolari olustu mu ────────────────────────────────────────
+  //
+  // NEDEN (2026-08-24): `initMikroTables()` MODUL YUKLENIRKEN kosuyor ve
+  // hatasi `initDocsTable().catch(...)` tarafindan SESSIZ bir console.warn'a
+  // ceviriliyor. D4 refactor'unde tam bu yol bir kez kirildi: init sirasi
+  // yanlis oldugu icin tablolar olusmayacakti ve kimse fark etmeyecekti -
+  // lokal boot testi de goremez, cunku lokalde DATABASE_URL yok ve o kod yolu
+  // hic kosmuyor. Sessiz bir "tablo yok" durumu, Mikro verisinin yerel
+  // aynasinin (off-server yedek + raporlama) tamamen bos kalmasi demek.
+  try {
+    const havuz = deps().getPgPool();
+    if (!havuz) {
+      add('mikro_ayna_tablolari', true, 'PG yok (Firestore yedek modu) - kontrol atlandi');
+    } else {
+      const { rows } = await havuz.query(
+        `SELECT count(*)::int AS n FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name LIKE 'mikro\\_%'`,
+      );
+      const n = Number(rows[0]?.n ?? 0);
+      add('mikro_ayna_tablolari', n > 0,
+        n > 0 ? `${n} mikro_* tablosu mevcut`
+              : 'HIC mikro_* tablosu YOK - initMikroTables() bootta sessizce basarisiz olmus olabilir '
+                + '(service-err.log icinde "PostgreSQL init failed" ara)');
+    }
+  } catch (e) {
+    add('mikro_ayna_tablolari', false, 'kontrol edilemedi: ' + (e instanceof Error ? e.message : String(e)));
+  }
+
   // ── Veritabani super kullanici VARSAYILAN parolasi ────────────────────────
   //
   // NEDEN (2026-08-24): PostgreSQL bu kutuya Chocolatey ile `/Password:postgres`
