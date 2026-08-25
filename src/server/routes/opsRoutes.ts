@@ -25,10 +25,6 @@ export interface OpsRouteCtx {
   requireAuth: any;
   requireMfaVerified: any;
   requireSuperAdmin: any;
-  reqActor: (req: Request) => { uid: string; email: string };
-  writeAuditLog: (...a: any[]) => Promise<unknown>;
-  pgServerTimestamp: () => any;
-  loadCompanyDocs: (coll: string, cid: string, daralt?: any) => Promise<Array<Record<string, unknown>>>;
 }
 
 export function opsRoutes(app: Express, C: OpsRouteCtx): void {

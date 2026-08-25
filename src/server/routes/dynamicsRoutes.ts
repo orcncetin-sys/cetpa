@@ -18,7 +18,6 @@ export interface DynamicsRouteCtx {
   reqActor: (req: Request) => { uid: string; email: string };
   reqCompanyId: (req: Request) => Promise<string>;
   writeAuditLog: (...a: any[]) => Promise<unknown>;
-  writeSyncLog: (...a: any[]) => Promise<unknown>;
   pgServerTimestamp: () => any;
   tenantSnap: (coll: string, cid: string, daralt?: any) => Promise<AdminQuerySnapshot>;
   getDynamicsToken: () => Promise<string | null>;

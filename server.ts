@@ -17,11 +17,11 @@ import {
   initMikroMirror, initMikroTables,
 } from "./src/server/mikroMirror.js";
 import {
-  initMikroClient, MIKRO_JUMP_SURUM, MIKRO_API_BASE, MIKRO_LOCAL_MODE,
+  initMikroClient,
   getMikroCreds, getMikroToken, mikroTokenCacheMap,
 } from "./src/server/mikroClient.js";
 import {
-  initOpsWatchdog, runOpsWatchdog, diskNobetcisi, SAKLAMA_KURALLARI,
+  initOpsWatchdog, SAKLAMA_KURALLARI,
 } from "./src/server/opsWatchdog.js";
 import {
   type AppRole, type DbOp, ADMIN_ROLES, STAFF_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
@@ -2511,9 +2511,6 @@ async function startServer() {
       res.status(500).json({ success: false, error: 'Luca API bağlantı hatası' });
     }
   });
-
-  // ── Cargo Tracking Proxy Routes ──────────────────────────────────────────
-
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
   /** GET /api/exchange-rates/at?date=YYYY-MM-DD — o tarihin TCMB kuru.
@@ -5113,17 +5110,16 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
   // kanitlanmis: yukari alinirsa hem app.use zinciri hem degisken kapsami
   // bozuluyor (mikroRoutes'ta tam bu hata canliyi kirmisti).
   trackingRoutes(app, {
-    requireAuth, requireMfaVerified, trackLimiter, apiLimiter, reqActor, writeAuditLog,
+    requireAuth, requireMfaVerified,
   });
 
   opsRoutes(app, {
     getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireSuperAdmin,
-    reqActor, writeAuditLog, pgServerTimestamp, loadCompanyDocs,
   });
 
   dynamicsRoutes(app, {
     getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
-    writeAuditLog, writeSyncLog, pgServerTimestamp, tenantSnap,
+    writeAuditLog, pgServerTimestamp, tenantSnap,
     getDynamicsToken, dynamicsGetAll, getDynamicsBase, getDynamicsCredsFromFirestore,
   });
 

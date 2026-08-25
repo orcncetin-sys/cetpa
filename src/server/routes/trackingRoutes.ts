@@ -15,13 +15,10 @@ import type { Express, Request, Response } from 'express';
 export interface TrackingRouteCtx {
   requireAuth: any;
   requireMfaVerified: any;
-  trackLimiter: any;
-  apiLimiter: any;
-  reqActor: (req: Request) => { uid: string; email: string };
-  writeAuditLog: (...a: any[]) => Promise<unknown>;
 }
 
 export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
+  // ── Cargo Tracking Proxy Routes ────────────────────────────────────────
   // DHL Tracking — https://developer.dhl.com/api-reference/shipment-tracking
   app.get('/api/tracking/dhl/:trackingNumber', C.requireAuth, async (req: Request, res: Response) => {
     const apiKey = process.env.DHL_API_KEY;
