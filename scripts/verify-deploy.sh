@@ -173,18 +173,25 @@ else
   #   express.json ZİNCİRDE  -> bozuk JSON gövdesi parse hatası verir (400/500)
   #   express.json ZİNCİRDE DEĞİL -> istek auth'a düşer ve 401 döner
   # Yani korumalı bir POST ucuna BOZUK JSON gönderip 401 alıyorsak zincir kırık.
-  BODY_PROBE="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul}"
-  PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
-    -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
-    "$BASE_URL$BODY_PROBE" 2>/dev/null || echo 000)
-  case "$PCODE" in
-    400|500) pass "gövde ayrıştırma zincirde (bozuk JSON -> $PCODE)" ;;
-    401|403) fail "GÖVDE AYRIŞTIRMA ZİNCİRDE DEĞİL: $BODY_PROBE bozuk JSON'a $PCODE döndü.
+  # HER AYRILAN GRUP ICIN AYRI SONDA. Tek sonda yetmez: her rota grubu KENDI
+  # `xRoutes(app, ...)` cagrisiyla kaydolur ve o cagri zincirde yanlis yere
+  # konabilir. 2026-08-24'te kirilan yalniz mikro grubuydu; digerleri dogruydu
+  # ve tek sondali kontrol bu farki goremezdi.
+  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status}"
+  for BODY_PROBE in $BODY_PROBES; do
+    PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+      -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
+      "$BASE_URL$BODY_PROBE" 2>/dev/null || echo 000)
+    case "$PCODE" in
+      400|500) pass "gövde ayrıştırma zincirde: $BODY_PROBE (bozuk JSON -> $PCODE)" ;;
+      401|403) fail "GÖVDE AYRIŞTIRMA ZİNCİRDE DEĞİL: $BODY_PROBE bozuk JSON'a $PCODE döndü.
       express.json/rate-limit app.use'ları bu rotadan SONRA kayıtlı olabilir —
       rota kaydı ara katmanlardan ÖNCE yapılmış demektir. req.body undefined
       olacağı için bu grubun TÜM POST uçları kırıktır." ;;
-    *)       fail "gövde ayrıştırma sondası beklenmedik yanıt: $PCODE ($BODY_PROBE)" ;;
-  esac
+      404)     fail "$BODY_PROBE -> 404: rota deploy'da YOK (grup hiç kaydolmamış olabilir)" ;;
+      *)       fail "gövde ayrıştırma sondası beklenmedik yanıt: $PCODE ($BODY_PROBE)" ;;
+    esac
+  done
 fi
 
 echo
