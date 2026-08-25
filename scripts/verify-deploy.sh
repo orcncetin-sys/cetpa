@@ -156,6 +156,35 @@ else
       esac
     done <<<"$ROUTES"
   fi
+
+  # 4) GÖVDE AYRIŞTIRMA ZİNCİRDE Mİ? (2026-08-24'te CANLIYI KIRAN hata)
+  #
+  # Rota grupları modüllere taşınırken `mikroRoutes(app, ...)` çağrısı yanlışlıkla
+  # `app.use(express.json(...))` ve `app.use([...], mikroLimiter)` SATIRLARINDAN
+  # ÖNCE konuldu. Express'te app.use yalnız KENDİNDEN SONRA kaydedilen rotalara
+  # uygulanır; sonuçta 21 Mikro rotasının hiçbirinde req.body yoktu (her POST
+  # kırık) ve hız sınırlaması da devre dışıydı.
+  #
+  # Yukarıdaki 401 kontrolü bunu GÖREMEZ: requireAuth gövdeye bakmadan
+  # reddediyor, yani 401 yalnızca "auth önde" der — ara katman zinciri hakkında
+  # hiçbir şey söylemez.
+  #
+  # AYIRT EDİCİ (kimlik gerektirmez, ölçüldü):
+  #   express.json ZİNCİRDE  -> bozuk JSON gövdesi parse hatası verir (400/500)
+  #   express.json ZİNCİRDE DEĞİL -> istek auth'a düşer ve 401 döner
+  # Yani korumalı bir POST ucuna BOZUK JSON gönderip 401 alıyorsak zincir kırık.
+  BODY_PROBE="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul}"
+  PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+    -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
+    "$BASE_URL$BODY_PROBE" 2>/dev/null || echo 000)
+  case "$PCODE" in
+    400|500) pass "gövde ayrıştırma zincirde (bozuk JSON -> $PCODE)" ;;
+    401|403) fail "GÖVDE AYRIŞTIRMA ZİNCİRDE DEĞİL: $BODY_PROBE bozuk JSON'a $PCODE döndü.
+      express.json/rate-limit app.use'ları bu rotadan SONRA kayıtlı olabilir —
+      rota kaydı ara katmanlardan ÖNCE yapılmış demektir. req.body undefined
+      olacağı için bu grubun TÜM POST uçları kırıktır." ;;
+    *)       fail "gövde ayrıştırma sondası beklenmedik yanıt: $PCODE ($BODY_PROBE)" ;;
+  esac
 fi
 
 echo
