@@ -112,15 +112,32 @@ finally {
   $geriAlindi = $true
 
   # DOGRULA: trust GERCEKTEN kapandi mi? Parolasiz baglanti BASARISIZ olmali.
-  $env:PGPASSWORD = ''
-  & $psql.FullName -U postgres -h $pgHost -p $pgPort -d postgres -c 'SELECT 1' 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) {
+  #
+  # DIKKAT (2026-08-25'te yasandi): psql basarisiz baglantida stderr'e yazar ve
+  # $ErrorActionPreference='Stop' bunu OLUMCUL hataya cevirir. Yani BEKLENEN
+  # sonuc (baglanti reddedildi) kirmizi bir NativeCommandError olarak patliyor
+  # ve script basari mesajini basmadan oluyordu - islem aslinda BASARILIYDI.
+  # Cozum: bu blok icin gecici olarak 'Continue', stderr dosyaya, PGPASSWORD
+  # bos yerine gecersiz bir deger (bos olunca psql ETKILESIMLI istem aciyor ve
+  # script bir kullaniciyi bekliyordu).
+  $eskiEAP = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $env:PGPASSWORD = 'trust-kapali-mi-kontrolu'
+  $null = & $psql.FullName -U postgres -h $pgHost -p $pgPort -d postgres `
+            -w -c 'SELECT 1' 2>&1
+  $kod = $LASTEXITCODE
+  $ErrorActionPreference = $eskiEAP
+  if ($kod -eq 0) {
     Write-Host ''
     Write-Host 'KRITIK: parolasiz baglanti HALA CALISIYOR - trust kapanmamis!' -ForegroundColor Red
     Write-Host "  Elle geri al:  Copy-Item '$yedek' '$hba' -Force ; Restart-Service $ServiceName" -ForegroundColor Red
   } else {
     Ok 'Dogrulandi: parolasiz baglanti artik REDDEDILIYOR (trust kapali)'
   }
+  # Ek kanit: dosyada 'trust' satiri kalmadigini da goster (yalniz sayi).
+  $kalanTrust = @(Select-String -Path $hba -Pattern '\btrust\s*$').Count
+  if ($kalanTrust -eq 0) { Ok "pg_hba'da 'trust' satiri kalmadi" }
+  else { Write-Host "KRITIK: pg_hba'da hala $kalanTrust 'trust' satiri var!" -ForegroundColor Red }
 }
 
 # -- 7) Uygulama hala saglikli mi? -----------------------------------------
