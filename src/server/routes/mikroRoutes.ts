@@ -27,7 +27,7 @@
  * blogundan kapanis `});`ine kadar hesaplaniyor.
  */
 import type { Express, Request, Response } from 'express';
-import type { z } from 'zod';
+import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema } from '../schemas.js';
 import cron from 'node-cron';
 import { timingSafeEqual } from 'crypto';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
@@ -38,7 +38,7 @@ import {
   mikroVergiOranlari, sqlTarih, vergiOraniCoz, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
 import {
-  CHA_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
+  CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
 import { PgDocRef, pgServerTimestamp } from '../pgShim.js';
@@ -62,11 +62,13 @@ export interface MikroRouteCtx {
   getPgPool: () => any;
   getUserCompanyId: (uid: string) => Promise<string>;
   mikroIdCozucuIds: (ids: Iterable<string>, cid: string) => (anahtar: string) => string;
-  /** zod dogrulama yardimcisi ve semasi server.ts'te - baglamdan geciyor.
-   *  Sema tipi `any` OLMAMALI: T semadan cikariliyor, `any` verilince T `{}`
-   *  olur ve dogrulanmis govdenin alanlari "does not exist" hatasi verir. */
-  validate: <T>(sema: z.ZodSchema<T>, veri: unknown, res: Response) => T | null;
-  GelenFaturaActionSchema: z.ZodSchema<{ faturaGuid: string; firebaseId?: string; aciklama?: string }>;
+  /** zod dogrulama yardimcisi (server.ts'te). SEMALAR baglamda DEGIL,
+   *  '../schemas.js'ten IMPORT ediliyor: tipleri elle yazmak yerine semadan
+   *  turusun, sema degisince sessizce bayatlamasin. Sema tipi `any` olamaz -
+   *  T cikarilamayinca `{}` olur ve alanlar 'does not exist' hatasi verir. */
+  validate: <T>(sema: { parse: (d: unknown) => T }, veri: unknown, res: Response) => T | null;
+  /** pg-boss kuyrugu (server.ts'te sonradan atanir) - GETTER. */
+  getBoss: () => any;
 }
 
 export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
@@ -3582,7 +3584,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   app.post('/api/mikro/gelen-fatura/kabul', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const parsed = C.validate(C.GelenFaturaActionSchema, req.body, res);
+    const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
     const { faturaGuid, firebaseId } = parsed;
     const t0 = Date.now();
@@ -3611,7 +3613,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   app.post('/api/mikro/gelen-fatura/ret', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const parsed = C.validate(C.GelenFaturaActionSchema, req.body, res);
+    const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
     const { faturaGuid, aciklama, firebaseId } = parsed;
     const t0 = Date.now();
@@ -3639,6 +3641,546 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       res.json({ success: isOk, data: r0?.Data ?? null, duration: Date.now() - t0, error: errorMsg });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── UCUNCU GRUP (D4 adim 8): e-Fatura / e-Arsiv uclari ────────────────
+  // ── Mikro e-Fatura / e-Arşiv ─────────────────────────────────────────────────
+  // POST /api/mikro/fatura/kaydet  — push order/invoice to Mikro as e-Fatura or e-Arşiv
+  // Body: { order: Record<string, unknown>, firebaseId: string }
+  //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
+  // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
+  app.post('/api/mikro/fatura/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const parsed = C.validate(FaturaKaydetSchema, req.body, res);
+    if (!parsed) return;
+    // P5-3: fatura Mikro'da olustuktan SONRAKI yerel guncelleme hatasi istegi
+    // basarisiz yapmaz (yoksa kullanici tekrar dener -> cift e-Fatura).
+    let localUpdateFailed = false;
+    const { order, firebaseId } = parsed;
+    const t0 = Date.now();
+    try {
+      const lineItems = order.lineItems;
+
+      const rawDate    = order.createdAt ? new Date(order.createdAt as string) : new Date();
+      const faturaDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
+      // faturaTipi: 1=e-Fatura, 2=e-Arşiv, 3=İhracat
+      const faturaType = order.faturaTipi === 'e-arsiv' ? 2 : order.faturaTipi === 'ihracat' ? 3 : 1;
+      const kdvOran    = Number(order.kdvOran ?? 20);
+
+      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
+      // 2026-06-12): evrak başlığı cha_* (CARI_HESAP_HAREKETLERI), satırlar
+      // detay[] içinde sth_* (STOK_HAREKETLERI, sth_evraktip=4). Payload Mikro
+      // zarfının İÇİNDE gönderilir (inMikro=true).
+      const satirlar = lineItems.map((item: Record<string, unknown>) => {
+        const tutar = Number(item.price ?? 0) * Number(item.quantity ?? 1);
+        return {
+          sth_tarih:           faturaDate,
+          sth_tip:             1,
+          sth_cins:            0,
+          sth_normal_iade:     0,
+          sth_evraktip:        4,   // fatura
+          sth_evrakno_seri:    'F',
+          sth_stok_kod:        (item.sku as string) || '',
+          sth_cari_cinsi:      0,
+          sth_cari_kodu:       (order.mikroCariKod as string) || '',
+          sth_miktar:          Number(item.quantity ?? 1),
+          sth_birim_pntr:      1,
+          sth_tutar:           tutar,
+          sth_vergi:           Math.round(tutar * kdvOran) / 100,
+          sth_vergi_pntr:      kdvOran >= 20 ? 4 : kdvOran >= 10 ? 3 : 1,
+          sth_vergisiz_fl:     false,
+          sth_aciklama:        (item.name as string) || '',
+          sth_cari_srm_merkezi: '', sth_stok_srm_merkezi: '',
+          sth_subeno:          0,
+          sth_giris_depo_no:   1,
+          sth_cikis_depo_no:   1,
+        };
+      });
+      const toplamTutar = satirlar.reduce((t, s) => t + s.sth_tutar, 0);
+      const evrak = {
+        cha_tip:          0,   // satış
+        cha_cinsi:        7,   // V17 örnek değeri (toptan satış faturası)
+        cha_normal_Iade:  0,
+        cha_evrak_tip:    63,  // fatura
+        cha_cari_cins:    0,
+        // cha_ebelge_turu V17'de eklendi (V16 gövdesinde YOK) — yalnız V17+
+        // kurulumlarda gönderilir. Kod eşlemesi ilk gerçek kayıtla doğrulanmalı.
+        ...(MIKRO_JUMP_SURUM >= 17
+          ? { cha_ebelge_turu: faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1 }
+          : {}),
+        cha_d_cins:       0,
+        cha_d_kur:        1,
+        cha_tarihi:       faturaDate,
+        cha_evrakno_seri: 'F',
+        cha_kod:          (order.mikroCariKod as string) || '',
+        cha_projekodu:    '',
+        cha_srmrkkodu:    '',
+        cha_vade:         0,
+        cha_subeno:       0,
+        cha_aciklama:     '',
+        kdv_istisna_kodu: '',
+        detay:            satirlar,
+      };
+
+      const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true);
+      const duration   = Date.now() - t0;
+      const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0         = envelope?.[0] as Record<string, unknown> | undefined;
+      const success    = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
+      const md         = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
+      const mikroFaturaNo = (md?.faturaNo || md?.FaturaNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      const ettn          = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+
+      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, C.reqActor(req));
+      if (success) {
+        if (C.getPgPool()) {
+          const client = await C.getPgPool().connect();
+          try {
+            await client.query('BEGIN');
+            await mirrorMikroInsert('mikro_stok_hareketleri',
+              (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS, client);
+            await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
+              [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS, client);
+            await client.query('COMMIT');
+          } catch (dbErr) {
+            await client.query('ROLLBACK');
+            console.error('[FaturaKaydetV2] local db transaction failed:', dbErr);
+            // Invoice is in Mikro, but local DB mirror failed. We can queue a retry if boss is available.
+            if (C.getBoss()) await C.getBoss().send('outbound-webhook', { event: 'fatura_mirror_failed', payload: { mikroFaturaNo } });
+          } finally {
+            client.release();
+          }
+        }
+        if (C.getAdminDb() && firebaseId) {
+          try {
+            await C.getAdminDb().collection('orders').doc(firebaseId).set({
+              companyId: await C.reqCompanyId(req),
+              mikroFaturaNo,
+              ettn,
+              hasInvoice:      true,
+              mikroFaturaDate: faturaDate,
+              mikroSynced:     true,
+              mikroSyncedAt:   pgServerTimestamp(),
+            }, { merge: true });
+          } catch (updErr) {
+            // P5-3 KRITIK: fatura Mikro'da ARTIK VAR. Burada hatayi yukari birakip
+            // 500 donersek kullanici "başarısız" gorup tekrar dener ve AYNI siparis
+            // icin IKINCI bir yasal e-Fatura kesilir. Bu yuzden yerel guncelleme
+            // hatasi istegi basarisiz YAPMAZ: loglanir, telafi kuyruguna alinir ve
+            // yanitta localUpdateFailed ile bildirilir.
+            localUpdateFailed = true;
+            console.error('[FaturaKaydetV2] yerel siparis guncellemesi basarisiz (FATURA MIKRO\'DA OLUSTU):', updErr);
+            if (C.getBoss()) {
+              await C.getBoss().send('outbound-webhook',
+                { event: 'fatura_order_update_failed', payload: { firebaseId, mikroFaturaNo, ettn } },
+              ).catch(() => {});
+            }
+          }
+        }
+      }
+      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  // ── Mikro e-İrsaliye ─────────────────────────────────────────────────────────
+  // POST /api/mikro/irsaliye/kaydet  — push shipment as e-İrsaliye to Mikro
+  // Body: { shipment: Record<string, unknown>, firebaseId: string }
+  //   shipment must have: mikroCariKod, customerName, destination, trackingNo, items[]
+  // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
+  app.post('/api/mikro/irsaliye/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const parsed = C.validate(IrsaliyeKaydetSchema, req.body, res);
+    if (!parsed) return;
+    const { shipment, firebaseId } = parsed;
+    const t0 = Date.now();
+    try {
+      const rawDate   = shipment.date ? new Date(shipment.date) : new Date();
+      const irsDate   = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
+      const items = (shipment.items || []) as Record<string, unknown>[];
+
+      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
+      // 2026-06-12): irsaliye satırları sth_* alanlarıdır (STOK_HAREKETLERI,
+      // sth_evraktip=1); kargo/araç bilgisi e_irsaliye_detaylari'nda taşınır.
+      // Payload Mikro zarfının İÇİNDE gönderilir (inMikro=true).
+      const irsSatir = (item: Record<string, unknown> | null) => ({
+        sth_tarih:            irsDate,
+        sth_tip:              1,
+        sth_cins:             0,
+        sth_normal_iade:      0,
+        sth_evraktip:         1,   // irsaliye
+        sth_evrakno_seri:     'I',
+        sth_stok_kod:         item ? ((item.sku as string) || '') : '',
+        sth_cari_cinsi:       0,
+        sth_cari_kodu:        (shipment.mikroCariKod as string) || '',
+        sth_miktar:           item ? Number(item.quantity ?? 1) : 1,
+        sth_birim_pntr:       1,
+        sth_tutar:            item ? Number(item.price ?? 0) * Number(item.quantity ?? 1) : 0,
+        sth_vergi_pntr:       4,
+        sth_vergi:            0,
+        sth_vergisiz_fl:      false,
+        sth_iskonto1:         0,
+        sth_iskonto2:         0,
+        sth_aciklama:         item ? ((item.name as string) || '') : ((shipment.customerName as string) || ''),
+        sth_giris_depo_no:    1,
+        sth_cikis_depo_no:    1,
+        sth_subeno:           0,
+        sth_malkbl_sevk_tarihi: irsDate,
+      });
+      const satirlar = items.length > 0
+        ? items.map((item: Record<string, unknown>) => irsSatir(item))
+        : [irsSatir(null)];
+
+      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', {
+        evraklar: [{
+          evrak_aciklamalari: [{ aciklama: (shipment.destination as string) || '' }],
+          e_irsaliye_detaylari: {
+            eir_tasiyici_firma_kodu: (shipment.cargoFirm as string) || '',
+            eir_tasiyici_arac_plaka: (shipment.trackingNo as string) || '',
+            eir_eirs_olrk_gonderilsin: 0,
+          },
+          satirlar,
+        }],
+      }, true);
+      const duration      = Date.now() - t0;
+      const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
+      const r0            = envelope?.[0] as Record<string, unknown> | undefined;
+      const success       = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
+      const md            = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
+      const irsaliyeNo    = (md?.irsaliyeNo || md?.IrsaliyeNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      const irsaliyeEttn  = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+
+      await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, C.reqActor(req));
+      if (success) void mirrorMikroInsert('mikro_stok_hareketleri',
+        (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'irsaliye_push' })), STH_COLS);
+      if (C.getAdminDb() && firebaseId && success) {
+        await C.getAdminDb().collection('shipments').doc(firebaseId).set({
+          companyId: await C.reqCompanyId(req),
+          irsaliyeNo,
+          irsaliyeEttn,
+          mikroSynced:     true,
+          mikroSyncedAt:   pgServerTimestamp(),
+        }, { merge: true });
+      }
+      res.json({ success, irsaliyeNo, irsaliyeEttn, data, duration });
+    } catch (err) {
+      const duration = Date.now() - t0;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      res.status(500).json({ success: false, error: errorMsg });
+    }
+  });
+
+  // ── Mikro Pull: Cari Bakiye ──────────────────────────────────────────────────
+  // POST /api/mikro/pull/bakiye — cari bakiyelerini Mikro'dan çek → cariBalances
+  //
+  // 2026-07-30'da BAŞTAN YAZILDI. Eski hali `CariHareketListesiV2`yi cari başına
+  // bir kez çağırıyordu; o metot Mikro Jump V17'de HİÇ YOK (resmi Postman
+  // koleksiyonunda 161 endpoint arasında bulunmuyor — liste yüzeyi yalnız
+  // Stok/Cari listesi + SqlVeriOkuV2). Yani her çağrı boşa gidiyor, ardından
+  // `Number(md?.bakiye ?? 0)` devreye girip TÜM carilerin bakiyesini 0 yazıyordu.
+  // Aynı sessiz-sıfır deseni stok tarafında da vardı (bkz. mikroStokMiktari).
+  //
+  // Yeni yol: SqlVeriOkuV2 (SELECT-only SQL kapısı) ile TEK sorguda tüm cari
+  // bakiyeleri. cha_tip 0 = borç (satış), 1 = alacak — bakiye = borç - alacak.
+  // N çağrı yerine 1 çağrı; ayrıca 100'lük limit gereksiz kalıyor.
+  
+// KALDIRILDI (2026-08-11): /api/mikro/test-personel geçici hata ayıklama ucu.
+// `requireAuth` YOKTU ve PERSONEL_TANIMLARI'nı ham dökmeye çalışıyordu — yani TC
+// kimlik no, maaş, telefon, e-posta. Bugün 500 veriyordu çünkü import ettiği
+// `./src/services/mikroSql` modülü hiç yok; o modül bir gün oluşturulsaydı uç
+// anında KİMLİKSİZ bir PII sızıntısına dönüşecekti. Kalıcı karşılığı zaten var:
+// POST /api/mikro/pull/personel (requireAuth + requireMfaVerified).
+
+app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const { ok, data } = await mikroPost('SqlVeriOkuV2', {
+        SQLSorgu:
+          'SELECT cha_kod, ' +
+          'SUM(CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) AS bakiye ' +
+          // ISNULL(cha_iptal,0)=0 ZORUNLU (2026-08-22 denetim bulgusu C16):
+          // iptal edilmiş cari hareketler de toplama giriyordu — cari bakiyesi
+          // iptal edilen her fatura/tahsilat kadar yanlış çıkıyordu. Bu tablonun
+          // diğer okumaları (import/cari-hareket ekKosul, evrak_tip 63 listesi)
+          // zaten iptali dışlıyor; bu sorgu tek istisnaydı.
+          'FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) = 0 GROUP BY cha_kod',
+      });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      if (!ok || !r0 || r0.IsError) {
+        // HİÇBİR ŞEY YAZMA. Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi
+        // vermemekten çok daha kötü — tahsilat kararları bu rakama bakıyor.
+        const msg = (r0?.ErrorMessage as string) || 'Mikro SqlVeriOkuV2 yanıt vermedi.';
+        console.warn('[pull/bakiye] SqlVeriOkuV2 başarısız:', msg);
+        return res.status(502).json({
+          success: false,
+          error: `Bakiye sorgusu çalıştırılamadı: ${msg}. Hiçbir bakiye değiştirilmedi.`,
+        });
+      }
+
+      const rows = mikroSatirlar(data);
+      if (!rows.length) {
+        return res.json({ success: true, total: 0, updated: 0, skipped: 0, duration: Date.now() - t0,
+                          note: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' });
+      }
+
+      const bakiyeByKod = new Map<string, number>();
+      let unreadable = 0;
+      for (const row of rows) {
+        const kod = String(row.cha_kod ?? '').trim();
+        const raw = row.bakiye;
+        if (!kod) continue;
+        // Alan okunamıyorsa 0 yazma — atla ve say.
+        if (raw == null || !Number.isFinite(Number(raw))) { unreadable++; continue; }
+        bakiyeByKod.set(kod, Number(raw));
+      }
+
+      const companyId = await C.reqCompanyId(req);
+      const leadsSnap = await C.getAdminDb().collection('leads').where('mikroCariKod', '!=', '').get();
+      let updated = 0, skipped = 0;
+      let batch = C.getAdminDb().batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
+
+      for (const leadDoc of leadsSnap.docs) {
+        const cariKod = String((leadDoc.data() as Record<string, unknown>).mikroCariKod ?? '').trim();
+        if (!cariKod) { skipped++; continue; }
+        // Mikro'da hiç hareketi olmayan cari: SQL'de satırı yok. Bu GERÇEKTEN
+        // sıfır bakiyedir (hareket yok = borç yok), tespit edilememiş değil —
+        // sorgu başarılı döndüğü için bunu yazmak doğru.
+        const bakiye = bakiyeByKod.has(cariKod) ? bakiyeByKod.get(cariKod)! : 0;
+        batch.set(C.getAdminDb().collection('cariBalances').doc(cariKod), {
+          companyId, cariKod, bakiye, updatedAt: pgServerTimestamp(),
+        }, { merge: true });
+        ops++;
+        batch.set(leadDoc.ref, { bakiye }, { merge: true });
+        ops++;
+        updated++;
+        if (ops >= 400) await flush();
+      }
+      await flush();
+
+      const ozet = `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`;
+      await C.writeSyncLog('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', ozet, true, null, null, Date.now() - t0, C.reqActor(req));
+      await C.writeAuditLog(C.reqActor(req), 'Mikro Bakiye Çekme', ozet);
+      res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable,
+                 mikroRows: rows.length, duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('[pull/bakiye]', err);
+      res.status(500).json({ success: false, error: 'Bakiye çekimi başarısız. Hiçbir bakiye değiştirilmedi.' });
+    }
+  });
+
+  // ── Mikro Pull: Cari Adresleri ───────────────────────────────────────────
+  // POST /api/mikro/pull/cari-adres
+  //
+  // Önceden yalnız PUSH vardı (leads.address/city/district → Mikro, bkz.
+  // CariKaydetV2 push payload). PULL yoktu — Mikro'da (elle veya push ile)
+  // girilmiş adresler Cetpa'ya hiç geri gelmiyordu (2026-08-17 kullanıcı
+  // isteği: "müşterilerin adreslerini mikroya kaydediyoruz, otomatik al ve
+  // bölgelerine koy" — Satış Bölgesi'nin otomatik atama yapabilmesi için şart).
+  //
+  // Kolonlar TAHMİN EDİLMİYOR — mikroKolonlar ile şemadan süzülüyor (adr_cadde/
+  // adr_ilce/adr_il/adr_ulke/adr_adres_no zaten mikro_cari_hesap_adresleri
+  // aynasında doğrulanmış — bkz. CREATE TABLE, ~satır 1092). Bir cari'nin
+  // birden çok adresi olabilir (sevk/fatura/vb, adr_adres_no ile ayrılır);
+  // en düşük adres no'yu (genelde varsayılan/ilk girilen) alıyoruz.
+  //
+  // SADECE BOŞ ALANLARI DOLDURUR — elle düzeltilmiş bir city/address varsa
+  // ÜZERİNE YAZMAZ (EKLE, YERİNE KOYMA ilkesi; bu alan için "ekleme" = eksik
+  // olanı doldurmak).
+  app.post('/api/mikro/pull/cari-adres', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const cols = await mikroKolonlar('CARI_HESAP_ADRESLERI');
+      if (!cols.length) {
+        return res.status(502).json({ success: false, error: 'CARI_HESAP_ADRESLERI şeması okunamadı.' });
+      }
+      const istenen = ['adr_cari_kod', 'adr_adres_no', 'adr_cadde', 'adr_ilce', 'adr_il', 'adr_ulke'];
+      const colSet = new Set(cols.map(c => c.toLowerCase()));
+      const secim = istenen.filter(c => colSet.has(c.toLowerCase()));
+      if (!secim.includes('adr_cari_kod') || secim.length < 2) {
+        return res.status(502).json({ success: false, error: 'CARI_HESAP_ADRESLERI beklenen kolonları taşımıyor — hiçbir adres değiştirilmedi.' });
+      }
+
+      // ORDER BY şart: adr_adres_no şemada yoksa (aşağıdaki gruplama her satırı
+      // eşit "0" görür) ya da iki satır aynı adres no'yu taşıyorsa (Mikro bunu
+      // garanti etmiyor), sıralamasız sonuç SQL Server'ın keyfi dönüş sırasına
+      // kalır — her çalıştırmada FARKLI adres seçilebilir (code-review bulgusu).
+      const siraliMi = secim.includes('adr_adres_no');
+      const { rows, hata } = await mikroSql(
+        `SELECT ${secim.join(', ')} FROM CARI_HESAP_ADRESLERI` +
+        (siraliMi ? ' ORDER BY adr_cari_kod, adr_adres_no' : ''),
+      );
+      if (hata) {
+        return res.status(502).json({ success: false, error: `Adres sorgusu çalıştırılamadı: ${hata}. Hiçbir adres değiştirilmedi.` });
+      }
+
+      // cari_kod başına en düşük adr_adres_no'lu satırı tut (ORDER BY ile artık
+      // deterministik — eşit no'larda SQL'in döndürdüğü ilk satır tutarlı kalır).
+      const byKod = new Map<string, Record<string, unknown>>();
+      for (const row of rows) {
+        const kod = String(row.adr_cari_kod ?? '').trim();
+        if (!kod) continue;
+        const mevcut = byKod.get(kod);
+        const no = Number(row.adr_adres_no ?? 0);
+        if (!mevcut || no < Number(mevcut.adr_adres_no ?? 0)) byKod.set(kod, row);
+      }
+
+      const companyId = await C.reqCompanyId(req);
+      const leadsSnap = await C.getAdminDb().collection('leads').where('mikroCariKod', '!=', '').get();
+      let updated = 0, skipped = 0, yabanciAtlanan = 0;
+      let batch = C.getAdminDb().batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
+
+      for (const leadDoc of leadsSnap.docs) {
+        const veri = leadDoc.data() as Record<string, unknown>;
+        const dc = (veri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) { yabanciAtlanan++; continue; }
+        const cariKod = String(veri.mikroCariKod ?? '').trim();
+        const adres = cariKod ? byKod.get(cariKod) : undefined;
+        if (!adres) { skipped++; continue; }
+
+        // Boş sayılan: undefined/null/'' ve YALNIZ BOŞLUKTAN oluşan değer —
+        // salt falsy kontrolü ' ' gibi anlamsız-ama-truthy değeri "zaten dolu"
+        // sanıp Mikro'dan doldurmayı atlıyordu (code-review bulgusu).
+        const bos = (v: unknown) => !v || (typeof v === 'string' && !v.trim());
+        const guncelleme: Record<string, unknown> = {};
+        if (bos(veri.address) && adres.adr_cadde) guncelleme.address = String(adres.adr_cadde);
+        if (bos(veri.city) && adres.adr_il) guncelleme.city = String(adres.adr_il);
+        if (bos((veri as { district?: unknown }).district) && adres.adr_ilce) guncelleme.district = String(adres.adr_ilce);
+        if (bos((veri as { country?: unknown }).country) && adres.adr_ulke) guncelleme.country = String(adres.adr_ulke);
+        if (!Object.keys(guncelleme).length) { skipped++; continue; }
+        // Kaynak izi: "en düşük adres no = varsayılan" TAHMİNE dayalı (Mikro'da
+        // doğrulanmış bir kural değil) — sahte kesinlik göstermemek için hangi
+        // alanların bu sezgisel seçimden geldiği işaretleniyor (bkz. task #31,
+        // Satış Bölgesi otomatik ataması bu alanı okuyacak).
+        guncelleme.addressSource = 'mikro-heuristic';
+
+        batch.set(leadDoc.ref, guncelleme, { merge: true });
+        ops++; updated++;
+        if (ops >= 400) await flush();
+      }
+      await flush();
+
+      const ozet = `${updated} cari adresi dolduruldu (Mikro'dan ${rows.length} adres satırı, ${yabanciAtlanan} yabancı kiracı atlandı)`;
+      await C.writeSyncLog('SQL:CARI_HESAP_ADRESLERI', 'leads', ozet, true, null, null, Date.now() - t0, C.reqActor(req));
+      await C.writeAuditLog(C.reqActor(req), 'Mikro Cari Adres Çekme', ozet);
+      res.json({ success: true, total: leadsSnap.size, updated, skipped, yabanciAtlanan,
+                 mikroRows: rows.length, duration: Date.now() - t0, note: `${updated} dolduruldu, ${skipped} atlandı` });
+    } catch (err) {
+      console.error('[pull/cari-adres]', err);
+      res.status(500).json({ success: false, error: 'Adres çekimi başarısız. Hiçbir adres değiştirilmedi.' });
+    }
+  });
+
+  // ── Mikro Pull: Mizan (Trial Balance) ───────────────────────────────────────
+  // POST /api/mikro/pull/mizan  — aylık mizan → accountingPeriods
+  // Body: { period?: 'YYYY-MM' }
+  //
+  // 2026-07-30'da YENİDEN YAZILDI: eski hali `MizanV2` çağırıyordu, o metot
+  // V17'de YOK. Artık SqlVeriOkuV2 ile MUHASEBE_FIS_DETAYLARI üzerinden hesap
+  // bazında borç/alacak toplamı alınıyor.
+  //
+  // Kolon adları TAHMİN EDİLMİYOR: INFORMATION_SCHEMA'dan okunup regex ile
+  // eşleştiriliyor (mikroKolonlar/kolonBul). Eşleşme bulunamazsa hangi kolonun
+  // bulunamadığını söyleyip 502 döner — sessizce boş/yanlış mizan yazmaz.
+  app.post('/api/mikro/pull/mizan', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    const t0 = Date.now();
+    try {
+      const now    = new Date();
+      const period = (req.body?.period as string) || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      if (!/^\d{4}-\d{2}$/.test(period)) return res.status(400).json({ success: false, error: 'period YYYY-MM olmalı.' });
+      const [yil, ay] = period.split('-').map(Number);
+      const ilkTarih  = `${yil}-${String(ay).padStart(2,'0')}-01`;
+      const lastDay   = new Date(yil, ay, 0).getDate();
+      const sonTarih  = `${yil}-${String(ay).padStart(2,'0')}-${lastDay}`;
+
+      const cols     = await mikroKolonlar('MUHASEBE_FISLERI');
+      if (!cols.length) return res.status(502).json({ success: false, error: 'MUHASEBE_FISLERI tablosu okunamadı (SqlVeriOkuV2 izni?).' });
+      // Mikro'da ayrı borç/alacak kolonu YOK: fis_meblag0 İŞARETLİ tutulur
+      // (borç +, alacak −). MUHASEBE_FISLERI_OZET'teki mfo_Grp0_B_Meblag /
+      // mfo_Grp0_A_Meblag ayrımı bu kuralı bağımsız olarak doğruluyor.
+      // Grup 0 = genel muhasebe seti (1-6 mali/UFRS/enflasyon alternatifleri).
+      const hesapCol  = kolonBul(cols, /hesap_kod/i);
+      const meblagCol = kolonBul(cols, /meblag0$/i);
+      const tarihCol  = kolonBul(cols, /tarih$/i);
+      const iptalCol  = kolonBul(cols, /_iptal$/i);
+      if (!hesapCol || !meblagCol) {
+        return res.status(502).json({ success: false,
+          error: `Mizan kolonları eşleşmedi (hesap=${hesapCol}, meblağ=${meblagCol}). Hiçbir şey yazılmadı.` });
+      }
+      for (const c of [hesapCol, meblagCol, tarihCol, iptalCol].filter(Boolean)) {
+        if (!sqlTanimlayici(c)) return res.status(500).json({ success: false, error: 'Geçersiz kolon adı.' });
+      }
+
+      const kosul: string[] = [];
+      if (tarihCol) kosul.push(`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
+      if (iptalCol) kosul.push(`${iptalCol} = 0`);   // iptal edilmiş fişler mizana girmez
+      const where = kosul.length ? ` WHERE ${kosul.join(' AND ')}` : '';
+      const { rows, hata } = await mikroSql(
+        `SELECT ${hesapCol} AS hesapKodu, ` +
+        `SUM(CASE WHEN ${meblagCol} > 0 THEN ${meblagCol} ELSE 0 END) AS borc, ` +
+        `SUM(CASE WHEN ${meblagCol} < 0 THEN -${meblagCol} ELSE 0 END) AS alacak ` +
+        `FROM MUHASEBE_FISLERI${where} GROUP BY ${hesapCol} ORDER BY ${hesapCol}`,
+      );
+      if (hata) return res.status(502).json({ success: false, error: `Mizan sorgusu başarısız: ${hata}. Hiçbir şey yazılmadı.` });
+
+      const satirlar = rows.map(r => ({
+        hesapKodu: String(r.hesapKodu ?? ''),
+        borc:   Number(r.borc ?? 0),
+        alacak: Number(r.alacak ?? 0),
+        bakiye: Number(r.borc ?? 0) - Number(r.alacak ?? 0),
+      })).filter(r => r.hesapKodu);
+
+      // Hiç satır yoksa BOŞ MİZAN YAZMA. Bu "dönemde hareket yok" da olabilir,
+      // "muhasebe modülü hiç kullanılmıyor / yanlış tablo" da — ikisi arasında
+      // ayrım yapamadığımız için var olan mizanı boşla ezmek kabul edilemez.
+      if (!satirlar.length) {
+        return res.status(502).json({ success: false,
+          error: `${period} döneminde MUHASEBE_FISLERI'nde hiç kayıt bulunamadı. ` +
+                 `Muhasebe fişleri Mikro'ya işlenmiyor olabilir — mizan DEĞİŞTİRİLMEDİ.` });
+      }
+
+      // ÇİFT TARAFLI KAYIT DENETİMİ — mizan tanımı gereği borç toplamı alacak
+      // toplamına EŞİT olmalıdır. Tutmuyorsa işaret varsayımım (meblag>0=borç)
+      // ya da grup seçimi yanlış demektir; yanlış mizan yazmaktansa dur.
+      const toplamBorc   = satirlar.reduce((t, r) => t + r.borc, 0);
+      const toplamAlacak = satirlar.reduce((t, r) => t + r.alacak, 0);
+      const fark = Math.abs(toplamBorc - toplamAlacak);
+      if (satirlar.length && fark > Math.max(1, (toplamBorc + toplamAlacak) * 0.0001)) {
+        return res.status(502).json({ success: false,
+          error: `Mizan dengesiz: borç ${toplamBorc.toFixed(2)} ≠ alacak ${toplamAlacak.toFixed(2)} (fark ${fark.toFixed(2)}). ` +
+                 `Borç/alacak işaret kuralı bu kurulumda farklı olabilir — hiçbir şey yazılmadı.` });
+      }
+
+      await C.getAdminDb().collection('accountingPeriods').doc(period).set({
+        companyId: await C.reqCompanyId(req),
+        period, yil, ay, rows: satirlar,
+        toplam: { borc: toplamBorc, alacak: toplamAlacak },
+        kaynak: `SQL:MUHASEBE_FISLERI (${hesapCol}/${meblagCol}, işaretli meblağ, denge doğrulandı)`,
+        syncedAt: pgServerTimestamp(),
+      }, { merge: true });
+
+      const mizanOzet = `${period} dönemi — ${satirlar.length} hesap satırı`;
+      await C.writeSyncLog('SQL:MUHASEBE_FISLERI', 'accountingPeriods', mizanOzet, true, null, null, Date.now() - t0, C.reqActor(req));
+      await C.writeAuditLog(C.reqActor(req), 'Mikro Mizan Çekme', mizanOzet);
+      res.json({ success: true, period, rowCount: satirlar.length, duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('[pull/mizan]', err);
+      res.status(500).json({ success: false, error: 'Mizan çekimi başarısız. Hiçbir şey yazılmadı.' });
     }
   });
 }
