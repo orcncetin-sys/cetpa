@@ -146,3 +146,18 @@ jobs:
             "powershell -Command \"try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 http://localhost:5174/api/health).StatusCode } catch { 0 }\"" | tr -d '\r')
           echo "Staging health: HTTP $kod"
           [ "$kod" = "200" ] || exit 1
+
+      # HTTP 200 SADECE "boot etti" der. 2026-08-24'te canliyi kiran hata da
+      # 200 dondururken olusmustu: rota grubu express.json'dan ONCE kaydedilince
+      # uygulama saglikli gorunur ama o grubun TUM POST uclarinda req.body
+      # undefined olur. Gercek ayirt edici ve neden grup basina sondalandigi
+      # deploy/windows/probe-chain.ps1'in basinda anlatiliyor.
+      #
+      # Sonda STAGING checkout'undan calisir (C:\cetpa-staging): boylece
+      # sondanin KENDISI de bu dalla birlikte gelir ve main'e girmeden once
+      # burada denenmis olur.
+      - name: Ara katman zinciri (grup basina bozuk-JSON sondasi)
+        if: steps.kurulu.outputs.hazir == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VDS_USER }}@${{ secrets.VDS_HOST }}" \
+            "powershell -ExecutionPolicy Bypass -File C:\\cetpa-staging\\deploy\\windows\\probe-chain.ps1 -Port 5174"

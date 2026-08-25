@@ -7,6 +7,9 @@ import {
   STREAM_INIT_MAX_ROWS, PgDocRef, PgFirestore,
   resolveSentinels, mergeDocData,
 } from "./src/server/pgShim.js";
+import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
+import { opsRoutes } from "./src/server/routes/opsRoutes.js";
+import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { initCrons } from "./src/server/crons.js";
@@ -14,11 +17,11 @@ import {
   initMikroMirror, initMikroTables,
 } from "./src/server/mikroMirror.js";
 import {
-  initMikroClient, MIKRO_JUMP_SURUM, MIKRO_API_BASE, MIKRO_LOCAL_MODE,
+  initMikroClient,
   getMikroCreds, getMikroToken, mikroTokenCacheMap,
 } from "./src/server/mikroClient.js";
 import {
-  initOpsWatchdog, runOpsWatchdog, diskNobetcisi, SAKLAMA_KURALLARI,
+  initOpsWatchdog, SAKLAMA_KURALLARI,
 } from "./src/server/opsWatchdog.js";
 import {
   type AppRole, type DbOp, ADMIN_ROLES, STAFF_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
@@ -2509,237 +2512,6 @@ async function startServer() {
     }
   });
 
-  // ── Cargo Tracking Proxy Routes ──────────────────────────────────────────
-
-  // DHL Tracking — https://developer.dhl.com/api-reference/shipment-tracking
-  app.get('/api/tracking/dhl/:trackingNumber', requireAuth, async (req: Request, res: Response) => {
-    const apiKey = process.env.DHL_API_KEY;
-    const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
-
-    if (!apiKey) {
-      return res.json({
-        mock: true, carrier: 'DHL', trackingNumber,
-        status: 'In Transit', statusCode: 'in_transit',
-        origin: 'Frankfurt, DE', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() + 2 * 86400000).toISOString(),
-        service: 'DHL Express Worldwide',
-        events: [
-          { timestamp: new Date().toISOString(), location: 'Frankfurt, DE', status: 'In Transit', description: 'Shipment is in transit' },
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Leipzig Hub, DE', status: 'Departed', description: 'Departed from facility' },
-          { timestamp: new Date(Date.now() - 7200000).toISOString(), location: 'Leipzig Hub, DE', status: 'Arrived', description: 'Arrived at DHL hub' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Sender City, DE', status: 'Picked Up', description: 'Shipment picked up' },
-        ]
-      });
-    }
-
-    try {
-      const r = await fetch(
-        `https://api-eu.dhl.com/track/shipments?trackingNumber=${encodeURIComponent(trackingNumber)}`,
-        { headers: { 'DHL-API-Key': apiKey, 'Accept': 'application/json' } }
-      );
-      const data = await r.json();
-      if (!r.ok) return res.status(r.status).json({ error: data.title || 'DHL API Error' });
-      res.json(data);
-    } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'DHL fetch failed' });
-    }
-  });
-
-  // UPS Tracking — https://developer.ups.com/api/reference/tracking
-  app.get('/api/tracking/ups/:trackingNumber', requireAuth, async (req: Request, res: Response) => {
-    const clientId = process.env.UPS_CLIENT_ID;
-    const clientSecret = process.env.UPS_CLIENT_SECRET;
-    const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
-
-    if (!clientId || !clientSecret) {
-      return res.json({
-        mock: true, carrier: 'UPS', trackingNumber,
-        status: 'Out For Delivery', statusCode: 'out_for_delivery',
-        origin: 'Louisville, KY, US', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() + 86400000).toISOString(),
-        service: 'UPS Worldwide Express',
-        events: [
-          { timestamp: new Date().toISOString(), location: 'Istanbul, TR', status: 'Out For Delivery', description: 'Out for delivery' },
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Istanbul Customs, TR', status: 'Cleared', description: 'Released from customs' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Cologne Hub, DE', status: 'In Transit', description: 'Arrived at UPS facility' },
-          { timestamp: new Date(Date.now() - 2 * 86400000).toISOString(), location: 'Louisville, KY, US', status: 'Departed', description: 'Departed from facility' },
-        ]
-      });
-    }
-
-    try {
-      // OAuth token
-      const tokenRes = await fetch('https://onlinetools.ups.com/security/v1/oauth/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
-        },
-        body: 'grant_type=client_credentials'
-      });
-      const token = await tokenRes.json();
-      if (!tokenRes.ok) return res.status(401).json({ error: 'UPS OAuth failed' });
-
-      const r = await fetch(
-        `https://onlinetools.ups.com/api/track/v1/details/${encodeURIComponent(trackingNumber)}?locale=en_US&returnSignature=false`,
-        { headers: { 'Authorization': `Bearer ${token.access_token}`, 'transId': Date.now().toString(), 'transactionSrc': 'cetpa' } }
-      );
-      const data = await r.json();
-      if (!r.ok) return res.status(r.status).json({ error: 'UPS Tracking Error' });
-      res.json(data);
-    } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'UPS fetch failed' });
-    }
-  });
-
-  // FedEx Tracking — https://developer.fedex.com/api/en-us/catalog/tracking
-  app.post('/api/tracking/fedex', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const clientId = process.env.FEDEX_CLIENT_ID;
-    const clientSecret = process.env.FEDEX_CLIENT_SECRET;
-    const { trackingNumber } = req.body;
-
-    if (!clientId || !clientSecret) {
-      return res.json({
-        mock: true, carrier: 'FedEx', trackingNumber,
-        status: 'Delivered', statusCode: 'delivered',
-        origin: 'Memphis, TN, US', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() - 3600000).toISOString(),
-        service: 'FedEx International Priority',
-        events: [
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Istanbul, TR', status: 'DL', description: 'Delivered - Package handed to recipient' },
-          { timestamp: new Date(Date.now() - 7200000).toISOString(), location: 'Istanbul, TR', status: 'OD', description: 'On FedEx vehicle for delivery' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Istanbul Ataturk, TR', status: 'AR', description: 'Arrived at FedEx location' },
-          { timestamp: new Date(Date.now() - 2 * 86400000).toISOString(), location: 'Paris CDG, FR', status: 'DP', description: 'Left FedEx origin facility' },
-          { timestamp: new Date(Date.now() - 3 * 86400000).toISOString(), location: 'Memphis, TN, US', status: 'PU', description: 'Picked up' },
-        ]
-      });
-    }
-
-    try {
-      const tokenRes = await fetch('https://apis.fedex.com/oauth/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`
-      });
-      const token = await tokenRes.json();
-      if (!tokenRes.ok) return res.status(401).json({ error: 'FedEx OAuth failed' });
-
-      const r = await fetch('https://apis.fedex.com/track/v1/trackingnumbers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token.access_token}`,
-          'Content-Type': 'application/json',
-          'X-locale': 'en_US'
-        },
-        body: JSON.stringify({
-          trackingInfo: [{ trackingNumberInfo: { trackingNumber } }],
-          includeDetailedScans: true
-        })
-      });
-      const data = await r.json();
-      if (!r.ok) return res.status(r.status).json({ error: 'FedEx Tracking Error' });
-      res.json(data);
-    } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'FedEx fetch failed' });
-    }
-  });
-
-  // ── Turkish Cargo Carrier Tracking ──────────────────────────────────────────
-  // Returns a normalised TrackingResult-compatible object.
-  // Falls back to realistic mock data when credentials aren't configured.
-  // Credentials (optional) stored in env vars or Firestore settings/cargoApiKeys.
-
-  function trMockEvents(carrier: string, no: string, status: string) {
-    const now = Date.now();
-    return {
-      mock: true, carrier, trackingNumber: no,
-      statusCode: 'in_transit' as const, status,
-      origin: 'İstanbul', destination: 'Ankara',
-      estimatedDelivery: new Date(now + 86400000).toISOString(),
-      isMock: true,
-      events: [
-        { timestamp: new Date(now - 1800000).toISOString(), location: 'Ankara Dağıtım Merkezi', status: 'Dağıtıma Çıktı', description: `${carrier}: Dağıtıma çıktı` },
-        { timestamp: new Date(now - 7200000).toISOString(), location: 'Ankara Transfer Merkezi', status: 'Transfer Merkezi', description: `${carrier}: Transfer merkezine ulaştı` },
-        { timestamp: new Date(now - 86400000).toISOString(), location: 'İstanbul Çıkış Deposu', description: `${carrier}: Kargo alındı`, status: 'Alındı' },
-      ],
-    };
-  }
-
-  // Yurtiçi Kargo
-  app.get('/api/tracking/yurtici/:no', requireAuth, async (req: Request, res: Response) => {
-    const no = req.params['no'] as string;
-    const apiKey = process.env.YURTICI_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('Yurtiçi', no, 'Dağıtımda'));
-    try {
-      const r = await fetch('https://ws.yurticikargo.com/GetShipmentInfo/v1', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-        body:    JSON.stringify({ trackingNumbers: [no] }),
-        signal:  AbortSignal.timeout(8000),
-      });
-      if (!r.ok) return res.json(trMockEvents('Yurtiçi', no, 'Bilinmiyor'));
-      const data = await r.json() as Record<string, unknown>;
-      res.json(data);
-    } catch {
-      res.json(trMockEvents('Yurtiçi', no, 'Bilgi Alınamadı'));
-    }
-  });
-
-  // MNG Kargo
-  app.get('/api/tracking/mng/:no', requireAuth, async (req: Request, res: Response) => {
-    const no = req.params['no'] as string;
-    const apiKey = process.env.MNG_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('MNG', no, 'Yolda'));
-    try {
-      const r = await fetch(`https://service.mngkargo.com.tr/mngWS.asmx/Sorgu?TakipNo=${encodeURIComponent(no)}`, {
-        headers: { 'x-api-key': apiKey },
-        signal:  AbortSignal.timeout(8000),
-      });
-      if (!r.ok) return res.json(trMockEvents('MNG', no, 'Bilinmiyor'));
-      const data = await r.json() as Record<string, unknown>;
-      res.json(data);
-    } catch {
-      res.json(trMockEvents('MNG', no, 'Bilgi Alınamadı'));
-    }
-  });
-
-  // Aras Kargo
-  app.get('/api/tracking/aras/:no', requireAuth, async (req: Request, res: Response) => {
-    const no = req.params['no'] as string;
-    const apiKey = process.env.ARAS_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('Aras', no, 'Transfer Merkezinde'));
-    try {
-      const r = await fetch(`https://kargo.aras.com.tr/api/v1/shipment/track/${encodeURIComponent(no)}`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        signal:  AbortSignal.timeout(8000),
-      });
-      if (!r.ok) return res.json(trMockEvents('Aras', no, 'Bilinmiyor'));
-      const data = await r.json() as Record<string, unknown>;
-      res.json(data);
-    } catch {
-      res.json(trMockEvents('Aras', no, 'Bilgi Alınamadı'));
-    }
-  });
-
-  // PTT Kargo
-  app.get('/api/tracking/ptt/:no', requireAuth, async (req: Request, res: Response) => {
-    const no = req.params['no'] as string;
-    try {
-      // PTT has a semi-public JSON endpoint
-      const r = await fetch(`https://gonderitakip.ptt.gov.tr/Track/Verify?q=${encodeURIComponent(no)}`, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        signal:  AbortSignal.timeout(8000),
-      });
-      if (r.ok) {
-        const data = await r.json() as Record<string, unknown>;
-        return res.json({ ...trMockEvents('PTT', no, 'Yolda'), ...data, mock: false, isMock: false });
-      }
-      return res.json(trMockEvents('PTT', no, 'Teslimatta'));
-    } catch {
-      res.json(trMockEvents('PTT', no, 'Teslimatta'));
-    }
-  });
-
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
   /** GET /api/exchange-rates/at?date=YYYY-MM-DD — o tarihin TCMB kuru.
    *  Doğrudan TCMB tarihsel arşivinden çeker (kendi arşivimizi tutmayız). Hafta
@@ -2759,220 +2531,6 @@ async function startServer() {
     res.json({ success: true, date, rates: cachedExchangeRates?.rates || {}, source: 'fallback' });
   });
 
-  /** Operasyon bekçisi: GET son 14 günün sonuçları, POST elle çalıştır.
-   *  Süper-admin panelindeki OpsWatchdogCard kullanır; cron her sabah 08:30. */
-  app.get('/api/ops/watchdog', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
-    if (!adminDb) return res.json({ success: true, results: [] });
-    try {
-      const snap = await adminDb.collection('opsChecks').get();
-      const results = snap.docs
-        .map(d => d.data() as Record<string, unknown>)
-        .filter(r => r.date)
-        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-        .slice(0, 14);
-      res.json({ success: true, results });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-  /** GET /api/ops/summary — SALT-OKUNUR ops özeti, token korumalı (2026-07-28).
-   *  Amacı: günlük bulut rutini (Claude routine) tarayıcı/oturum olmadan sistemin
-   *  durumunu okuyabilsin. Sadece operasyonel metrik döner — kişisel/iş verisi YOK.
-   *  OPS_SUMMARY_TOKEN env'i tanımlı değilse uç KAPALIDIR (503).
-   *  Token: `X-Ops-Token` başlığı veya ?token= ile; karşılaştırma sabit-zamanlı. */
-  /** POST /api/ops/disk-test — disk uyarı YOLUNU elle sına.
-   *
-   *  Neden gerekli: 2026-07-31 kesintisinde izleme sessiz kaldı. Uyarı
-   *  mekanizmasının "yazıldı" olması onun ÇALIŞTIĞI anlamına gelmiyor; postanın
-   *  gerçekten ulaştığını kanıtlamadan güvenmemek gerek. Eşiklerle oynayıp iki
-   *  kez deploy etmek yerine kalıcı bir sınama yolu.
-   *
-   *  Eşikleri ve 6 saatlik tekrar kısıtını atlar, postayı "TEST" olarak
-   *  işaretler. /api/ops/summary ile AYNI token korumasını kullanır.
-   */
-  app.post('/api/ops/disk-test', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
-    const sonuc = await diskNobetcisi(true);
-    res.json({
-      success: !sonuc.hata,
-      ...sonuc,
-      alici: process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || null,
-      not: sonuc.postaDenendi
-        ? 'Test postası gönderildi. Gelen kutunu (ve spam) kontrol et.'
-        : 'Posta GÖNDERİLEMEDİ — hata alanına bak.',
-    });
-  });
-
-  app.get('/api/ops/summary', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'ops summary kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
-    try {
-      let latest: Record<string, unknown> | null = null;
-      let previous: Record<string, unknown> | null = null;
-      if (adminDb) {
-        const snap = await adminDb.collection('opsChecks').get();
-        const rows = snap.docs.map(d => d.data() as Record<string, unknown>)
-          .filter(r => r.date)
-          .sort((x, y) => String(y.date).localeCompare(String(x.date)));
-        latest = rows[0] ?? null;
-        previous = rows[1] ?? null;
-      }
-      const failing = ((latest?.checks as Array<{ key: string; ok: boolean; detail: string }>) || []).filter(c => !c.ok);
-      res.json({
-        generatedAt: new Date().toISOString(),
-        uptimeSeconds: Math.round(process.uptime()),
-        env: process.env.NODE_ENV || 'development',
-        watchdog: {
-          date: latest?.date ?? null,
-          ok: latest?.ok ?? null,
-          failingCount: failing.length,
-          failing,                       // yalnız BOZUK olanların detayı
-          checks: latest?.checks ?? [],  // tam liste (11 kontrol)
-          previousDate: previous?.date ?? null,
-          previousOk: previous?.ok ?? null,
-        },
-        mikro: { apiBase: MIKRO_API_BASE, localMode: MIKRO_LOCAL_MODE, surum: MIKRO_JUMP_SURUM },
-      });
-    } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  app.post('/api/ops/watchdog/run', requireAuth, requireMfaVerified, requireSuperAdmin, async (_req: Request, res: Response) => {
-    try {
-      res.json({ success: true, result: await runOpsWatchdog() });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  /** GET /api/ops/module-status — modül bazlı sezgisel olgunluk göstergesi.
-   *  GERÇEK dosya sinyallerinden hesaplanır (satır sayısı, App.tsx/diğer
-   *  bileşenlerde kullanılıyor mu, TODO/stub/placeholder işaretleri) —
-   *  "bitti/eksik" gibi kesin bir iddia ÜRETMEZ, yalnız ham sinyalleri döner;
-   *  istemci bunu açıkça "sezgisel gösterge" etiketiyle sunar (bkz. CLAUDE.md
-   *  "sahte kesinlik gösterme"). 2026-08-16, süper-admin panel isteği.
-   */
-  const MODULE_REGISTRY: { id: string; label: string; file: string; group: string }[] = [
-    { id: 'crm', label: 'CRM (Satış Hunisi)', file: 'src/pages/CRMPage.tsx', group: 'Satış' },
-    { id: 'orders', label: 'Sipariş & Lojistik', file: 'src/pages/OrdersPage.tsx', group: 'Satış' },
-    { id: 'inventory', label: 'Envanter', file: 'src/pages/InventoryPage.tsx', group: 'Stok' },
-    { id: 'muhasebe', label: 'Muhasebe (ana)', file: 'src/pages/MuhasebePage.tsx', group: 'Muhasebe' },
-    { id: 'satinalma', label: 'Satın Alma', file: 'src/pages/SatinAlmaPage.tsx', group: 'Satın Alma' },
-    { id: 'ik', label: 'İnsan Kaynakları', file: 'src/pages/IKPage.tsx', group: 'IK' },
-    { id: 'raporlar', label: 'Raporlar', file: 'src/pages/RaporlarPage.tsx', group: 'Rapor' },
-    { id: 'admin', label: 'Admin', file: 'src/pages/AdminPage.tsx', group: 'Yönetim' },
-    { id: 'ayarlar', label: 'Ayarlar', file: 'src/pages/SettingsPage.tsx', group: 'Yönetim' },
-    { id: 'dashboard', label: 'Dashboard', file: 'src/pages/DashboardPage.tsx', group: 'Genel' },
-    { id: 'b2bportal', label: 'B2B Portal', file: 'src/components/B2BPortal.tsx', group: 'Satış' },
-    { id: 'hr', label: 'HR Modülü', file: 'src/components/HRModule.tsx', group: 'IK' },
-    { id: 'legal', label: 'Hukuk', file: 'src/components/LegalModule.tsx', group: 'Yönetim' },
-    { id: 'quality', label: 'Kalite', file: 'src/components/QualityModule.tsx', group: 'Üretim' },
-    { id: 'production', label: 'Üretim', file: 'src/components/ProductionModule.tsx', group: 'Üretim' },
-    { id: 'mrp', label: 'MRP', file: 'src/components/MRPModule.tsx', group: 'Üretim' },
-    { id: 'bom', label: 'Ürün Ağacı (BOM)', file: 'src/components/BOMPanel.tsx', group: 'Üretim' },
-    { id: 'bakim', label: 'Bakım', file: 'src/components/BakimModule.tsx', group: 'Üretim' },
-    { id: 'servis', label: 'Servis', file: 'src/components/ServisModule.tsx', group: 'Satış' },
-    { id: 'lotseri', label: 'Lot/Seri Takip', file: 'src/components/LotSeriModule.tsx', group: 'Stok' },
-    { id: 'sube', label: 'Şube Yönetimi', file: 'src/components/SubeModule.tsx', group: 'Yönetim' },
-    { id: 'holding', label: 'Holding', file: 'src/components/HoldingModule.tsx', group: 'Yönetim' },
-    { id: 'kurumsalyonetim', label: 'Kurumsal Yönetim', file: 'src/components/CorporateGovernanceModule.tsx', group: 'Yönetim' },
-    { id: 'maliyetmerkezi', label: 'Maliyet Merkezi', file: 'src/components/MaliyetMerkeziModule.tsx', group: 'Muhasebe' },
-    { id: 'gelirtanima', label: 'Gelir Tanıma', file: 'src/components/GelirTanimaModule.tsx', group: 'Muhasebe' },
-    { id: 'muhtasar', label: 'Muhtasar', file: 'src/components/MuhtasarModule.tsx', group: 'Muhasebe' },
-    { id: 'sabitkiymet', label: 'Sabit Kıymet', file: 'src/components/SabitKiymetModule.tsx', group: 'Muhasebe' },
-    { id: 'kasa', label: 'Kasa', file: 'src/components/KasaModule.tsx', group: 'Muhasebe' },
-    { id: 'dunning', label: 'Tahsilat Hatırlatma', file: 'src/components/DunningModule.tsx', group: 'Muhasebe' },
-    { id: 'ihracat', label: 'İhracat', file: 'src/components/IhracatModule.tsx', group: 'Satış' },
-    { id: 'territory', label: 'Bölge Yönetimi', file: 'src/components/TerritoryModule.tsx', group: 'Satış' },
-    { id: 'performans', label: 'Performans', file: 'src/components/PerformansModule.tsx', group: 'IK' },
-    { id: 'cpq', label: 'CPQ (Teklif Yapılandırma)', file: 'src/components/CPQPanel.tsx', group: 'Satış' },
-    { id: 'demandforecast', label: 'Talep Tahmini', file: 'src/components/DemandForecastPanel.tsx', group: 'Stok' },
-    { id: 'priceintel', label: 'Fiyat İstihbaratı', file: 'src/components/PriceIntelPanel.tsx', group: 'Satış' },
-    { id: 'dealercomm', label: 'Bayi Komisyonu', file: 'src/components/DealerCommissionPanel.tsx', group: 'Satış' },
-    { id: 'subscription', label: 'Abonelik Yönetimi', file: 'src/components/SubscriptionPanel.tsx', group: 'Yönetim' },
-    { id: 'mobilewms', label: 'Mobil WMS', file: 'src/components/MobileWMSModule.tsx', group: 'Stok' },
-    { id: 'erp_hub', label: 'ERP Hub', file: 'src/components/ERPHubPanel.tsx', group: 'Entegrasyon' },
-    { id: 'marketplace', label: 'Pazaryeri', file: 'src/components/MarketplacePanel.tsx', group: 'Entegrasyon' },
-    { id: 'sku_mapping', label: 'SKU Eşleştirme', file: 'src/components/SkuMappingPanel.tsx', group: 'Entegrasyon' },
-    { id: 'mutabakat', label: 'Mutabakat', file: 'src/components/MutabakatPanel.tsx', group: 'Muhasebe' },
-    { id: 'overdue', label: 'Vadesi Geçen', file: 'src/components/OverduePanel.tsx', group: 'Muhasebe' },
-    { id: 'risk', label: 'Risk Paneli', file: 'src/components/RiskPanel.tsx', group: 'Muhasebe' },
-    { id: 'finance', label: 'Finans Paneli', file: 'src/components/FinancePanel.tsx', group: 'Muhasebe' },
-    { id: 'analytics', label: 'Analitik', file: 'src/components/AnalyticsPanel.tsx', group: 'Rapor' },
-  ];
-  const MODULE_STUB_MARKERS = ['todo', 'yakında', 'coming soon', 'henüz bağlı değil', 'placeholder veri', 'mock veri', 'dummy veri', 'not implemented', 'stub veri', 'demo veri'];
-  function walkSourceFiles(dir: string, out: string[] = []): string[] {
-    let entries: fs.Dirent[] = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-    for (const e of entries) {
-      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) walkSourceFiles(full, out);
-      else if (e.name.endsWith('.tsx') || e.name.endsWith('.ts')) out.push(full);
-    }
-    return out;
-  }
-  // ── Calisma ortami bilgisi (super-admin) ──────────────────────────────────
-  // NEDEN VAR: firebase-admin 14 `node >=22` istiyor; CI Node 20'de, uretim
-  // sunucusu ise chocolatey 'nodejs-lts' ile kuruldu ve GERCEK surumu hicbir
-  // yerden gorunmuyordu. Yukseltme plani tahmine dayanamaz — bu uc olcumu
-  // saglar. /api/health'e KONMADI: orasi kimliksiz erisilebiliyor ve tam
-  // calisma-zamani surumunu disariya bildirmek gereksiz bilgi sizintisidir.
-  app.get('/api/ops/runtime', requireAuth, requireSuperAdmin, (_req: Request, res: Response) => {
-    let firebaseAdminSurum: string | null = null;
-    try {
-      firebaseAdminSurum = JSON.parse(
-        fs.readFileSync(path.join(process.cwd(), 'node_modules', 'firebase-admin', 'package.json'), 'utf8'),
-      ).version as string;
-    } catch { /* paket okunamazsa null */ }
-
-    const majör = Number(process.versions.node.split('.')[0]);
-    res.json({
-      node: process.version,
-      nodeMajor: majör,
-      platform: `${process.platform} ${process.arch}`,
-      firebaseAdmin: firebaseAdminSurum,
-      // firebase-admin 14 engines: { node: '>=22' }
-      firebaseAdmin14Uyumlu: majör >= 22,
-      uptimeSaat: Math.round((process.uptime() / 3600) * 10) / 10,
-    });
-  });
-
-  app.get('/api/ops/module-status', requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
-    try {
-      const root = process.cwd();
-      const scanDirs = [path.join(root, 'src', 'pages'), path.join(root, 'src', 'components'), path.join(root, 'src', 'App.tsx')];
-      const files = scanDirs.flatMap(d => (fs.existsSync(d) && fs.statSync(d).isDirectory()) ? walkSourceFiles(d) : (fs.existsSync(d) ? [d] : []));
-      const contents = new Map<string, string>();
-      for (const f of files) { try { contents.set(f, fs.readFileSync(f, 'utf8')); } catch { /* okunamayan dosya atlanır */ } }
-      const combined = [...contents.values()].join('\n');
-      const modules = MODULE_REGISTRY.map(m => {
-        const full = path.join(root, m.file);
-        const content = contents.get(full);
-        if (content === undefined) return { ...m, exists: false, lines: 0, stubMarkers: [] as string[], wired: false, mtimeMs: null as number | null };
-        const lines = content.split('\n').length;
-        const lower = content.toLowerCase();
-        const stubMarkers = MODULE_STUB_MARKERS.filter(s => lower.includes(s));
-        const compName = path.basename(m.file, path.extname(m.file));
-        const occurrences = combined.split(compName).length - 1; // kendi dosyasındaki tanım + başka yerdeki kullanım(lar)
-        const wired = occurrences >= 2;
-        let mtimeMs: number | null = null;
-        try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* yok say */ }
-        return { ...m, exists: true, lines, stubMarkers, wired, mtimeMs };
-      });
-      res.json({ success: true, modules, generatedAt: new Date().toISOString() });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
 
   /** POST /api/logistics/transfer — konum-bazlı stok transferi (atomik).
    *  Body: { productId, sku?, productName?, quantity, from?, to?, note? }
@@ -5547,6 +5105,25 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     getCompanyStatus, companyStatusCache, APP_ROLES, escapeHtml, isValidEmail,
   });
 
+  // KONUM: superadminRoutes ile AYNI nokta - ara katmanlardan (express.json,
+  // limitler) SONRA ve tum kapanis degiskenleri kapsamda. Bu konum
+  // kanitlanmis: yukari alinirsa hem app.use zinciri hem degisken kapsami
+  // bozuluyor (mikroRoutes'ta tam bu hata canliyi kirmisti).
+  trackingRoutes(app, {
+    requireAuth, requireMfaVerified,
+  });
+
+  opsRoutes(app, {
+    getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireSuperAdmin,
+  });
+
+  dynamicsRoutes(app, {
+    getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
+    writeAuditLog, pgServerTimestamp, tenantSnap,
+    getDynamicsToken, dynamicsGetAll, getDynamicsBase, getDynamicsCredsFromFirestore,
+  });
+
+
   // ─────────────────────────────────────────────────────────────────────────────
   // PAZARYERİ FİYAT İSTİHBARATI — Trendyol + Amazon SP-API (env-gated, ERP deseni)
   // Rakip fiyatları çeker; pricingEngine (client) fiyatlandırma önerisi üretir.
@@ -5783,180 +5360,6 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return out;
   }
 
-  app.get('/api/dynamics/status', async (_req: Request, res: Response) => {
-    const hasEnvCreds = !!(process.env.DYNAMICS_TENANT_ID && process.env.DYNAMICS_CLIENT_ID && process.env.DYNAMICS_CLIENT_SECRET && process.env.DYNAMICS_COMPANY_ID);
-    const fsCreds = hasEnvCreds ? null : await getDynamicsCredsFromFirestore();
-    const configured = hasEnvCreds || !!fsCreds;
-    if (!configured) return res.json({ configured: false, connected: false });
-    try {
-      const token = await getDynamicsToken();
-      if (!token) return res.json({ configured: true, connected: false, error: 'OAuth2 token request failed — check DYNAMICS_CLIENT_ID / DYNAMICS_CLIENT_SECRET / DYNAMICS_TENANT_ID' });
-      // Bağlantı probu: getDynamicsBase() ZATEN companies(ID) içerir; hafif bir
-      // alt-entity sorgusu (items?$top=1) hem OAuth hem şirket erişimini doğrular.
-      // (Önceki `${base}/companies` = .../companies(ID)/companies → daima 404'tü.)
-      const r = await fetch(`${getDynamicsBase()}/items?$top=1`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      });
-      if (!r.ok) return res.json({ configured: true, connected: false, error: `BC API returned HTTP ${r.status}` });
-      return res.json({
-        configured: true,
-        connected:  true,
-        companyName: 'Business Central',
-        environmentName: process.env.DYNAMICS_ENVIRONMENT ?? 'production',
-      });
-    } catch (err) {
-      return res.json({ configured: true, connected: false, error: String(err) });
-    }
-  });
-
-  // BC item → inventory upsert (Mikro/Paraşüt deseni; sku=item.number, dedup sku ile).
-  // NOT: canlı BC'ye karşı test EDİLMEDİ — ilk gerçek sync doğrulayacak.
-  app.post('/api/dynamics/import/stok', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
-    const token = await getDynamicsToken();
-    if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
-    const companyId = await reqCompanyId(req);
-    const t0 = Date.now();
-    try {
-      const items = await dynamicsGetAll(token, 'items');
-      // KİRACI SINIRI: "Mikro/Paraşüt deseni" yorumu doğru — o desendeki aynı
-      // eksik filtre buraya da kopyalanmış. GTIN/barkod gibi SKU'lar kiracılar
-      // arasında çakışabilir; düzeltme Paraşüt/barkod/fiyat ile aynı.
-      const invSnap = await tenantSnap('inventory', companyId);
-      const bySku = new Map<string, PgDocRef>();
-      for (const d of invSnap.docs) {
-        const veri = d.data() as Record<string, unknown>;
-        const dc = (veri.companyId as string | undefined) || '';
-        if (dc && dc !== companyId) continue;
-        const sku = ((veri.sku as string) || '').trim();
-        if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
-      }
-      let created = 0, updated = 0;
-      let batch = adminDb.batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
-      for (const it of items) {
-        const sku = ((it.number as string) || '').trim();
-        if (!sku) continue;
-        if ((it.blocked as boolean) === true) continue; // bloke kalemleri atla
-        const price = Number(it.unitPrice) || 0;
-        const fields = {
-          name: (it.displayName as string) || sku,
-          unit: (it.baseUnitOfMeasureCode as string) || 'ADET',
-          stockLevel: Number(it.inventory) || 0,
-          price,
-          prices: { 'Retail': price, 'B2B Standard': price, 'B2B Premium': price, 'Dealer': price },
-          barcode: (it.gtin as string) || '',
-          dynamicsId: String(it.id ?? ''), source: 'dynamics',
-          updatedAt: pgServerTimestamp(),
-          companyId, // create+update etiketle (self-heal)
-        };
-        const ref = bySku.get(sku);
-        if (ref) { batch.update(ref, fields); updated++; }
-        else {
-          const newRef = adminDb.collection('inventory').doc();
-          batch.set(newRef, { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() });
-          bySku.set(sku, newRef);
-          created++;
-        }
-        if (++ops >= 400) await flush();
-      }
-      await flush();
-      await writeAuditLog(reqActor(req), 'Dynamics Stok İçe Aktarma', `${created} yeni / ${updated} güncel`);
-      res.json({ success: true, created, updated, errors: 0, total: items.length, duration: Date.now() - t0 });
-    } catch (e) {
-      res.status(500).json({ success: false, created: 0, updated: 0, errors: 1, error: (e as Error).message });
-    }
-  });
-
-  // BC customer → leads upsert (dedup: dynamicsId → VKN → isim; Paraşüt/Mikro deseni).
-  // NOT: canlı BC'ye karşı test EDİLMEDİ — ilk gerçek sync doğrulayacak.
-  app.post('/api/dynamics/import/cari', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
-    const token = await getDynamicsToken();
-    if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
-    const companyId = await reqCompanyId(req);
-    const t0 = Date.now();
-    try {
-      const customers = await dynamicsGetAll(token, 'customers');
-      // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
-      const leadSnap = await tenantSnap('leads', companyId);
-      const byDynId = new Map<string, PgDocRef>();
-      const byVkn = new Map<string, PgDocRef>();
-      const byName = new Map<string, PgDocRef>();
-      const normVkn = (v?: string) => (v || '').replace(/\D/g, '');
-      for (const d of leadSnap.docs) {
-        const data = d.data();
-        const dc = (data.companyId as string | undefined) || '';
-        if (dc && dc !== companyId) continue;
-        const did = (data.dynamicsId as string) || '';
-        if (did) byDynId.set(did, d.ref);
-        const vkn = normVkn((data.taxId as string) || (data.taxNo as string));
-        if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
-        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
-      }
-      let created = 0, updated = 0;
-      let batch = adminDb.batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
-      for (const c of customers) {
-        const did = String(c.id ?? '');
-        const name = (c.displayName as string) || (c.number as string) || did;
-        const addr = [c.addressLine1, c.addressLine2].filter(Boolean).join(' ');
-        const fields = {
-          name,
-          company: name,
-          email: (c.email as string) || '',
-          phone: (c.phoneNumber as string) || '',
-          taxId: (c.taxRegistrationNumber as string) || '',
-          address: addr,
-          city: (c.city as string) || '',
-          balance: Number(c.balanceDue ?? 0),
-          type: 'Customer', // BC customer entity = müşteri (tedarikçi ayrı 'vendors' entity'si)
-          dynamicsId: did, source: 'dynamics', mikroSynced: false,
-          updatedAt: pgServerTimestamp(),
-          companyId, // create+update etiketle (self-heal)
-        };
-        const vkn = normVkn(fields.taxId);
-        const nameKey = name.trim().toLowerCase();
-        const ref = byDynId.get(did)
-          || (vkn ? byVkn.get(vkn) : undefined)
-          || (nameKey ? byName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); updated++; }
-        else {
-          const newRef = adminDb.collection('leads').doc();
-          batch.set(newRef, { ...fields, status: 'Active', createdAt: pgServerTimestamp() });
-          if (did) byDynId.set(did, newRef);
-          created++;
-        }
-        if (++ops >= 400) await flush();
-      }
-      await flush();
-      await writeAuditLog(reqActor(req), 'Dynamics Cari İçe Aktarma', `${created} yeni / ${updated} güncel`);
-      res.json({ success: true, created, updated, errors: 0, total: customers.length, duration: Date.now() - t0 });
-    } catch (e) {
-      res.status(500).json({ success: false, created: 0, updated: 0, errors: 1, error: (e as Error).message });
-    }
-  });
-
-  app.post('/api/dynamics/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { orderId } = req.body as { orderId?: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    const token = await getDynamicsToken();
-    if (!token) return res.json({ success: false, notConfigured: true });
-    // TODO: fetch order from Firebase, POST /salesOrders to Business Central
-    return res.json({ success: false, notImplemented: true, error: 'Dynamics order export not yet implemented.' });
-  });
-
-  app.post('/api/dynamics/export/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { orderId } = req.body as { orderId?: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    const token = await getDynamicsToken();
-    if (!token) return res.json({ success: false, notConfigured: true });
-    // TODO: fetch order from Firebase, POST /salesInvoices to Business Central
-    return res.json({ success: false, notImplemented: true, error: 'Dynamics invoice export not yet implemented.' });
-  });
 
   // ── SAP Business One (Service Layer) ─────────────────────────────────────────
   // Docs: https://help.sap.com/docs/SAP_BUSINESS_ONE/b1
