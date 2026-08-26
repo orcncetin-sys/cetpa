@@ -89,6 +89,12 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   // koleksiyonlarını kirletmesin diye ayrı tutulur; temiz doküman postProcess
   // ile ilgili UI koleksiyonuna yazılır.
   'mikroDepolar', 'mikroBankalar', 'mikroKasalar',
+  // Ayni Mikro ayna ailesinin atlanmis iki uyesi (2026-08-25 kod incelemesi).
+  // Kardeslerinin (mikroDepolar/mikroBankalar/mikroKasalar) hepsi listedeydi,
+  // bu ikisi degildi -> filtresiz, yani her kiraci digerinin barkodlarini ve
+  // odeme planlarini okuyabiliyordu. Ikisi de /api/mikro/import/{barkod,
+  // odeme-plan} ile yaziliyor.
+  'barkodlar', 'odemePlanlari',
   // ── 2026-08-25 denetimi: sinifi HIC olmayan iki is koleksiyonu ──
   // Ikisi de "filtresiz" dalina dusuyordu (tenantWhere WHERE eki eklemiyor,
   // rowVisible sonunda `true` donuyor) — yani her kiraci digerlerininkini

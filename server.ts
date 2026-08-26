@@ -1614,7 +1614,10 @@ async function startServer() {
      *  (`{ mikro: { idmPassword } }`) sır maskesiz geçiyordu. */
     const maskSecrets = (v: unknown, anahtar?: string): unknown => {
       if (typeof v === 'string') return (anahtar && SECRET_FIELD_RE.test(anahtar) && v !== '') ? REDACTED : v;
-      if (Array.isArray(v)) return v.map(x => maskSecrets(x));
+      // Dizi elemanlarina ANAHTARI da gecir: `apiKeys: ['a','b']` gibi bir
+      // alanda eleman duzeyinde anahtar yoktur, dolayisiyla anahtar
+      // gecirilmezse dizideki sirlar MASKESIZ kalirdi.
+      if (Array.isArray(v)) return v.map(x => maskSecrets(x, anahtar));
       if (v && typeof v === 'object') {
         const out: Record<string, unknown> = {};
         for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = maskSecrets(val, k);

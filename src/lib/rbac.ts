@@ -117,6 +117,12 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   mikroDepolar: { read: [...STAFF_ROLES], write: ['Admin', 'Manager'] },
   mikroBankalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager'] },
   mikroKasalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager'] },
+  // Mikro ayna ailesinin kalan ikisi. KURALSIZ birakmak artik SESSIZ 403
+  // uretir: makeMikroSqlImport her import ucuna
+  // `requireCollectionAccess(opts.collection, 'write')` uyguluyor, yani kurali
+  // olmayan hedefte Admin DISINDAKI herkes import'u tetikleyemez.
+  barkodlar: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  odemePlanlari: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
 
   salesReturns: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
   serviceRequests: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'Quality'] },

@@ -102,6 +102,33 @@ describe('RBAC — sessiz 403 koruması', () => {
   });
 });
 
+describe('Mikro SQL import hedefleri', () => {
+  // `makeMikroSqlImport` (mikroRoutes.ts) her import ucuna
+  // `requireCollectionAccess(opts.collection, 'write')` uyguluyor. Bu, hedef
+  // koleksiyonun sınıflandırılmasını ZORUNLU kılar:
+  //   - kuralı yoksa  -> Admin dışındaki herkes import'u tetikleyemez (sessiz 403)
+  //   - TENANT değilse -> içeri akan Mikro verisi tüm kiracılara açık kalır
+  // 2026-08-25 kod incelemesinde `barkodlar` ve `odemePlanlari` tam olarak bu
+  // durumdaydı: kardeşleri (mikroDepolar/Bankalar/Kasalar) listedeyken bu ikisi
+  // atlanmıştı ve yetki kapısı eklenince iki import ucu kilitlenecekti.
+  const IMPORT_HEDEFLERI = [
+    'mikroSiparisler', 'mikroFaturalar', 'mikroCariHareketler', 'inventoryMovements',
+    'mikroBankalar', 'mikroKasalar', 'odemePlanlari', 'mikroDepolar',
+    'barkodlar', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri',
+  ];
+
+  it('hepsi TENANT olarak sınıflandırılmış', () => {
+    const eksik = IMPORT_HEDEFLERI.filter(c => !TENANT_COLLECTIONS.includes(c));
+    expect(eksik, `Sınıfsız import hedefi (kiracılar arası sızar): ${eksik.join(', ')}`).toEqual([]);
+  });
+
+  it('hepsinde açık erişim kuralı var (yoksa import ucu Admin dışında 403 döner)', () => {
+    const kuralsiz = IMPORT_HEDEFLERI.filter(c =>
+      !hasExplicitRule(c) && !ADMIN_ONLY_COLLECTIONS.has(c) && !APPEND_ONLY_COLLECTIONS.has(c));
+    expect(kuralsiz, `Kuralsız import hedefi: ${kuralsiz.join(', ')}`).toEqual([]);
+  });
+});
+
 describe('bilinçli olarak sınıfsız bırakılanlar', () => {
   it('hepsi gerçekten sınıfsız (liste bayatlamamış)', () => {
     // Bu liste "kazayla sınıfsız" ile "bilerek sınıfsız"ı ayırmak için var.
