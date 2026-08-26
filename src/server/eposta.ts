@@ -131,3 +131,19 @@ export function resendSagligiOnbellekten(): ResendDurum | null {
   void resendSagligi().catch(() => { /* arka plan tazeleme; hata yut */ });
   return null;
 }
+
+/**
+ * Giden e-posta HTML'ine gomulen KIRACI KAYNAKLI metni guvenli hale getirir.
+ * server.ts'ten TASINDI (2026-08-26) — epostaRoutes de kullaniyor ve
+ * server.ts'ten import DONGU olurdu.
+ */
+export function escapeHtml(v: unknown): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Basit e-posta bicim kontrolu. */
+export function isValidEmail(e: string): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+}

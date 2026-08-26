@@ -67,3 +67,13 @@ export const AiChatSchema = z.object({
   context:    z.string().max(8000).optional(),
   language:   z.enum(['tr', 'en']).optional(),
 });
+
+// server.ts'ten TASINDI (2026-08-26): epostaRoutes de kullaniyor.
+// E-posta gönderim şeması
+export const EmailSendSchema = z.object({
+  to:      z.string().email('Geçerli bir e-posta adresi girin.'),
+  subject: z.string().min(1, 'Konu boş olamaz.').max(200),
+  html:    z.string().min(1, 'İçerik boş olamaz.'),
+  from:    z.string().email().optional(),
+  replyTo: z.string().email().optional(),
+});

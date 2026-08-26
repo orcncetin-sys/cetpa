@@ -16,6 +16,18 @@ export const ADMIN_ROLES: AppRole[] = ['Admin', 'Manager'];
 export const STAFF_ROLES: AppRole[] = ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'HR', 'Purchasing', 'Legal', 'Corporate', 'Quality'];
 export const EXTERNAL_ROLES: AppRole[] = ['B2B', 'Dealer'];
 
+/**
+ * TUM roller — davet/rol atama uclari bunu dogrulama listesi olarak kullanir.
+ *
+ * server.ts'te AYRI bir `APP_ROLES` dizisi vardi: ayni 12 rol IKI KEZ
+ * yaziliyordu ve biri degisince digeri sessizce bayatlardi (CLAUDE.md:
+ * "grup uyeligini tek kaynaktan turet"). 2026-08-26'da birlestirildi.
+ * Tip guvenligi: `AppRole[]` oldugu icin yeni bir rol tipe eklenip buraya
+ * eklenmezse derleyici SUSAR — bu yuzden liste tipten TURETILMIYOR, elle
+ * yaziliyor ama TEK yerde.
+ */
+export const APP_ROLES: readonly AppRole[] = [...STAFF_ROLES, ...EXTERNAL_ROLES];
+
 /** Yalnız Admin/Manager'ın okuyup yazabileceği hassas koleksiyonlar. */
 export const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory', 'backupConfigs']);
 /** Append-only: yalnız ekleme (POST). Güncelleme/silme kimseye yok. */

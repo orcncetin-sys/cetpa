@@ -31,7 +31,8 @@ param(
     '/api/parasut/import/stok',
     '/api/ai/lead-score',
     '/api/shopify/sync',
-    '/api/iyzico/payment-link'
+    '/api/iyzico/payment-link',
+    '/api/email/send'
   )
 )
 

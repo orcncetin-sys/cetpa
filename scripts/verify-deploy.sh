@@ -177,7 +177,7 @@ else
   # `xRoutes(app, ...)` cagrisiyla kaydolur ve o cagri zincirde yanlis yere
   # konabilir. 2026-08-24'te kirilan yalniz mikro grubuydu; digerleri dogruydu
   # ve tek sondali kontrol bu farki goremezdi.
-  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/iyzico/payment-link}"
+  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/iyzico/payment-link /api/email/send}"
   for BODY_PROBE in $BODY_PROBES; do
     PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
