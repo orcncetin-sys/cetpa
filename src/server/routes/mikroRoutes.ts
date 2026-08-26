@@ -3718,9 +3718,33 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         cha_evrak_tip:    63,  // fatura
         cha_cari_cins:    0,
         // cha_ebelge_turu V17'de eklendi (V16 gövdesinde YOK) — yalnız V17+
-        // kurulumlarda gönderilir. Kod eşlemesi ilk gerçek kayıtla doğrulanmalı.
+        // kurulumlarda gönderilir.
+        //
+        // ⚠️ ESKİDEN YANLIŞTI (2026-08-25'te düzeltildi). Eski eşleme
+        //    `faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1` idi, yani
+        //    e-fatura için 1, e-arşiv için 8 yazıyordu. Bu, uygulamanın KENDİ
+        //    okuma tarafıyla çelişiyordu: Cetpa'dan kesilen bir e-Fatura,
+        //    Cetpa'nın kendi Faturalar ekranında "e-Arşiv" görünürdü; 8'in ise
+        //    okuma tarafında karşılığı yok, -1/bilinmiyor'a düşerdi.
+        //
+        //    Doğru eşleme İKİ BAĞIMSIZ kaynakla sabitlendi (tahmin değil):
+        //      1. Okuma tarafı — canlı tie-out ile ölçüldü (HANDOFF.md:119:
+        //         satış 200×tür0 / 5×tür1, alış 91×tür0 / 58×tür1) →
+        //         src/hooks/useMikroFaturalar.ts:21 «0=e-Fatura, 1=e-Arşiv,
+        //         2=e-İrsaliye».
+        //      2. Mikro API spec'i — bu dosyada :3528 «EBelgeTipi 0=EFatura
+        //         1=EArsiv 2=EIrsaliye» ve :3425 aynı eşlemeyi kullanıyor.
+        //
+        //    İhracat 0'da BIRAKILDI: ihracat faturası e-Fatura ailesindendir ve
+        //    okuma tarafında ayrı bir kodu yok (bkz. hafıza: "İhracat
+        //    cha_ebelge_turu'da yok"). Uydurma bir kod yazmaktansa e-Fatura
+        //    olarak işaretlemek hem doğru hem okuma tarafıyla tutarlı.
+        //
+        // ⚠️ ŞU AN ETKİSİZ: MIKRO_JUMP_SURUM varsayılanı 16, yani bu alan hiç
+        //    gönderilmiyor. V17'ye geçildiğinde AKTİFLEŞİR — ilk gerçek kayıtta
+        //    Mikro'da belge tipinin doğru göründüğü GÖZLE doğrulanmalı.
         ...(MIKRO_JUMP_SURUM >= 17
-          ? { cha_ebelge_turu: faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1 }
+          ? { cha_ebelge_turu: faturaType === 2 ? 1 : 0 }  // 2=e-arşiv → 1, e-fatura & ihracat → 0
           : {}),
         cha_d_cins:       0,
         cha_d_kur:        1,

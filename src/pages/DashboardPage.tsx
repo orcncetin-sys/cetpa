@@ -577,7 +577,7 @@ export default function DashboardPage(props: Props) {
 
                 return (
                   <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100 shadow-sm'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5 ${darkMode ? 'text-white/40' : 'text-gray-400'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5 ${darkMode ? 'text-white/65' : 'text-gray-400'}`}>
                       ✨ {currentLanguage === 'tr' ? 'Akıllı İçgörüler' : 'Smart Insights'}
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -598,7 +598,7 @@ export default function DashboardPage(props: Props) {
                 return (
                   <div className={cn('rounded-2xl border p-4', darkMode ? 'bg-white/5 border-white/10' : 'bg-amber-50/60 border-amber-200/60')}>
                     <div className="flex items-center justify-between mb-3">
-                      <p className={cn('text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5', darkMode ? 'text-white/40' : 'text-amber-700')}>
+                      <p className={cn('text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5', darkMode ? 'text-white/65' : 'text-amber-700')}>
                         <Receipt className="w-3.5 h-3.5" />
                         {currentLanguage === 'tr' ? 'Yaklaşan Vergi Tarihleri' : 'Upcoming Tax Deadlines'}
                       </p>
@@ -691,7 +691,7 @@ export default function DashboardPage(props: Props) {
                             {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}%
                           </span>
                         )}
-                        <p className={cn("text-[10px]", darkMode ? "text-white/40" : "text-gray-400")}>
+                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>
                           {currentLanguage === 'tr' ? 'Geçen aya göre' : 'vs. last month'}
                         </p>
                       </div>
@@ -776,16 +776,16 @@ export default function DashboardPage(props: Props) {
                       </div>
                       <div className="text-right">
                         <p className={`text-2xl font-black ${pct99 >= 100 ? 'text-emerald-600' : pct99 >= 70 ? 'text-brand' : pct99 >= 40 ? 'text-amber-600' : 'text-red-500'}`}>{pct99}%</p>
-                        <p className={cn("text-[10px]", darkMode ? "text-white/40" : "text-gray-400")}>{sym99}{cvtRev99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
+                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>{sym99}{cvtRev99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
                       </div>
                     </div>
                     <div className={cn("h-2.5 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
                       <div className={`h-full rounded-full transition-all duration-700 ${barColor99}`} style={{ width: `${Math.min(pct99, 100)}%` }} />
                     </div>
                     <div className="flex justify-between mt-1.5">
-                      <span className={cn("text-[10px]", darkMode ? "text-white/30" : "text-gray-400")}>0</span>
+                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>0</span>
                       {pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {currentLanguage === 'tr' ? 'Hedefe ulaşıldı!' : 'Target reached!'}</span>}
-                      <span className={cn("text-[10px]", darkMode ? "text-white/30" : "text-gray-400")}>{monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : '—'}</span>
+                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : '—'}</span>
                     </div>
                   </div>
                 );
@@ -1333,7 +1333,7 @@ export default function DashboardPage(props: Props) {
                               className={`w-full rounded-t-lg transition-all duration-700 ${isCurrentMonth ? 'bg-brand' : darkMode ? 'bg-white/20 hover:bg-white/30' : 'bg-gray-200 hover:bg-gray-300'}`}
                               style={{ height: `${h}%`, minHeight: m.rev > 0 ? '4px' : '0' }}
                             />
-                            <span className={cn("text-[9px] font-bold", isCurrentMonth ? 'text-brand' : darkMode ? 'text-white/40' : 'text-gray-400')}>{m.label}</span>
+                            <span className={cn("text-[9px] font-bold", isCurrentMonth ? 'text-brand' : darkMode ? 'text-white/65' : 'text-gray-400')}>{m.label}</span>
                           </div>
                         );
                       })}
@@ -1604,7 +1604,7 @@ export default function DashboardPage(props: Props) {
                 )}
               >
                 <Search className="w-4 h-4 text-gray-400" />
-                <span className={cn("flex-1 text-sm", darkMode ? "text-white/40" : "text-gray-400")}>
+                <span className={cn("flex-1 text-sm", darkMode ? "text-white/65" : "text-gray-400")}>
                   {currentLanguage === 'tr' ? 'Sipariş, müşteri veya ürün ara…' : 'Search orders, leads or products…'}
                 </span>
                 <kbd className="hidden sm:inline text-[10px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono shadow-sm">⌘K</kbd>
@@ -1812,7 +1812,7 @@ export default function DashboardPage(props: Props) {
                           <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : "bg-gray-50")}>
                             <p className={`text-lg font-black ${stat.color}`}>{stat.value}</p>
                             <p className={cn("text-[10px] font-bold mt-0.5 truncate", darkMode ? "text-white/50" : "text-gray-500")}>{stat.label}</p>
-                            <p className={cn("text-[9px] mt-0.5", darkMode ? "text-white/30" : "text-gray-400")}>{stat.sub}</p>
+                            <p className={cn("text-[9px] mt-0.5", darkMode ? "text-white/60" : "text-gray-400")}>{stat.sub}</p>
                           </div>
                         ));
                       })()}
@@ -2051,7 +2051,7 @@ export default function DashboardPage(props: Props) {
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className={cn("text-sm font-semibold truncate", darkMode ? "text-white/90" : "text-gray-800")}>{l.name}</p>
-                              <p className={cn("text-[10px] truncate", darkMode ? "text-white/40" : "text-gray-400")}>{l.company}</p>
+                              <p className={cn("text-[10px] truncate", darkMode ? "text-white/65" : "text-gray-400")}>{l.company}</p>
                             </div>
                             <p className={cn("text-[11px] font-bold flex-shrink-0", darkMode ? "text-white/50" : "text-gray-400")}>
                               {due.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' })}

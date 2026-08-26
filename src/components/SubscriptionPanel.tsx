@@ -154,7 +154,7 @@ export default function SubscriptionPanel({
                 }`}>
                   {isTrial ? t.trial : t.active}
                 </span>
-                <span className="text-white/40 text-xs">{remaining} {t.daysLeft}</span>
+                <span className="text-white/65 text-xs">{remaining} {t.daysLeft}</span>
               </div>
             </div>
             <div className="text-right hidden sm:block">

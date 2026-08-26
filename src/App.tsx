@@ -2665,7 +2665,8 @@ function AppContent() {
     // dinleyici bu iki koleksiyonu okumadığı için liste boş kalıyor ve sayfa
     // yenilense de asla dolmuyordu — özellik sessizce ölüydü.
     //
-    // Neden gözden kaçtı: dinleyiciler `src/hooks/useDataSync.ts` içinde YAZILMIŞ
+    // Neden gözden kaçtı: dinleyiciler yarım kalmış bir refactor'ün dosyasında
+    // (`src/hooks/useDataSync.ts`, 2026-08-25'te SİLİNDİ) YAZILMIŞ
     // ama o dosya HİÇBİR YERDEN import edilmiyor (ölü kod). Canlı dinleyiciler
     // bu dosyada duruyor ve o ikisi buraya hiç kopyalanmamış.
     //
@@ -2824,7 +2825,7 @@ function AppContent() {
     if (!user) return;
     const u: (() => void)[] = [];
     // Bkz. lazyCollections.ts — modül-özel koleksiyonlar ilgili sekme açılana
-    // kadar dinlenmez. useDataSync ile AYNI kararı vermeleri için ortak kapı.
+    // kadar dinlenmez. Tüm dinleyicilerin AYNI kararı vermesi için ortak kapı.
     const sub = (col: string, setter: (d: unknown[]) => void) => {
       if (!koleksiyonAktif(col, activeTab)) return;
       u.push(onSnapshot(collection(db, col), s => setter(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => setter([])));
@@ -3586,12 +3587,12 @@ function AppContent() {
                             </h2>
                             <button
                               onClick={() => { setShowDemoForm(false); setDemoForm({ name: '', company: '', email: '', phone: '', message: '' }); }}
-                              className={cn("p-2 rounded-xl transition-all", darkMode ? "text-white/40 hover:text-white hover:bg-white/10" : "text-gray-400 hover:text-gray-900 hover:bg-black/5")}
+                              className={cn("p-2 rounded-xl transition-all", darkMode ? "text-white/65 hover:text-white hover:bg-white/10" : "text-gray-400 hover:text-gray-900 hover:bg-black/5")}
                             >
                               <X className="w-5 h-5" />
                             </button>
                           </div>
-                          <p className={cn("text-sm", darkMode ? "text-white/40" : "text-black/40")}>
+                          <p className={cn("text-sm", darkMode ? "text-white/65" : "text-black/70")}>
                             {currentLanguage === 'tr' ? 'Bilgilerinizi bırakın, ekibimiz 24 saat içinde ulaşsın.' : 'Leave your details and our team will reach out within 24 hours.'}
                           </p>
                         </div>
@@ -3600,7 +3601,7 @@ function AppContent() {
                         <form onSubmit={handleDemoSubmit} className="px-10 py-8 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                                 {currentLanguage === 'tr' ? 'Ad Soyad *' : 'Full Name *'}
                               </label>
                               <input
@@ -3613,7 +3614,7 @@ function AppContent() {
                               />
                             </div>
                             <div className="space-y-1.5">
-                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                                 {currentLanguage === 'tr' ? 'Şirket' : 'Company'}
                               </label>
                               <input
@@ -3627,7 +3628,7 @@ function AppContent() {
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                                 {currentLanguage === 'tr' ? 'E-posta *' : 'Email *'}
                               </label>
                               <input
@@ -3640,7 +3641,7 @@ function AppContent() {
                               />
                             </div>
                             <div className="space-y-1.5">
-                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                              <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                                 {currentLanguage === 'tr' ? 'Telefon' : 'Phone'}
                               </label>
                               <input
@@ -3653,7 +3654,7 @@ function AppContent() {
                             </div>
                           </div>
                           <div className="space-y-1.5">
-                            <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                            <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                               {currentLanguage === 'tr' ? 'Mesajınız' : 'Message'}
                             </label>
                             <textarea
@@ -3684,7 +3685,7 @@ function AppContent() {
                         <h2 className={cn("text-2xl font-black mb-3", darkMode ? "text-white" : "text-[#1D1D1F]")}>
                           {currentLanguage === 'tr' ? 'Talebiniz Alındı!' : 'Request Received!'}
                         </h2>
-                        <p className={cn("text-sm mb-8", darkMode ? "text-white/40" : "text-black/40")}>
+                        <p className={cn("text-sm mb-8", darkMode ? "text-white/65" : "text-black/70")}>
                           {currentLanguage === 'tr' ? 'Ekibimiz en kısa sürede sizinle iletişime geçecek.' : 'Our team will contact you as soon as possible.'}
                         </p>
                         <button
@@ -3790,7 +3791,7 @@ function AppContent() {
                     className={cn("flex-1 py-2 rounded-xl text-xs font-black transition-all",
                       authMode === m
                         ? "bg-brand text-white shadow-sm"
-                        : darkMode ? "text-white/40 hover:text-white/70" : "text-gray-400 hover:text-gray-700"
+                        : darkMode ? "text-white/65 hover:text-white/70" : "text-gray-400 hover:text-gray-700"
                     )}>
                     {m === 'signin' ? (currentLanguage === 'tr' ? 'Giriş Yap' : 'Sign In') : (currentLanguage === 'tr' ? 'Kayıt Ol' : 'Sign Up')}
                   </button>
@@ -3827,7 +3828,7 @@ function AppContent() {
                         {isEmailLoginLoading ? '...' : (currentLanguage === 'tr' ? 'SIFIRLAMA BAĞLANTISI GÖNDER' : 'SEND RESET LINK')}
                       </button>
                       <button type="button" onClick={() => { setAuthMode('signin'); setAuthError(null); }}
-                        className={cn("w-full text-sm font-semibold", darkMode ? "text-white/40 hover:text-white/70" : "text-gray-400 hover:text-gray-600")}>
+                        className={cn("w-full text-sm font-semibold", darkMode ? "text-white/65 hover:text-white/70" : "text-gray-400 hover:text-gray-600")}>
                         {currentLanguage === 'tr' ? '← Giriş Yap' : '← Back to Sign In'}
                       </button>
                     </form>
@@ -3843,7 +3844,7 @@ function AppContent() {
                     { key: 'confirm', label: currentLanguage === 'tr' ? 'ŞİFRE TEKRAR' : 'CONFIRM PASSWORD', type: 'password', ac: 'new-password' },
                   ].map(f => (
                     <div key={f.key} className="space-y-1">
-                      <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>{f.label}</label>
+                      <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>{f.label}</label>
                       <input type={f.type} value={signupForm[f.key as keyof typeof signupForm]}
                         onChange={(e) => setSignupForm(prev => ({ ...prev, [f.key]: e.target.value }))}
                         className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
@@ -3854,7 +3855,7 @@ function AppContent() {
                     className="w-full font-black py-3.5 px-6 rounded-2xl transition-all disabled:opacity-60 text-sm active:scale-[0.98] bg-brand hover:bg-brand/90 text-white shadow-lg outline-none mt-1">
                     {isEmailLoginLoading ? '...' : (currentLanguage === 'tr' ? 'HESAP OLUŞTUR' : 'CREATE ACCOUNT')}
                   </button>
-                  <p className={cn("text-[10px] text-center", darkMode ? "text-white/30" : "text-gray-400")}>
+                  <p className={cn("text-[10px] text-center", darkMode ? "text-white/60" : "text-gray-400")}>
                     {currentLanguage === 'tr' ? 'Kayıt olarak ' : 'By registering you agree to our '}
                     <span className="text-brand">{currentLanguage === 'tr' ? 'Kullanım Koşulları' : 'Terms of Service'}</span>
                     {currentLanguage === 'tr' ? "'nı kabul etmiş olursunuz." : '.'}
@@ -3866,7 +3867,7 @@ function AppContent() {
               {authMode === 'signin' && (
                 <form onSubmit={handleEmailSignIn} className="space-y-3">
                   <div className="space-y-1">
-                    <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                    <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
                       {currentLanguage === 'tr' ? 'E-POSTA ADRESİ' : 'EMAIL ADDRESS'}
                     </label>
                     <input type="email" value={emailLogin.email}
@@ -3877,7 +3878,7 @@ function AppContent() {
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between ml-1">
-                      <label className={cn("text-[10px] font-black uppercase tracking-widest", darkMode ? "text-white/30" : "text-gray-400")}>
+                      <label className={cn("text-[10px] font-black uppercase tracking-widest", darkMode ? "text-white/60" : "text-gray-400")}>
                         {currentLanguage === 'tr' ? 'ŞİFRE' : 'PASSWORD'}
                       </label>
                       <button type="button" onClick={() => { setAuthMode('reset'); setAuthError(null); }}
@@ -3910,7 +3911,7 @@ function AppContent() {
                 <>
                   <div className="relative flex items-center gap-4 py-1">
                     <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
-                    <span className={cn("text-[11px] font-bold uppercase tracking-widest", darkMode ? "text-white/20" : "text-gray-300")}>
+                    <span className={cn("text-[11px] font-bold uppercase tracking-widest", darkMode ? "text-white/55" : "text-gray-300")}>
                       {currentLanguage === 'tr' ? 'veya' : 'OR'}
                     </span>
                     <div className={cn("flex-1 h-px", darkMode ? "bg-white/10" : "bg-gray-100")} />
@@ -3931,7 +3932,7 @@ function AppContent() {
             </div>
           </div>
 
-          <p className={cn("text-center text-xs mt-4", darkMode ? "text-white/20" : "text-gray-400")}>
+          <p className={cn("text-center text-xs mt-4", darkMode ? "text-white/55" : "text-gray-400")}>
             © 2026 CETPA · {currentT.authorized_only || 'Authorized Personnel Only'}
           </p>
         </motion.div>
@@ -4052,7 +4053,7 @@ function AppContent() {
               className={cn(
                 "hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all outline-none flex-shrink-0",
                 darkMode
-                  ? "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/70"
+                  ? "bg-white/5 border-white/10 text-white/65 hover:bg-white/10 hover:text-white/70"
                   : "bg-black/[0.04] border-black/10 text-gray-400 hover:bg-black/[0.07]"
               )}
               title={currentLanguage === 'tr' ? 'Ara (⌘K)' : 'Search (⌘K)'}
@@ -4065,7 +4066,7 @@ function AppContent() {
             {/* Keyboard shortcut help — Phase 28 */}
             <button
               onClick={() => setShortcutModalOpen(true)}
-              className={cn("hidden md:flex items-center justify-center w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] rounded-xl border transition-all outline-none flex-shrink-0 font-bold", darkMode ? "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/70" : "bg-black/[0.04] border-black/10 text-gray-400 hover:bg-black/[0.07] hover:text-gray-600")}
+              className={cn("hidden md:flex items-center justify-center w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] rounded-xl border transition-all outline-none flex-shrink-0 font-bold", darkMode ? "bg-white/5 border-white/10 text-white/65 hover:bg-white/10 hover:text-white/70" : "bg-black/[0.04] border-black/10 text-gray-400 hover:bg-black/[0.07] hover:text-gray-600")}
               title={currentLanguage === 'tr' ? 'Klavye kısayolları (?)' : 'Keyboard shortcuts (?)'}
             >
               <span className="text-xs">?</span>
@@ -4229,11 +4230,11 @@ function AppContent() {
               </button>
               {user && (
                 <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
-                  className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
+                  className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
                   <ShieldCheck className="w-4 h-4" />
                 </button>
               )}
-              <button onClick={handleLogout} className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/40 hover:text-red-400 hover:bg-white/10" : "text-gray-400 hover:text-red-500 hover:bg-red-50")}>
+              <button onClick={handleLogout} className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-red-400 hover:bg-white/10" : "text-gray-400 hover:text-red-500 hover:bg-red-50")}>
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
@@ -4298,7 +4299,7 @@ function AppContent() {
                           ? "text-brand bg-brand/15 border border-brand/25"
                           : isLocked
                             ? darkMode
-                              ? "text-white/25 hover:text-white/40 hover:bg-white/[0.04] border border-transparent"
+                              ? "text-white/55 hover:text-white/65 hover:bg-white/[0.04] border border-transparent"
                               : "text-gray-300 hover:text-gray-400 hover:bg-gray-50 border border-transparent"
                             : darkMode
                               ? "text-white/60 hover:text-white hover:bg-white/[0.08] border border-transparent"
@@ -4342,7 +4343,7 @@ function AppContent() {
                   <Globe className="w-3.5 h-3.5 text-brand" />
                   {currentLanguage === 'tr' ? 'EN' : 'TR'}
                 </button>
-                <div className={cn("flex-1 flex items-center justify-end gap-3 text-[10px]", darkMode ? "text-white/30" : "text-gray-400")}>
+                <div className={cn("flex-1 flex items-center justify-end gap-3 text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>
                   <a href="mailto:info@cetpa.com" className={cn("flex items-center gap-1 transition-all", darkMode ? "hover:text-white/60" : "hover:text-gray-700")}>
                     <Mail className="w-3 h-3 text-brand" /> info@cetpa.com
                   </a>
@@ -4576,7 +4577,7 @@ function AppContent() {
                         <Icon className={cn('w-4 h-4 shrink-0', isGroupActive ? 'text-brand' : '')} />
                         <span className="truncate flex-1">{group.label}</span>
                         {hasChildren && (
-                          <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform', isGroupActive ? 'rotate-180 text-brand' : darkMode ? 'text-white/30' : 'text-gray-300')} />
+                          <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform', isGroupActive ? 'rotate-180 text-brand' : darkMode ? 'text-white/60' : 'text-gray-300')} />
                         )}
                       </button>
 
@@ -4592,7 +4593,7 @@ function AppContent() {
                                   'w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all',
                                   active
                                     ? darkMode ? 'bg-brand/20 text-brand' : 'bg-brand/10 text-brand font-semibold'
-                                    : darkMode ? 'text-white/40 hover:text-white/70 hover:bg-white/[0.05]' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                                    : darkMode ? 'text-white/65 hover:text-white/70 hover:bg-white/[0.05]' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
                                 )}
                               >
                                 {child.label}

@@ -856,7 +856,7 @@ export default function OrdersPage({
 
               {/* ── Phase 501: Date Range Quick Filter ── */}
               <div className="flex flex-wrap gap-1.5 items-center">
-                <span className={cn("text-[10px] font-semibold uppercase tracking-wider", darkMode ? "text-white/40" : "text-gray-400")}>
+                <span className={cn("text-[10px] font-semibold uppercase tracking-wider", darkMode ? "text-white/65" : "text-gray-400")}>
                   {currentLanguage === 'tr' ? 'Dönem' : 'Period'}:
                 </span>
                 {([
@@ -2859,7 +2859,7 @@ export default function OrdersPage({
                       ].map((m, i) => (
                         <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
                           <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
-                          <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/40" : "text-gray-400")}>{m.label}</p>
+                          <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/65" : "text-gray-400")}>{m.label}</p>
                         </div>
                       ))}
                     </div>

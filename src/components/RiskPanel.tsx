@@ -191,7 +191,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
         const match = lead.paymentTerms.match(/\d+/);
         if (match) daysAllowed = parseInt(match[0], 10);
       }
-      // Bkz. App.tsx / useDataSync.ts'teki ayni hesap: tarih cozulemezse
+      // Bkz. App.tsx'teki ayni hesap: tarih cozulemezse
       // siparis GECIKMIS SAYILMAZ. `|| now` yedegi, syncedAt'i olmayan
       // pazaryeri siparislerini "bugun verilmis" yapip vadesini hep gelecege
       // atiyordu; hicbiri gecikmis listesine girmiyordu (2026-08-24).

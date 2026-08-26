@@ -122,7 +122,7 @@ export default function SatinAlmaPage(props: Props) {
   // hook'a çıkarılıp burada da kullanıldı.
   //
   // Kendi `leads` dinleyicisi (App.tsx'in paylaşılan `leads` state'i DEĞİL):
-  // useDataSync.ts o state'i Admin/Manager dışındaki roller için
+  // App.tsx'teki dinleyici o state'i Admin/Manager dışındaki roller için
   // assignedTo===uid'e KISITLIYOR (CRM pipeline sahipliği amaçlı). Bu
   // ekranın gerçek kullanıcıları (Purchasing/Logistics rolleri, satin-alma
   // full erişiminde) Admin/Manager değil — paylaşılan `leads`'i kullansaydım
@@ -212,7 +212,7 @@ export default function SatinAlmaPage(props: Props) {
                                     style={{ height: `${Math.max((m.cost / maxCost) * 100, m.cost > 0 ? 8 : 4)}%` }}
                                     title={`₺${m.cost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
                                   />
-                                  <span className={cn("text-[9px] font-semibold", darkMode ? "text-white/40" : "text-gray-400")}>{m.label}</span>
+                                  <span className={cn("text-[9px] font-semibold", darkMode ? "text-white/65" : "text-gray-400")}>{m.label}</span>
                                 </div>
                               ))}
                             </div>

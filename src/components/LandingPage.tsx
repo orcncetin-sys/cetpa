@@ -209,7 +209,7 @@ function IcpSection({ isTR, d, darkMode }: SectionProps) {
             <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
               {isTR ? 'Cetpa sizin için nasıl çalışır?' : 'How does Cetpa work for you?'}
             </h2>
-            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/70'))}>
               {isTR ? 'Profilinizi seçin, size özel faydaları görün.' : 'Choose your profile and see the benefits tailored to you.'}
             </p>
           </div>
@@ -268,7 +268,7 @@ function IcpSection({ isTR, d, darkMode }: SectionProps) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className={cn('text-center text-sm', d('text-white/30', 'text-black/30'))}
+                className={cn('text-center text-sm', d('text-white/60', 'text-black/65'))}
               >
                 {isTR ? '↑ Profilinizi seçmek için bir düğmeye tıklayın' : '↑ Click a button above to choose your profile'}
               </motion.p>
@@ -295,7 +295,7 @@ const COMP_ROWS = [
 
 function CellIcon({ val, isTR }: { val: string; isTR: boolean }) {
   if (val === 'check') return <Check className="w-4 h-4 text-emerald-500 mx-auto" />;
-  if (val === 'x')     return <X     className="w-4 h-4 text-black/20 mx-auto dark:text-white/20" />;
+  if (val === 'x')     return <X     className="w-4 h-4 text-black/60 mx-auto dark:text-white/55" />;
   return (
     <span className="flex flex-col items-center gap-0.5">
       <Minus className="w-4 h-4 text-amber-500 mx-auto" />
@@ -316,7 +316,7 @@ function CompetitorSection({ isTR, d }: SectionProps) {
             <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
               {isTR ? 'Neden CETPA?' : 'Why CETPA?'}
             </h2>
-            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/70'))}>
               {isTR ? 'Rakiplerimizle yan yana karşılaştırın.' : 'Compare us side by side with alternatives.'}
             </p>
           </div>
@@ -324,12 +324,12 @@ function CompetitorSection({ isTR, d }: SectionProps) {
           <div className={cn('rounded-3xl border overflow-hidden', d('border-white/10', 'border-black/8 shadow-md'))}>
             {/* Header */}
             <div className={cn('grid grid-cols-4 text-center text-xs font-black uppercase tracking-wider', d('bg-white/[0.04]', 'bg-black/[0.03]'))}>
-              <div className={cn('px-4 py-4 text-left', d('text-white/40', 'text-black/40'))}>
+              <div className={cn('px-4 py-4 text-left', d('text-white/65', 'text-black/70'))}>
                 {isTR ? 'Özellik' : 'Feature'}
               </div>
               <div className="px-4 py-4 text-brand">CETPA</div>
-              <div className={cn('px-4 py-4', d('text-white/40', 'text-black/40'))}>Logo ERP</div>
-              <div className={cn('px-4 py-4', d('text-white/40', 'text-black/40'))}>Mikro</div>
+              <div className={cn('px-4 py-4', d('text-white/65', 'text-black/70'))}>Logo ERP</div>
+              <div className={cn('px-4 py-4', d('text-white/65', 'text-black/70'))}>Mikro</div>
             </div>
 
             {/* Rows */}
@@ -390,7 +390,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
             <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight', d('text-white', 'text-[#111]'))}>
               {isTR ? 'Yatırım getirinizi hesaplayın' : 'Calculate your ROI'}
             </h2>
-            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('mt-3 text-sm', d('text-white/50', 'text-black/70'))}>
               {isTR ? 'Kaydırıcıları ayarlayın, tasarrufu gerçek zamanlı görün.' : 'Adjust the sliders and see your savings in real time.'}
             </p>
           </div>
@@ -438,7 +438,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                     onChange={e => setter(Number(e.target.value))}
                     className={sliderClass}
                   />
-                  <div className={cn('flex justify-between text-[10px] mt-1', d('text-white/25', 'text-black/25'))}>
+                  <div className={cn('flex justify-between text-[10px] mt-1', d('text-white/55', 'text-black/60'))}>
                     <span>{min}</span><span>{max}</span>
                   </div>
                 </div>
@@ -500,14 +500,14 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                     </span>
                   </div>
                   {(citationTR || citationEN) && (
-                    <p className={cn('text-[10px] mt-1.5', d('text-white/25', 'text-black/30'))}>
+                    <p className={cn('text-[10px] mt-1.5', d('text-white/55', 'text-black/65'))}>
                       {isTR ? citationTR : citationEN}
                     </p>
                   )}
                 </motion.div>
               ))}
 
-              <p className={cn('text-[10px] text-center mt-2', d('text-white/25', 'text-black/25'))}>
+              <p className={cn('text-[10px] text-center mt-2', d('text-white/55', 'text-black/60'))}>
                 {isTR
                   ? '* Hesaplamalar McKinsey & Gartner 2024 kıyaslamaları baz alınarak tahmin edilmiştir.'
                   : '* Estimates based on McKinsey & Gartner 2024 benchmarks.'}
@@ -520,7 +520,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                     ? '"İlk 3 ayda sipariş işleme süremiz %71 azaldı."'
                     : '"Our order processing time dropped 71% in the first 3 months."'}
                 </p>
-                <footer className={cn('text-xs mt-2 font-semibold', d('text-white/40', 'text-black/40'))}>
+                <footer className={cn('text-xs mt-2 font-semibold', d('text-white/65', 'text-black/70'))}>
                   — Emre K., {isTR ? 'Tekstil A.Ş. Genel Müdürü' : 'CEO, Tekstil A.Ş.'}
                 </footer>
               </blockquote>
@@ -559,7 +559,7 @@ function FAQItem({ q, a, darkMode }: { q: string; a: string; darkMode: boolean }
       <AnimatePresence>
         {open && (
           <motion.div id={panelId} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}>
-            <p className={cn('px-6 pb-6 text-sm leading-relaxed', darkMode ? 'text-white/50' : 'text-black/50')}>{a}</p>
+            <p className={cn('px-6 pb-6 text-sm leading-relaxed', darkMode ? 'text-white/50' : 'text-black/70')}>{a}</p>
           </motion.div>
         )}
       </AnimatePresence>
@@ -585,7 +585,7 @@ function TestiCard({ quote, name, role, company, rating, darkMode }: { quote: st
         </div>
         <div>
           <p className="font-bold text-sm">{name}</p>
-          <p className={cn('text-xs', darkMode ? 'text-white/40' : 'text-black/40')}>{role} · {company}</p>
+          <p className={cn('text-xs', darkMode ? 'text-white/65' : 'text-black/70')}>{role} · {company}</p>
         </div>
       </div>
     </motion.div>
@@ -784,8 +784,8 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
               onClick={() => setPaused(p => !p)}
               className={cn(
                 'mt-3 w-8 h-8 rounded-full border flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-                d('border-white/15 text-white/35 hover:text-white/65 hover:bg-white/6',
-                  'border-black/12 text-black/30 hover:text-black/55 hover:bg-black/5')
+                d('border-white/15 text-white/60 hover:text-white/65 hover:bg-white/6',
+                  'border-black/12 text-black/65 hover:text-black/55 hover:bg-black/5')
               )}
               title={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
               aria-label={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
@@ -803,7 +803,7 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
             <h3 className={cn('text-2xl font-black mb-4 leading-tight', d('text-white', 'text-gray-900'))}>
               {isTR ? 'Bağlantıyı momentuma dönüştürün' : 'Turn connectivity into momentum'}
             </h3>
-            <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/70'))}>
               {rightDesc}
             </p>
 
@@ -834,9 +834,9 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
                             {item.title}
                           </span>
                           <ArrowRight className={cn('w-3.5 h-3.5 transition-all',
-                            isActive ? 'text-brand translate-x-0.5' : d('text-white/25', 'text-black/25'))} />
+                            isActive ? 'text-brand translate-x-0.5' : d('text-white/55', 'text-black/60'))} />
                         </div>
-                        <p className={cn('text-xs leading-relaxed', d('text-white/40', 'text-black/45'))}>
+                        <p className={cn('text-xs leading-relaxed', d('text-white/65', 'text-black/70'))}>
                           {item.desc}
                         </p>
                       </div>
@@ -919,7 +919,7 @@ function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ct
           {[stat1, stat2].filter(Boolean).map((s, i) => s && (
             <div key={i} className={cn('flex-1 text-center px-3 py-3 rounded-2xl', d('bg-white/5', 'bg-gray-50'))}>
               <p className="text-2xl font-black" style={{ color: accent }}>{s.value}</p>
-              <p className={cn('text-[10px] font-medium mt-0.5', d('text-white/40', 'text-black/40'))}>{s.label}</p>
+              <p className={cn('text-[10px] font-medium mt-0.5', d('text-white/65', 'text-black/70'))}>{s.label}</p>
             </div>
           ))}
         </div>
@@ -937,7 +937,7 @@ function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ct
       <h2 className={cn('text-3xl md:text-4xl font-black mb-5 leading-tight', d('text-white', 'text-gray-900'))}>
         {title}
       </h2>
-      <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/50'))}>{desc}</p>
+      <p className={cn('text-sm leading-relaxed mb-8', d('text-white/50', 'text-black/70'))}>{desc}</p>
       <ul className="space-y-3.5 mb-10">
         {bullets.map((b, i) => (
           <li key={i} className={cn('flex items-start gap-3 text-sm', d('text-white/70', 'text-gray-700'))}>
@@ -1027,7 +1027,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
             <h2 className={cn('text-3xl md:text-4xl font-black tracking-tight mb-4', d('text-white', 'text-[#111]'))}>
               {isTR ? 'Müşterileriniz için siz seçin, siz kazanın.' : 'You recommend. You earn.'}
             </h2>
-            <p className={cn('mt-3 text-sm max-w-xl mx-auto', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('mt-3 text-sm max-w-xl mx-auto', d('text-white/50', 'text-black/70'))}>
               {isTR
                 ? 'Mali müşavirler CETPA\'yı ücretsiz kullanır, her müşteri yönlendirmesinden gelir payı alır.'
                 : "CPAs use CETPA free. Earn revenue share on every client referral."}
@@ -1049,7 +1049,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
                 <h3 className={cn('font-black text-sm mb-2', d('text-white', 'text-[#111]'))}>
                   {isTR ? b.titleTR : b.titleEN}
                 </h3>
-                <p className={cn('text-xs leading-relaxed', d('text-white/50', 'text-black/50'))}>
+                <p className={cn('text-xs leading-relaxed', d('text-white/50', 'text-black/70'))}>
                   {isTR ? b.descTR : b.descEN}
                 </p>
               </motion.div>
@@ -1058,7 +1058,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
 
           {/* Application form */}
           <div className={cn('max-w-lg mx-auto rounded-3xl border p-8', d('bg-white/[0.04] border-white/10', 'bg-white border-black/8 shadow-md'))}>
-            <p className={cn('text-xs font-bold uppercase tracking-widest text-center mb-5', d('text-white/50', 'text-black/50'))}>
+            <p className={cn('text-xs font-bold uppercase tracking-widest text-center mb-5', d('text-white/50', 'text-black/70'))}>
               {isTR ? 'Mali müşavir ortaklık programına başvurun' : 'Apply for the CPA partner program'}
             </p>
             {!submitted ? (
@@ -1070,7 +1070,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
                   onChange={e => setEmail(e.target.value)}
                   placeholder={isTR ? 'iş e-posta adresiniz' : 'your business email'}
                   aria-label={isTR ? 'İş e-posta adresiniz' : 'Your business email'}
-                  className={cn('flex-1 px-4 py-3 rounded-xl text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('bg-white/8 border border-white/10 text-white placeholder:text-white/30 focus:border-brand/40', 'bg-[#f5f5f7] border border-transparent text-[#111] placeholder:text-black/30 focus:border-brand/30'))}
+                  className={cn('flex-1 px-4 py-3 rounded-xl text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('bg-white/8 border border-white/10 text-white placeholder:text-white/60 focus:border-brand/40', 'bg-[#f5f5f7] border border-transparent text-[#111] placeholder:text-black/65 focus:border-brand/30'))}
                 />
                 <button
                   type="submit"
@@ -1332,13 +1332,13 @@ export default function LandingPage({
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-4">
               <button onClick={onLanguageToggle}
                 aria-label={isTR ? 'Dili İngilizce yap' : 'Switch to Turkish'}
-                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
               <button onClick={onDarkModeToggle}
                 aria-label={darkMode ? (isTR ? 'Açık moda geç' : 'Switch to light mode') : (isTR ? 'Koyu moda geç' : 'Switch to dark mode')}
                 aria-pressed={darkMode}
-                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/50 hover:text-black hover:bg-black/5'))}>
+                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
                 {darkMode ? <Sun className="w-[15px] h-[15px]" aria-hidden="true" /> : <Moon className="w-[15px] h-[15px]" aria-hidden="true" />}
               </button>
               {!isLoggedIn ? (
@@ -1394,7 +1394,7 @@ export default function LandingPage({
           </motion.h1>
 
           <motion.p initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}
-            className={cn('text-lg md:text-xl leading-relaxed mb-10 max-w-2xl mx-auto', d('text-white/50', 'text-black/50'))}>
+            className={cn('text-lg md:text-xl leading-relaxed mb-10 max-w-2xl mx-auto', d('text-white/50', 'text-black/70'))}>
             {isTR
               ? 'Satış, lojistik, üretim ve muhasebe süreçlerinizi tek platformda yönetin. Shopify, Mikro ve Luca ile tam entegrasyon.'
               : 'Manage sales, logistics, production and accounting on one platform. Full integration with Shopify, Mikro and Luca.'}
@@ -1416,7 +1416,7 @@ export default function LandingPage({
           </motion.div>
 
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-            className={cn('text-xs', d('text-white/30', 'text-black/30'))}>
+            className={cn('text-xs', d('text-white/60', 'text-black/65'))}>
             {isTR ? '✓ Kredi kartı gerekmez · ✓ 14 gün ücretsiz · ✓ İstediğiniz zaman iptal' : '✓ No credit card · ✓ 14-day free trial · ✓ Cancel anytime'}
           </motion.p>
 
@@ -1530,7 +1530,7 @@ export default function LandingPage({
                   <div key={i} className="flex items-center gap-3 flex-shrink-0">
                     <SparkleIcon size={10} style={{ color: brand, opacity: 0.5 }} />
                     <span className={cn('text-sm font-black', d('text-white', 'text-black'))}>{s.val}</span>
-                    <span className={cn('text-xs', d('text-white/40', 'text-black/40'))}>{s.label}</span>
+                    <span className={cn('text-xs', d('text-white/65', 'text-black/70'))}>{s.label}</span>
                   </div>
                 ))}
               </div>
@@ -1550,7 +1550,7 @@ export default function LandingPage({
       {/* ── Integrations logos ─────────────────────────────────────────────── */}
       <section className="py-20">
         <div className="w-full max-w-5xl mx-auto px-6 text-center">
-          <p className={cn('text-xs font-bold uppercase tracking-widest mb-10', d('text-white/25', 'text-black/25'))}>
+          <p className={cn('text-xs font-bold uppercase tracking-widest mb-10', d('text-white/55', 'text-black/60'))}>
             {isTR ? 'Entegre olduğumuz platformlar' : 'Platforms we integrate with'}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-10 md:gap-16">
@@ -1583,7 +1583,7 @@ export default function LandingPage({
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'Üç adımda dijital dönüşüm' : 'Three steps to digital transformation'}
             </h2>
-            <p className={cn('max-w-xl mx-auto', d('text-white/40', 'text-black/40'))}>
+            <p className={cn('max-w-xl mx-auto', d('text-white/65', 'text-black/70'))}>
               {isTR ? 'Karmaşık kurulum yok. Hemen başlayın, aynı gün verim alın.' : 'No complex setup. Start immediately, get results the same day.'}
             </p>
           </div>
@@ -1599,10 +1599,10 @@ export default function LandingPage({
                       style={{ background: `linear-gradient(135deg, ${brand}, #ff8c00)` }}>
                       <Icon className="w-6 h-6" />
                     </div>
-                    <span className={cn('absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center', d('bg-white/10 text-white/50', 'bg-gray-100 text-black/40'))}>{s.n}</span>
+                    <span className={cn('absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center', d('bg-white/10 text-white/50', 'bg-gray-100 text-black/70'))}>{s.n}</span>
                   </div>
                   <h3 className="text-xl font-black mb-3">{s.title}</h3>
-                  <p className={cn('text-sm leading-relaxed', d('text-white/40', 'text-black/40'))}>{s.desc}</p>
+                  <p className={cn('text-sm leading-relaxed', d('text-white/65', 'text-black/70'))}>{s.desc}</p>
                 </motion.div>
               );
             })}
@@ -1658,7 +1658,7 @@ export default function LandingPage({
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'İşletmenizin her yönü kapsandı' : 'Every aspect of your business covered'}
             </h2>
-            <p className={cn('max-w-xl mx-auto', d('text-white/40', 'text-black/40'))}>
+            <p className={cn('max-w-xl mx-auto', d('text-white/65', 'text-black/70'))}>
               {isTR ? 'Modüler yapı sayesinde sadece ihtiyacınız olan özellikleri aktif edin.' : 'Activate only the features you need thanks to the modular architecture.'}
             </p>
           </div>
@@ -1672,7 +1672,7 @@ export default function LandingPage({
                     <Icon className="w-5 h-5" />
                   </div>
                   <h3 className="font-bold text-sm mb-2">{f.title}</h3>
-                  <p className={cn('text-xs leading-relaxed', d('text-white/40', 'text-black/40'))}>{f.desc}</p>
+                  <p className={cn('text-xs leading-relaxed', d('text-white/65', 'text-black/70'))}>{f.desc}</p>
                 </motion.div>
               );
             })}
@@ -1709,7 +1709,7 @@ export default function LandingPage({
           <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
             {isTR ? 'CETPA\'yı aksiyonda görün' : 'See CETPA in action'}
           </h2>
-          <p className={cn('max-w-xl mx-auto mb-12', d('text-white/40', 'text-black/40'))}>
+          <p className={cn('max-w-xl mx-auto mb-12', d('text-white/65', 'text-black/70'))}>
             {isTR ? 'Demo talep edin, ekibimiz size özel bir sunum ayarlasın.' : 'Request a demo and our team will set up a personalized presentation.'}
           </p>
           <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
@@ -1739,7 +1739,7 @@ export default function LandingPage({
                 <p className="text-3xl font-black text-brand">
                   <Counter to={s.to} prefix={s.prefix} suffix={s.suffix} />
                 </p>
-                <p className={cn('text-xs mt-1 font-medium', d('text-white/40', 'text-black/40'))}>{s.label}</p>
+                <p className={cn('text-xs mt-1 font-medium', d('text-white/65', 'text-black/70'))}>{s.label}</p>
               </motion.div>
             ))}
           </div>
@@ -1782,7 +1782,7 @@ export default function LandingPage({
               </button>
               <span className={cn('text-sm font-semibold flex items-center gap-2', pricingAnnual && 'text-brand')}>
                 {isTR ? 'Yıllık' : 'Annual'}
-                <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', pricingAnnual ? 'bg-brand/15 text-brand' : d('bg-white/8 text-white/40', 'bg-black/8 text-black/40'))}>
+                <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', pricingAnnual ? 'bg-brand/15 text-brand' : d('bg-white/8 text-white/65', 'bg-black/8 text-black/70'))}>
                   {isTR ? '%20 tasarruf' : '20% off'}
                 </span>
               </span>
@@ -1809,12 +1809,12 @@ export default function LandingPage({
                     </div>
                   )}
                   <h3 className="text-xl font-black mb-1">{plan.name}</h3>
-                  <p className={cn('text-xs mb-6', d('text-white/40', 'text-black/40'))}>{plan.desc}</p>
+                  <p className={cn('text-xs mb-6', d('text-white/65', 'text-black/70'))}>{plan.desc}</p>
                   <div className="mb-8">
                     {price !== null ? (
                       <div className="flex items-baseline gap-1">
                         <span className="text-4xl font-black">{isTR ? '₺' : '$'}{price?.toLocaleString()}</span>
-                        <span className={cn('text-sm', d('text-white/40', 'text-black/40'))}>{isTR ? '/ay' : '/mo'}</span>
+                        <span className={cn('text-sm', d('text-white/65', 'text-black/70'))}>{isTR ? '/ay' : '/mo'}</span>
                       </div>
                     ) : (
                       <span className="text-3xl font-black">{isTR ? 'Teklif Al' : 'Get Quote'}</span>
@@ -1874,7 +1874,7 @@ export default function LandingPage({
                   <Icon className="w-5 h-5" style={{ color: brand }} />
                 </div>
                 <h3 className="font-bold mb-1.5 text-sm">{label}</h3>
-                <p className={cn('text-xs leading-relaxed', d('text-white/40', 'text-black/40'))}>{desc}</p>
+                <p className={cn('text-xs leading-relaxed', d('text-white/65', 'text-black/70'))}>{desc}</p>
               </motion.div>
             ))}
           </div>
@@ -1921,7 +1921,7 @@ export default function LandingPage({
                     : <>"If your operations aren't connected, you'll always<br /><span className="cetpa-gradient-text">compete on price alone."</span></>
                   }
                 </h2>
-                <p className={cn('mt-6 text-sm leading-relaxed max-w-lg', d('text-white/45','text-black/45'))}>
+                <p className={cn('mt-6 text-sm leading-relaxed max-w-lg', d('text-white/65','text-black/70'))}>
                   {isTR
                     ? 'Veriyi silolarda tutmak, müşteri deneyimini ve marjları ezer. CETPA tüm departmanları tek bir gerçek kaynağında birleştirir.'
                     : 'Siloed data crushes customer experience and margins. CETPA unifies every department into one source of truth.'
@@ -1940,7 +1940,7 @@ export default function LandingPage({
                     <span className="text-2xl font-black text-brand leading-none">{kpi.val}</span>
                     <div>
                       <p className={cn('text-xs font-bold', d('text-white/80','text-black/80'))}>{kpi.label}</p>
-                      <p className={cn('text-[10px]', d('text-white/30','text-black/30'))}>{kpi.sub}</p>
+                      <p className={cn('text-[10px]', d('text-white/60','text-black/65'))}>{kpi.sub}</p>
                     </div>
                   </motion.div>
                 ))}
@@ -1987,12 +1987,12 @@ export default function LandingPage({
                 <div className="flex-1 min-w-0">
                   <p className={cn('text-xs font-black', d('text-white/80','text-[#111]'))}>{mod.label}</p>
                 </div>
-                <span className={cn('text-[10px] font-black tabular-nums shrink-0', d('text-white/15','text-black/15'))}>{mod.n}</span>
+                <span className={cn('text-[10px] font-black tabular-nums shrink-0', d('text-white/50','text-black/55'))}>{mod.n}</span>
               </motion.div>
             ))}
           </div>
           <div className="text-center mt-10">
-            <div className={cn('inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold border', d('border-white/10 text-white/40','border-black/10 text-black/40'))}>
+            <div className={cn('inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold border', d('border-white/10 text-white/65','border-black/10 text-black/70'))}>
               {isTR ? '🔒 Enterprise planında tüm modüller açık + özel geliştirme' : '🔒 Enterprise plan unlocks all modules + custom development'}
             </div>
           </div>
@@ -2020,7 +2020,7 @@ export default function LandingPage({
                   <>Start your digital<br /><span className="cetpa-gradient-text">transformation today</span></>
                 )}
               </h2>
-              <p className={cn('text-lg mb-10 max-w-xl mx-auto', d('text-white/50', 'text-black/50'))}>
+              <p className={cn('text-lg mb-10 max-w-xl mx-auto', d('text-white/50', 'text-black/70'))}>
                 {isTR ? '14 gün ücretsiz, kredi kartı gerekmez. İstediğiniz zaman iptal edin.' : '14 days free, no credit card required. Cancel anytime.'}
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -2035,7 +2035,7 @@ export default function LandingPage({
                   {isTR ? 'Demo Talebi' : 'Request Demo'}
                 </a>
               </div>
-              <p className={cn('text-xs mt-6', d('text-white/25', 'text-black/25'))}>
+              <p className={cn('text-xs mt-6', d('text-white/55', 'text-black/60'))}>
                 {isTR ? 'veya bizi arayın: +90 212 000 00 00' : 'or call us: +90 212 000 00 00'}
               </p>
             </div>
@@ -2050,32 +2050,32 @@ export default function LandingPage({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-12">
             <div className="col-span-2 md:col-span-1">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 mb-4" />
-              <p className={cn('text-xs leading-relaxed mb-4', d('text-white/35', 'text-black/35'))}>
+              <p className={cn('text-xs leading-relaxed mb-4', d('text-white/60', 'text-black/65'))}>
                 {isTR ? 'Türkiye\'nin lider B2B Cloud ERP platformu.' : "Turkey's leading B2B Cloud ERP platform."}
               </p>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className={cn('text-xs', d('text-white/30', 'text-black/30'))}>99.9% uptime</span>
+                <span className={cn('text-xs', d('text-white/60', 'text-black/65'))}>99.9% uptime</span>
               </div>
             </div>
             {/* ── Product column ── */}
             <div>
-              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Ürün' : 'Product'}</p>
+              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Ürün' : 'Product'}</p>
               <div className="space-y-3">
                 <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Özellikler' : 'Features'}
                 </button>
                 <button onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Fiyatlar' : 'Pricing'}
                 </button>
                 <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   Changelog
                 </button>
                 <Link to="/api"
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   API
                 </Link>
               </div>
@@ -2083,22 +2083,22 @@ export default function LandingPage({
 
             {/* ── Company column ── */}
             <div>
-              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Şirket' : 'Company'}</p>
+              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Şirket' : 'Company'}</p>
               <div className="space-y-3">
                 <button onClick={() => document.getElementById('solutions')?.scrollIntoView({ behavior: 'smooth' })}
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Hakkımızda' : 'About'}
                 </button>
                 <Link to="/careers"
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Kariyer' : 'Careers'}
                 </Link>
                 <Link to="/blog"
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   Blog
                 </Link>
                 <a href="mailto:info@cetpa.com.tr?subject=Basin"
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Basın' : 'Press'}
                 </a>
               </div>
@@ -2106,18 +2106,18 @@ export default function LandingPage({
 
             {/* ── Legal column ── */}
             <div>
-              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/25', 'text-black/25'))}>{isTR ? 'Yasal' : 'Legal'}</p>
+              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Yasal' : 'Legal'}</p>
               <div className="space-y-3">
                 <Link to="/privacy"
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}
                 </Link>
                 <Link to="/terms"
-                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Kullanım Koşulları' : 'Terms of Service'}
                 </Link>
                 <a href="mailto:info@cetpa.com.tr"
-                  className={cn('block text-xs transition-colors', d('text-white/35 hover:text-white', 'text-black/35 hover:text-black'))}>
+                  className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   info@cetpa.com.tr
                 </a>
               </div>
@@ -2126,13 +2126,13 @@ export default function LandingPage({
 
           {/* ── Bottom bar ── */}
           <div className={cn('pt-8 border-t flex flex-col sm:flex-row items-center justify-between gap-4', d('border-white/6', 'border-black/6'))}>
-            <p className={cn('text-xs', d('text-white/20', 'text-black/20'))}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+            <p className={cn('text-xs', d('text-white/55', 'text-black/60'))}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
             <div className="flex items-center gap-1.5">
-              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>
+              <span className={cn('text-xs', d('text-white/55', 'text-black/60'))}>
                 {isTR ? 'CETPA tarafından' : 'Made by CETPA with'}
               </span>
               <span className="text-brand text-sm leading-none">❤</span>
-              <span className={cn('text-xs', d('text-white/20', 'text-black/20'))}>
+              <span className={cn('text-xs', d('text-white/55', 'text-black/60'))}>
                 {isTR ? "Antalya'da yapıldı" : "in Antalya"}
               </span>
             </div>

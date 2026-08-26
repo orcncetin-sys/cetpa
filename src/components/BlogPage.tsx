@@ -11,7 +11,7 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
   useEffect(() => { window.scrollTo(0, 0); }, []);
   const isTR = lang === 'tr';
   const bg = darkMode ? 'bg-[#0a0a0a] text-[#f5f5f7]' : 'bg-white text-[#1D1D1F]';
-  const muted = darkMode ? 'text-white/40' : 'text-black/40';
+  const muted = darkMode ? 'text-white/65' : 'text-black/70';
   const border = darkMode ? 'border-white/8' : 'border-black/8';
   const card = darkMode ? 'bg-white/5 border border-white/10' : 'bg-gray-50 border border-gray-100';
   const tagBg = darkMode ? 'bg-white/10 text-white/70' : 'bg-black/5 text-black/60';

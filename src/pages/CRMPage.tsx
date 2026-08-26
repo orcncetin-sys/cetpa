@@ -115,7 +115,7 @@ export default function CRMPage({
   logAuditAction,
 }: Props) {
   // Faturası/bakiyesi olan lead'ler artık aday değil, gerçek cari — Müşteri
-  // Adayları listesinden/hunisinden gizlenir (silinmez; useDataSync'teki otomatik
+  // Adayları listesinden/hunisinden gizlenir (silinmez; dinleyicideki otomatik
   // durum-ilerletme efekti isMusteri=true yazar). Kullanıcı onayı 2026-08-16.
   const activeLeads = useMemo(
     () => leads.filter(l => (l as unknown as { isMusteri?: boolean }).isMusteri !== true),
@@ -1886,7 +1886,7 @@ export default function CRMPage({
                         );
                       })}
                     </div>
-                    <p className={cn("text-[10px] mt-3", darkMode ? "text-white/30" : "text-gray-400")}>
+                    <p className={cn("text-[10px] mt-3", darkMode ? "text-white/60" : "text-gray-400")}>
                       {currentLanguage === 'tr' ? '% değerleri bir önceki aşamaya göre dönüşüm oranını gösterir.' : 'Percentages show conversion from the previous stage.'}
                     </p>
                   </div>

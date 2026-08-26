@@ -217,7 +217,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
                 i < step ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
                 i === step ? 'bg-[#ff4000] text-white shadow-lg shadow-[#ff4000]/30' :
-                'bg-white/10 text-white/30 border border-white/10'
+                'bg-white/10 text-white/60 border border-white/10'
               }`}>
                 {i < step ? <Check className="w-4 h-4" /> : i + 1}
               </div>
@@ -256,7 +256,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                   ? 'İşletmenizi yönetmenin en akıllı yolu.'
                   : 'The smartest way to manage your business.'}
               </p>
-              <p className="text-white/30 text-sm mb-8">
+              <p className="text-white/60 text-sm mb-8">
                 {lang === 'tr'
                   ? 'Birkaç adımda hesabınızı kuralım ve 14 gün ücretsiz başlayın.'
                   : 'Let\'s set up your account in a few steps and start your 14-day free trial.'}
@@ -288,14 +288,14 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                 <h2 className="text-2xl font-black text-white mb-2">
                   {lang === 'tr' ? 'Şirketinizi Tanıyalım' : 'Tell Us About Your Company'}
                 </h2>
-                <p className="text-white/40 text-sm">
+                <p className="text-white/65 text-sm">
                   {lang === 'tr' ? 'Deneyiminizi kişiselleştirmek için birkaç bilgi.' : 'A few details to personalize your experience.'}
                 </p>
               </div>
 
               <div className="space-y-5">
                 <div>
-                  <label className="block text-xs font-bold text-white/40 uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-bold text-white/65 uppercase tracking-wider mb-2">
                     {lang === 'tr' ? 'Şirket Adı' : 'Company Name'}
                   </label>
                   <input
@@ -307,7 +307,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-white/40 uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-bold text-white/65 uppercase tracking-wider mb-2">
                     {lang === 'tr' ? 'Sektör' : 'Industry'}
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -327,7 +327,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-white/40 uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-bold text-white/65 uppercase tracking-wider mb-2">
                     {lang === 'tr' ? 'Şirket Büyüklüğü' : 'Company Size'}
                   </label>
                   <div className="flex flex-wrap gap-2">
@@ -349,7 +349,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               </div>
 
               <div className="flex justify-between mt-8">
-                <button onClick={() => setStep(0)} className="text-white/40 hover:text-white/70 text-sm font-medium transition-colors">
+                <button onClick={() => setStep(0)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
                   {lang === 'tr' ? '← Geri' : '← Back'}
                 </button>
                 <button
@@ -380,7 +380,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                 <h2 className="text-2xl font-black text-white mb-2">
                   {lang === 'tr' ? 'Planınızı Seçin' : 'Choose Your Plan'}
                 </h2>
-                <p className="text-white/40 text-sm">
+                <p className="text-white/65 text-sm">
                   {lang === 'tr' ? '14 gün tüm özellikleri ücretsiz deneyin. Kredi kartı gerekmez.' : '14-day free trial with full features. No credit card required.'}
                 </p>
               </div>
@@ -400,7 +400,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                       <span className="text-2xl">{plan.icon}</span>
                       <div>
                         <h4 className="text-white font-bold text-sm">{plan.name[lang]}</h4>
-                        <p className="text-white/40 text-xs">{plan.subtitle[lang]}</p>
+                        <p className="text-white/65 text-xs">{plan.subtitle[lang]}</p>
                       </div>
                       {selectedPlan === plan.id && (
                         <Check className="w-5 h-5 text-[#ff4000] ml-auto" />
@@ -417,7 +417,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               </div>
 
               <div className="flex justify-between mt-8">
-                <button onClick={() => setStep(1)} className="text-white/40 hover:text-white/70 text-sm font-medium transition-colors">
+                <button onClick={() => setStep(1)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
                   {lang === 'tr' ? '← Geri' : '← Back'}
                 </button>
                 <button
@@ -438,7 +438,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               <p className="text-white/50 text-sm mb-6">{lang === 'tr' ? 'Muhasebe entegrasyonunuzu ve dağıtım modelinizi seçin.' : 'Choose your accounting integration and deployment model.'}</p>
 
               {/* ERP seçimi */}
-              <p className="text-xs font-bold text-white/40 uppercase mb-2">{lang === 'tr' ? 'Muhasebe Entegrasyonu' : 'Accounting Integration'}</p>
+              <p className="text-xs font-bold text-white/65 uppercase mb-2">{lang === 'tr' ? 'Muhasebe Entegrasyonu' : 'Accounting Integration'}</p>
               <div className="grid grid-cols-3 gap-2 mb-6">
                 {([['mikro', '💼 Mikro'], ['parasut', '🪂 Paraşüt'], ['none', lang === 'tr' ? '⏭ Sonra' : '⏭ Later']] as const).map(([id, label]) => (
                   <button key={id} onClick={() => setErpChoice(id)}
@@ -449,7 +449,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               </div>
 
               {/* Dağıtım modeli */}
-              <p className="text-xs font-bold text-white/40 uppercase mb-2">{lang === 'tr' ? 'Dağıtım Modeli' : 'Deployment Model'}</p>
+              <p className="text-xs font-bold text-white/65 uppercase mb-2">{lang === 'tr' ? 'Dağıtım Modeli' : 'Deployment Model'}</p>
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <button onClick={() => setDeployMode('saas')}
                   className={`p-4 rounded-xl text-left transition-all border ${deployMode === 'saas' ? 'bg-[#ff4000]/20 border-[#ff4000]' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
@@ -487,7 +487,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               )}
 
               <div className="flex justify-between mt-4">
-                <button onClick={() => setStep(2)} className="text-white/40 hover:text-white/70 text-sm font-medium transition-colors">
+                <button onClick={() => setStep(2)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
                   {lang === 'tr' ? '← Geri' : '← Back'}
                 </button>
                 <button onClick={() => setStep(4)}
@@ -555,7 +555,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                     ? `${companyName} için ${PLANS.find(p => p.id === selectedPlan)?.name[lang]} planı aktif edildi.`
                     : `${PLANS.find(p => p.id === selectedPlan)?.name[lang]} plan activated for ${companyName}.`}
                 </p>
-                <p className="text-white/30 text-sm mb-8">
+                <p className="text-white/60 text-sm mb-8">
                   {lang === 'tr'
                     ? '14 günlük ücretsiz deneme süreniz başladı. Kredi kartı gerekmez.'
                     : 'Your 14-day free trial has started. No credit card required.'}

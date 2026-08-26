@@ -117,7 +117,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
         <div className="flex gap-3 flex-wrap">
           {/* Carrier selector — split into international + TR */}
           <div className="flex flex-wrap gap-2">
-            <span className={cn("text-[10px] font-bold uppercase self-center mr-1", darkMode ? "text-white/30" : "text-gray-400")}>
+            <span className={cn("text-[10px] font-bold uppercase self-center mr-1", darkMode ? "text-white/60" : "text-gray-400")}>
               🌍
             </span>
             {INTERNATIONAL_CARRIERS.map(c => (
@@ -137,7 +137,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                 {c}
               </button>
             ))}
-            <span className={cn("text-[10px] font-bold uppercase self-center mx-1", darkMode ? "text-white/30" : "text-gray-400")}>
+            <span className={cn("text-[10px] font-bold uppercase self-center mx-1", darkMode ? "text-white/60" : "text-gray-400")}>
               🇹🇷
             </span>
             {TR_CARRIERS.map(c => (
@@ -215,11 +215,11 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                   {trackResult.trackingNumber}
                 </p>
                 {trackResult.service && (
-                  <p className={cn("text-xs mt-0.5", darkMode ? "text-white/40" : "text-gray-400")}>{trackResult.service}</p>
+                  <p className={cn("text-xs mt-0.5", darkMode ? "text-white/65" : "text-gray-400")}>{trackResult.service}</p>
                 )}
               </div>
               <div className="text-right">
-                <p className={cn("text-[10px] uppercase tracking-widest font-bold mb-1", darkMode ? "text-white/30" : "text-gray-400")}>
+                <p className={cn("text-[10px] uppercase tracking-widest font-bold mb-1", darkMode ? "text-white/60" : "text-gray-400")}>
                   {currentLanguage === 'tr' ? 'Tahmini Teslimat' : 'Est. Delivery'}
                 </p>
                 <p className={cn("text-sm font-bold", darkMode ? "text-white" : "text-[#1D1D1F]")}>
@@ -252,7 +252,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
 
           {/* Timeline */}
           <div className="p-5">
-            <p className={cn("text-[10px] uppercase tracking-widest font-bold mb-4", darkMode ? "text-white/30" : "text-gray-400")}>
+            <p className={cn("text-[10px] uppercase tracking-widest font-bold mb-4", darkMode ? "text-white/60" : "text-gray-400")}>
               {currentLanguage === 'tr' ? 'Kargo Hareketi' : 'Tracking Events'}
             </p>
             <div className="space-y-0">
@@ -277,11 +277,11 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                         <p className={cn("text-sm font-semibold", darkMode ? "text-white/90" : "text-[#1D1D1F]")}>
                           {evt.description}
                         </p>
-                        <p className={cn("text-xs mt-0.5", darkMode ? "text-white/40" : "text-gray-400")}>
+                        <p className={cn("text-xs mt-0.5", darkMode ? "text-white/65" : "text-gray-400")}>
                           <MapPin className="w-3 h-3 inline mr-1" />{evt.location || '-'}
                         </p>
                       </div>
-                      <p className={cn("text-[10px] font-bold whitespace-nowrap", darkMode ? "text-white/30" : "text-gray-400")}>
+                      <p className={cn("text-[10px] font-bold whitespace-nowrap", darkMode ? "text-white/60" : "text-gray-400")}>
                         {evt.timestamp
                           ? new Date(evt.timestamp).toLocaleString(
                               currentLanguage === 'tr' ? 'tr-TR' : 'en-US',
@@ -335,7 +335,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                   <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", statusColors[t.statusCode] || 'bg-gray-100 text-gray-600')}>
                     {statusLabels[t.statusCode] || t.status}
                   </span>
-                  <ChevronRight className={cn("w-4 h-4", darkMode ? "text-white/20" : "text-gray-300")} />
+                  <ChevronRight className={cn("w-4 h-4", darkMode ? "text-white/55" : "text-gray-300")} />
                 </div>
               </button>
             ))}

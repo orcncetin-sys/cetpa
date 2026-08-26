@@ -11,7 +11,8 @@
  * hata calisma aninda "is not a function" olarak patlar - ustelik cogu cagri
  * 04:00/08:30 cron'larinin icinde ve oradaki `catch` onu console.warn'a
  * cevirip sessizlestirir. Bu oturumda ayni sessiz-hata sinifi iki kez daha
- * yasandi (olu useDataSync dinleyicileri, initMikroMirror sira hatasi).
+ * yasandi (olu useDataSync dinleyicileri -> dosya 2026-08-25'te silindi,
+ * initMikroMirror sira hatasi).
  *
  * COZUM: `any` yerine, modullerin GERCEKTEN kullandigi yuzey. Olculdu:
  *   collection(ad).doc(id?).get() / .set(veri, opts?)

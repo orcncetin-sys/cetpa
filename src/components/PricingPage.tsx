@@ -105,7 +105,7 @@ export default function PricingPage({
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-16">
         <div className="flex items-center justify-between mb-8">
           {onBack && (
-            <button onClick={onBack} className={cn("flex items-center gap-2 text-sm font-medium transition-colors", darkMode ? "text-white/50 hover:text-white" : "text-black/50 hover:text-black")}>
+            <button onClick={onBack} className={cn("flex items-center gap-2 text-sm font-medium transition-colors", darkMode ? "text-white/50 hover:text-white" : "text-black/70 hover:text-black")}>
               <X className="w-4 h-4" /> {t.back}
             </button>
           )}
@@ -122,7 +122,7 @@ export default function PricingPage({
           <h1 className={cn("text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight", darkMode ? "text-white" : "text-[#1D1D1F]")}>
             {t.heroTitle}
           </h1>
-          <p className={cn("text-base sm:text-lg mt-4 max-w-2xl mx-auto", darkMode ? "text-white/50" : "text-black/50")}>
+          <p className={cn("text-base sm:text-lg mt-4 max-w-2xl mx-auto", darkMode ? "text-white/50" : "text-black/70")}>
             {t.heroSubtitle}
           </p>
 
@@ -232,7 +232,7 @@ export default function PricingPage({
                   {!plan.isCustomPricing && (
                     <button
                       onClick={() => onStartTrial(plan.id)}
-                      className={cn("w-full py-2.5 text-xs font-medium transition-colors", darkMode ? "text-white/40 hover:text-white/80" : "text-black/40 hover:text-black/80")}
+                      className={cn("w-full py-2.5 text-xs font-medium transition-colors", darkMode ? "text-white/65 hover:text-white/80" : "text-black/70 hover:text-black/80")}
                     >
                       {t.startTrial}
                     </button>
@@ -247,7 +247,7 @@ export default function PricingPage({
         <div className="text-center mb-8">
           <button
             onClick={() => setShowComparison(!showComparison)}
-            className={cn("inline-flex items-center gap-2 text-sm font-bold transition-colors", darkMode ? "text-white/50 hover:text-white" : "text-black/50 hover:text-black")}
+            className={cn("inline-flex items-center gap-2 text-sm font-bold transition-colors", darkMode ? "text-white/50 hover:text-white" : "text-black/70 hover:text-black")}
           >
             {t.comparePlans}
             <ChevronDown className={`w-4 h-4 transition-transform ${showComparison ? 'rotate-180' : ''}`} />
@@ -268,7 +268,7 @@ export default function PricingPage({
                   <table className="w-full text-sm">
                     <thead>
                       <tr className={cn("border-b", darkMode ? "border-white/10" : "border-black/10")}>
-                        <th className={cn("text-left py-4 px-6 font-bold text-xs uppercase tracking-wider", darkMode ? "text-white/50" : "text-black/50")}>{t.module}</th>
+                        <th className={cn("text-left py-4 px-6 font-bold text-xs uppercase tracking-wider", darkMode ? "text-white/50" : "text-black/70")}>{t.module}</th>
                         {PLANS.map(p => (
                           <th key={p.id} className={cn("text-center py-4 px-4 font-bold text-xs uppercase tracking-wider", darkMode ? "text-white" : "text-black")}>
                             {p.icon} {p.name[lang]}
@@ -287,7 +287,7 @@ export default function PricingPage({
                               {plan.modulesAllowed.includes(mod.id) ? (
                                 <Check className="w-5 h-5 text-green-400 mx-auto" />
                               ) : (
-                                <X className="w-4 h-4 text-white/15 mx-auto" />
+                                <X className="w-4 h-4 text-white/50 mx-auto" />
                               )}
                             </td>
                           ))}
@@ -322,7 +322,7 @@ export default function PricingPage({
                   className="w-full flex items-center justify-between p-5 text-left"
                 >
                   <span className={cn("font-bold text-sm pr-4", darkMode ? "text-white" : "text-[#1D1D1F]")}>{faq.q}</span>
-                  <ChevronDown className={cn(`w-5 h-5 flex-shrink-0 transition-transform ${expandedFaq === i ? 'rotate-180' : ''}`, darkMode ? "text-white/40" : "text-black/30")} />
+                  <ChevronDown className={cn(`w-5 h-5 flex-shrink-0 transition-transform ${expandedFaq === i ? 'rotate-180' : ''}`, darkMode ? "text-white/65" : "text-black/65")} />
                 </button>
                 <AnimatePresence>
                   {expandedFaq === i && (
@@ -348,7 +348,7 @@ export default function PricingPage({
             { icon: CreditCard, text: t.guarantee },
             { icon: Globe, text: t.global },
           ].map(({ icon: Icon, text }, i) => (
-            <div key={i} className={cn("flex items-center gap-2", darkMode ? "text-white/30" : "text-black/30")}>
+            <div key={i} className={cn("flex items-center gap-2", darkMode ? "text-white/60" : "text-black/65")}>
               <Icon className="w-4 h-4" />
               <span className="text-xs font-bold uppercase tracking-wider">{text}</span>
             </div>

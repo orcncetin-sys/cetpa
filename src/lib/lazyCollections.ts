@@ -38,7 +38,7 @@ export const LAZY_COLLECTION_TABS: Record<string, readonly string[]> = {
 
 /**
  * Bir kez açılan kapıyı açık tutan modül-seviyesi küme. Modül seviyesinde
- * çünkü hem App.tsx hem useDataSync aynı koleksiyonlara abone oluyor ve
+ * çünkü birden fazla yer aynı koleksiyonlara abone oluyor ve
  * ikisinin aynı kararı vermesi gerekiyor. Oturum kapanışında sıfırlanır.
  */
 const acilmis = new Set<string>();
