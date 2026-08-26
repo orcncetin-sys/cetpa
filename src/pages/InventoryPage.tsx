@@ -1,3 +1,4 @@
+import { sayiBicimleyici } from '../utils/recharts';
 import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -292,7 +293,7 @@ export default function InventoryPage(props: Props) {
                               ))}
                             </Pie>
                             <Tooltip
-                              formatter={(v: number) => [`₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Değer' : 'Value']}
+                              formatter={sayiBicimleyici((v) => [`₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Değer' : 'Value'])}
                               contentStyle={{ fontSize: 11, borderRadius: 8 }}
                             />
                           </RePieChart>

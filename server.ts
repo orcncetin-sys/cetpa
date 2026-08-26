@@ -18,7 +18,7 @@ import { aiRoutes } from "./src/server/routes/aiRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten } from "./src/server/eposta.js";
-import type { AdminDbLike } from "./src/server/adminDbTypes.js";
+import type { AdminDbLike, DocDaralt } from "./src/server/adminDbTypes.js";
 import { initCrons } from "./src/server/crons.js";
 import {
   initMikroMirror, initMikroTables,
@@ -121,6 +121,23 @@ const EmailSendSchema = z.object({
 // adminDb is assigned after the PgFirestore class definition below: PostgreSQL
 // shim when DATABASE_URL is set, real Firestore otherwise (local-dev fallback).
 let adminDb: PgFirestore | null = null;
+
+/**
+ * `adminDb`yi ZORUNLU olarak dondurur.
+ *
+ * `adminDb` bir `let` ve baslangicta null; rotalar init'ten SONRA kosar, yani
+ * pratikte doludur — ama tip bunu bilemez ve her cagri yerine null kontrolu
+ * serpistirmek 20+ yerde gurultu olurdu. Getter TEK YERDE gurultulu basarisiz
+ * olur: `undefined.collection is not a function` yerine ne oldugunu SOYLEYEN
+ * bir hata.
+ *
+ * MODUL DUZEYINDE (2026-08-26): startServer icinde tanimliyken, dosyada DAHA
+ * ONCE gelen rota kayitlari ("used before its declaration") onu goremiyordu.
+ */
+const adminDbZorunlu = (): AdminDbLike => {
+  if (!adminDb) throw new Error('adminDb henuz hazir degil (init tamamlanmadan rota calisti)');
+  return adminDb;
+};
 let adminFirestoreFallback: Firestore | null = null;
 // Gemini anahtar önbelleği (settings/aiConfig kaynaklı) — modül düzeyinde ki
 // hem çözümleyici (resolveGeminiClient) hem de /api/db settings yazma yolu
@@ -646,7 +663,7 @@ async function initDocsTable(): Promise<void> {
 initMikroMirror({ getPgPool: () => pgPool });
 // Cron'lar: eskiden bu noktada modul duzeyinde kayitliydi, oyle kaldi
 // (kayit sirasi ve zamanlama davranisi birebir korunsun diye).
-initCrons({ getAdminDb: () => adminDb, tenantSnap, serverTenantId, pgServerTimestamp });
+initCrons({ getAdminDb: adminDbZorunlu, tenantSnap, serverTenantId, pgServerTimestamp });
 
 initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
 
@@ -936,22 +953,8 @@ async function serverTenantId(): Promise<string> {
 // dokümanlarını getirir — filtreyi PG'ye iter (P8/P9). Tüm koleksiyonu belleğe
 // çekip JS'te elemenin yerine geçer; "lenient" anlam (companyId eşleşir VEYA
 // companyId yok) korunur, rapor sayıları değişmez. pgPool yoksa shim'e düşer.
-/**
- * `daralt` — SQL tarafında ek süzme/sıralama/tavan (yalnız pgPool yolunda).
- *
- * Varsayılan davranış (verilmezse) DEĞİŞMEZ: koleksiyonun tamamı. Ama bir
- * rapor ucu "yalnız açık siparişlerin en yenisi 500 tanesi" istiyorsa, bunu
- * tüm koleksiyonu Node'a çekip JS'te süzerek yapmak zorunda kalmasın
- * (code-review: /api/aging kiracı düzeltmesiyle birlikte LIMIT'i kaybetmişti).
- * `alanDurum`/`siralaAlan` KOD İÇİNDE sabit verilir — istemciden gelmez.
- */
-type DocDaralt = {
-  /** data->>'status' bu kümede olsun. */
-  durumlar?: string[];
-  /** data->>'<alan>' DESC sırala (metinsel; ISO tarih ve epoch için doğru sıra). */
-  siralaAlanDesc?: string;
-  tavan?: number;
-};
+// DocDaralt src/server/adminDbTypes.ts'e TASINDI (2026-08-26) — rota
+// modulleri de baglamda kullaniyor; server.ts'ten import DONGU olurdu.
 
 async function loadCompanyDocs(
   coll: string, cid: string, daralt?: DocDaralt,
@@ -1338,7 +1341,7 @@ async function startServer() {
 
   initOpsWatchdog({
     getPgPool: () => pgPool as never,
-    getAdminDb: () => adminDb,
+    getAdminDb: adminDbZorunlu,
     pgServerTimestamp,
     getMikroCreds,
     getCachedExchangeRates: () => cachedExchangeRates,
@@ -2692,7 +2695,7 @@ async function startServer() {
     mikroIdCozucu, loadCompanyDocs, mikroLimiter, requireCollectionAccess,
     requireAuth, requireMfaVerified,
     // Sonradan atanan baglantilar GETTER ile (bkz. diger modullerdeki gerekce).
-    getAdminDb: () => adminDb, getPgPool: () => pgPool,
+    getAdminDb: adminDbZorunlu, getPgPool: () => pgPool,
     getUserCompanyId, mikroIdCozucuIds, validate, getBoss: () => boss,
   });
 
@@ -4196,7 +4199,7 @@ async function startServer() {
   // dbLimiter HENUZ TANIMLI OLMAZ (tsc yakaladi) ve ara katman sirasi da
   // bozulur - mikroRoutes'ta tam bu hata canliyi kirmisti.
   superadminRoutes(app, {
-    getAdminDb: () => adminDb, pgServerTimestamp, reqActor, writeAuditLog,
+    getAdminDb: adminDbZorunlu, pgServerTimestamp, reqActor, writeAuditLog,
     requireAuth, requireSuperAdmin, requireMfaVerified, isSuperAdmin,
     sendEmail, iyzicoAuth, PLAN_PRICES_TRY,
     getIyzicoCreds, randStr, toPkiString,
@@ -4210,16 +4213,6 @@ async function startServer() {
   trackingRoutes(app, {
     requireAuth, requireMfaVerified,
   });
-
-  // `adminDb` bir `let` ve baslangicta null; rotalar startServer'dan SONRA
-  // kosar, yani pratikte doludur — ama tip bunu bilemez ve her cagri yerine
-  // null kontrolu serpistirmek 20+ yerde gurultu olurdu. Bunun yerine getter
-  // TEK YERDE gurultulu basarisiz olur: `undefined.collection is not a
-  // function` yerine ne oldugunu SOYLEYEN bir hata.
-  const adminDbZorunlu = (): AdminDbLike => {
-    if (!adminDb) throw new Error('adminDb henuz hazir degil (init tamamlanmadan rota calisti)');
-    return adminDb;
-  };
 
   opsRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,

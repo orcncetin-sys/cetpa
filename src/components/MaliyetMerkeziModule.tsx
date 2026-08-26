@@ -1,3 +1,4 @@
+import { sayiBicimleyici } from '../utils/recharts';
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -801,7 +802,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="dept" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₺${(v / 1000).toFixed(0)}K`} />
-                    <Tooltip formatter={(v: number) => formatTRY(v)} />
+                    <Tooltip formatter={sayiBicimleyici((v) => formatTRY(v))} />
                     <Legend />
                     <Bar dataKey={t.butce} fill="#e5e7eb" radius={[4, 4, 0, 0]} />
                     <Bar dataKey={t.gerceklesen} fill="#ff4000" radius={[4, 4, 0, 0]} />
@@ -828,7 +829,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                             <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(v: number) => formatTRY(v)} />
+                        <Tooltip formatter={sayiBicimleyici((v) => formatTRY(v))} />
                       </RechartsPieChart>
                     </ResponsiveContainer>
                     <div className="flex flex-col gap-1.5">

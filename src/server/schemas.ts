@@ -12,6 +12,12 @@
  */
 import { z } from 'zod';
 
+/** `validate()`in kabul ettigi sema tipi.
+ *  Baglamda `{ parse: ... }` diye YAKLASIK yazmak strictFunctionTypes
+ *  altinda reddediliyor: gerceklestirim `safeParse` cagiriyor, yani
+ *  yaklasik tip hem DAR hem YANLIS yontemi ilan ediyordu. */
+export type Sema<T> = z.ZodSchema<T>;
+
 // Fatura kaydetme şeması
 export const FaturaKaydetSchema = z.object({
   firebaseId: z.string().optional(),

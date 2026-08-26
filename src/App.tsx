@@ -2380,7 +2380,7 @@ function AppContent() {
             } catch (error) {
               handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
             }
-            const rawRole = userSnap.data().role as string | undefined;
+            const rawRole = userSnap.data()?.role as string | undefined;
             // Sahip hesabı (mevcut kayıt için de) — role alanı boşsa/silinmişse
             // bile bu e-posta kendi uygulamasından kilitlenmesin. Aynı güvenlik
             // ağı zaten YENİ kayıt dalında vardı (satır ~2207), buraya da taşındı.
@@ -3252,7 +3252,7 @@ function AppContent() {
       const newEntry = { action: `Durum: ${status}`, actor: user?.displayName || user?.email || 'Sistem', ts: Date.now() };
       const updatedTimeline = [...prevTimeline, newEntry];
       await updateDoc(doc(db, 'orders', orderId), { status, timeline: updatedTimeline });
-      logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', currentT[status.toLowerCase()] || status)}`);
+      logAuditAction(currentT.order_status_update, `${currentT.order} #${orderId} ${currentT.order_status_updated_to.replace('{0}', (currentT as Record<string, string>)[status.toLowerCase()] || status)}`);
 
       // ── Stok hareketi: sevkiyatta düş, iptalde geri yükle (idempotent) ──────
       {

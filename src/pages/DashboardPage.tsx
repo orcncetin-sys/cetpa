@@ -1,3 +1,4 @@
+import { sayiBicimleyici } from '../utils/recharts';
 import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1891,11 +1892,11 @@ export default function DashboardPage(props: Props) {
                           <YAxis yAxisId="rev" tick={{ fontSize: 9, fill: '#86868b' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                           <YAxis yAxisId="ord" orientation="right" tick={{ fontSize: 9, fill: '#86868b' }} axisLine={false} tickLine={false} />
                           <Tooltip
-                            formatter={(value: number, name: string) =>
+                            formatter={sayiBicimleyici((value, name) =>
                               name === 'revenue'
                                 ? [`₺${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Ciro' : 'Revenue']
                                 : [value, currentLanguage === 'tr' ? 'Sipariş' : 'Orders']
-                            }
+                            )}
                             contentStyle={{ fontSize: 11, borderRadius: 10, border: '1px solid #f0f0f0' }}
                           />
                           <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#ff4000" strokeWidth={2} fill="url(#gradRev)" dot={{ r: 3, fill: '#ff4000' }} />

@@ -7,6 +7,7 @@
  * actionable recommendations.
  */
 
+import { sayiBicimleyici } from '../utils/recharts';
 import { useState } from 'react';
 import {
   TrendingUp, RefreshCw, AlertCircle, Package,
@@ -304,7 +305,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
                     axisLine={false} tickLine={false} width={48}
                   />
                   <Tooltip
-                    formatter={(v: number) => [`₺${v.toLocaleString('tr-TR')}`, tr ? 'Tahmini' : 'Projected']}
+                    formatter={sayiBicimleyici((v) => [`₺${v.toLocaleString('tr-TR')}`, tr ? 'Tahmini' : 'Projected'])}
                     contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 11 }}
                   />
                   <Bar dataKey="projected" radius={[6, 6, 0, 0]}>

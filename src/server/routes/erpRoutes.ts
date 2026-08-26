@@ -19,7 +19,7 @@
  * POST'lari req.body'siz kalir - 2026-08-24'te mikroRoutes'ta tam bu oldu.
  */
 import type { Express, Request, Response } from 'express';
-import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot } from '../adminDbTypes.js';
+import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
 
 /** Parasut API kok adresi. Kod icinde SABIT - istemciden gelmez, dolayisiyla
  *  SSRF yuzeyi yok (2026-08-25 denetiminde bu ACIKCA dogrulandi). */
@@ -36,7 +36,7 @@ export interface ErpRouteCtx {
   writeAuditLog: (...a: any[]) => Promise<unknown>;
   writeSyncLog: (...a: any[]) => Promise<unknown>;
   pgServerTimestamp: () => any;
-  tenantSnap: (coll: string, cid: string, daralt?: any) => Promise<AdminQuerySnapshot>;
+  tenantSnap: (coll: string, cid: string, daralt?: DocDaralt) => Promise<AdminQuerySnapshot>;
   /** Parasut kimlik bilgileri - env ya da settings/parasut. */
   getParasutCreds: () => Promise<any>;
   getParasutToken: (creds: any) => Promise<string>;

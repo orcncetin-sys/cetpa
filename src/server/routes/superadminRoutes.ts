@@ -15,11 +15,12 @@
  * dalina gidip cetpa-staging'de (port 5174) dogrulandi, sonra main'e alindi.
  */
 import { resendGonderici } from '../eposta.js';
+import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface SuperadminRouteCtx {
-  getAdminDb: () => any;
+  getAdminDb: () => AdminDbLike;
   pgServerTimestamp: () => any;
   reqActor: (req: Request) => { uid: string; email: string };
   writeAuditLog: (...a: any[]) => Promise<unknown>;

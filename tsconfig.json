@@ -14,7 +14,11 @@
     // stok miktarlari). Derleyici artik o yollari yakaliyor.
     // ONEMLI: bir hatayi `?? 0` ile kapatmak YASAK - CLAUDE.md kurali:
     // "Dis sistemden gelen sayisal alan yoksa 0 degil, BILINMIYOR".
-    "strictNullChecks": true,
+    // 2026-08-26: TAM strict. strictNullChecks acildiktan sonra kalan
+    // bayraklarin (noImplicitAny, strictFunctionTypes, strictBindCallApply,
+    // strictPropertyInitialization, noImplicitThis, useUnknownInCatchVariables,
+    // alwaysStrict) maliyeti yalnizca 31 hataydi — olculdu, tahmin degil.
+    "strict": true,
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,

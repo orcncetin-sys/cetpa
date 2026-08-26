@@ -26,8 +26,9 @@
  * rotanin GOVDESI geride kalmisti - bu yuzden blok basi/sonu artik yorum
  * blogundan kapanis `});`ine kadar hesaplaniyor.
  */
+import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
-import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema } from '../schemas.js';
+import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
 import cron from 'node-cron';
 import { timingSafeEqual } from 'crypto';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
@@ -41,7 +42,7 @@ import {
   CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
-import { PgDocRef, pgServerTimestamp } from '../pgShim.js';
+import { pgServerTimestamp } from '../pgShim.js';
 
 
 /** Bu rota grubunun server.ts'ten ihtiyac duydugu HER SEY - acik liste. */
@@ -50,15 +51,15 @@ export interface MikroRouteCtx {
   writeSyncLog: (...a: any[]) => Promise<unknown>;
   reqCompanyId: (req: Request) => Promise<string>;
   writeAuditLog: (...a: any[]) => Promise<unknown>;
-  tenantSnap: (coll: string, cid: string, daralt?: any) => Promise<{ docs: any[] }>;
+  tenantSnap: (coll: string, cid: string, daralt?: DocDaralt) => Promise<{ docs: any[] }>;
   mikroIdCozucu: (coll: string, cid: string) => Promise<(anahtar: string) => string>;
-  loadCompanyDocs: (coll: string, cid: string, daralt?: any) => Promise<Array<Record<string, unknown>>>;
+  loadCompanyDocs: (coll: string, cid: string, daralt?: DocDaralt) => Promise<Array<Record<string, unknown>>>;
   mikroLimiter: any;
   requireCollectionAccess: (coll: string, op: 'read' | 'write' | 'delete') => any;
   requireAuth: any;
   requireMfaVerified: any;
   /** server.ts'te SONRADAN atanan `let` - deger degil GETTER. */
-  getAdminDb: () => any;
+  getAdminDb: () => AdminDbLike;
   getPgPool: () => any;
   getUserCompanyId: (uid: string) => Promise<string>;
   mikroIdCozucuIds: (ids: Iterable<string>, cid: string) => (anahtar: string) => string;
@@ -66,7 +67,7 @@ export interface MikroRouteCtx {
    *  '../schemas.js'ten IMPORT ediliyor: tipleri elle yazmak yerine semadan
    *  turusun, sema degisince sessizce bayatlamasin. Sema tipi `any` olamaz -
    *  T cikarilamayinca `{}` olur ve alanlar 'does not exist' hatasi verir. */
-  validate: <T>(sema: { parse: (d: unknown) => T }, veri: unknown, res: Response) => T | null;
+  validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   /** pg-boss kuyrugu (server.ts'te sonradan atanir) - GETTER. */
   getBoss: () => any;
 }
@@ -411,9 +412,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Filtre yoksa Kiracı A'nın senkronu Kiracı B'nin cari kaydını sessizce
       // ele geçirirdi (stok import'unda bugün bulunan sınıfın aynısı).
       const leadSnap = await C.tenantSnap('leads', companyId);
-      const leadByKod = new Map<string, PgDocRef>();
-      const leadByVkn = new Map<string, PgDocRef>();
-      const leadByName = new Map<string, PgDocRef>();
+      const leadByKod = new Map<string, AdminDocRef>();
+      const leadByVkn = new Map<string, AdminDocRef>();
+      const leadByName = new Map<string, AdminDocRef>();
       const vknNorm = (v?: string) => (v || '').replace(/\D/g, '');
       for (const d of leadSnap.docs) {
         const data = d.data();
@@ -590,7 +591,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // "Stokları İçeri Al" düğmesi). Yabancı SKU haritada yoksa YENİ doküman
       // açılır — kiracı başına ayrı kayıt, doğru multi-tenant davranışı.
       const existingSnap = invSnapOnce;   // yukarıda bir kez çekildi
-      const existingBySku = new Map<string, PgDocRef>();
+      const existingBySku = new Map<string, AdminDocRef>();
       for (const docSnap of existingSnap.docs) {
         const veri = docSnap.data() as Record<string, unknown>;
         const dc = (veri.companyId as string | undefined) || '';
@@ -863,9 +864,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // aynı gerçek firmayla müşteri ilişkisi olması olası (2026-08-11'de bulundu).
       const normalizeVkn = (v?: string) => (v || '').replace(/\D/g, '');
       const existingSnap = await C.tenantSnap('leads', companyId);
-      const existingByKod = new Map<string, PgDocRef>();
-      const existingByVkn = new Map<string, PgDocRef>();
-      const existingByName = new Map<string, PgDocRef>();
+      const existingByKod = new Map<string, AdminDocRef>();
+      const existingByVkn = new Map<string, AdminDocRef>();
+      const existingByName = new Map<string, AdminDocRef>();
       for (const docSnap of existingSnap.docs) {
         const data = docSnap.data();
         const dc = (data.companyId as string | undefined) || '';
@@ -2002,7 +2003,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // da vardı): companyId filtresi YOKTU — Tenant A'nın barkod senkronu Tenant
       // B'nin aynı SKU'lu ürününün barcode alanını sessizce ezebilirdi.
       const invSnap = await C.tenantSnap('inventory', companyId);
-      const bySku = new Map<string, PgDocRef>();
+      const bySku = new Map<string, AdminDocRef>();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
         const dc = (veri.companyId as string | undefined) || '';

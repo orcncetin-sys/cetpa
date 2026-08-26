@@ -7,7 +7,7 @@
  * server.ts bu modulu import ettigi icin ters yonde import DONGU olurdu.
  */
 import type { Express, Request, Response } from 'express';
-import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot } from '../adminDbTypes.js';
+import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface DynamicsRouteCtx {
@@ -19,7 +19,7 @@ export interface DynamicsRouteCtx {
   reqCompanyId: (req: Request) => Promise<string>;
   writeAuditLog: (...a: any[]) => Promise<unknown>;
   pgServerTimestamp: () => any;
-  tenantSnap: (coll: string, cid: string, daralt?: any) => Promise<AdminQuerySnapshot>;
+  tenantSnap: (coll: string, cid: string, daralt?: DocDaralt) => Promise<AdminQuerySnapshot>;
   getDynamicsToken: () => Promise<string | null>;
   dynamicsGetAll: (token: string, yol: string) => Promise<any[]>;
   getDynamicsBase: () => string;

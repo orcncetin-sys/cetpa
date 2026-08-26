@@ -17,14 +17,14 @@ import type { Express, Request, Response } from 'express';
 // ThinkingLevel/Type Google SDK'nin KENDI enum'lari; server.ts'e bagimlilik
 // degil, dogrudan pakete import edilir (dongu yok).
 import { ThinkingLevel, Type } from '@google/genai';
-import { AiChatSchema } from '../schemas.js';
+import { AiChatSchema, type Sema } from '../schemas.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface AiRouteCtx {
   requireAuth: any;
   requireMfaVerified: any;
   requireAdmin: any;
-  validate: <T>(sema: { parse: (d: unknown) => T }, veri: unknown, res: Response) => T | null;
+  validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   resolveGeminiClient: () => Promise<any>;
   resolveGeminiModel: (requested?: string) => string;
   safeAiError: (msg: string) => string;

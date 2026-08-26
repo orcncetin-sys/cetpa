@@ -19,7 +19,7 @@
  * pgServerTimestamp) server.ts'te kaldigi icin DI ile geciyor.
  */
 import { resendGonderici } from './eposta.js';
-import type { AdminDbLike, AdminDocRef } from './adminDbTypes.js';
+import type { AdminDbLike, AdminDocRef, DocDaralt } from './adminDbTypes.js';
 import cron from 'node-cron';
 import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
@@ -32,7 +32,7 @@ export interface CronDeps {
   /** `any` DEGIL: yapisal tip, tip denetimini korur (bkz. adminDbTypes.ts). */
   getAdminDb: () => AdminDbLike | null;
   /** Kiraci-filtreli snapshot (server.ts'te kaldi). */
-  tenantSnap: (coll: string, cid: string, daralt?: unknown) => Promise<{ docs: Array<{ id: string; data: () => Record<string, unknown>; ref: AdminDocRef }> }>;
+  tenantSnap: (coll: string, cid: string, daralt?: DocDaralt) => Promise<{ docs: Array<{ id: string; data: () => Record<string, unknown>; ref: AdminDocRef }> }>;
   /** Oturumsuz baglamda hedef kiraci. */
   serverTenantId: () => Promise<string>;
   pgServerTimestamp: () => any;

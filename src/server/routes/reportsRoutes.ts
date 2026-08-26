@@ -10,7 +10,7 @@
  * modulu import ettigi icin ters yonde import DONGU olurdu.
  */
 import type { Express, Request, Response } from 'express';
-import type { AdminDbLike } from '../adminDbTypes.js';
+import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ReportsRouteCtx {
@@ -18,7 +18,7 @@ export interface ReportsRouteCtx {
   requireAuth: any;
   getUserCompanyId: (uid: string) => Promise<string>;
   /** Kiraci filtresini SQL'e iten yardimci - tum-koleksiyon taramasi yapmaz. */
-  loadCompanyDocs: (coll: string, cid: string, daralt?: any) => Promise<Array<Record<string, unknown>>>;
+  loadCompanyDocs: (coll: string, cid: string, daralt?: DocDaralt) => Promise<Array<Record<string, unknown>>>;
 }
 
 export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {

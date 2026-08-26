@@ -1,3 +1,4 @@
+import { sayiBicimleyici } from '../utils/recharts';
 import React, { useState, useEffect } from 'react';
 import { ayAnahtari } from '../utils/zaman';
 import { motion, AnimatePresence } from 'motion/react';
@@ -426,7 +427,7 @@ export default function DealerCommissionPanel({
                       />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        formatter={(value: number) => [`${grafikSembol}${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Satış' : 'Sales']}
+                        formatter={sayiBicimleyici((value) => [`${grafikSembol}${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Satış' : 'Sales'])}
                       />
                       <Bar dataKey="convertedSales" radius={[6, 6, 0, 0]} name={currentLanguage === 'tr' ? 'Satış' : 'Sales'}>
                         {dealerPerformance.slice(0, 8).map((d, i) => (

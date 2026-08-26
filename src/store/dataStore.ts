@@ -5,6 +5,9 @@ import type {
   Vehicle, LocationStock
 } from '../types';
 
+/** Doviz pozisyonu: bakiye + defter kuru (USD/EUR). */
+export type FxPos = { usdBalance: number; usdBookRate: number; eurBalance: number; eurBookRate: number };
+
 interface DataState {
   commissionRules: any[];
   setCommissionRules: (val: any[] | ((prev: any[]) => any[])) => void;
@@ -16,8 +19,12 @@ interface DataState {
   setPaymentHistory: (val: any[] | ((prev: any[]) => any[])) => void;
   notifications: any[];
   setNotifications: (val: any[] | ((prev: any[]) => any[])) => void;
-  fxPos: { usdBalance: number, usdBookRate: number, eurBalance: number, eurBookRate: number };
-  setFxPos: (val: any | ((prev: any) => any)) => void;
+  fxPos: FxPos;
+  /** Doviz pozisyonu setter'i — React'in `setState` deseni (deger ya da
+   *  onceki degeri alan fonksiyon). Once `any` ile yazilmisti; `noImplicitAny`
+   *  acilinca cagri yerlerindeki `prev` ortuk any oluyordu, yani alan adi
+   *  yanlis yazilsa (usdBalanse gibi) derleyici GORMUYORDU. */
+  setFxPos: (val: FxPos | ((prev: FxPos) => FxPos)) => void;
   companySettings: Record<string, unknown>;
   setCompanySettings: (val: Record<string, unknown> | ((prev: Record<string, unknown>) => Record<string, unknown>)) => void;
   logoUrl: string | null;

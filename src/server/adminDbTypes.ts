@@ -50,6 +50,12 @@ export interface AdminDocRef {
   readonly id: string;
   get(): Promise<AdminDocSnapshot>;
   set(veri: Record<string, unknown>, opts?: { merge?: boolean }): Promise<unknown>;
+  /** Kismi guncelleme (jsonb merge). 2026-08-26'da eklendi: mikroRoutes
+   *  `getAdminDb: () => any`dan AdminDbLike'a gecirilince tsc bunun eksik
+   *  oldugunu soyledi — yani 4 cagri yeri `any` iken denetimsiz gecmisti. */
+  update(veri: Record<string, unknown>): Promise<unknown>;
+  /** Dokumani siler. Ayni tur (superadminRoutes'ta 1 cagri yeri). */
+  delete(): Promise<unknown>;
 }
 
 /**
@@ -93,3 +99,25 @@ export interface AdminDbLike {
   collection(ad: string): AdminCollectionRef;
   batch(): AdminBatch;
 }
+
+/**
+ * `daralt` — `loadCompanyDocs`/`tenantSnap`in SQL tarafinda uyguladigi ek
+ * suzme/siralama/tavan (yalniz pgPool yolunda).
+ *
+ * Varsayilan davranis (verilmezse) DEGISMEZ: koleksiyonun tamami. Ama bir
+ * rapor ucu "yalniz acik siparislerin en yenisi 500 tanesi" istiyorsa, bunu
+ * tum koleksiyonu Node'a cekip JS'te suzerek yapmak zorunda kalmasin
+ * (code-review: /api/aging kiraci duzeltmesiyle birlikte LIMIT'i kaybetmisti).
+ * `alanDurum`/`siralaAlan` KOD ICINDE sabit verilir — istemciden GELMEZ.
+ *
+ * server.ts'ten TASINDI (2026-08-26): rota modulleri baglamda bu tipi
+ * kullaniyor ve server.ts'ten import DONGU olurdu. Baglamda `daralt?: any`
+ * yazmak strictFunctionTypes altinda da reddediliyordu.
+ */
+export type DocDaralt = {
+  /** data->>'status' bu kumede olsun. */
+  durumlar?: string[];
+  /** data->>'<alan>' DESC sirala (metinsel; ISO tarih ve epoch icin dogru sira). */
+  siralaAlanDesc?: string;
+  tavan?: number;
+};

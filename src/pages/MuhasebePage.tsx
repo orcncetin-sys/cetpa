@@ -65,7 +65,10 @@ interface Props {
   leads: Lead[];
   exchangeRates: Record<string, number> | null;
   fmtKpi: (value: number, format?: 'full' | 'K', decimals?: number) => string;
-  createNotification: (title: string, message: string, type?: string) => Promise<void>;
+  // Tip App.tsx:1301'deki GERCEK imzayla ayni — `type?: string` demek,
+  // gerceklestirimden GENIS bir sozlesme ilan etmekti ve strictFunctionTypes
+  // bunu reddediyor (haklı olarak: 'foo' gecirilse calisma aninda dusuyordu).
+  createNotification: (title: string, message: string, type?: 'info' | 'warning' | 'success') => Promise<void>;
   toast: (msg: string, type?: string) => void;
   setActiveTab: (tab: string) => void;
   kpiCurrency: 'TRY' | 'USD' | 'EUR';
