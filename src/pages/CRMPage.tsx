@@ -202,16 +202,23 @@ export default function CRMPage({
   const [orderSort, setOrderSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'syncedAt', dir: 'desc' });
 
   // ── Local utilities ──────────────────────────────────────────────────────────
+  // Sıralama anahtarını karşılaştırılabilir bir ilkel değere indirger.
+  // Davranış eskisiyle aynı: Timestamp/Date -> ms, metin -> küçük harf,
+  // yok/null -> '' (yalnızca sıralama içindir, sayısal alana 0 yazılmaz).
+  const sortKeyValue = (raw: unknown): string | number => {
+    if (raw && typeof (raw as { toDate?: unknown }).toDate === 'function') return (raw as { toDate: () => Date }).toDate().getTime();
+    if (raw instanceof Date) return raw.getTime();
+    if (typeof raw === 'string') return raw.toLowerCase();
+    if (typeof raw === 'number') return raw;
+    if (raw === undefined || raw === null) return '';
+    if (typeof raw === 'boolean') return Number(raw);
+    if (typeof raw === 'bigint') return Number(raw);
+    return String(raw);
+  };
   const sortData = <T,>(arr: T[], key: string, dir: 'asc' | 'desc'): T[] =>
     [...arr].sort((a: T, b: T) => {
-      let av = (a as Record<string, unknown>)[key] as unknown;
-      let bv = (b as Record<string, unknown>)[key] as unknown;
-      if (av && typeof (av as Record<string, unknown>).toDate === 'function') av = (av as { toDate: () => Date }).toDate().getTime();
-      if (bv && typeof (bv as Record<string, unknown>).toDate === 'function') bv = (bv as { toDate: () => Date }).toDate().getTime();
-      if (typeof av === 'string') av = av.toLowerCase();
-      if (typeof bv === 'string') bv = bv.toLowerCase();
-      if (av === undefined || av === null) av = '';
-      if (bv === undefined || bv === null) bv = '';
+      const av = sortKeyValue((a as Record<string, unknown>)[key]);
+      const bv = sortKeyValue((b as Record<string, unknown>)[key]);
       if (dir === 'asc') return av < bv ? -1 : av > bv ? 1 : 0;
       return av > bv ? -1 : av < bv ? 1 : 0;
     });
@@ -500,7 +507,7 @@ export default function CRMPage({
 
               {/* CRM sub-tab: Müşteriler */}
               {activeTab === 'crm' && crmTab === 'musteriler' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* CRM sub-tab: Siparişler */}
@@ -2302,7 +2309,7 @@ export default function CRMPage({
                                 );
                               })()}
                               {/* Phase 36: Follow-up due badge */}
-                              {lead.nextFollowUpDate && (() => {
+                              {!!lead.nextFollowUpDate && (() => {
                                 const due = typeof (lead.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
                                   ? (lead.nextFollowUpDate as { toDate: () => Date }).toDate()
                                   : new Date(lead.nextFollowUpDate as unknown as string | number);
@@ -3405,7 +3412,7 @@ export default function CRMPage({
                                 <Trash2 className="w-4 h-4" />
                               </button>
                               <div>
-                                <p className="font-bold text-lg text-[#1D2226]">{formatCurrency(order.totalPrice, exchangeRates)}</p>
+                                <p className="font-bold text-lg text-[#1D2226]">{formatCurrency(order.totalPrice, exchangeRates ?? undefined)}</p>
                                 <div className="flex items-center gap-1.5 mt-1 justify-end flex-wrap">
                                   <select value={order.status} onChange={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order.id, e.target.value as Order['status']); }}
                                     className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block outline-none cursor-pointer appearance-none",
@@ -3675,7 +3682,7 @@ export default function CRMPage({
             const approved549 = p549Iadeler.filter(r=>r.status==='Onaylandı');
             const done549 = p549Iadeler.filter(r=>r.status==='Tamamlandı');
             const statusColor = (s: string) => s==='Onaylandı'?'bg-emerald-100 text-emerald-700':s==='Reddedildi'?'bg-red-100 text-red-700':s==='Tamamlandı'?'bg-blue-100 text-blue-700':'bg-orange-100 text-orange-700';
-            const decisionColor = (d: string) => d==='İade'?'bg-rose-100 text-rose-700':d==='Değişim'?'bg-violet-100 text-violet-700':d==='Kredi Notu'?'bg-amber-100 text-amber-700':'bg-gray-100 text-gray-600';
+            const decisionColor = (d: string | undefined) => d==='İade'?'bg-rose-100 text-rose-700':d==='Değişim'?'bg-violet-100 text-violet-700':d==='Kredi Notu'?'bg-amber-100 text-amber-700':'bg-gray-100 text-gray-600';
             return (
               <motion.div key="iade" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
                 <ModuleHeader

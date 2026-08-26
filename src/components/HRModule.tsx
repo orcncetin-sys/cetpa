@@ -344,7 +344,11 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     if (!leaveForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
     const emp = employees.find(e => e.id === leaveForm.employeeId);
     // Gün sayısını başlangıç/bitiş tarihinden hesapla (dahil); önce hep 1 kalıyordu.
-    const leaveMs = Date.parse(leaveForm.endDate) - Date.parse(leaveForm.startDate);
+    // Tarihlerden biri bos ise NaN uretilir - Date.parse(undefined)'in zaten
+    // dondugu deger. Asagidaki Number.isFinite kontrolu bunu yakalayip
+    // leaveForm.days'e dusuyor; "tarih yok" sessizce 1 gune donusmuyor.
+    const { startDate: izinBas, endDate: izinBit } = leaveForm;
+    const leaveMs = (izinBas && izinBit) ? Date.parse(izinBit) - Date.parse(izinBas) : NaN;
     const days = Number.isFinite(leaveMs) && leaveMs >= 0 ? Math.floor(leaveMs / 86400000) + 1 : (leaveForm.days || 1);
     try {
       if (editingLeaveId) {

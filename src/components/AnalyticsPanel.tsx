@@ -7,12 +7,13 @@ import {
 import { format, subMonths, startOfMonth } from 'date-fns';
 import { tr as trLocale, enUS } from 'date-fns/locale';
 import { TrendingUp, TrendingDown, ShoppingCart, Users, Package, DollarSign } from 'lucide-react';
+import { zamanMs } from '../utils/zaman';
 
 interface Order {
   status?: string;
-  syncedAt?: { toDate?: () => Date } | string | number | Date;
+  syncedAt?: unknown;   // kanonik src/types.ts ile ayni (bkz. zamanMs)
   totalPrice?: number;
-  assignedTo?: string;
+  assignedTo?: string | null;   // kanonik tipte null da olabiliyor
   customerId?: string;
   customerName?: string;
   items?: { productId?: string; name?: string; qty?: number; price?: number }[];
@@ -20,7 +21,7 @@ interface Order {
 
 interface Lead {
   status?: string;
-  createdAt?: { toDate?: () => Date } | string | number | Date;
+  createdAt?: unknown;  // kanonik src/types.ts ile ayni (bkz. zamanMs)
   value?: number;
   source?: string;
 }
@@ -41,13 +42,11 @@ interface AnalyticsPanelProps {
 const BRAND = '#ff4000';
 const COLORS = ['#ff4000', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
-function toDate(val?: { toDate?: () => Date } | string | number | Date | null): Date {
-  if (!val) return new Date();
-  if (typeof val === 'object' && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
-    return (val as { toDate: () => Date }).toDate();
-  }
-  return new Date(val as string | number | Date);
-}
+// YEREL `toDate` KALDIRILDI (2026-08-26). `if (!val) return new Date()` yuzunden
+// tarihi COZULEMEYEN her siparis "SIMDI" sayiliyordu; asagidaki
+// `>= thisMonth` suzgeci de onu ICINDE BULUNULAN AYIN CIROSUNA katiyordu.
+// Yani Mikro'dan syncedAt'siz gelen kayitlar bu ayin gelirini SISIRIYORDU.
+// `zamanMs` cozemezse null doner (asla "simdi"); cagri yerleri artik disliyor.
 
 const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
   orders = [],
@@ -67,11 +66,14 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
     const thisMonth = startOfMonth(now);
     const lastMonth = startOfMonth(subMonths(now, 1));
 
+    // Tarihi cozulemeyen siparis HICBIR aya sayilmaz (eskiden hepsi bu aya
+    // dusuyordu). Bir aya ait oldugu bilinmiyorsa o ayin cirosu olarak
+    // gosterilemez — CLAUDE.md: "sahte kesinlik gosterme".
     const thisMonthRevenue = activeOrders
-      .filter(o => toDate(o.syncedAt) >= thisMonth)
+      .filter(o => { const ms = zamanMs(o.syncedAt); return ms !== null && ms >= thisMonth.getTime(); })
       .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
     const lastMonthRevenue = activeOrders
-      .filter(o => toDate(o.syncedAt) >= lastMonth && toDate(o.syncedAt) < thisMonth)
+      .filter(o => { const ms = zamanMs(o.syncedAt); return ms !== null && ms >= lastMonth.getTime() && ms < thisMonth.getTime(); })
       .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
 
     const revenueGrowth = lastMonthRevenue > 0
@@ -100,7 +102,9 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
       });
     }
     orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-      const d = toDate(o.syncedAt);
+      const ms = zamanMs(o.syncedAt);
+      if (ms === null) return;   // aylik grafige tarihsiz kayit girmez
+      const d = new Date(ms);
       const idx = months.findIndex(m => format(d, 'MMM yyyy') === format(m.date, 'MMM yyyy'));
       if (idx !== -1) {
         months[idx].revenue += Number(o.totalPrice) || 0;

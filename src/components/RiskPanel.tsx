@@ -195,7 +195,11 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
       // siparis GECIKMIS SAYILMAZ. `|| now` yedegi, syncedAt'i olmayan
       // pazaryeri siparislerini "bugun verilmis" yapip vadesini hep gelecege
       // atiyordu; hicbiri gecikmis listesine girmiyordu (2026-08-24).
-      const siparisMs = zamanMs(o.createdAt) ?? zamanMs(o.syncedAt);
+      // `createdAt`/`syncedAt` types.ts'te `unknown`; zamanMs'in kabul ettigi
+      // birlesim disa aktarilmadigi icin imzadan turetilir (bkz. App.tsx:2890).
+      // Tanimadigi bir deger gelirse zamanMs yine null doner - "simdi"ye dusmez.
+      type ZamanArg = Parameters<typeof zamanMs>[0];
+      const siparisMs = zamanMs(o.createdAt as ZamanArg) ?? zamanMs(o.syncedAt as ZamanArg);
       if (siparisMs === null) return false;
       const dueDate = new Date(siparisMs);
       dueDate.setDate(dueDate.getDate() + daysAllowed);

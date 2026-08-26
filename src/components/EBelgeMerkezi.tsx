@@ -303,9 +303,11 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'gib'), snap => {
       if (snap.exists()) {
+        // exists() shim'de tip daraltmasi yapmiyor -> data() yine undefined
+        // olabilir; alt satirlardaki yedekler zaten "yok" halini karsiliyor.
         const d = snap.data();
-        setGibConnected(d.connected ?? false);
-        setGibLastCheck(d.lastCheck?.toDate?.() ?? null);
+        setGibConnected(d?.connected ?? false);
+        setGibLastCheck(d?.lastCheck?.toDate?.() ?? null);
       } else {
         setGibConnected(false);
         setGibLastCheck(null);

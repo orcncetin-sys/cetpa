@@ -52,9 +52,11 @@ export default function OnboardingChecklist({
     const ref = doc(db, 'userOnboarding', userId);
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
+        // exists() shim'de tip daraltmasi yapmiyor -> data() yine undefined
+        // olabilir; bos dokuman zaten "hic adim tamamlanmadi" demek.
         const data = snap.data();
-        setCompletedSteps(data.completedSteps ?? []);
-        setDismissed(data.dismissed ?? false);
+        setCompletedSteps(data?.completedSteps ?? []);
+        setDismissed(data?.dismissed ?? false);
       } else {
         // Create doc on first visit
         setDoc(ref, { completedSteps: [], dismissed: false }).catch(() => {});

@@ -23,8 +23,9 @@ async function fetchCountryIndex(): Promise<string[]> {
   try {
     const res = await fetch('/geo/cities/_index.json');
     if (!res.ok) return [];
-    indexCache = await res.json();
-    return indexCache;
+    const kodlar: string[] = await res.json();
+    indexCache = kodlar;
+    return kodlar;
   } catch { return []; }
 }
 

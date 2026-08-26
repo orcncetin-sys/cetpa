@@ -75,8 +75,11 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
    */
   const cronCompanyId = async (): Promise<string> => {
     if (process.env.MIKRO_CRON_COMPANY_ID) return process.env.MIKRO_CRON_COMPANY_ID;
-    if (!deps().getAdminDb()) return '';
-    const snap = await deps().getAdminDb().collection('users').get();
+    // Yerel const: guard ile kullanim arasinda getter'i TEKRAR cagirmak
+    // daralmayi kaybettiriyor (her cagri yeniden null donebilir).
+    const db = deps().getAdminDb();
+    if (!db) return '';
+    const snap = await db.collection('users').get();
     // Set<string> ACIKCA: `getAdminDb()` DI'da `any` oldugu icin `snap.docs`
     // da any oluyor ve `new Set(any)` TypeScript'te Set<unknown> cikariyor.
     // server.ts'te adminDb'nin gercek tipi vardi, bu cikarim sorunu yoktu.
@@ -104,7 +107,8 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
 
   cron.schedule('0 * * * *', async () => {
     const cronCreds = await getMikroCreds();
-    if (!cronCreds || !deps().getAdminDb()) return;
+    const db = deps().getAdminDb();
+    if (!cronCreds || !db) return;
     console.log('Mikro cron: stok + cari tam senkron başlatıldı');
     try {
       const companyId = await cronCompanyId();
@@ -133,8 +137,8 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         }
       }
       let stokYeni = 0, stokGuncel = 0;
-      let batch = deps().getAdminDb().batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = deps().getAdminDb()!.batch(); ops = 0; } };
+      let batch = db.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
       const seenSku = new Set<string>();
       for (const s of stoklar) {
         const sku = (s.sto_kod as string)?.trim();
@@ -172,7 +176,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           // konsinye gibi yalniz bizim tarafta bilinen dususleri Mikro'nun (bunlardan
           // habersiz) eski sayisiyla sessizce ezmesine karsi gorunurluk saglar.
           if (mikroQty !== null && existing.stockLevel !== mikroQty) {
-            batch.set(deps().getAdminDb().collection('stockDiscrepancies').doc(), {
+            batch.set(db.collection('stockDiscrepancies').doc(), {
               productId: existing.ref.id, sku, productName: existing.name,
               ourQty: existing.stockLevel, mikroQty, diff: mikroQty - existing.stockLevel,
               resolved: false, companyId, detectedAt: deps().pgServerTimestamp(),
@@ -187,7 +191,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           stokGuncel++;
         }
         else {
-          batch.set(deps().getAdminDb().collection('inventory').doc(), {
+          batch.set(db.collection('inventory').doc(), {
             ...fields, sku, category: 'Genel',
             lowStockThreshold: 5,
             prices: mikroPrices,
@@ -250,7 +254,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
           || (nameKey ? leadByName.get(nameKey) : undefined);
         if (ref) { batch.update(ref, fields); cariGuncel++; }
         else {
-          const newRef = deps().getAdminDb().collection('leads').doc();
+          const newRef = db.collection('leads').doc();
           batch.set(newRef, {
             ...fields, status: 'Active', source: 'mikro_cron',
             createdAt: deps().pgServerTimestamp(),
@@ -272,7 +276,8 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
   cron.schedule('0 4 * * *', async () => {
     if (MIKRO_JUMP_SURUM < 17) return; // GenelAmacliMaliyetListesiV2 V16'da yok
     const cronCreds = await getMikroCreds();
-    if (!cronCreds || !deps().getAdminDb()) return;
+    const db = deps().getAdminDb();
+    if (!cronCreds || !db) return;
     console.log('Mikro cron: gece stok miktar senkronu başlatıldı (V17)');
     try {
       // Kiracı ÇÖZÜLÜYOR: bu cron eskiden tüm kiracıların envanterini okuyup
@@ -285,8 +290,8 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         .filter(x => x.sku);
       const sonTarih = mikroBugun();
       let updated = 0;
-      let batch = deps().getAdminDb().batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = deps().getAdminDb()!.batch(); ops = 0; } };
+      let batch = db.batch(); let ops = 0;
+      const flush = async () => { if (ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
       for (let i = 0; i < items.length; i += 8) {
         const results = await Promise.all(items.slice(i, i + 8).map(async (it) => {
           try {

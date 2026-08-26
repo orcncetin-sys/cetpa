@@ -43,7 +43,10 @@ function deps(): MirrorDeps {
 export function initMikroMirror(d: MirrorDeps): void { D = d; }
 
 export async function initMikroTables(): Promise<void> {
-  if (!deps().getPgPool()) return;
+  // Yerel const: guard'dan sonra getter'i TEKRAR cagirmak daralmayi
+  // kaybettiriyor (getter her cagrida null donebilir).
+  const pool = deps().getPgPool();
+  if (!pool) return;
   const ddl = `
   CREATE TABLE IF NOT EXISTS mikro_stoklar (
     sto_kod text PRIMARY KEY,
@@ -158,7 +161,7 @@ export async function initMikroTables(): Promise<void> {
     alan_eslesme jsonb NOT NULL,
     aciklama text
   );`;
-  await deps().getPgPool().query(ddl);
+  await pool.query(ddl);
 
   const eslesmeler: Array<[string, string, string, Record<string, string>, string]> = [
     ['STOKLAR', 'mikro_stoklar', 'inventory (docs)', {
@@ -219,7 +222,7 @@ export async function initMikroTables(): Promise<void> {
     }, 'Liste endpointi yok — SqlVeriOkuV2 açılınca doldurulur'],
   ];
   for (const [mikro, pgt, app, alanlar, aciklama] of eslesmeler) {
-    await deps().getPgPool().query(
+    await pool.query(
       `INSERT INTO mikro_tablo_eslesme (mikro_tablo, pg_tablo, app_karsiligi, alan_eslesme, aciklama)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (mikro_tablo) DO UPDATE SET pg_tablo = $2, app_karsiligi = $3, alan_eslesme = $4, aciklama = $5`,
@@ -239,8 +242,9 @@ export async function mirrorMikroInsert(
   cols: Record<string, (r: Record<string, unknown>) => unknown>,
   client?: import('pg').PoolClient
 ): Promise<void> {
-  if (!deps().getPgPool() || !rows?.length) return;
-  const dbClient = client || deps().getPgPool();
+  const pool = deps().getPgPool();
+  if (!pool || !rows?.length) return;
+  const dbClient = client || pool;
   try {
     for (const r of rows) {
       const veri = JSON.stringify(r);
@@ -262,12 +266,13 @@ export async function mirrorMikroInsert(
 
 /** STOKLAR + STOK_SATIS_FIYAT_LISTELERI + DEPOLAR aynası (sto_kod upsert). */
 export async function mirrorMikroStoklar(rows: Record<string, unknown>[]): Promise<void> {
-  if (!deps().getPgPool() || !rows?.length) return;
+  const pool = deps().getPgPool();
+  if (!pool || !rows?.length) return;
   try {
     for (const s of rows) {
       const kod = strOrNull(s.sto_kod)?.trim();
       if (!kod) continue;
-      await deps().getPgPool().query(
+      await pool.query(
         `INSERT INTO mikro_stoklar (sto_kod, sto_isim, sto_kisa_ismi, sto_birim1_ad, sto_grup_kodu, sto_grup_isim,
            sto_yer_kod, sto_perakende_vergi, sto_toptan_vergi, sto_satis_fiyat1, sto_satis_fiyat2, sto_satis_fiyat3,
            sto_satis_fiyat4, sto_mevcut_mik, veri)
@@ -294,7 +299,7 @@ export async function mirrorMikroStoklar(rows: Record<string, unknown>[]): Promi
       for (const f of fiyatlar) {
         const sira = numOrNull(f.sfiyat_listesirano);
         if (sira === null) continue;
-        await deps().getPgPool().query(
+        await pool.query(
           `INSERT INTO mikro_stok_satis_fiyat_listeleri (sfiyat_stokkod, sfiyat_listesirano, sfiyat_fiyati, sfiyat_doviz, sfiyat_birim_pntr, veri)
            VALUES ($1,$2,$3,$4,$5,$6)
            ON CONFLICT (sfiyat_stokkod, sfiyat_listesirano) DO UPDATE SET
@@ -305,7 +310,7 @@ export async function mirrorMikroStoklar(rows: Record<string, unknown>[]): Promi
       }
       const yerKod = strOrNull(s.sto_yer_kod)?.trim();
       if (yerKod) {
-        await deps().getPgPool().query(
+        await pool.query(
           `INSERT INTO mikro_depolar (dep_no, dep_adi) VALUES ($1, $2) ON CONFLICT (dep_no) DO NOTHING`,
           [yerKod, `Depo ${yerKod}`],
         );
@@ -316,12 +321,13 @@ export async function mirrorMikroStoklar(rows: Record<string, unknown>[]): Promi
 
 /** CARI_HESAPLAR (+adresler, +yetkili) aynası (cari_kod upsert). */
 export async function mirrorMikroCariler(rows: Record<string, unknown>[]): Promise<void> {
-  if (!deps().getPgPool() || !rows?.length) return;
+  const pool = deps().getPgPool();
+  if (!pool || !rows?.length) return;
   try {
     for (const c of rows) {
       const kod = strOrNull(c.cari_kod)?.trim();
       if (!kod) continue;
-      await deps().getPgPool().query(
+      await pool.query(
         `INSERT INTO mikro_cari_hesaplar (cari_kod, cari_unvan1, cari_unvan2, cari_vdaire_no, cari_vdaire_adi,
            cari_email, cari_ceptel, cari_efatura_fl, cari_baglanti_tipi, cari_hareket_tipi, veri)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)

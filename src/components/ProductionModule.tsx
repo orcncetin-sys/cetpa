@@ -615,7 +615,9 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
           for (const line of tersKayitLines) {
             const invRef = doc(db, 'inventory', line.inventoryId);
             const snap = await tx.get(invRef);
-            const currentQty = (snap.exists() ? (snap.data().quantity as number) : 0) || 0;
+            // `exists()` tip koruyucu degil; dbClient'ta tanimi zaten `data !== undefined`.
+            const mevcutVeri = snap.data();
+            const currentQty = (mevcutVeri === undefined ? 0 : (mevcutVeri.quantity as number)) || 0;
             tx.update(invRef, { quantity: currentQty + line.delta });
           }
           tx.update(doc(db, 'productionOrders', order.id), {

@@ -115,9 +115,10 @@ export async function getMikroCreds(): Promise<MikroCreds | null> {
   }
 
   // 2. Fallback: read from Firestore settings/mikro (entered from Settings UI)
-  if (!deps().getAdminDb()) return null;
+  const adminDb = deps().getAdminDb();
+  if (!adminDb) return null;
   try {
-    const snap = await deps().getAdminDb().collection('settings').doc('mikro').get();
+    const snap = await adminDb.collection('settings').doc('mikro').get();
     if (!snap.exists) return null;
     const d = snap.data() as Record<string, unknown>;
     // Support both new field names and legacy "accessToken" → idmPassword mapping
@@ -132,8 +133,11 @@ export async function getMikroCreds(): Promise<MikroCreds | null> {
 
     return {
       idmEmail:      idmEmail      || '',
-      idmPassword,
-      alias,
+      // Lokal modda IDM/Alias kullanılmaz (yukarıdaki guard yalnız Sifre arar),
+      // bu yüzden bu ikisi lokalde tanımsız kalabilir; bulut modunda guard dolu
+      // olduklarını garanti eder. Metin alanı — sayısal "sessiz sıfır" riski yok.
+      idmPassword:   idmPassword   || '',
+      alias:         alias         || '',
       firmaKodu:     (d.firmaKodu     as string) || '01',
       calismaYili:   (d.calismaYili   as string) || String(new Date().getFullYear()),
       apiKey:        apiKey  || '',

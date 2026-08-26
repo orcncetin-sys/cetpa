@@ -9,6 +9,12 @@
       "DOM",
       "DOM.Iterable"
     ],
+    // 2026-08-26: strictNullChecks ACIK. Bu proje "sessiz sifir/undefined"
+    // sinifindan defalarca zarar gordu (Mikro alanlari, tarih cozumleme,
+    // stok miktarlari). Derleyici artik o yollari yakaliyor.
+    // ONEMLI: bir hatayi `?? 0` ile kapatmak YASAK - CLAUDE.md kurali:
+    // "Dis sistemden gelen sayisal alan yoksa 0 degil, BILINMIYOR".
+    "strictNullChecks": true,
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,

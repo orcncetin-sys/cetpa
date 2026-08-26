@@ -33,8 +33,22 @@
  * `gunBasi()` bu ikisini tek kurala bağlar.
  */
 
-/** Firestore/dbClient Timestamp'ine benzeyen her şey. */
-type ZamanBenzeri =
+/**
+ * Firestore/dbClient Timestamp'ine benzeyen her şey.
+ *
+ * BELGELEME amaçlı: aşağıdaki imzalar `unknown` alır. Neden — kanonik tiplerde
+ * (`src/types.ts`) `Order.syncedAt` ve `Lead.createdAt` zaten `unknown`, dar bir
+ * union onları REDDEDİYORDU. Bu yüzden bileşenler kendi yerel `toDate()`
+ * yardımcılarını yazıyordu ve o kopyalar "çözemezsem BUGÜN" diye düşüyordu —
+ * yani tam olarak bu dosyanın önlemek için var olduğu tuzağa (2026-08-26'da
+ * FinancePanel + AnalyticsPanel'de bulundu: tarihsiz sipariş içinde bulunulan
+ * ayın cirosuna sayılıyordu). Tip daraltmak yerine yardımcıyı erişilebilir
+ * kılmak doğru olan.
+ *
+ * Güvenlik kaybı yok: union'daki alanların hepsi opsiyonel olduğu için
+ * neredeyse her nesne zaten eşleşiyordu.
+ */
+export type ZamanBenzeri =
   | { toMillis?: () => number; toDate?: () => Date }
   | { _seconds?: number; _nanoseconds?: number }
   | { seconds?: number; nanoseconds?: number }
@@ -44,7 +58,7 @@ type ZamanBenzeri =
  * Herhangi bir zaman damgası biçimini epoch milisaniyeye çevirir.
  * ÇÖZEMEZSE `null` döner — ASLA "şimdi"ye düşmez.
  */
-export function zamanMs(v: ZamanBenzeri): number | null {
+export function zamanMs(v: unknown): number | null {
   if (v == null) return null;
 
   if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.getTime() : null;
@@ -90,7 +104,7 @@ export function zamanMs(v: ZamanBenzeri): number | null {
 }
 
 /** `zamanMs`'in Date karşılığı. Çözemezse `null`. */
-export function zamanDate(v: ZamanBenzeri): Date | null {
+export function zamanDate(v: unknown): Date | null {
   const ms = zamanMs(v);
   return ms === null ? null : new Date(ms);
 }
@@ -104,7 +118,7 @@ export function zamanDate(v: ZamanBenzeri): Date | null {
  * gecikme gününü bir gün eksik hesaplatıyordu. Burada her iki taraf da
  * yerel güne indirgenir, böylece fark tam gün cinsinden çıkar.
  */
-export function gunBasi(v: ZamanBenzeri): Date | null {
+export function gunBasi(v: unknown): Date | null {
   if (typeof v === 'string') {
     const s = v.trim();
     // Saat bilgisi OLMAYAN tarih string'ini YEREL gün olarak kur — UTC'ye
@@ -124,7 +138,7 @@ export function gunBasi(v: ZamanBenzeri): Date | null {
  * İki zaman arasındaki TAM GÜN farkı (a - b), yerel güne göre.
  * Herhangi biri çözülemezse `null`.
  */
-export function gunFarki(a: ZamanBenzeri, b: ZamanBenzeri): number | null {
+export function gunFarki(a: unknown, b: unknown): number | null {
   const ga = gunBasi(a), gb = gunBasi(b);
   if (!ga || !gb) return null;
   return Math.round((ga.getTime() - gb.getTime()) / 86400000);
@@ -135,14 +149,14 @@ export function gunFarki(a: ZamanBenzeri, b: ZamanBenzeri): number | null {
  * Ay/yıl karşılaştırmalarını `getMonth()+1` aritmetiğiyle elle yapmak yerine
  * bunu kullan — 0/1-tabanlı ay karışması ortadan kalkar.
  */
-export function ayAnahtari(v: ZamanBenzeri): string | null {
+export function ayAnahtari(v: unknown): string | null {
   const d = zamanDate(v);
   if (!d) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 /** `"YYYY-MM-DD"` yerel gün anahtarı. Çözemezse `null`. */
-export function gunAnahtari(v: ZamanBenzeri): string | null {
+export function gunAnahtari(v: unknown): string | null {
   const d = gunBasi(v);
   if (!d) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

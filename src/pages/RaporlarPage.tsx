@@ -265,7 +265,9 @@ export default function RaporlarPage({
         // iki farkli ciro tanimi vardi.
         const ayBasiMs570 = monthStart570.getTime();
         const monthOrders570 = orders.filter(o => {
-          const ms = zamanMs(o.createdAt);
+          // `createdAt` types.ts'te `unknown`; zamanMs'in parametre tipi disa
+          // aktarilmadigi icin imzadan turetilir (bkz. App.tsx:2890).
+          const ms = zamanMs(o.createdAt as Parameters<typeof zamanMs>[0]);
           return ms !== null && ms >= ayBasiMs570;
         });
         const actRevenue570 = monthOrders570.reduce((s, o) => s + (o.totalPrice || 0), 0);

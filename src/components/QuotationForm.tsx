@@ -149,7 +149,7 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
                 <select
                   required
                   value={selectedLead?.id || ''}
-                  onChange={(e) => setSelectedLead(leads.find(l => l.id === e.target.value))}
+                  onChange={(e) => setSelectedLead(leads.find(l => l.id === e.target.value) ?? null)}
                   className="apple-input w-full"
                 >
                   <option value="">{t.select_customer || 'Müşteri Seçin'}</option>

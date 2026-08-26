@@ -54,7 +54,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             {([
               { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), icon: Package, accent: 'text-blue-600', accentBg: 'bg-blue-50', isMoney: false },
               { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), icon: AlertCircle, accent: 'text-orange-500', accentBg: 'bg-orange-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', isMoney: true },
+              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates ?? undefined), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', isMoney: true },
               { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), icon: List, accent: 'text-purple-600', accentBg: 'bg-purple-50', isMoney: false },
             ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; isMoney: boolean }[]).map((k,i) => (
               <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg}

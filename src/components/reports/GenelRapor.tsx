@@ -1992,7 +1992,9 @@ export default function GenelRapor(ctx: ReportsCtx) {
         const overallAvg = monthAvg.filter(v=>v>0).reduce((s,v)=>s+v,0) / Math.max(1, monthAvg.filter(v=>v>0).length);
         if (overallAvg === 0) return null;
         const seasonality = monthAvg.map(avg => avg > 0 ? avg / overallAvg : null);
-        const peakMonth = seasonality.reduce((best, val, i) => val !== null && (best === -1 || (seasonality[best] || 0) < val) ? i : best, -1);
+        // <number>: akumulator DIZI eleman tipine (number|null) cozulup
+        // seasonality[best] indekslemesini kirmasin diye acikca sabitlendi.
+        const peakMonth = seasonality.reduce<number>((best, val, i) => val !== null && (best === -1 || (seasonality[best] || 0) < val) ? i : best, -1);
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Ciro Mevsimsellik Endeksi' : 'Revenue Seasonality Index'}</h3>

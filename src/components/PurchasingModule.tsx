@@ -455,6 +455,21 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     return matchesSearch && matchesStatus;
   });
 
+  /**
+   * Iki siralama degerini karsilastirir. Siralanabilir alanlar string (orderNumber,
+   * supplier, status), number (totalAmount, expectedDate ms) ya da Date/number
+   * (createdAt) — Date once ms'e indirilir ki Date ile ham sayi ayni olcekte
+   * karsilastirilsin. Tur cifti eslesmezse 0 doner: `<` ve `>` ikisi de false
+   * verdiginde eski kod da 0 donuyordu, yani sira UYDURULMAZ.
+   */
+  const karsilastir = (x: unknown, y: unknown): number => {
+    const xv = x instanceof Date ? x.getTime() : x;
+    const yv = y instanceof Date ? y.getTime() : y;
+    if (typeof xv === 'number' && typeof yv === 'number') return xv < yv ? -1 : xv > yv ? 1 : 0;
+    if (typeof xv === 'string' && typeof yv === 'string') return xv < yv ? -1 : xv > yv ? 1 : 0;
+    return 0;
+  };
+
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (!sortConfig) return 0;
     const { key, direction } = sortConfig;
@@ -477,9 +492,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       bVal = toEtaTime(b.expectedDate);
     }
 
-    if (aVal < bVal) return direction === 'asc' ? -1 : 1;
-    if (aVal > bVal) return direction === 'asc' ? 1 : -1;
-    return 0;
+    const fark = karsilastir(aVal, bVal);
+    return direction === 'asc' ? fark : -fark;
   });
 
   const getStatusColor = (status: string) => {

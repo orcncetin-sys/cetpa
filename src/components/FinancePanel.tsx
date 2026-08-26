@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves, Info } from 'lucide-react';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
+import { zamanMs } from '../utils/zaman';
 
 interface Order {
   id?: string;
@@ -12,8 +13,11 @@ interface Order {
   status?: string;
   hasInvoice?: boolean;
   paid?: boolean;        // Phase 98
-  syncedAt?: { toDate?: () => Date } | string | number;
-  createdAt?: { toDate?: () => Date } | string | number;
+  // Kanonik `src/types.ts` bu alanlari `unknown` ilan ediyor; dar bir union
+  // App.tsx'ten gelen Order[]'i REDDEDIYORDU (strictNullChecks bunu ortaya
+  // cikardi). Cozumleme `zamanMs` ile yapiliyor.
+  syncedAt?: unknown;
+  createdAt?: unknown;
 }
 
 interface FinancePanelProps {
@@ -23,11 +27,15 @@ interface FinancePanelProps {
   displayCurrency?: 'TRY' | 'USD' | 'EUR';
 }
 
-const toDate = (val: Order['syncedAt']): Date => {
-  if (!val) return new Date();
-  if (typeof val === 'object' && 'toDate' in val && typeof val.toDate === 'function') return val.toDate();
-  return new Date(val as string | number);
-};
+// YEREL `toDate` KALDIRILDI (2026-08-26). Iki olumcul kusuru vardi:
+//   1. `if (!val) return new Date()` — tarihi olmayan kayit BUGUNE dusuyordu.
+//      Asagidaki yaslandirma kovalarinda bu, odenmemis ve TARIHSIZ bir
+//      siparisi "0-30 gun" (en taze) kovasina koyuyordu: gercekte ne kadar
+//      geciktigi bilinmiyorken rapor onu saglikli gosteriyordu.
+//   2. `toDate` METODU OLMAYAN ham zarf ({_seconds,_nanoseconds}) icin
+//      `new Date(nesne)` -> Invalid Date.
+// `zamanMs` her iki durumda da `null` doner (asla "simdi") — cagri yerleri
+// artik bunu ACIKCA ele aliyor.
 
 const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguage, exchangeRates, displayCurrency: externalCurrency }) => {
   // Component-scoped: yalnız bu panel mount olduğunda abone olur (App.tsx'te
@@ -66,8 +74,10 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   const recentOrders = [...orders]
     .sort((a, b) => {
       if (sort.key === 'date') {
-        const av = toDate(a.syncedAt || a.createdAt).getTime();
-        const bv = toDate(b.syncedAt || b.createdAt).getTime();
+        // Cozulemeyen tarih: siralamada en sona (bugunmus gibi davranmaz).
+        const av = zamanMs(a.syncedAt ?? a.createdAt);
+        const bv = zamanMs(b.syncedAt ?? b.createdAt);
+        if (av === null || bv === null) return av === bv ? 0 : av === null ? 1 : -1;
         return sort.dir === 'asc' ? av - bv : bv - av;
       }
       const av = (a as Record<string, unknown>)[sort.key] as string | number ?? '';
@@ -204,8 +214,12 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           { label: currentLanguage === 'tr' ? 'Gecikmiş (90+ gün)': 'Overdue (90+ d)',    days: '90+',   orders: [], color: 'text-red-700',     bg: 'bg-red-50',     dot: 'bg-red-500'    },
         ];
         unpaidOrders.forEach(o => {
-          const d = toDate(o.createdAt);
-          const days = Math.floor((now - d.getTime()) / 86400000);
+          // TARIHI COZULEMEYEN odenmemis siparis: eskiden days=0 ile "0-30 gun"
+          // kovasina, yani EN TAZE gruba dusuyordu. Bilinmeyen bir yasi
+          // "yeni" saymak yanlis yonde hata; en geciken kovaya koyuyoruz ki
+          // insan gozune gorunsun (alarm yonu = guvenli taraf).
+          const ms = zamanMs(o.createdAt);
+          const days = ms === null ? Infinity : Math.floor((now - ms) / 86400000);
           if      (days <= 30) buckets[0].orders.push(o);
           else if (days <= 60) buckets[1].orders.push(o);
           else if (days <= 90) buckets[2].orders.push(o);
@@ -333,8 +347,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           const relevant = orders.filter(o => {
             const raw = o.syncedAt || o.createdAt;
             if (!raw) return false;
-            const d = toDate(raw as Order['syncedAt']);
-            return d >= weekStart && d < weekEnd;
+            const ms = zamanMs(raw);
+            if (ms === null) return false;   // cozulemeyen tarih haftaya sayilmaz
+            return ms >= weekStart.getTime() && ms < weekEnd.getTime();
           });
 
           const collected = relevant.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);

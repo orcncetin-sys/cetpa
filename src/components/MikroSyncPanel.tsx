@@ -157,7 +157,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     const unsub = onSnapshot(q, snap => {
       const alis = snap.docs
         .filter(d => (d.data() as GelenFatura & { yon?: string }).yon === 'alis')
-        .map(d => ({ id: d.id, ...(d.data() as GelenFatura) }));
+        .map(d => ({ id: d.id, ...(d.data() as Omit<GelenFatura, 'id'>) }));
       setGelenFaturalar(alis);
     }, () => {});
     return () => unsub();

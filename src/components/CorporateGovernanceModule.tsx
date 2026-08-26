@@ -470,7 +470,14 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     const { key, direction } = sortConfig;
                     const aVal = a[key as keyof Shareholder];
                     const bVal = b[key as keyof Shareholder];
-                    if (aVal !== undefined && bVal !== undefined) {
+                    // `keyof Shareholder` createdAt/updatedAt gibi `unknown` alanlari da
+                    // kapsiyor; salt `!== undefined` guard'i onlari karsilastirilabilir
+                    // saymiyor. Siralanabilir kolonlar zaten string (name/type) veya
+                    // sayi (shareCount/sharePercentage); digerleri eskisi gibi 0 doner.
+                    if (typeof aVal === 'number' && typeof bVal === 'number') {
+                      if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+                      if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+                    } else if (typeof aVal === 'string' && typeof bVal === 'string') {
                       if (aVal < bVal) return direction === 'asc' ? -1 : 1;
                       if (aVal > bVal) return direction === 'asc' ? 1 : -1;
                     }

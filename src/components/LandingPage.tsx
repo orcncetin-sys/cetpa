@@ -1215,6 +1215,9 @@ export default function LandingPage({
     const unsub = onSnapshot(doc(db, 'settings', 'pricing'), snap => {
       if (snap.exists()) {
         const d = snap.data();
+        // `exists()` true olsa da `data()` tipi `undefined` icerir (dbClient shim).
+        // Veri gelmediyse mevcut fiyat planlarina DOKUNMA - bos degerle ezme.
+        if (!d) return;
         // Firestore doc shape: { startup_monthly_tr, startup_yearly_tr, startup_monthly_en, startup_yearly_en,
         //                         enterprise_monthly_tr, enterprise_yearly_tr, enterprise_monthly_en, enterprise_yearly_en }
         setFirestorePricing(prev => (prev === null ? staticPricingPlans : prev).map((plan, i) => {

@@ -185,6 +185,25 @@ export class PgDocSnapshot {
   data(): PgDocData | undefined { return this._data; }
 }
 
+/**
+ * SORGU sonucundaki dokuman. `PgDocSnapshot`ten tek farki: `data()` undefined
+ * DONMEZ.
+ *
+ * NEDEN AYRI TIP (2026-08-26, strictNullChecks acilirken cikti): tek-dokuman
+ * yolu (`PgDocRef.get()`) satir bulunamayinca `data === undefined` uretir, bu
+ * yuzden `PgDocSnapshot.data()` `| undefined` donuyor. Ama SORGU sonucu
+ * (`PgQueryBuilder.get()`) dokumani ancak SATIR VARSA uretir — orada
+ * `undefined` imkansizdir. Ortak imza yuzunden derleyici bunu bilemiyordu ve
+ * her `d.data()!` ya da `d.data()?.x` yazmak gerekiyordu; daha kotusu,
+ * `AdminDbLike` yuzeyi (adminDbTypes.ts) `data(): Record<string, unknown>`
+ * ilan ettigi icin PgFirestore ona YAPISAL OLARAK UYMUYORDU — `any` iken
+ * gizliydi, strictNullChecks bunu ortaya cikardi.
+ */
+export class PgQueryDocSnapshot extends PgDocSnapshot {
+  constructor(id: string, data: PgDocData, ref: PgDocRef) { super(id, data, ref); }
+  override data(): PgDocData { return super.data() as PgDocData; }
+}
+
 export class PgDocRef {
   constructor(private pool: pg.Pool, public coll: string, public id: string) {}
   get path(): string { return `${this.coll}/${this.id}`; }
@@ -250,7 +269,7 @@ export class PgQueryBuilder {
       },
     };
   }
-  async get(): Promise<{ docs: PgDocSnapshot[]; empty: boolean; size: number; forEach: (cb: (d: PgDocSnapshot) => void) => void }> {
+  async get(): Promise<{ docs: PgQueryDocSnapshot[]; empty: boolean; size: number; forEach: (cb: (d: PgQueryDocSnapshot) => void) => void }> {
     const { rows } = await this.pool.query('SELECT id, data FROM docs WHERE coll = $1', [this.collName]);
     let items = rows.map((r: { id: string; data: unknown }) => ({ id: r.id, data: pgReviveTimestamps(r.data) as PgDocData }));
     for (const f of this.filters) {
@@ -277,8 +296,8 @@ export class PgQueryBuilder {
       });
     }
     if (this.limitN != null) items = items.slice(0, this.limitN);
-    const docs = items.map((it: { id: string; data: PgDocData }) => new PgDocSnapshot(it.id, it.data, new PgDocRef(this.pool, this.collName, it.id)));
-    return { docs, empty: docs.length === 0, size: docs.length, forEach: (cb: (d: PgDocSnapshot) => void) => docs.forEach(cb) };
+    const docs = items.map((it: { id: string; data: PgDocData }) => new PgQueryDocSnapshot(it.id, it.data, new PgDocRef(this.pool, this.collName, it.id)));
+    return { docs, empty: docs.length === 0, size: docs.length, forEach: (cb: (d: PgQueryDocSnapshot) => void) => docs.forEach(cb) };
   }
 }
 

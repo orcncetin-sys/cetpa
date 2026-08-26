@@ -53,7 +53,7 @@ export default function IKRapor(ctx: ReportsCtx) {
           <KpiGrid cols={3}>
             {([
               { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, accent: 'text-blue-600', accentBg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
-              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
+              { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates ?? undefined), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
               { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
             ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; desc: string; isMoney: boolean }[]).map((k,i) => (
               <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg} hint={k.desc}

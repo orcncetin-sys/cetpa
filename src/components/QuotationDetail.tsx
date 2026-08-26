@@ -28,6 +28,15 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
 
   if (!isOpen || !quotation) return null;
 
+  // Kayitta para birimi yoksa TRY: uygulamanin kendi varsayimi
+  // (QuotationForm.tsx teklifi duzenlemeye acarken `initialData.currency || 'TRY'` yapiyor).
+  const paraBirimi = quotation.currency || 'TRY';
+  // totalAmount BILINMIYOR olabilir; 0 varsaymak yerine UI'da '—' gosteriyoruz.
+  const toplam = quotation.totalAmount;
+  const araToplam = toplam === undefined ? undefined : toplam / 1.2;
+  const kdvToplam = toplam === undefined ? undefined : toplam - toplam / 1.2;
+  const tutarYaz = (v: number | undefined) => (v === undefined ? '—' : formatAmount(v, paraBirimi));
+
   const handleConvertToOrder = async () => {
     if (!onConvertToOrder) return;
     setIsConverting(true);
@@ -149,9 +158,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         tr(item.name || ''),
         item.sku || '',
         String(item.quantity || 0),
-        formatAmount(item.price || 0, quotation.currency),
+        formatAmount(item.price || 0, paraBirimi),
         `%${item.vatRate ?? 0}`,
-        formatAmount((item.price || 0) * (item.quantity || 0), quotation.currency),
+        formatAmount((item.price || 0) * (item.quantity || 0), paraBirimi),
       ]);
 
       autoTable(doc, {
@@ -201,8 +210,8 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFont('Roboto', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...DARK);
-      doc.text(formatAmount(subTotal, quotation.currency), W - 16, totalsY + 4, { align: 'right' });
-      doc.text(formatAmount(vatTotal, quotation.currency), W - 16, totalsY + 12, { align: 'right' });
+      doc.text(formatAmount(subTotal, paraBirimi), W - 16, totalsY + 4, { align: 'right' });
+      doc.text(formatAmount(vatTotal, paraBirimi), W - 16, totalsY + 12, { align: 'right' });
 
       // Grand total row
       doc.setFillColor(...BRAND);
@@ -211,7 +220,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
       doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
-      doc.text(formatAmount(total, quotation.currency), W - 16, totalsY + 23, { align: 'right' });
+      doc.text(formatAmount(total, paraBirimi), W - 16, totalsY + 23, { align: 'right' });
 
       // ── Notes ────────────────────────────────────────────────────────────
       if (quotation.notes) {
@@ -358,16 +367,16 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {quotation.lineItems.map((item: QuotationItem, i: number) => (
+                  {(quotation.lineItems ?? []).map((item: QuotationItem, i: number) => (
                     <tr key={i} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-4">
                         <p className="text-sm font-bold text-gray-900">{item.name}</p>
                         <p className="text-xs text-gray-500">{item.sku}</p>
                       </td>
                       <td className="p-4 text-center text-sm font-medium text-gray-900">{item.quantity}</td>
-                      <td className="p-4 text-right text-sm font-medium text-gray-900">{formatAmount(item.price, quotation.currency)}</td>
+                      <td className="p-4 text-right text-sm font-medium text-gray-900">{formatAmount(item.price, paraBirimi)}</td>
                       <td className="p-4 text-center text-sm font-medium text-gray-500">%{item.vatRate}</td>
-                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatAmount(item.price * item.quantity * (1 + item.vatRate / 100), quotation.currency)}</td>
+                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatAmount(item.price * item.quantity * (1 + item.vatRate / 100), paraBirimi)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -385,15 +394,15 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
             <div className="w-full md:w-64 space-y-3">
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">{t.subtotal || 'Ara Toplam'}</span>
-                <span className="font-bold text-gray-900">{formatAmount(quotation.totalAmount / 1.2, quotation.currency)}</span>
+                <span className="font-bold text-gray-900">{tutarYaz(araToplam)}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">{t.vat_total || 'KDV Toplam'}</span>
-                <span className="font-bold text-gray-900">{formatAmount(quotation.totalAmount - (quotation.totalAmount / 1.2), quotation.currency)}</span>
+                <span className="font-bold text-gray-900">{tutarYaz(kdvToplam)}</span>
               </div>
               <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
                 <span className="text-sm font-bold text-gray-900">{t.grand_total || 'Genel Toplam'}</span>
-                <span className="text-xl font-black text-brand">{formatAmount(quotation.totalAmount, quotation.currency)}</span>
+                <span className="text-xl font-black text-brand">{tutarYaz(toplam)}</span>
               </div>
             </div>
           </div>

@@ -286,7 +286,7 @@ export default function FaturalarTab({
                       <td className="px-4 py-3 font-mono font-semibold text-[#ff4000]">{inv.faturaNo as string || `#${(inv.id as string).slice(0,8)}`}</td>
                       <td className="px-4 py-3">
                         <p className="font-semibold text-[#1D1D1F]">{inv.customerName as string}</p>
-                        {inv.taxId && <p className="text-[10px] text-gray-400">VKN: {inv.taxId as string}</p>}
+                        {!!inv.taxId && <p className="text-[10px] text-gray-400">VKN: {inv.taxId as string}</p>}
                       </td>
                       <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${typeColor}`}>{tp}</span></td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{inv.date as string}</td>

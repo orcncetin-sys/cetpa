@@ -13,6 +13,7 @@ import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten } from "./src/server/eposta.js";
+import type { AdminDbLike } from "./src/server/adminDbTypes.js";
 import { initCrons } from "./src/server/crons.js";
 import {
   initMikroMirror, initMikroTables,
@@ -5208,12 +5209,22 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     requireAuth, requireMfaVerified,
   });
 
+  // `adminDb` bir `let` ve baslangicta null; rotalar startServer'dan SONRA
+  // kosar, yani pratikte doludur — ama tip bunu bilemez ve her cagri yerine
+  // null kontrolu serpistirmek 20+ yerde gurultu olurdu. Bunun yerine getter
+  // TEK YERDE gurultulu basarisiz olur: `undefined.collection is not a
+  // function` yerine ne oldugunu SOYLEYEN bir hata.
+  const adminDbZorunlu = (): AdminDbLike => {
+    if (!adminDb) throw new Error('adminDb henuz hazir degil (init tamamlanmadan rota calisti)');
+    return adminDb;
+  };
+
   opsRoutes(app, {
-    getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireSuperAdmin,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
   });
 
   dynamicsRoutes(app, {
-    getAdminDb: () => adminDb, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
     writeAuditLog, pgServerTimestamp, tenantSnap,
     getDynamicsToken, dynamicsGetAll, getDynamicsBase, getDynamicsCredsFromFirestore,
   });

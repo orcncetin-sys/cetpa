@@ -45,6 +45,10 @@ import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 export default function CrmRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
   void itemCostTRY; void itemPriceTRY; // sekmeye göre kullanılıyor olabilir
+  // `exchangeRates` kur YOKKEN null gelir; formatInCurrency imzası `?: ExchangeRates`.
+  // `?? undefined` yalnız TİP köprüsü — iki değerde de fonksiyon kuru bulamayıp '—'
+  // döndürür, uydurma bir kur/tutar üretmez.
+  const fxKurlari = exchangeRates ?? undefined;
   return (
     <>
       {reportsTab === 'crm' && (
@@ -93,7 +97,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
               { label: currentLanguage==='tr'?'Tekrar Eden':'Repeat Customers', value: `${tekrarEden} (%${sadakatYuzde})`,
                 hint: currentLanguage==='tr'?'birden fazla sipariş veren':'more than one order',
                 icon: CheckCircle2, accent: 'text-violet-600', accentBg: 'bg-violet-50', money: false },
-              { label: currentLanguage==='tr'?'Ort. Müşteri Değeri':'Avg Customer Value', value: formatInCurrency(ortDeger, revenueCurrency, exchangeRates),
+              { label: currentLanguage==='tr'?'Ort. Müşteri Değeri':'Avg Customer Value', value: formatInCurrency(ortDeger, revenueCurrency, fxKurlari),
                 hint: currentLanguage==='tr'?'iptaller hariç toplam ciro / müşteri':'revenue excl. cancelled / customer',
                 icon: CreditCard, accent: 'text-amber-600', accentBg: 'bg-amber-50', money: true },
             ];
@@ -137,7 +141,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
                       <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
                       <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
                     </div>
-                    <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, exchangeRates)}</span>
+                    <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, fxKurlari)}</span>
                   </div>
                 ))}
               </div>
@@ -187,7 +191,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
                         <p className="text-sm font-bold text-gray-800 truncate">{r.name}</p>
                         <p className="text-[10px] text-gray-400">{r.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {r.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</p>
                       </div>
-                      <span className="text-sm font-bold text-brand">{formatInCurrency(r.revenue, revenueCurrency, exchangeRates)}</span>
+                      <span className="text-sm font-bold text-brand">{formatInCurrency(r.revenue, revenueCurrency, fxKurlari)}</span>
                     </div>
                   ))}
                 </div>

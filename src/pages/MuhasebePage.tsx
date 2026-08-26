@@ -400,7 +400,7 @@ export default function MuhasebePage(props: Props) {
                         currentLanguage={currentLanguage}
                         isAuthenticated={!!user && hasFullAccess('muhasebe')}
                         userRole={userRole}
-                        exchangeRates={exchangeRates}
+                        exchangeRates={exchangeRates ?? undefined}
                         createNotification={createNotification}
                         warehouses={warehouses}
                         employees={employees}

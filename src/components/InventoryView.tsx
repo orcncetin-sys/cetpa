@@ -834,7 +834,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       <ProductForm
         isOpen={isAddingProduct}
         onClose={() => { setIsAddingProduct(false); setEditingProduct(null); }}
-        initialData={editingProduct}
+        initialData={editingProduct ?? undefined}
         onSave={() => {
           setIsAddingProduct(false);
           setEditingProduct(null);

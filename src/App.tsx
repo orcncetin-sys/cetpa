@@ -2754,6 +2754,9 @@ function AppContent() {
     const unsubUserPrefs = onSnapshot(doc(db, 'userPrefs', user.uid), (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
+      // exists() geçildi ama data()'nın imzası yine de undefined dönebiliyor;
+      // gerçek guard koy — `!` ile bastırma.
+      if (!d) return;
       // darkModeRef.current — closure'daki bayat `darkMode` DEĞİL. Böylece bayrak
       // yalnız değer GERÇEKTEN farklıysa set edilir; setDarkMode state'i
       // değiştirir, [darkMode] effect'i koşar ve bayrağı temizler.
@@ -2882,7 +2885,9 @@ function AppContent() {
             // riskScore'una yaziliyor, yani hata veritabanina isleniyordu.
             // Ayrica `createdAt` bir Timestamp ORNEGI oldugunda `new Date(x)`
             // Invalid Date verir (sinifin toString/valueOf'u yok).
-            const oAny = o as unknown as Record<string, unknown>;
+            // `zamanMs`'in kabul ettiği birlik tipi (ZamanBenzeri) dışa aktarılmıyor;
+            // imzadan türetiliyor ki alanlar `unknown` kalmasın.
+            const oAny = o as unknown as { createdAt?: Parameters<typeof zamanMs>[0]; syncedAt?: Parameters<typeof zamanMs>[0] };
             const siparisMs = zamanMs(oAny.createdAt) ?? zamanMs(oAny.syncedAt);
             if (siparisMs === null) return false;   // tarihi bilinmiyor -> gecikmis SAYMA
             const due = new Date(siparisMs);

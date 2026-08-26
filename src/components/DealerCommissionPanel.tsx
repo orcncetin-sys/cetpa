@@ -78,6 +78,18 @@ const TIER_COLORS: Record<string, string> = {
 // Paylasilan zamanMs cozemedigi degere null doner; asagida o kayit donem
 // filtresine GIRMEZ (sessizce bu aya yazilmaz).
 
+// `unknown` zaman alanini ayAnahtari'nin kabul ettigi bicimlere DARALTIR.
+// Cozumlemeyi yine zaman.ts yapiyor: taninmayan bicimde null doner, ASLA
+// icinde bulunulan aya dusmez (yukaridaki notun tam sebebi).
+const ayAnahtariBelirsiz = (v: unknown): string | null => {
+  if (v == null) return null;
+  if (typeof v === 'string' || typeof v === 'number' || v instanceof Date) return ayAnahtari(v);
+  // Timestamp benzeri nesne; alanlarin GERCEKTEN var olup olmadigini zamanMs
+  // kendisi dogruluyor, bu yuzden yalniz "nesne" olmasi yeterli.
+  if (typeof v === 'object') return ayAnahtari(v as { toMillis?: () => number; toDate?: () => Date });
+  return null;
+};
+
 export default function DealerCommissionPanel({
   currentLanguage, isAuthenticated, userRole, leads = [], orders = [], exchangeRates
 }: DealerCommissionPanelProps) {
@@ -202,7 +214,7 @@ export default function DealerCommissionPanel({
         if (!matches) return false;
         // syncedAt YOKSA createdAt'e dus (pazaryeri siparislerinde syncedAt yok).
         // Ikisi de cozulemiyorsa kayit bu doneme SAYILMAZ — "bilmiyorum" != "bu ay".
-        const anahtar = ayAnahtari(o.syncedAt) ?? ayAnahtari(o.createdAt);
+        const anahtar = ayAnahtariBelirsiz(o.syncedAt) ?? ayAnahtariBelirsiz(o.createdAt);
         return anahtar === `${year}-${String(month).padStart(2, '0')}`;
       });
 

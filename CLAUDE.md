@@ -15,6 +15,17 @@
 - `npm run build` server.ts'i derlemez; server değişikliğinin tek lokal kanıtı boot testidir. Hızlı tarif: `(npx tsx server.ts > /tmp/boot.log 2>&1 &); sleep 6; cat /tmp/boot.log; pkill -f "tsx server.ts"` — "Server running on" satırını ve hata yokluğunu doğrula.
 - **Lokal dev'de gerçek Mikro/prod verisi YOK.** `DATABASE_URL` lokalde set değilse sunucu `adminDb → Firestore fallback`'a düşer (boş/dev proje) — Mikro'ya bağlı ekranları lokal preview'da açmak yalnız "çökmüyor mu" diye kanıtlar, GERÇEK rakamları doğrulamaz. Mikro-veri-bağımlı bir düzeltmenin doğruluğu tsc + kod-mantığı incelemesi + boot testiyle kanıtlanır; rakamların gerçekten doğru geldiği yalnız deploy sonrası canlıda görülür — bunu kullanıcıya açıkça söyle, "test ettim çalışıyor" deme.
 
+## TypeScript — strictNullChecks AÇIK (2026-08-26)
+`tsconfig.json`'da `strictNullChecks: true`. Bu proje "sessiz sıfır/undefined" sınıfından defalarca zarar gördü (Mikro alanları, tarih çözümleme, stok miktarları) — derleyici artık o yolları yakalıyor.
+
+**Bir strictNullChecks hatasını kapatırken:**
+- **Sayısal alanda `?? 0` / `|| 0` YASAK.** Bu, yukarıdaki "sahte kesinlik gösterme" kuralının tam ihlali: dış sistemden gelen alan yoksa 0 değil, BİLİNMİYOR. Sayı undefined olabiliyorsa çağrıyı guard'la, undefined'ın yayılmasına izin ver, ya da UI'da '—' göster. (Dizi/nesne için `?? []`/`?? {}` genelde zararsız.)
+- **`!` son çare.** Önce gerçek guard (`if (!x) return;`, erken dönüş, `?.`). `!` kullanacaksan değerin neden kesin dolu olduğunu YANINDAKİ satırda yaz — yorumsuz `!` bırakma.
+- **`as any` / `@ts-ignore` / `@ts-expect-error` yasak** — hatayı kapatmaz, saklar.
+- **Emin değilsen dokunma.** Kapatmak için işin nasıl çalıştığına dair VARSAYIM gerekiyorsa (özellikle para/stok/tarih), o hatayı bırak ve sor. Yanlış "düzeltme" sessiz hata üretir; derlenmeyen hata sadece derlenmez.
+
+**Henüz açık DEĞİL:** tam `strict` (kalan farkı ölçtükten sonra ayrı iş — `noImplicitAny` vb.). Sayıyı buraya yazma, ölç.
+
 ## Mikro entegrasyonu — kalıcı ilkeler
 - **Mikro kolon/tablo adı TAHMİN ETME.** Bu, projenin en pahalı tekrarlanan hatası (cha_vergi/cha_ettn importu 3 kez sessizce öldürdü; demirbaş kolonlarında `dbs_` yerine `dem_` çıktı). Her zaman `mikroKolonlar(tablo)` ile çalışma-anı şema keşfi yap, ya da yanlışsa GERÇEK kolon listesiyle yüksek sesle başarısız ol — asla sessizce sıfır/boş veri yazma. Değer-kolonu ararken gevşek regex kullanma (`kolonSec` ile en-spesifikten-genele sırala, `_Guid` kolonlarını varsayılan dışla — `sfiyat_fiyati|fiyat` deseni `sfiyat_Guid`'i eşleştirip fiyatları sessizce sıfırlamıştı).
 - **Mikro'ya bağlarken EKLE, YERİNE KOYMA.** Bir ekranı Mikro'ya bağlarken native Cetpa verisini (orders, apPurchaseOrders, journalEntries) SİLME/değiştirme — Mikro verisini ADDITIVE olarak topla (bkz. KDV/Satışlar/Bilanço/Finans Paneli deseni: `combinedRevenue = nativeRevenue + mikroRevenue`). Böylece hem eski native kayıtlar hem yeni Mikro senkronu kaybolmaz.

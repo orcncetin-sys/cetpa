@@ -267,15 +267,24 @@ export default function OrdersPage({
     return () => u.forEach(fn => fn());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Siralama anahtarini karsilastirilabilir tek bir ilkel degere indirger:
+  // Firestore Timestamp -> ms, metin -> kucuk harf, null/undefined -> ''.
+  // (Once `let av: unknown` idi; strictNullChecks altinda '<' / '>' unknown'a uygulanamiyor.)
+  const sortKeyOf = (raw: unknown): string | number => {
+    if (raw && typeof (raw as { toDate?: unknown }).toDate === 'function') {
+      return (raw as { toDate: () => Date }).toDate().getTime();
+    }
+    if (typeof raw === 'string') return raw.toLowerCase();
+    if (typeof raw === 'number') return raw;
+    if (raw == null) return '';
+    // boolean/nesne: JS'in '<' operatorunun bu tipler icin zaten yaptigi metin cevrimi
+    return String(raw);
+  };
+
   const sortData = <T,>(arr: T[], key: string, dir: 'asc' | 'desc'): T[] =>
     [...arr].sort((a: T, b: T) => {
-      let av = (a as Record<string, unknown>)[key] as unknown;
-      let bv = (b as Record<string, unknown>)[key] as unknown;
-      if (av && typeof (av as Record<string, unknown>).toDate === 'function') av = (av as { toDate: () => Date }).toDate().getTime();
-      if (bv && typeof (bv as Record<string, unknown>).toDate === 'function') bv = (bv as { toDate: () => Date }).toDate().getTime();
-      if (typeof av === 'string') av = av.toLowerCase();
-      if (typeof bv === 'string') bv = bv.toLowerCase();
-      if (av == null) av = ''; if (bv == null) bv = '';
+      const av = sortKeyOf((a as Record<string, unknown>)[key]);
+      const bv = sortKeyOf((b as Record<string, unknown>)[key]);
       if (dir === 'asc') return av < bv ? -1 : av > bv ? 1 : 0;
       return av > bv ? -1 : av < bv ? 1 : 0;
     });
@@ -2022,7 +2031,8 @@ export default function OrdersPage({
                           {selectedOrder.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                         </button>
                       </div>
-                      {selectedOrder.estimatedDelivery && (() => {
+                      {/* estimatedDelivery tipi `unknown`; `x && <jsx>` sonucu unknown olup ReactNode'a atanamiyor -> dogruluk kontrolunu boolean'a indirge */}
+                      {!!selectedOrder.estimatedDelivery && (() => {
                         const ed = typeof (selectedOrder.estimatedDelivery as { toDate?: () => Date }).toDate === 'function'
                           ? (selectedOrder.estimatedDelivery as { toDate: () => Date }).toDate()
                           : new Date(selectedOrder.estimatedDelivery as string | number);
@@ -2244,16 +2254,16 @@ export default function OrdersPage({
               )}
               {/* Lojistik sub-tab: Depo/Transfer/İrsaliye via AccountingModule */}
               {lojistikTab === 'depo' && (
-                <AccountingModule key="loj-depo" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-depo" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="depo" allowedTabs={['depo']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'transfer' && (
-                <AccountingModule key="loj-transfer" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-transfer" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="transfer" allowedTabs={['transfer']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'giden_irsaliye' && (
-                <AccountingModule key="loj-giden" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-giden" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="giden_irsaliye" allowedTabs={['giden_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
               {lojistikTab === 'gelen_irsaliye' && (
-                <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule key="loj-gelen" orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="gelen_irsaliye" allowedTabs={['gelen_irsaliye']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* ── Phase 554: WMS Bin/Location Management ─────────────────────────── */}

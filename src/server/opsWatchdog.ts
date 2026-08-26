@@ -87,12 +87,13 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   // yedeklenmeyen müşteri" bu projedeki en pahalı hata sınıfının (sessiz
   // başarısızlık) tam örneği. O yüzden ayrıca sayılıp FAIL üretiyor.
   try {
-    if (!deps().getPgPool()) add('backup_tenants', true, 'deps().getPgPool() yok, atlandı');
+    const havuz = deps().getPgPool();
+    if (!havuz) add('backup_tenants', true, 'deps().getPgPool() yok, atlandı');
     else {
-      const { rows: kiracilar } = await deps().getPgPool().query(
+      const { rows: kiracilar } = await havuz.query(
         "SELECT DISTINCT data->>'companyId' AS cid FROM docs WHERE data ? 'companyId' AND data->>'companyId' <> ''",
       );
-      const { rows: ayarlar } = await deps().getPgPool().query(
+      const { rows: ayarlar } = await havuz.query(
         "SELECT data FROM docs WHERE coll = 'backupConfigs'",
       );
       const ayarMap = new Map(
@@ -133,11 +134,12 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   // sema degisikligi) musterilere VAAT EDILEN sure asilir ve kimse fark etmez.
   // Burada dogrudan VERIYE bakiyoruz: suresi gecmis kayit KALDI MI?
   try {
-    if (!deps().getPgPool()) add('kvkk_saklama', true, 'deps().getPgPool() yok, atlandı');
+    const havuz = deps().getPgPool();
+    if (!havuz) add('kvkk_saklama', true, 'deps().getPgPool() yok, atlandı');
     else {
       const asanlar: string[] = [];
       for (const { coll, gun } of SAKLAMA_KURALLARI) {
-        const { rows } = await deps().getPgPool().query(
+        const { rows } = await havuz.query(
           `SELECT count(*)::int AS n FROM docs WHERE coll = $1 AND updated_at < now() - ($2 || ' days')::interval`,
           [coll, String(gun)],
         );
@@ -155,10 +157,11 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   //    (Yaşanan arıza sınıfı: cron haftalarca "başarıyla" koşup veri yazmamıştı.)
   try {
     const creds = await deps().getMikroCreds();
+    const havuz = deps().getPgPool();
     if (!creds) add('mikro_sync', true, 'Mikro yapılandırılmamış, atlandı');
-    else if (!deps().getPgPool()) add('mikro_sync', false, 'deps().getPgPool() yok');
+    else if (!havuz) add('mikro_sync', false, 'deps().getPgPool() yok');
     else {
-      const { rows } = await deps().getPgPool().query('SELECT max(guncelleme) AS g, count(*)::int AS n FROM mikro_stoklar');
+      const { rows } = await havuz.query('SELECT max(guncelleme) AS g, count(*)::int AS n FROM mikro_stoklar');
       const g = rows[0]?.g ? new Date(rows[0].g).getTime() : 0;
       if (!g) add('mikro_sync', false, 'mikro_stoklar boş — sync hiç yazmamış');
       else add('mikro_sync', hoursAgo(g) < 26, `${rows[0].n} kayıt, son güncelleme ${hoursAgo(g).toFixed(1)} saat önce`);
@@ -169,9 +172,10 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   //    (2.347 ürünün "kritik stok" göründüğü stockLevel arızasının imzası).
   let stockRatio: number | null = null;
   try {
-    if (!deps().getAdminDb()) add('stock_ratio', false, 'deps().getAdminDb() yok');
+    const db = deps().getAdminDb();
+    if (!db) add('stock_ratio', false, 'deps().getAdminDb() yok');
     else {
-      const snap = await deps().getAdminDb().collection('inventory').get();
+      const snap = await db.collection('inventory').get();
       const total = snap.docs.length;
       if (total === 0) add('stock_ratio', true, 'envanter boş, atlandı');
       else {
@@ -179,7 +183,7 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
         stockRatio = withStock / total;
         const yd = new Date(Date.now() - 86_400_000);
         const ydStr = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, '0')}-${String(yd.getDate()).padStart(2, '0')}`;
-        const prev = await deps().getAdminDb().collection('opsChecks').doc(ydStr).get();
+        const prev = await db.collection('opsChecks').doc(ydStr).get();
         const prevRatio = prev.exists ? Number((prev.data() as Record<string, unknown>).stockRatio) : NaN;
         const drop = Number.isFinite(prevRatio) ? prevRatio - stockRatio : 0;
         add('stock_ratio', drop <= 0.3,
@@ -192,9 +196,10 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   // 4) Mikro retry kuyruğu — işlemci yalnız bir kullanıcı login'ken çalışır;
   //    24 saatten eski queued iş = kuyruk tıkalı, ölü iş birikimi = temizlik gerek.
   try {
-    if (!deps().getAdminDb()) add('retry_queue', false, 'deps().getAdminDb() yok');
+    const db = deps().getAdminDb();
+    if (!db) add('retry_queue', false, 'deps().getAdminDb() yok');
     else {
-      const snap = await deps().getAdminDb().collection('syncJobs').get();
+      const snap = await db.collection('syncJobs').get();
       let queued = 0, dead = 0, stuck = 0;
       for (const d of snap.docs) {
         const j = d.data() as Record<string, unknown>;
@@ -210,10 +215,13 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   } catch (e) { add('retry_queue', false, e instanceof Error ? e.message : String(e)); }
 
   // 5) Kur tazeliği — 30 dakikalık kur cron'u bellek önbelleğini ilerletiyor mu?
-  if (!deps().getCachedExchangeRates()) add('exchange_rates', false, 'bellekte kur yok');
+  // Tek anlik goruntu: getter sonradan atanan bir `let` okur, dort ayri
+  // cagri kontrol ile mesaji farkli kur setlerinden uretebilirdi.
+  const kurlar = deps().getCachedExchangeRates();
+  if (!kurlar) add('exchange_rates', false, 'bellekte kur yok');
   else {
-    const age = hoursAgo(opsToMs(deps().getCachedExchangeRates().updatedAt));
-    add('exchange_rates', age < 2, `USD ${deps().getCachedExchangeRates().rates.USD ?? '?'} (${deps().getCachedExchangeRates().source}, ${age.toFixed(1)} saat önce)`);
+    const age = hoursAgo(opsToMs(kurlar.updatedAt));
+    add('exchange_rates', age < 2, `USD ${kurlar.rates.USD ?? '?'} (${kurlar.source}, ${age.toFixed(1)} saat önce)`);
   }
 
   // 6) Bant genişliği self-testi — 2026-07-20 arızası: sunucunun TÜM ağ hattı
@@ -256,8 +264,9 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   //    ("Üzgünüm, şu an yanıt veremiyorum"). Günde 1 mini çağrıyla anahtar +
   //    model + kota üçünü birden doğrula. (Probe startServer'da kurulur.)
   try {
-    if (!deps().getAiHealthProbe()) add('ai_gemini', true, 'AI probe hazır değil, atlandı');
-    else { const r = await deps().getAiHealthProbe()(); add('ai_gemini', r.ok, r.detail); }
+    const probe = deps().getAiHealthProbe();
+    if (!probe) add('ai_gemini', true, 'AI probe hazır değil, atlandı');
+    else { const r = await probe(); add('ai_gemini', r.ok, r.detail); }
   } catch (e) { add('ai_gemini', false, e instanceof Error ? e.message : String(e)); }
 
   // 8) SSL sertifika — kamuya SUNULAN sertifikanın kalan ömrü + host eşleşmesi.
@@ -365,9 +374,10 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   // 10) Client hata birikimi — son 24 saatte anormal frontend hatası =
   //     kullanıcıların yaşadığı ama bildirmediği kırıklık sinyali.
   try {
-    if (!deps().getPgPool()) add('client_errors', true, 'deps().getPgPool() yok, atlandı');
+    const havuz = deps().getPgPool();
+    if (!havuz) add('client_errors', true, 'deps().getPgPool() yok, atlandı');
     else {
-      const { rows } = await deps().getPgPool().query(
+      const { rows } = await havuz.query(
         "SELECT count(*)::int AS n FROM docs WHERE coll = 'clientErrors' AND updated_at > now() - interval '24 hours'");
       const n = rows[0]?.n ?? 0;
       add('client_errors', n <= 50, `son 24 saatte ${n} client hatası (eşik ≤50)`);
@@ -379,14 +389,16 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   //     opsChecks'ten; stock_ratio ile aynı desen).
   let docsCount: number | null = null;
   try {
-    if (!deps().getPgPool()) add('pg_growth', true, 'deps().getPgPool() yok, atlandı');
+    const havuz = deps().getPgPool();
+    if (!havuz) add('pg_growth', true, 'deps().getPgPool() yok, atlandı');
     else {
-      const { rows } = await deps().getPgPool().query("SELECT count(*)::int AS n, pg_total_relation_size('docs') AS b FROM docs");
+      const { rows } = await havuz.query("SELECT count(*)::int AS n, pg_total_relation_size('docs') AS b FROM docs");
       docsCount = rows[0]?.n ?? 0;
       const mb = Number(rows[0]?.b ?? 0) / 1024 ** 2;
       const yd2 = new Date(Date.now() - 86_400_000);
       const yd2Str = `${yd2.getFullYear()}-${String(yd2.getMonth() + 1).padStart(2, '0')}-${String(yd2.getDate()).padStart(2, '0')}`;
-      const prev = deps().getAdminDb() ? await deps().getAdminDb().collection('opsChecks').doc(yd2Str).get() : null;
+      const db = deps().getAdminDb();
+      const prev = db ? await db.collection('opsChecks').doc(yd2Str).get() : null;
       const prevCount = prev?.exists ? Number((prev.data() as Record<string, unknown>).docsCount) : NaN;
       const anomaly = Number.isFinite(prevCount) && prevCount > 0 && (docsCount ?? 0) > prevCount * 2 && (docsCount ?? 0) - prevCount > 10_000;
       add('pg_growth', !anomaly,
@@ -419,7 +431,8 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const ok = checks.every(c => c.ok);
   try {
-    if (deps().getAdminDb()) await deps().getAdminDb().collection('opsChecks').doc(date).set({ date, ok, checks, stockRatio, docsCount, ranAt: deps().pgServerTimestamp() });
+    const db = deps().getAdminDb();
+    if (db) await db.collection('opsChecks').doc(date).set({ date, ok, checks, stockRatio, docsCount, ranAt: deps().pgServerTimestamp() });
   } catch (e) { console.warn('opsChecks yazılamadı:', e instanceof Error ? e.message : String(e)); }
   console.log(`Ops watchdog: ${ok ? 'PASS' : 'FAIL'} — ${checks.map(c => `${c.ok ? '+' : '!'}${c.key}`).join(' ')}`);
   return { date, ok, checks, stockRatio };

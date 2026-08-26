@@ -60,6 +60,21 @@ function itemPriceTRY(item: InventoryItem, tier: string, rates: Record<string, n
   return raw * (rates[cur] ?? 1);
 }
 
+/**
+ * `Order.syncedAt` / `Order.createdAt` types.ts'te `unknown` tipli (kaynaga gore
+ * Timestamp | ISO string | epoch ms | Date gelebiliyor); `zamanMs` ise disa
+ * aktarilmayan bir "zaman benzeri" birlesim bekliyor. Bu sarmalayici YALNIZ tipi
+ * daraltir, DAVRANISI DEGISTIRMEZ: taninmayan deger `zamanMs`'in kendisi gibi
+ * `null` doner — asla "simdi"ye dusmez.
+ */
+const zamanMsBilinmeyen = (v: unknown): number | null => {
+  if (v == null) return null;
+  if (typeof v === 'string' || typeof v === 'number' || v instanceof Date) return zamanMs(v);
+  if (typeof v !== 'object') return null; // boolean/function/symbol: zamanMs de null dondururdu
+  const zamanBenzeri = v as { toMillis?: () => number; toDate?: () => Date };
+  return zamanMs(zamanBenzeri);
+};
+
 export type ReportsProps = {orders: Order[], inventory: InventoryItem[], exchangeRates: Record<string, number> | null, currentT: Record<string, string>, currentLanguage: string, userRole?: string | null, onNavigate?: (tab: string) => void, employees: Employee[], quotations?: Quotation[], inventoryMovements?: InventoryMovement[], recurringOrders?: Array<{ id: string; templateName: string; customerName: string; totalPrice: number; frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean }>, externalTab?: 'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler', setExternalTab?: (t: 'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler') => void};
 
 export function useReportsData({ orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations = [], inventoryMovements = [], recurringOrders = [], externalTab, setExternalTab }: ReportsProps) {
@@ -141,10 +156,14 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
     .filter(o => o.status !== 'Cancelled')
     .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0), [orders]);
   const revenueSymbol = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
-  const revenueFormatted = formatInCurrency(totalRevenueTRY, revenueCurrency, exchangeRates);
+  // `exchangeRates` prop'u kur YOKKEN null; formatInCurrency imzasi `?: ExchangeRates`.
+  // `?? undefined` yalniz TIP koprusu: iki degerde de `exchangeRates?.[currency]`
+  // undefined verip fonksiyon '—' donuyor (kur uydurulmuyor).
+  const fxKurlari = exchangeRates ?? undefined;
+  const revenueFormatted = formatInCurrency(totalRevenueTRY, revenueCurrency, fxKurlari);
   const totalOrders = orders.length;
   const avgOrderValueTRY = totalOrders > 0 ? totalRevenueTRY / totalOrders : 0;
-  const avgOrderFormatted = formatInCurrency(avgOrderValueTRY, revenueCurrency, exchangeRates);
+  const avgOrderFormatted = formatInCurrency(avgOrderValueTRY, revenueCurrency, fxKurlari);
   const lowStockItems = inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length;
 
   // Sales Trend Data
@@ -157,7 +176,7 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
     // TAMAMI — gecerli bir createdAt'leri oldugu halde — tek bir 'unknown'
     // kovasina dokuluyordu: gunluk ciro trendinde kalici, sisirilmis bir
     // "bilinmeyen" cubugu, gercek gunler ise eksik gorunuyordu.
-    const ms = zamanMs(o.syncedAt) ?? zamanMs(o.createdAt);
+    const ms = zamanMsBilinmeyen(o.syncedAt) ?? zamanMsBilinmeyen(o.createdAt);
     if (ms !== null) {
       try {
         const d = new Date(ms);
