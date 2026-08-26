@@ -21,6 +21,7 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { exportOrdersCSV } from '../utils/export';
+import { kurCevir, formatInCurrency } from '../utils/currency';
 import { registerTurkishFont } from '../utils/pdfFont';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
@@ -295,13 +296,13 @@ export default function OrdersPage({
     setter: (v: { key: string; dir: 'asc' | 'desc' }) => void
   ) => setter({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' });
 
+  // Kur yoksa '—' (2026-08-26). Eskiden 2024'ten kalma SABİT kurlar (USD 32 / EUR 35)
+  // kullanılıyordu — sahte kesinlik. TL yolu birebir aynı: çevrilmez, aynen biçimlenir.
   const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 32;
-    const eur = exchangeRates?.EUR ?? 35;
-    const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
+    const cv = kpiCurrency === 'TRY' ? v : kurCevir(v, kpiCurrency, exchangeRates);
+    if (cv === null) return '—';  // sembol de basma — "$—" saçma olurdu
     const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
     const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
   };
@@ -1143,7 +1144,11 @@ export default function OrdersPage({
                               </select>
                             </td>
                             <td className="px-6 py-4 text-right font-bold text-[#1D2226]">
-                              <div>{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?order.totalPrice:order.totalPrice/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                              {/* TL yolu birebir korundu; USD/EUR artık kur yoksa '—' (eskiden `||1` ile
+                                  TL tutar '$' ile basılıyordu — ~38× şişkin). Sembol biçimleyicinin içinde. */}
+                              <div>{kpiCurrency === 'TRY'
+                                ? `₺${order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : formatInCurrency(order.totalPrice, kpiCurrency, exchangeRates ?? undefined)}</div>
                               <div className="flex flex-col items-end gap-0.5 mt-0.5">
                                 {order.faturali ? (
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
@@ -1819,9 +1824,17 @@ export default function OrdersPage({
                         onClick={() => {
                           const o = selectedOrder;
                           const trackUrl = `${window.location.origin}/?track=${o.id}`;
-                          const _waRate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
+                          // Kur yoksa mesajı HİÇ üretme (2026-08-26): eskiden `||1` ile TL tutar '$' ile
+                          // basılıyordu (~38× şişkin). '—' de müşteriye giden metne akmamalı.
+                          const _waCv = kpiCurrency === 'TRY' ? (o.totalPrice||0) : kurCevir(o.totalPrice||0, kpiCurrency, exchangeRates);
+                          if (_waCv === null) {
+                            toast(currentLanguage === 'tr'
+                              ? 'Kur bilgisi yok — tutar çevrilemediği için özet kopyalanmadı.'
+                              : 'Exchange rate unavailable — summary not copied.', 'error');
+                            return;
+                          }
                           const _waSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                          const _waAmt  = `${_waSym}${(kpiCurrency === 'TRY' ? (o.totalPrice||0) : (o.totalPrice||0) / _waRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                          const _waAmt  = `${_waSym}${_waCv.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
                           const summary = currentLanguage === 'tr'
                             ? `📦 *Sipariş Özeti*\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
                             : `📦 *Order Summary*\nOrder: #${o.shopifyOrderId || o.id.slice(-6)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
@@ -1840,9 +1853,17 @@ export default function OrdersPage({
                         <button
                           onClick={() => {
                             const o = selectedOrder;
+                            // Ödeme hatırlatması MÜŞTERİYE gider: kur yoksa yanlış tutar (eskiden `||1`
+                            // → TL tutar '$' ile, ~38× şişkin) yerine mesajı hiç üretme.
+                            const cv = kpiCurrency === 'TRY' ? o.totalPrice : kurCevir(o.totalPrice, kpiCurrency, exchangeRates);
+                            if (cv === null) {
+                              toast(currentLanguage === 'tr'
+                                ? 'Kur bilgisi yok — tutar çevrilemediği için hatırlatma oluşturulmadı.'
+                                : 'Exchange rate unavailable — reminder not generated.', 'error');
+                              return;
+                            }
                             const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                            const rate = kpiCurrency === 'TRY' ? 1 : kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
-                            const amt = `${sym}${(o.totalPrice / rate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            const amt = `${sym}${cv.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                             const msg = currentLanguage === 'tr'
                               ? `Sayın ${o.customerName},\n\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
                               : `Dear ${o.customerName},\n\nPayment of ${amt} for Order #${o.shopifyOrderId || o.id.slice(-6)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;

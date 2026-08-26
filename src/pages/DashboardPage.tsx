@@ -11,6 +11,7 @@ import { db, auth } from '../firebase';
 import { doc, collection, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, isCollectionReady } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
+import { kurCevir } from '../utils/currency';
 import { confirmDelete } from '../lib/confirm';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import ModuleHeader from '../components/ModuleHeader';
@@ -21,7 +22,16 @@ import type { Order, Lead, InventoryItem, Shipment } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 
-const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
+// KUR YEDEGI KALDIRILDI (2026-08-26) — burada `const FX_FALLBACK = { USD: 38,
+// EUR: 41 }` duruyordu. Canli kur gelmedigi her an TL tutarlar 2024'ten kalma
+// SABIT bir kurla bolunuyor, sonuc da guncel kurmus gibi $/€ ile basiliyordu.
+// Ayrica birkac yerde daha eski `|| 1` yedegi vardi: o da ham TL'yi dolar diye
+// gosteriyordu (₺40.000 -> "$40.000", ~38x sisik).
+//
+// Ceviri artik TEK yerde: src/utils/currency.ts -> kurCevir (kur yoksa null).
+// Bu sayfa cevrilmis KPI tutarlarini App.tsx'ten gelen `fmtKpi` prop'uyla
+// basiyor; o da null'i '—' yapar. CLAUDE.md: guvenilir hesaplanamayan rakam
+// yerine yaniltici bir sayi degil '—' goster.
 
 function DeltaBadge({ delta }: { delta: number | null | undefined }) {
   if (delta == null || isNaN(delta)) return null;
@@ -305,8 +315,8 @@ export default function DashboardPage(props: Props) {
                 ))}
                 {/* Revenue KPI with currency toggle + delta */}
                 {(() => {
-                  const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                  const converted = kpiCurrency === 'TRY' ? combinedRevenue : combinedRevenue / rate;
+                  // `symbol` yalnizca YUKLENIYOR gostergesi icin ('$···'); tutarin
+                  // kendisi fmtKpi'den gelir (kur yoksa '—', sembolsuz).
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                   const revDelta = summaryData?.revenue?.delta;
                   return (
@@ -332,7 +342,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                       </div>
                       {revenueReady ? (
-                        <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{symbol}{converted.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                        <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{fmtKpi(combinedRevenue)}</p>
                       ) : (
                         <p className="text-2xl font-bold mt-auto text-gray-300 animate-pulse" title={currentLanguage === 'tr' ? 'Veri yükleniyor…' : 'Loading…'}>{symbol}···</p>
                       )}
@@ -401,9 +411,6 @@ export default function DashboardPage(props: Props) {
                   })
                   .reduce((s, o) => s + o.totalPrice, 0);
 
-                const insightRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const insightSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvtWeek = kpiCurrency === 'TRY' ? weekRevenue : weekRevenue / insightRate;
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {/* ── 7-Day Revenue card — with currency toggle ── */}
@@ -428,7 +435,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                       </div>
                       <p className="text-2xl font-bold text-emerald-600 mt-auto">
-                        {insightSymbol}{cvtWeek.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        {fmtKpi(weekRevenue)}
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
                       <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
@@ -660,11 +667,6 @@ export default function DashboardPage(props: Props) {
                 const dayProgress = Math.round((now.getDate() / daysInMonth) * 100);
                 // On-pace projection
                 const projectedRev   = dayProgress > 0 ? Math.round(mtdRev * (100 / dayProgress)) : mtdRev;
-                const mtdRate        = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const mtdSymbol      = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvtMtd         = kpiCurrency === 'TRY' ? mtdRev      : mtdRev / mtdRate;
-                const cvtProjected   = kpiCurrency === 'TRY' ? projectedRev : projectedRev / mtdRate;
-                const cvtLastRev     = kpiCurrency === 'TRY' ? lastRev     : lastRev / mtdRate;
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
@@ -673,7 +675,7 @@ export default function DashboardPage(props: Props) {
                           {currentLanguage === 'tr' ? 'Bu Ay Ciro (MTD)' : 'Revenue MTD'}
                         </h3>
                         <p className={cn("text-xl font-black mt-0.5", darkMode ? "text-white" : "text-gray-900")}>
-                          {mtdSymbol}{cvtMtd.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                          {fmtKpi(mtdRev)}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-1.5">
@@ -700,7 +702,7 @@ export default function DashboardPage(props: Props) {
                     <div className="space-y-1">
                       <div className="flex justify-between text-[10px] text-gray-400">
                         <span>{currentLanguage === 'tr' ? 'Ay ilerlemesi' : 'Month progress'}: {dayProgress}%</span>
-                        <span>{currentLanguage === 'tr' ? 'Projeksiyon' : 'Projected'}: {mtdSymbol}{cvtProjected.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                        <span>{currentLanguage === 'tr' ? 'Projeksiyon' : 'Projected'}: {fmtKpi(projectedRev)}</span>
                       </div>
                       <div className={cn("h-2 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
                         <div
@@ -710,7 +712,7 @@ export default function DashboardPage(props: Props) {
                       </div>
                       {lastRev > 0 && (
                         <div className="flex justify-between text-[10px] text-gray-400">
-                          <span>{currentLanguage === 'tr' ? 'Geçen ay' : 'Last month'}: {mtdSymbol}{cvtLastRev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                          <span>{currentLanguage === 'tr' ? 'Geçen ay' : 'Last month'}: {fmtKpi(lastRev)}</span>
                         </div>
                       )}
                     </div>
@@ -730,10 +732,6 @@ export default function DashboardPage(props: Props) {
                 const mtdRev99 = orders.filter(o => getOD(o) >= thisMonthStart && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const pct99 = monthlyTarget > 0 ? Math.min(Math.round((mtdRev99 / monthlyTarget) * 100), 200) : 0;
                 const barColor99 = pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
-                const rate99 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const sym99 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvtRev99 = kpiCurrency === 'TRY' ? mtdRev99 : mtdRev99 / rate99;
-                const cvtTarget99 = kpiCurrency === 'TRY' ? monthlyTarget : monthlyTarget / rate99;
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
@@ -768,7 +766,7 @@ export default function DashboardPage(props: Props) {
                           <button onClick={() => { setTargetDraft(String(monthlyTarget)); setIsEditingTarget(true); }}
                             className="flex items-center gap-1 mt-0.5 group">
                             <p className={cn("text-xl font-black", darkMode ? "text-white" : "text-gray-900")}>
-                              {monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : (currentLanguage === 'tr' ? 'Hedef belirle…' : 'Set target…')}
+                              {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : (currentLanguage === 'tr' ? 'Hedef belirle…' : 'Set target…')}
                             </p>
                             <span className="text-gray-300 group-hover:text-brand transition-colors text-[10px]">✎</span>
                           </button>
@@ -776,7 +774,7 @@ export default function DashboardPage(props: Props) {
                       </div>
                       <div className="text-right">
                         <p className={`text-2xl font-black ${pct99 >= 100 ? 'text-emerald-600' : pct99 >= 70 ? 'text-brand' : pct99 >= 40 ? 'text-amber-600' : 'text-red-500'}`}>{pct99}%</p>
-                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>{sym99}{cvtRev99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
+                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>{fmtKpi(mtdRev99)} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
                       </div>
                     </div>
                     <div className={cn("h-2.5 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
@@ -785,7 +783,7 @@ export default function DashboardPage(props: Props) {
                     <div className="flex justify-between mt-1.5">
                       <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>0</span>
                       {pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {currentLanguage === 'tr' ? 'Hedefe ulaşıldı!' : 'Target reached!'}</span>}
-                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{monthlyTarget > 0 ? `${sym99}${cvtTarget99.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : '—'}</span>
+                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{monthlyTarget > 0 ? fmtKpi(monthlyTarget) : '—'}</span>
                     </div>
                   </div>
                 );
@@ -850,9 +848,6 @@ export default function DashboardPage(props: Props) {
                   for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + 1; }
                   return Object.values(custMap).filter(c => c > 1).length;
                 })();
-                const kpiRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const kpiSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvtAov    = kpiCurrency === 'TRY' ? aov : aov / kpiRate;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* ── AOV card — with currency toggle ── */}
@@ -874,7 +869,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                       </div>
                       <p className="text-xl font-bold text-emerald-600">
-                        {kpiSymbol}{cvtAov.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        {fmtKpi(aov)}
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Ort. Sipariş Değeri' : 'Avg. Order Value'}</p>
                       <p className="text-[10px] text-gray-400">AOV</p>
@@ -980,9 +975,6 @@ export default function DashboardPage(props: Props) {
                 const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const r130 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const s130 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvt130 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r130).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -994,7 +986,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-black text-emerald-600">{s130}{cvt130(todayPaid)}</p>
+                        <p className="text-2xl font-black text-emerald-600">{fmtKpi(todayPaid)}</p>
                         <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'bugün tahsil' : 'collected today'}</p>
                       </div>
                     </div>
@@ -1005,7 +997,7 @@ export default function DashboardPage(props: Props) {
                         { label: currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable', val: totalUnpaid, color: 'text-amber-600' },
                       ].map(c => (
                         <div key={c.label} className="text-center bg-gray-50 rounded-xl p-3">
-                          <p className={`text-base font-bold ${c.color}`}>{s130}{cvt130(c.val)}</p>
+                          <p className={`text-base font-bold ${c.color}`}>{fmtKpi(c.val)}</p>
                           <p className="text-[9px] text-gray-400 leading-tight mt-0.5">{c.label}</p>
                         </div>
                       ))}
@@ -1044,9 +1036,15 @@ export default function DashboardPage(props: Props) {
                   if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
                 }
                 const maxWeek = Math.max(...weeks, 1);
-                const r159 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const s159 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const f159 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r159).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                // fmtKpi DEGIL: bu kart tutari her zaman CALISMA ZAMANI yereliyle
+                // basiyordu (`toLocaleString(undefined, ...)`). TRY ciktisi birebir
+                // ayni kalsin diye o davranis korundu; degisen tek sey, kur yoksa
+                // artik uydurma bir kurla bolmek yerine '—' donmesi.
+                const f159 = (v: number) => {
+                  const cv = kurCevir(v, kpiCurrency, exchangeRates);
+                  return cv === null ? '—' : `${s159}${cv.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+                };
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-3">
@@ -1060,7 +1058,7 @@ export default function DashboardPage(props: Props) {
                         </span>
                       )}
                     </div>
-                    <p className="text-3xl font-black text-brand mb-3">{s159}{f159(dailyRev)}<span className="text-sm font-normal text-gray-400">/{currentLanguage==='tr'?'gün':'day'}</span></p>
+                    <p className="text-3xl font-black text-brand mb-3">{f159(dailyRev)}<span className="text-sm font-normal text-gray-400">/{currentLanguage==='tr'?'gün':'day'}</span></p>
                     <div className="flex items-end gap-0.5 h-10">
                       {weeks.map((w, i) => (
                         <div key={i} className="flex-1 flex flex-col justify-end">
@@ -1261,9 +1259,12 @@ export default function DashboardPage(props: Props) {
                 }
                 const topPayers = Object.values(custPay).sort((a, b) => b.totalPaid - a.totalPaid).slice(0, 5);
                 const topDebtors = Object.entries(custUnpaid).sort(([,a],[,b]) => b - a).slice(0, 5);
-                const r160 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                 const s160 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const f160 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r160).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                // fmtKpi DEGIL — f159 ile ayni gerekce: calisma zamani yereli korunuyor.
+                const f160 = (v: number) => {
+                  const cv = kurCevir(v, kpiCurrency, exchangeRates);
+                  return cv === null ? '—' : `${s160}${cv.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+                };
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
@@ -1272,7 +1273,7 @@ export default function DashboardPage(props: Props) {
                         {topPayers.map((c, i) => (
                           <div key={i} className="flex items-center justify-between">
                             <span className="text-xs text-gray-700 truncate">{c.name}</span>
-                            <span className="text-xs font-bold text-emerald-600 shrink-0 ml-2">{s160}{f160(c.totalPaid)}</span>
+                            <span className="text-xs font-bold text-emerald-600 shrink-0 ml-2">{f160(c.totalPaid)}</span>
                           </div>
                         ))}
                       </div>
@@ -1285,7 +1286,7 @@ export default function DashboardPage(props: Props) {
                         ) : topDebtors.map(([name, amt], i) => (
                           <div key={i} className="flex items-center justify-between">
                             <span className="text-xs text-gray-700 truncate">{name}</span>
-                            <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{s160}{f160(amt)}</span>
+                            <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{f160(amt)}</span>
                           </div>
                         ))}
                       </div>
@@ -1311,8 +1312,6 @@ export default function DashboardPage(props: Props) {
                   rev: orders.filter(o => { const d = getOD103(o); return d.getFullYear() === m.year && d.getMonth() === m.month && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
                 }));
                 const maxRev103 = Math.max(...data103.map(d => d.rev), 1);
-                const rate103 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const sym103 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-4">
@@ -1325,11 +1324,10 @@ export default function DashboardPage(props: Props) {
                       {data103.map((m, i) => {
                         const h = maxRev103 > 0 ? Math.max((m.rev / maxRev103) * 100, m.rev > 0 ? 4 : 0) : 0;
                         const isCurrentMonth = i === 5;
-                        const cvt = kpiCurrency === 'TRY' ? m.rev : m.rev / rate103;
                         return (
                           <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
                             <div
-                              title={`${sym103}${cvt.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                              title={fmtKpi(m.rev)}
                               className={`w-full rounded-t-lg transition-all duration-700 ${isCurrentMonth ? 'bg-brand' : darkMode ? 'bg-white/20 hover:bg-white/30' : 'bg-gray-200 hover:bg-gray-300'}`}
                               style={{ height: `${h}%`, minHeight: m.rev > 0 ? '4px' : '0' }}
                             />
@@ -1340,7 +1338,7 @@ export default function DashboardPage(props: Props) {
                     </div>
                     <div className="flex justify-between mt-2 text-[9px] text-gray-400">
                       <span>0</span>
-                      <span>{sym103}{(kpiCurrency === 'TRY' ? maxRev103 : maxRev103 / rate103).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                      <span>{fmtKpi(maxRev103)}</span>
                     </div>
                   </div>
                 );
@@ -1402,10 +1400,6 @@ export default function DashboardPage(props: Props) {
                 if (totalRev === 0) return null;
                 const b2bPct    = Math.round((b2bRev    / totalRev) * 100);
                 const retailPct = 100 - b2bPct;
-                const p79Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const p79Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvtB2B    = kpiCurrency === 'TRY' ? b2bRev    : b2bRev    / p79Rate;
-                const cvtRetail = kpiCurrency === 'TRY' ? retailRev : retailRev / p79Rate;
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
@@ -1427,14 +1421,14 @@ export default function DashboardPage(props: Props) {
                         <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 flex-shrink-0" />
                         <div>
                           <p className="text-xs font-bold text-blue-700">B2B — {b2bPct}%</p>
-                          <p className="text-[10px] text-gray-400">{p79Sym}{cvtB2B.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                          <p className="text-[10px] text-gray-400">{fmtKpi(b2bRev)}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm bg-gray-300 flex-shrink-0" />
                         <div>
                           <p className="text-xs font-bold text-gray-600">{currentLanguage === 'tr' ? 'Perakende' : 'Retail'} — {retailPct}%</p>
-                          <p className="text-[10px] text-gray-400">{p79Sym}{cvtRetail.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                          <p className="text-[10px] text-gray-400">{fmtKpi(retailRev)}</p>
                         </div>
                       </div>
                     </div>
@@ -1453,9 +1447,6 @@ export default function DashboardPage(props: Props) {
                 ];
                 const total106 = segs.reduce((s, seg) => s + seg.rev, 0);
                 if (total106 === 0) return null;
-                const p106Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const p106Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const cvt106   = (v: number) => (kpiCurrency === 'TRY' ? v : v / p106Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
 
                 // SVG donut: r=40, circumference=251.3
                 const R = 40, C = 2 * Math.PI * R;
@@ -1515,7 +1506,7 @@ export default function DashboardPage(props: Props) {
                                   <span className="text-xs font-semibold text-gray-700">{s.label}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] text-gray-400">{p106Sym}{cvt106(s.rev)}</span>
+                                  <span className="text-[10px] text-gray-400">{fmtKpi(s.rev)}</span>
                                   <span className="text-[10px] font-black text-gray-600 w-7 text-right">{pct}%</span>
                                 </div>
                               </div>
@@ -1746,7 +1737,7 @@ export default function DashboardPage(props: Props) {
                           <p className="text-xs text-gray-400">#{o.shopifyOrderId || o.id?.slice(-6)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-bold text-[#1D1D1F]">{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?(o.totalPrice||o.totalAmount||0):(o.totalPrice||o.totalAmount||0)/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+                          <p className="text-sm font-bold text-[#1D1D1F]">{fmtKpi(o.totalPrice||o.totalAmount||0)}</p>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status === 'Delivered' ? 'bg-green-100 text-green-700' : o.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{o.status}</span>
                         </div>
                       </div>
@@ -1799,13 +1790,9 @@ export default function DashboardPage(props: Props) {
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {(() => {
-                        const ivRate = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                        const ivSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                        const cvCost   = kpiCurrency === 'TRY' ? costValue   : costValue   / ivRate;
-                        const cvRetail = kpiCurrency === 'TRY' ? retailValue : retailValue / ivRate;
                         return [
-                        { label: currentLanguage === 'tr' ? 'Maliyet Değeri' : 'Cost Value',   value: `${ivSym}${cvCost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,   color: 'text-gray-800',    sub: currentLanguage === 'tr' ? 'stok maliyeti' : 'at cost' },
-                        { label: currentLanguage === 'tr' ? 'Satış Değeri'  : 'Retail Value',  value: `${ivSym}${cvRetail.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,  color: 'text-emerald-700', sub: currentLanguage === 'tr' ? 'tavsiye fiyat' : 'at retail' },
+                        { label: currentLanguage === 'tr' ? 'Maliyet Değeri' : 'Cost Value',   value: fmtKpi(costValue),   color: 'text-gray-800',    sub: currentLanguage === 'tr' ? 'stok maliyeti' : 'at cost' },
+                        { label: currentLanguage === 'tr' ? 'Satış Değeri'  : 'Retail Value',  value: fmtKpi(retailValue),  color: 'text-emerald-700', sub: currentLanguage === 'tr' ? 'tavsiye fiyat' : 'at retail' },
                         { label: currentLanguage === 'tr' ? 'Brüt Marj'     : 'Gross Margin',  value: `${margin}%`,  color: margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-600', sub: currentLanguage === 'tr' ? 'teorik oran' : 'theoretical' },
                         { label: currentLanguage === 'tr' ? 'Toplam Adet'   : 'Total Units',   value: totalUnits.toLocaleString('tr-TR'), color: 'text-blue-700', sub: currentLanguage === 'tr' ? 'stokta' : 'in stock' },
                         ].map((stat, i) => (
@@ -1873,12 +1860,7 @@ export default function DashboardPage(props: Props) {
                       </div>
                       <div className="flex items-center gap-4 mb-3">
                         <div>
-                          {(() => {
-                            const r6Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
-                            const r6Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                            const r6Val  = kpiCurrency === 'TRY' ? totalRevAll : totalRevAll / r6Rate;
-                            return <p className="text-xl font-bold text-gray-900">{r6Sym}{r6Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>;
-                          })()}
+                          <p className="text-xl font-bold text-gray-900">{fmtKpi(totalRevAll)}</p>
                           <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '6 ay toplam ciro' : '6-month total revenue'}</p>
                         </div>
                         <div className="w-px h-8 bg-gray-100" />
@@ -1930,7 +1912,7 @@ export default function DashboardPage(props: Props) {
                             <div key={i} className="space-y-1">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold text-gray-700 truncate max-w-[140px]">{p.name}</span>
-                                <span className="text-[10px] font-bold text-gray-500">{kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?p.revenue:p.revenue/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                                <span className="text-[10px] font-bold text-gray-500">{fmtKpi(p.revenue)}</span>
                               </div>
                               <div className="w-full bg-gray-100 rounded-full h-1.5">
                                 <div
@@ -2079,8 +2061,6 @@ export default function DashboardPage(props: Props) {
                   .slice(0, 5);
                 if (top5.length === 0) return null;
                 const maxRev = top5[0].revenue;
-                const mtdTopRate   = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
-                const mtdTopSymbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -2094,7 +2074,6 @@ export default function DashboardPage(props: Props) {
                     <div className="space-y-3">
                       {top5.map((c, i) => {
                         const pct     = Math.round((c.revenue / maxRev) * 100);
-                        const cvtRev  = kpiCurrency === 'TRY' ? c.revenue : c.revenue / mtdTopRate;
                         const medal   = ['🥇','🥈','🥉','',''][i] || '';
                         return (
                           <div key={c.name} className="space-y-1">
@@ -2106,7 +2085,7 @@ export default function DashboardPage(props: Props) {
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage === 'tr' ? 'sip.' : 'ord.'}</span>
                                 <span className="text-[10px] font-bold text-gray-700">
-                                  {mtdTopSymbol}{cvtRev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                  {fmtKpi(c.revenue)}
                                 </span>
                               </div>
                             </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCurrency, formatInCurrency } from './currency';
+import { formatCurrency, formatInCurrency, kurCevir } from './currency';
 
 describe('formatCurrency', () => {
   it('formats TRY amounts with ₺ symbol', () => {
@@ -65,5 +65,48 @@ describe('formatInCurrency', () => {
     const result = formatInCurrency(1000, 'USD');
     // No rates → no conversion → shows 1000
     expect(result).toBeTruthy();
+  });
+});
+
+describe('kurCevir — uydurma kur YASAK', () => {
+  const kurlar = { USD: 40, EUR: 44 };
+
+  it('TRY icin aynen doner (kur gerekmez)', () => {
+    expect(kurCevir(1000, 'TRY', kurlar)).toBe(1000);
+    // Kur HIC yokken bile TRY yolu calismali — regresyonun en olasi yeri burasi.
+    expect(kurCevir(1000, 'TRY', null)).toBe(1000);
+    expect(kurCevir(1000, 'TRY', undefined)).toBe(1000);
+  });
+
+  it('kur varsa dogru cevirir', () => {
+    expect(kurCevir(40000, 'USD', kurlar)).toBe(1000);
+    expect(kurCevir(44000, 'EUR', kurlar)).toBe(1000);
+  });
+
+  it('kur YOKSA null doner — TL tutarini oldugu gibi DONDURMEZ', () => {
+    // Bu testin varlik sebebi: 13 dosyada `exchangeRates?.USD || 1` vardi ve
+    // kur yokken TL tutari '$' ile basiliyordu (₺40.000 -> "$40.000", ~40 kat).
+    expect(kurCevir(40000, 'USD', null)).toBeNull();
+    expect(kurCevir(40000, 'USD', undefined)).toBeNull();
+    expect(kurCevir(40000, 'USD', {})).toBeNull();
+    expect(kurCevir(40000, 'USD', kurlar)).not.toBe(40000);
+  });
+
+  it('gecersiz kur (0, negatif, NaN) null doner — bolme patlamaz', () => {
+    expect(kurCevir(40000, 'USD', { USD: 0 })).toBeNull();
+    expect(kurCevir(40000, 'USD', { USD: -5 })).toBeNull();
+    expect(kurCevir(40000, 'USD', { USD: NaN })).toBeNull();
+    expect(kurCevir(40000, 'USD', { USD: Infinity })).toBeNull();
+  });
+
+  it('gecersiz tutar null doner', () => {
+    expect(kurCevir(NaN, 'USD', kurlar)).toBeNull();
+    expect(kurCevir(Infinity, 'TRY', kurlar)).toBeNull();
+  });
+
+  it('formatInCurrency ile AYNI karari verir (iki kopya sapmasin)', () => {
+    // Ikisi de "kur yok -> gosterme" diyor; biri sayi, digeri string dilinde.
+    expect(kurCevir(40000, 'USD', null)).toBeNull();
+    expect(formatInCurrency(40000, 'USD', undefined)).toBe('—');
   });
 });

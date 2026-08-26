@@ -370,12 +370,32 @@ export default function SabitKiymetModule({
   exchangeRates?: Record<string, number> | null;
 }) {
   // KPI toplamları tek para birimine (₺) çevrilir (önce karışık para birimi ham toplanıyordu).
-  const toTRY = (amount: number, currency?: string) => {
+  //
+  // YÖN NOTU: burada döviz → ₺ (ÇARPMA) yapılıyor; utils/currency'deki
+  // `kurCevir` TERS yönü (₺ → döviz, BÖLME) yapar, bu yüzden buraya uymaz.
+  // Ondan devralınan şey KARAR: kur yoksa uydurma, `null` dön.
+  // Eskiden `?? 38` / `?? 41` vardı — 2024'ten kalma sabit kurlar KPI'yi
+  // sessizce yanlış basıyordu (CLAUDE.md: "sahte kesinlik gösterme").
+  const toTRY = (amount: number, currency?: string): number | null => {
     const a = Number(amount) || 0;
-    if (currency === 'USD') return a * (exchangeRates?.USD ?? 38);
-    if (currency === 'EUR') return a * (exchangeRates?.EUR ?? 41);
-    return a;
+    if (!currency || currency === 'TRY') return a; // ₺ yolu: kur gerekmez
+    const kur = exchangeRates?.[currency];
+    if (!kur || !isFinite(kur) || kur <= 0) return null;
+    return a * kur;
   };
+
+  /**
+   * Karışık para birimli varlıkları ₺'ye toplar. TEK bir kalem çevrilemiyorsa
+   * toplam da güvenilir değildir → null (KPI '—' basar). Eksik kalemi 0 sayıp
+   * yarım toplamı ₺ etiketiyle göstermek hatanın ta kendisi olurdu.
+   * Tüm varlıklar ₺ ise kur hiç sorulmaz, davranış eskisiyle birebir aynıdır.
+   */
+  const toplaTRY = (list: SabitKiymet[], tutar: (v: SabitKiymet) => number): number | null =>
+    list.reduce<number | null>((s, v) => {
+      if (s === null) return null;
+      const d = toTRY(tutar(v), v.paraBirimi);
+      return d === null ? null : s + d;
+    }, 0);
   const tr = currentLanguage === 'tr';
   const L = (key: LabelKey) => t(key, currentLanguage);
 
@@ -453,8 +473,8 @@ export default function SabitKiymetModule({
   const aktifVarliklar = varliklar.filter(v => v.durum === 'Aktif' || v.durum === 'Bakımda');
   const kpi = {
     count: varliklar.length,
-    toplamDeger: aktifVarliklar.reduce((s, v) => s + toTRY(calcNetDeger(v), v.paraBirimi), 0),
-    toplamBirikmiS: aktifVarliklar.reduce((s, v) => s + toTRY(calcBirikmisSalinma(v), v.paraBirimi), 0),
+    toplamDeger: toplaTRY(aktifVarliklar, calcNetDeger),
+    toplamBirikmiS: toplaTRY(aktifVarliklar, calcBirikmisSalinma),
   };
 
   // ── Filtering & sorting (Varlıklar) ───────────────────────────────────────
@@ -701,8 +721,8 @@ export default function SabitKiymetModule({
       {activeTab === 'varliklar' && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard icon={Package}    label={L('toplamVarlik')}    value={`${kpi.count} ${L('adet')}`}    color="bg-blue-100 text-blue-700" />
-          <StatCard icon={BarChart3}  label={L('toplamDegerLabel')} value={formatTRY(kpi.toplamDeger)}    color="bg-green-100 text-green-700" />
-          <StatCard icon={TrendingDown} label={L('toplamAmort')}   value={formatTRY(kpi.toplamBirikmiS)} color="bg-orange-100 text-orange-700" />
+          <StatCard icon={BarChart3}  label={L('toplamDegerLabel')} value={kpi.toplamDeger === null ? '—' : formatTRY(kpi.toplamDeger)}       color="bg-green-100 text-green-700" />
+          <StatCard icon={TrendingDown} label={L('toplamAmort')}   value={kpi.toplamBirikmiS === null ? '—' : formatTRY(kpi.toplamBirikmiS)} color="bg-orange-100 text-orange-700" />
         </div>
       )}
 

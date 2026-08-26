@@ -183,6 +183,7 @@ import PaymentMethodModal from './components/PaymentMethodModal';
 import { translations, type Language } from './translations';
 import { optimizeRoute } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
+import { kurCevir } from './utils/currency';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -484,10 +485,17 @@ const FxInput = ({ value, onChange, w = 'w-28' }: { value: number; onChange: (v:
     placeholder="0" className={`${w} px-2 py-1 text-xs text-right bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-brand tabular-nums`} />
 );
 
-// Tek kaynak: canlı kur yokken kullanılan yedek oranlar (soğuk başlangıç).
-// Önceden modüller arası tutarsızdı (32/35 vs 38/41). KPI'larda `|| 1` ham TRY'yi
-// $/€ diye gösteriyordu → `?? FX_FALLBACK` ile gerçek oran kullanılır.
-const FX_FALLBACK = { USD: 38, EUR: 41 } as const;
+// KUR YEDEGI KALDIRILDI (2026-08-26).
+//
+// Burada `const FX_FALLBACK = { USD: 38, EUR: 41 }` duruyordu: canli kur
+// gelmedigi her an TL tutarlar 2024'ten kalma SABIT bir kurla bolunuyor, sonuc
+// da guncel kurmus gibi $/€ ile basiliyordu. Bir onceki yedek (`|| 1`) ham TL'yi
+// dolar diye gosteriyordu; bu yedek ise sessizce YANLIS ama makul gorunen bir
+// rakam uretiyordu — ikincisi daha tehlikelidir, cunku fark edilmez.
+//
+// CLAUDE.md: guvenilir hesaplanamayan rakam yerine yaniltici bir sayi degil '—'
+// goster. Cevirinin tek dogru yeri `src/utils/currency.ts` (`kurCevir`): kur
+// yoksa null doner, cagiran da '—' basar.
 
 // Modül seviyesinde (render-içi tanım yerine) — her render'da yeni identity/remount engeli.
 function DeltaBadge({ delta }: { delta: number | null | undefined }) {
@@ -868,13 +876,13 @@ function AppContent() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
+  // TRY seciliyken kur hic sorgulanmaz — davranis eskisiyle birebir ayni.
+  // USD/EUR seciliyken kur yoksa uydurma yerine '—' doner (bkz. FX_FALLBACK notu).
   const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? FX_FALLBACK.USD;
-    const eur = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
-    const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
+    const cv = kurCevir(v, kpiCurrency, exchangeRates);
+    if (cv === null) return '—';
     const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
     const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
   };
@@ -1237,8 +1245,18 @@ function AppContent() {
       fetch('https://api.frankfurter.app/latest?from=USD&to=TRY,EUR')
         .then(r => r.json())
         .then(data => {
-          const tryPerUsd: number = data.rates?.TRY ?? FX_FALLBACK.USD;
-          const eurPerUsd: number = data.rates?.EUR ?? 0.92;
+          // Yanit gecersizse KUR YAZMA (2026-08-26). Eskiden `?? 38` / `?? 0.92`
+          // ile uydurma kurlar store'a yaziliyordu; oradan da TUM uygulamaya
+          // yayiliyordu — her KPI, rapor ve PDF sahte ama makul bir rakam
+          // gosteriyordu. Kur yoksa `exchangeRates` bos kalir ve tuketiciler
+          // (kurCevir uzerinden) '—' gosterir.
+          const tryPerUsd = Number(data?.rates?.TRY);
+          const eurPerUsd = Number(data?.rates?.EUR);
+          if (!Number.isFinite(tryPerUsd) || tryPerUsd <= 0 ||
+              !Number.isFinite(eurPerUsd) || eurPerUsd <= 0) {
+            console.error('Frankfurter API gecersiz kur dondu; kur ayarlanmadi:', data);
+            return;
+          }
           const tryPerEur = tryPerUsd / eurPerUsd;
           setExchangeRates({ USD: tryPerUsd, EUR: tryPerEur });
           storeSetRates({ USD: tryPerUsd, EUR: tryPerEur });

@@ -1707,8 +1707,14 @@ export default function GenelRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'genel' && exchangeRates && orders.length >= 5 && (() => {
-        const usdRate = exchangeRates['USD'] || 32;
-        const eurRate = exchangeRates['EUR'] || 35;
+        // UYDURMA KUR YOK (2026-08-26). Eskiden `|| 32` / `|| 35` vardi: 2024'ten
+        // kalma sabit kurlarla "Multi-Currency Revenue" karti YANLIS rakam
+        // basiyordu ve hemen altinda "Based on LIVE exchange rates" yaziyordu —
+        // yani yanlis rakami dogru diye sunuyordu. Kartin TAMAMI kura bagli
+        // oldugu icin dogru davranis kartı hic gostermemek.
+        const usdRate = exchangeRates['USD'];
+        const eurRate = exchangeRates['EUR'];
+        if (!usdRate || !eurRate || !isFinite(usdRate) || !isFinite(eurRate) || usdRate <= 0 || eurRate <= 0) return null;
         const now = new Date();
         const last30 = orders.filter(o => {
           const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);

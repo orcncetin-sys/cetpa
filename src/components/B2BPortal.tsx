@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { kurCevir } from '../utils/currency';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
 import { exportOrderPDF } from '../utils/pdf';
 import { syncShopify } from '../services/shopifyService';
@@ -88,6 +89,18 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   const [dealerSearch, setDealerSearch] = useState('');
   const [shopifySyncing, setShopifySyncing] = useState(false);
   const [shopifySyncStatus, setShopifySyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Bayi/kredi gostergelerinin para birimi bicimleyicisi. Tutarlar TL tutulur;
+  // secili para birimine ceviri YALNIZ gercek kur varsa yapilir. Kur yoksa
+  // uydurma yedek (eski `exchangeRates?.USD || 1`: TL rakamini '$' ile basip
+  // ~38x sisiriyordu) yerine '—' gosterilir. TRY seciliyken kur gerekmez,
+  // kurCevir tutari aynen dondurur — davranis degismez.
+  const dcSym = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
+  const dcFormat = (tutarTL: number): string => {
+    const cevrilen = kurCevir(tutarTL, dealerCurrency, exchangeRates);
+    if (cevrilen === null) return '—';
+    return `${dcSym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+  };
 
   useEffect(() => {
     if (!user || !userRole) return;
@@ -349,10 +362,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
         <div className="space-y-4">
           {/* KPI row */}
           {(() => {
-            const dcRate = dealerCurrency === 'USD' ? (exchangeRates?.USD || 1) : dealerCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-            const dcSym = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
             const totalCredit = dealers.reduce((s, d) => s + (d.creditLimit as number || 0), 0);
-            const cvtCredit = dealerCurrency === 'TRY' ? totalCredit : totalCredit / dcRate;
             const CurrencyToggle = () => (
               <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                 {(['TRY', 'USD', 'EUR'] as const).map(c => (
@@ -369,13 +379,13 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 <div className="apple-card p-4"><p className="text-2xl font-bold text-green-600">{dealers.filter(d => d.status === 'Active').length}</p><p className="text-xs text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</p></div>
                 <div className="apple-card p-4 flex flex-col gap-2">
                   <div className="flex items-center justify-between"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Toplam Kredi' : 'Total Credit'}</p><CurrencyToggle /></div>
-                  <p className="text-2xl font-bold text-blue-600">{dcSym}{cvtCredit.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                  <p className="text-2xl font-bold text-blue-600">{dcFormat(totalCredit)}</p>
                 </div>
                 <div className="apple-card p-4 flex flex-col gap-2">
                   <div className="flex items-center justify-between"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Teklif Toplamı' : 'Quote Total'}</p><CurrencyToggle /></div>
                   <p className="text-2xl font-bold text-purple-600">
                     {/* q.total alanı yok → totalAmount, yoksa lineItems'tan hesapla (önce hep ₺0 gösteriyordu) */}
-                    {dcSym}{((qt => dealerCurrency === 'TRY' ? qt : qt / dcRate)(quotations.reduce((s, q) => s + (Number(q.totalAmount) || ((q.lineItems || q.items || []) as QuotationItem[]).reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0)), 0))).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                    {dcFormat(quotations.reduce((s, q) => s + (Number(q.totalAmount) || ((q.lineItems || q.items || []) as QuotationItem[]).reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0)), 0))}
                   </p>
                 </div>
               </div>
@@ -424,7 +434,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <td className="text-gray-500">{d.email as string}</td>
                       <td className="hidden md:table-cell text-gray-500">{d.phone as string}</td>
                       <td className="hidden sm:table-cell"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand">{d.priceTier as string || 'Dealer'}</span></td>
-                      <td className="hidden lg:table-cell font-semibold">{dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€'}{(dealerCurrency === 'TRY' ? (d.creditLimit as number || 0) : (d.creditLimit as number || 0) / (dealerCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1))).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                      <td className="hidden lg:table-cell font-semibold">{dcFormat((d.creditLimit as number) || 0)}</td>
                       <td className="hidden lg:table-cell text-gray-500">{d.paymentTerms as string || '30'} {currentLanguage === 'tr' ? 'gün' : 'days'}</td>
                       <td><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.status === 'Active' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>{d.status as string || 'Active'}</span></td>
                       <td>
@@ -548,39 +558,31 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
 
           <div className="space-y-6">
             <div className="apple-card p-6 bg-brand text-white">
-              {(() => {
-                const crRate = dealerCurrency === 'USD' ? (exchangeRates?.USD || 1) : dealerCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-                const crSym = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
-                const cvtLimit = dealerCurrency === 'TRY' ? creditInfo.limit : creditInfo.limit / crRate;
-                const cvtUsed = dealerCurrency === 'TRY' ? creditInfo.used : creditInfo.used / crRate;
-                return (<>
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-lg font-bold">{currentT.credit_limit}</h3>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-0.5 bg-white/20 rounded-lg p-0.5">
-                        {(['TRY', 'USD', 'EUR'] as const).map(c => (<button key={c} onClick={() => setDealerCurrency(c)} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${dealerCurrency === c ? 'bg-white text-brand shadow-sm' : 'text-white/70 hover:text-white'}`}>{c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}</button>))}
-                      </div>
-                      <button onClick={() => setIsEditingCredit(true)} className="text-xs underline opacity-80 hover:opacity-100">{currentT.edit}</button>
-                    </div>
+              <div className="flex justify-between items-start mb-4">
+                <h3 className="text-lg font-bold">{currentT.credit_limit}</h3>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-0.5 bg-white/20 rounded-lg p-0.5">
+                    {(['TRY', 'USD', 'EUR'] as const).map(c => (<button key={c} onClick={() => setDealerCurrency(c)} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md transition-all ${dealerCurrency === c ? 'bg-white text-brand shadow-sm' : 'text-white/70 hover:text-white'}`}>{c === 'TRY' ? '₺' : c === 'USD' ? '$' : '€'}</button>))}
                   </div>
-                  {isEditingCredit ? (
-                    <div className="space-y-3">
-                      <input type="number" value={creditInfo.limit} onChange={(e) => setCreditInfo({ ...creditInfo, limit: Number(e.target.value) })} className="w-full bg-white/20 border border-white/30 rounded-xl px-3 py-2 text-white outline-none focus:bg-white/30" placeholder={currentT.credit_limit_label} />
-                      <div className="flex gap-2">
-                        <button onClick={async () => { const lead = leads.find(l => l.email === user?.email); if (lead) { await updateDoc(doc(db, 'leads', lead.id), { creditLimit: creditInfo.limit }); } setIsEditingCredit(false); }} className="flex-1 bg-white text-brand py-2 rounded-xl text-xs font-bold">{currentT.save}</button>
-                        <button onClick={() => setIsEditingCredit(false)} className="flex-1 bg-white/20 text-white py-2 rounded-xl text-xs font-bold">{currentT.cancel}</button>
-                      </div>
-                    </div>
-                  ) : (<>
-                    <p className="text-3xl font-bold mb-4">{crSym}{cvtLimit.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
-                    <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden mb-2">
-                      <div className={cn('h-full', (creditInfo.used / creditInfo.limit) > 0.8 ? 'bg-red-500' : (creditInfo.used / creditInfo.limit) > 0.5 ? 'bg-yellow-400' : 'bg-white')} style={{ width: `${Math.min(100, (creditInfo.used / creditInfo.limit) * 100)}%` }} />
-                    </div>
-                    <p className="text-xs opacity-80">{currentT.used_limit}: {crSym}{cvtUsed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ({Math.round((creditInfo.used / creditInfo.limit) * 100)}%)</p>
-                    {creditInfo.used > creditInfo.limit && <p className="text-xs font-bold mt-2 text-red-200">⚠️ {currentT.over_limit}</p>}
-                  </>)}
-                </>);
-              })()}
+                  <button onClick={() => setIsEditingCredit(true)} className="text-xs underline opacity-80 hover:opacity-100">{currentT.edit}</button>
+                </div>
+              </div>
+              {isEditingCredit ? (
+                <div className="space-y-3">
+                  <input type="number" value={creditInfo.limit} onChange={(e) => setCreditInfo({ ...creditInfo, limit: Number(e.target.value) })} className="w-full bg-white/20 border border-white/30 rounded-xl px-3 py-2 text-white outline-none focus:bg-white/30" placeholder={currentT.credit_limit_label} />
+                  <div className="flex gap-2">
+                    <button onClick={async () => { const lead = leads.find(l => l.email === user?.email); if (lead) { await updateDoc(doc(db, 'leads', lead.id), { creditLimit: creditInfo.limit }); } setIsEditingCredit(false); }} className="flex-1 bg-white text-brand py-2 rounded-xl text-xs font-bold">{currentT.save}</button>
+                    <button onClick={() => setIsEditingCredit(false)} className="flex-1 bg-white/20 text-white py-2 rounded-xl text-xs font-bold">{currentT.cancel}</button>
+                  </div>
+                </div>
+              ) : (<>
+                <p className="text-3xl font-bold mb-4">{dcFormat(creditInfo.limit)}</p>
+                <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden mb-2">
+                  <div className={cn('h-full', (creditInfo.used / creditInfo.limit) > 0.8 ? 'bg-red-500' : (creditInfo.used / creditInfo.limit) > 0.5 ? 'bg-yellow-400' : 'bg-white')} style={{ width: `${Math.min(100, (creditInfo.used / creditInfo.limit) * 100)}%` }} />
+                </div>
+                <p className="text-xs opacity-80">{currentT.used_limit}: {dcFormat(creditInfo.used)} ({Math.round((creditInfo.used / creditInfo.limit) * 100)}%)</p>
+                {creditInfo.used > creditInfo.limit && <p className="text-xs font-bold mt-2 text-red-200">⚠️ {currentT.over_limit}</p>}
+              </>)}
             </div>
 
             <div className="apple-card p-6">

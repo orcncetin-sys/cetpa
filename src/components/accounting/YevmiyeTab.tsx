@@ -4,6 +4,26 @@ import { type JournalEntry } from '../../types';
 import { formatInCurrency } from '../../utils/currency';
 import { SortHeader, exportCSV, HESAP_PLANI, type AccountingT } from './shared';
 
+/**
+ * Kur ETİKETİ ("1 USD = ₺41,20"). Kur yoksa RAKAM BASMAZ.
+ *
+ * ESKİDEN: `(exchangeRates.USD || 0).toLocaleString(...)` — dış koşul yalnız
+ * `exchangeRates` nesnesinin varlığına bakıyordu, o nesnede USD/EUR anahtarı
+ * eksik ya da 0 olduğunda etiket "1 USD = ₺0,00" yazıyordu. Sıfır bir kur
+ * değil, "veri yok" demek; onu rakam olarak basmak sahte kesinlik.
+ */
+const kurEtiketi = (
+  currency: 'USD' | 'EUR',
+  exchangeRates: Record<string, number> | undefined,
+  currentLanguage: string,
+): string => {
+  const kur = exchangeRates?.[currency];
+  if (!kur || !isFinite(kur) || kur <= 0) {
+    return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
+  }
+  return `1 ${currency} = ₺${kur.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 type JournalForm = {
   date: string; fiş: string; aciklama: string;
   debitHesap: string; alacakHesap: string;
@@ -84,7 +104,7 @@ export default function YevmiyeTab({
             ))}
             {exchangeRates && yevmiyeCurrency !== 'TRY' && (
               <span className="ml-2 text-[10px] text-gray-400 font-mono">
-                {yevmiyeCurrency === 'USD' ? `1 USD = ₺${(exchangeRates.USD||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `1 EUR = ₺${(exchangeRates.EUR||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
+                {kurEtiketi(yevmiyeCurrency, exchangeRates, currentLanguage)}
               </span>
             )}
           </div>

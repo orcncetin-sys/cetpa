@@ -7,6 +7,7 @@ import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, wh
 import { db, auth } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
+import { formatCurrency } from '../utils/currency';
 
 interface ProductFormProps {
   isOpen: boolean;
@@ -160,12 +161,19 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
   // Each field stores its own currency natively. Helpers work per-currency.
   const symOf = (cur: 'TRY' | 'USD' | 'EUR') => cur === 'USD' ? '$' : cur === 'EUR' ? '€' : '₺';
 
-  /** TL equivalent hint shown below input when non-TRY (for reference only) */
+  /**
+   * TL equivalent hint shown below input when non-TRY (for reference only).
+   *
+   * Ceviri yonu buradaki TEK istisna: alandaki tutar zaten USD/EUR cinsinden,
+   * TL karsiligi icin kurla CARPILIR (kurCevir'in tersi, o TL'yi dovize boler).
+   * Kur yoksa uydurma yedek (eski `exchangeRates.USD || 1`) TL karsiligini
+   * dovizle ayni sayi gosteriyordu; artik ipucu hic gosterilmez (null).
+   */
   const tryHintFor = (value: number, cur: 'TRY' | 'USD' | 'EUR'): string | null => {
-    if (cur === 'TRY' || !value || !exchangeRates) return null;
-    const rate = cur === 'USD' ? (exchangeRates.USD || 1) : (exchangeRates.EUR || 1);
-    const inTRY = value * rate;
-    return `≈ ₺${inTRY.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (cur === 'TRY' || !value) return null;
+    const rate = exchangeRates?.[cur];
+    if (!rate || !isFinite(rate) || rate <= 0) return null;
+    return `≈ ${formatCurrency(value * rate)}`;
   };
 
   return createPortal(

@@ -16,6 +16,7 @@ import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
 import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
+import { kurCevir } from '../utils/currency';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -597,8 +598,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       {/* Stats */}
       {(() => {
         const totalTRY = activePurchaseOrders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
-        const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-        const convertedTotal = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
+        // KUR UYDURMA YOK (2026-08-26). Eskiden `exchangeRates?.USD || 1` vardı:
+        // kur gelmemişse TL tutar OLDUĞU GİBİ kalıp başına '$' konuyordu
+        // (₺40.000 → "$40.000", ~38× şişkin). `kurCevir` kur yoksa null döner,
+        // KPI da '—' gösterir. TRY seçiliyken kur gerekmez, davranış aynıdır.
+        const convertedTotal = kurCevir(totalTRY, kpiCurrency, exchangeRates);
         const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -636,7 +640,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                   ))}
                 </div>
               </div>
-              <p className="text-xl font-black text-green-600">{sym}{convertedTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+              <p className="text-xl font-black text-green-600">
+                {convertedTotal === null
+                  ? <span className="text-gray-400" title={currentLanguage === 'tr' ? 'Güncel kur alınamadı' : 'Exchange rate unavailable'}>—</span>
+                  : `${sym}${convertedTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+              </p>
             </div>
           </div>
         );

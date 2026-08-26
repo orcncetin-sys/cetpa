@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
+import { kurCevir } from '../utils/currency';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
 import DekontModal from './DekontModal';
@@ -589,11 +590,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [satisSortDir, setSatisSortDir] = useState<'asc' | 'desc'>('desc');
   const [satisSearch, setSatisSearch] = useState('');
   const [kpiCurrency, setKpiCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
-  const kpiRate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
   const kpiSym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-  const formatConv = (n: number) => kpiCurrency === 'TRY'
-    ? formatTRY(n)
-    : `${kpiSym}${(n / kpiRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // KUR UYDURMASI KALDIRILDI (2026-08-26). Eskiden `kpiRate` kuru okurken
+  // "yoksa 1" yedegi kullaniyordu: bolen 1 olunca TL
+  // tutari OLDUGU GIBI kalip basina '$' konuyordu (₺40.000 -> "$40.000",
+  // ~38 kat sisirilmis KPI). Ceviri karari tek yerde: `kurCevir` kur yoksa
+  // null doner, biz de yaniltici sayi yerine '—' basariz.
+  // TRY yolu DEGISMEDI: yine dogrudan `formatTRY`.
+  const formatConv = (n: number): string => {
+    if (kpiCurrency === 'TRY') return formatTRY(n);
+    const cevrilen = kurCevir(n, kpiCurrency, exchangeRates);
+    if (cevrilen === null) return '—';
+    return `${kpiSym}${cevrilen.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
   const [musteriSortKey, setMusteriSortKey] = useState<'name' | 'company' | 'phone' | 'balance' | 'riskGroup'>('name');
   const [musteriSortDir, setMusteriSortDir] = useState<'asc' | 'desc'>('asc');
   const [tedarikciSortKey, setTedarikciSortKey] = useState<'name' | 'company' | 'phone' | 'email' | 'taxNo' | 'balance' | 'riskGroup'>('name');

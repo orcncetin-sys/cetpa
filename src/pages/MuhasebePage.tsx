@@ -17,6 +17,7 @@ import AccountingModule from '../components/AccountingModule';
 import { SortHeader } from '../components/accounting/shared';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { itemCostTRY } from '../utils/cost';
+import { kurCevir } from '../utils/currency';
 import { authFetch } from '../services/authFetch';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
@@ -584,9 +585,14 @@ export default function MuhasebePage(props: Props) {
                         });
                         const maxAmt110 = Math.max(...apBuckets.map(b => b.orders.reduce((s, po) => s + po.totalAmount, 0)), 1);
 
-                        const apRate = apCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : apCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const apSym = apCurrency === 'TRY' ? '₺' : apCurrency === 'USD' ? '$' : '€';
-                        const fmtAP = (n: number) => apCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${apSym}${(n / apRate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                        // Kur yoksa FX_FALLBACK (2024'ten kalma sabit 38/41) ile bolunuyordu.
+                        // kurCevir kur yoksa null doner; null'da sembol bile basmiyoruz ("$—" sacma).
+                        const fmtAP = (n: number) => {
+                          if (apCurrency === 'TRY') return `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                          const c = kurCevir(n, apCurrency, exchangeRates);
+                          return c === null ? '—' : `${apSym}${c.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                        };
                         return (
                           <>
                             {/* Summary KPIs */}
@@ -739,9 +745,12 @@ export default function MuhasebePage(props: Props) {
                           setDoc(doc(db, 'settings', 'budgets'), { [budgetMonth]: newBudgets }, { merge: true }).catch(() => {});
                         };
 
-                        const butceRate = butceCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : butceCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const butceSym = butceCurrency === 'TRY' ? '₺' : butceCurrency === 'USD' ? '$' : '€';
-                        const fmtButce = (n: number) => butceCurrency === 'TRY' ? `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${butceSym}${(n / butceRate).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+                        const fmtButce = (n: number) => {
+                          if (butceCurrency === 'TRY') return `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                          const c = kurCevir(n, butceCurrency, exchangeRates);
+                          return c === null ? '—' : `${butceSym}${c.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+                        };
                         return (
                           <>
                             {/* Month picker + summary */}
@@ -1183,9 +1192,13 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tüm siparişler tahsil edildi.' : 'All orders collected.'}</p>
                           </div>
                         );
-                        const r131 = kpiCurrency === 'USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1;
                         const s131 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                        const f131 = (v: number) => (kpiCurrency === 'TRY' ? v : v / r131).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                        // Sembol eskiden cagri yerinde ({s131}{f131(v)}) ekleniyordu; kur yokken
+                        // "$—" cikmasin diye artik formatleyicinin ICINDE.
+                        const f131 = (v: number) => {
+                          const c = kpiCurrency === 'TRY' ? v : kurCevir(v, kpiCurrency, exchangeRates);
+                          return c === null ? '—' : `${s131}${c.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                        };
                         return (
                           <div className="space-y-3">
                             {/* Summary cards */}
@@ -1198,7 +1211,7 @@ export default function MuhasebePage(props: Props) {
                               ].map(k => (
                                 <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
                                   <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
-                                  <p className={`text-xl font-bold ${k.color}`}>{s131}{f131(k.val)}</p>
+                                  <p className={`text-xl font-bold ${k.color}`}>{f131(k.val)}</p>
                                 </div>
                               ))}
                             </div>
@@ -1216,11 +1229,11 @@ export default function MuhasebePage(props: Props) {
                                   <div key={c.name} className="px-5 py-3 grid grid-cols-6 items-center hover:bg-gray-50/50 transition-all">
                                     <div className="col-span-2 min-w-0">
                                       <p className="text-xs font-bold text-gray-800 truncate">{c.name}</p>
-                                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}: {s131}{f131(c.total)} · {c.oldest}g</p>
+                                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}: {f131(c.total)} · {c.oldest}g</p>
                                     </div>
                                     {[c.b0_30, c.b31_60, c.b61_90, c.b90p].map((v, i) => (
                                       <span key={i} className={`text-xs font-bold text-right ${v > 0 ? i === 0 ? 'text-emerald-600' : i === 1 ? 'text-amber-600' : i === 2 ? 'text-orange-600' : 'text-red-600' : 'text-gray-200'}`}>
-                                        {v > 0 ? s131 + f131(v) : '—'}
+                                        {v > 0 ? f131(v) : '—'}
                                       </span>
                                     ))}
                                   </div>
@@ -1228,7 +1241,7 @@ export default function MuhasebePage(props: Props) {
                               </div>
                               <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-between text-xs font-bold">
                                 <span className="text-gray-500">{custs.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</span>
-                                <span className="text-gray-800">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total AR'}: {s131}{f131(totalAR)}</span>
+                                <span className="text-gray-800">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total AR'}: {f131(totalAR)}</span>
                               </div>
                             </div>
                           </div>
@@ -1522,14 +1535,18 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 143: Profit & Loss Statement ── */}
                   {muhasebeTab === 'pnl' && (() => {
                     // ── Shared currency setup (used by entire PnL tab) ──────────
-                    const pnlUsd = exchangeRates?.USD ?? FX_FALLBACK.USD;
-                    const pnlEur = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
-                    const pnlRate = p563PnlCurrency === 'USD' ? pnlUsd : p563PnlCurrency === 'EUR' ? pnlEur : 1;
                     const pnlSym  = p563PnlCurrency === 'USD' ? '$' : p563PnlCurrency === 'EUR' ? '€' : '₺';
-                    const fmtPnl  = (v: number) => `${pnlSym}${(v / pnlRate).toLocaleString(
-                      p563PnlCurrency === 'TRY' ? 'tr-TR' : p563PnlCurrency === 'EUR' ? 'de-DE' : 'en-US',
-                      { maximumFractionDigits: 0 }
-                    )}`;
+                    // Kur ETIKETI ("₺1 = $x") icin ham kur — yoksa null ve rakam BASMIYORUZ.
+                    const pnlKurHam = exchangeRates?.[p563PnlCurrency];
+                    const pnlKur = typeof pnlKurHam === 'number' && isFinite(pnlKurHam) && pnlKurHam > 0 ? pnlKurHam : null;
+                    const fmtPnl  = (v: number) => {
+                      const c = p563PnlCurrency === 'TRY' ? v : kurCevir(v, p563PnlCurrency, exchangeRates);
+                      if (c === null) return '—';
+                      return `${pnlSym}${c.toLocaleString(
+                        p563PnlCurrency === 'TRY' ? 'tr-TR' : p563PnlCurrency === 'EUR' ? 'de-DE' : 'en-US',
+                        { maximumFractionDigits: 0 }
+                      )}`;
+                    };
 
                     const now143 = new Date();
                     const months143: { label: string; revenue: number; cogs: number; grossProfit: number }[] = [];
@@ -1595,9 +1612,11 @@ export default function MuhasebePage(props: Props) {
                           <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-700">
                             <Globe className="w-3.5 h-3.5 flex-shrink-0" />
                             <span>
-                              {currentLanguage === 'tr'
-                                ? `Kur: ₺1 = ${p563PnlCurrency === 'USD' ? `$${(1/pnlRate).toFixed(4)}` : `€${(1/pnlRate).toFixed(4)}`} — Frankfurter API (TCMB referans)`
-                                : `Rate: ₺1 = ${p563PnlCurrency === 'USD' ? `$${(1/pnlRate).toFixed(4)}` : `€${(1/pnlRate).toFixed(4)}`} — Frankfurter API`}
+                              {pnlKur === null
+                                ? (currentLanguage === 'tr' ? 'Kur alınamadı — tutarlar gösterilemiyor.' : 'Rate unavailable — amounts cannot be shown.')
+                                : currentLanguage === 'tr'
+                                  ? `Kur: ₺1 = ${pnlSym}${(1 / pnlKur).toFixed(4)} — Frankfurter API (TCMB referans)`
+                                  : `Rate: ₺1 = ${pnlSym}${(1 / pnlKur).toFixed(4)} — Frankfurter API`}
                             </span>
                           </div>
                         )}
@@ -3828,11 +3847,16 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'kur-degerleme' && (() => {
                     const tr635 = currentLanguage === 'tr';
                     // Güncel kur CANLI TCMB'den (exchangeRates); açık bakiye + defterdeki kur editlenebilir.
-                    const curUSD = exchangeRates?.USD ?? 0;
-                    const curEUR = exchangeRates?.EUR ?? 0;
+                    const gecerliKur = (v: number | undefined): number | null =>
+                      typeof v === 'number' && isFinite(v) && v > 0 ? v : null;
+                    const curUSD = gecerliKur(exchangeRates?.USD);
+                    const curEUR = gecerliKur(exchangeRates?.EUR);
                     // Kur farkı = döviz bakiyesi × (güncel kur − defterdeki kur)  [TL cinsinden]
-                    const gainUSD = fxPos.usdBalance * (curUSD - fxPos.usdBookRate);
-                    const gainEUR = fxPos.eurBalance * (curEUR - fxPos.eurBookRate);
+                    // Kur yokken `?? 0` kullaniliyordu: gain = −bakiye × defterKuru, yani
+                    // TAMAMEN uydurma bir "zarar" rakami basiliyordu. Artik null → '—'.
+                    const gainUSD = curUSD === null ? null : fxPos.usdBalance * (curUSD - fxPos.usdBookRate);
+                    const gainEUR = curEUR === null ? null : fxPos.eurBalance * (curEUR - fxPos.eurBookRate);
+                    const netGain = gainUSD === null || gainEUR === null ? null : gainUSD + gainEUR;
                     const positions = [
                       { cur: 'USD', bal: fxPos.usdBalance, balField: 'usdBalance' as const, book: fxPos.usdBookRate, bookField: 'usdBookRate' as const, curRate: curUSD, gain: gainUSD },
                       { cur: 'EUR', bal: fxPos.eurBalance, balField: 'eurBalance' as const, book: fxPos.eurBookRate, bookField: 'eurBookRate' as const, curRate: curEUR, gain: gainEUR },
@@ -3842,35 +3866,35 @@ export default function MuhasebePage(props: Props) {
                         <ModuleHeader title={tr635?'Kur Değerleme (FX Revaluation)':'FX Revaluation'} subtitle={tr635?'Açık döviz pozisyonlarının dönem sonu kur farkı hesabı':'Period-end FX revaluation of open foreign currency balances'} icon={TrendingUp}/>
                         <div className="flex items-center gap-4 flex-wrap">
                           <span className="text-xs text-gray-500">{tr635?'Güncel Kur (TCMB):':'Current Rate (TCMB):'}</span>
-                          <span className="text-sm font-bold text-gray-900">USD ₺{curUSD.toFixed(4)}</span>
-                          <span className="text-sm font-bold text-gray-900">EUR ₺{curEUR.toFixed(4)}</span>
+                          <span className="text-sm font-bold text-gray-900">USD {curUSD === null ? '—' : `₺${curUSD.toFixed(4)}`}</span>
+                          <span className="text-sm font-bold text-gray-900">EUR {curEUR === null ? '—' : `₺${curEUR.toFixed(4)}`}</span>
                           <button onClick={() => void refreshFxRates()} disabled={fxRefreshing} className="apple-button-secondary px-3 py-1.5 text-xs">
                             <RefreshCw className={`w-3.5 h-3.5 ${fxRefreshing?'animate-spin':''}`} /> {tr635?'Kur Güncelle':'Update Rates'}
                           </button>
-                          {(curUSD === 0) && <span className="text-[11px] text-amber-600">{tr635?'Kur çekilemedi — Kur Güncelle\'ye basın':'Rates unavailable — click Update'}</span>}
+                          {(curUSD === null || curEUR === null) && <span className="text-[11px] text-amber-600">{tr635?'Kur çekilemedi — Kur Güncelle\'ye basın':'Rates unavailable — click Update'}</span>}
                         </div>
                         <p className="text-[11px] text-gray-400">{tr635?'Açık bakiye (döviz cinsinden) ve defterdeki kuru girin — otomatik kaydedilir. Güncel kur TCMB\'den canlı çekilir.':'Enter open balance (in FX) and book rate — auto-saved. Current rate is live from the central bank.'}</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {positions.map(fx=>(
-                            <div key={fx.cur} className={`apple-card p-5 border-l-4 ${fx.gain>=0?'border-l-emerald-400':'border-l-red-400'}`}>
+                            <div key={fx.cur} className={`apple-card p-5 border-l-4 ${fx.gain === null ? 'border-l-gray-200' : fx.gain>=0?'border-l-emerald-400':'border-l-red-400'}`}>
                               <p className="text-xs font-bold text-gray-500 mb-3">{fx.cur} {tr635?'Pozisyonu':'Position'}</p>
                               <div className="space-y-2 text-sm">
                                 <div className="flex justify-between items-center"><span className="text-gray-500">{tr635?'Açık Bakiye':'Open Balance'} ({fx.cur})</span><FxInput value={fx.bal} onChange={v=>updateFx(fx.balField, v)} /></div>
                                 <div className="flex justify-between items-center"><span className="text-gray-500">{tr635?'Defterdeki Kur':'Book Rate'}</span><FxInput value={fx.book} onChange={v=>updateFx(fx.bookField, v)} w="w-24" /></div>
-                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">₺{fx.curRate.toFixed(4)}</span></div>
-                                <div className={`flex justify-between pt-2 border-t border-gray-100 font-black ${fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
+                                <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">{fx.curRate === null ? '—' : `₺${fx.curRate.toFixed(4)}`}</span></div>
+                                <div className={`flex justify-between pt-2 border-t border-gray-100 font-black ${fx.gain === null ? 'text-gray-400' : fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
                                   <span>{tr635?'Kur Farkı':'FX Gain/Loss'}</span>
-                                  <span>{fx.gain>=0?'+':'-'}₺{Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}</span>
+                                  <span>{fx.gain === null ? '—' : `${fx.gain>=0?'+':'-'}₺${Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}`}</span>
                                 </div>
                               </div>
                             </div>
                           ))}
                         </div>
-                        <div className={`apple-card p-4 flex items-center gap-3 ${(gainUSD+gainEUR)>=0?'bg-emerald-50':'bg-red-50'}`}>
-                          <TrendingUp className={`w-5 h-5 ${(gainUSD+gainEUR)>=0?'text-emerald-600':'text-red-600'}`}/>
+                        <div className={`apple-card p-4 flex items-center gap-3 ${netGain === null ? 'bg-gray-50' : netGain>=0?'bg-emerald-50':'bg-red-50'}`}>
+                          <TrendingUp className={`w-5 h-5 ${netGain === null ? 'text-gray-400' : netGain>=0?'text-emerald-600':'text-red-600'}`}/>
                           <div>
                             <p className="text-xs text-gray-500">{tr635?'Net Kur Farkı (Değerleme Sonucu)':'Net FX Position (Revaluation Result)'}</p>
-                            <p className={`text-lg font-black ${(gainUSD+gainEUR)>=0?'text-emerald-700':'text-red-700'}`}>{(gainUSD+gainEUR)>=0?'+':'-'}₺{Math.round(Math.abs(gainUSD+gainEUR)).toLocaleString('tr-TR')}</p>
+                            <p className={`text-lg font-black ${netGain === null ? 'text-gray-400' : netGain>=0?'text-emerald-700':'text-red-700'}`}>{netGain === null ? '—' : `${netGain>=0?'+':'-'}₺${Math.round(Math.abs(netGain)).toLocaleString('tr-TR')}`}</p>
                           </div>
                         </div>
                       </motion.div>

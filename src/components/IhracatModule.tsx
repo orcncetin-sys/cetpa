@@ -93,11 +93,18 @@ function statusBadge(durum: string) {
 
 export default function IhracatModule({ currentLanguage, isAuthenticated, exchangeRates }: { currentLanguage: string; isAuthenticated: boolean; exchangeRates?: Record<string, number> | null }) {
   // Karışık dövizleri (USD/EUR) ₺'ye çevir (önce ham toplanıp USD etiketleniyordu).
-  const toTRY = (amount: number, doviz?: string) => {
+  //
+  // YÖN NOTU: burada döviz → ₺ (ÇARPMA) yapılıyor; utils/currency'deki
+  // `kurCevir` TERS yönü (₺ → döviz, BÖLME) yapar, bu yüzden buraya uymaz.
+  // Ondan devralınan şey KARAR: kur yoksa uydurma, `null` dön.
+  // Eskiden `?? 38` / `?? 41` vardı — 2024'ten kalma sabit kurlar KPI'yi
+  // sessizce yanlış basıyordu (CLAUDE.md: "sahte kesinlik gösterme").
+  const toTRY = (amount: number, doviz?: string): number | null => {
     const a = Number(amount) || 0;
-    if (doviz === 'EUR') return a * (exchangeRates?.EUR ?? 41);
-    if (doviz === 'USD') return a * (exchangeRates?.USD ?? 38);
-    return a;
+    if (!doviz || doviz === 'TRY') return a; // ₺ yolu: kur gerekmez
+    const kur = exchangeRates?.[doviz];
+    if (!kur || !isFinite(kur) || kur <= 0) return null;
+    return a * kur;
   };
   const [activeTab, setActiveTab] = useState<'ihracat' | 'ithalat' | 'akreditif' | 'gumruk'>('ihracat');
   const [ihracatlar, setIhracatlar] = useState<Ihracat[]>([]);
@@ -199,7 +206,13 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
     setSaving(false);
   }
 
-  const ihracatToplam = ihracatlar.reduce((s, i) => s + toTRY(i.tutar, i.doviz), 0);
+  // TEK bir kalem çevrilemiyorsa toplam da güvenilir değildir → null ('—' basılır).
+  // Eksik kalemi 0 sayıp yarım toplamı ₺ etiketiyle göstermek hatanın ta kendisiydi.
+  const ihracatToplam = ihracatlar.reduce<number | null>((s, i) => {
+    if (s === null) return null;
+    const v = toTRY(i.tutar, i.doviz);
+    return v === null ? null : s + v;
+  }, 0);
   const bekleyenGumruk = ihracatlar.filter(i => i.gumrukDurumu === 'Bekliyor' || i.gumrukDurumu === 'Gümrükte').length;
 
   const tabs = [
@@ -216,7 +229,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Toplam İhracat', value: ihracatlar.length, color: 'text-brand' },
-            { label: 'Toplam Tutar (₺)', value: `₺${Math.round(ihracatToplam).toLocaleString('tr-TR')}`, color: 'text-green-600' },
+            { label: 'Toplam Tutar (₺)', value: ihracatToplam === null ? '—' : `₺${Math.round(ihracatToplam).toLocaleString('tr-TR')}`, color: 'text-green-600' },
             { label: 'Bekleyen Gümrük', value: bekleyenGumruk, color: 'text-amber-600' },
             { label: 'Ort. Teslimat (gün)', value: '14', color: 'text-blue-600' },
           ].map(kpi => (

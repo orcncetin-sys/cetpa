@@ -24,6 +24,7 @@ import {
 } from '../types';
 import { format } from 'date-fns';
 import { confirmAction } from '../lib/confirm';
+import { kurCevir } from '../utils/currency';
 import { cn } from '../lib/utils';
 import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
@@ -645,17 +646,35 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 </div>
                 {(() => {
                   // Her çalışanın maaşı KENDİ para biriminden ₺'ye çevrilir (önce hepsi TRY sanılıyordu).
-                  const toTRYsal = (amt: number, cur?: string) => (amt || 0) * (cur === 'USD' ? (exchangeRates?.USD ?? 38) : cur === 'EUR' ? (exchangeRates?.EUR ?? 41) : 1);
-                  const totalTRY = employees.reduce((s, e) => s + toTRYsal(e.salary, (e as { salaryCurrency?: string }).salaryCurrency), 0);
-                  const rate = salaryCurrency === 'USD' ? (exchangeRates?.USD ?? 38) : salaryCurrency === 'EUR' ? (exchangeRates?.EUR ?? 41) : 1;
+                  // KUR UYDURULMAZ (2026-08-26): burada `?? 38` / `?? 41` sabitleri vardı — 2024'ten
+                  // kalma kurlarla toplam maaş sessizce yanlış çıkıyordu. Kur yoksa toplam
+                  // hesaplanamaz, '—' gösterilir (CLAUDE.md "sahte kesinlik gösterme").
+                  // NOT: `kurCevir` yalnız ₺→döviz yönünü verir; buradaki döviz→₺ yönü için
+                  // kuru doğrudan okuyoruz — ama yoksa `null` döner, asla varsayılan sayı.
+                  const kurAl = (cur?: string): number | null => {
+                    if (!cur || cur === 'TRY') return 1;
+                    const k = exchangeRates?.[cur];
+                    return typeof k === 'number' && isFinite(k) && k > 0 ? k : null;
+                  };
+                  let toplam = 0;
+                  let kurEksik = false;
+                  for (const e of employees) {
+                    const kur = kurAl((e as { salaryCurrency?: string }).salaryCurrency);
+                    if (kur === null) { kurEksik = true; break; }
+                    toplam += (Number(e.salary) || 0) * kur;
+                  }
+                  const totalTRY: number | null = kurEksik ? null : toplam;
+                  const rate = kurAl(salaryCurrency);
                   const sym = salaryCurrency === 'TRY' ? '₺' : salaryCurrency === 'USD' ? '$' : '€';
-                  const converted = salaryCurrency === 'TRY' ? totalTRY : totalTRY / rate;
+                  const converted = totalTRY === null ? null : kurCevir(totalTRY, salaryCurrency, exchangeRates ?? undefined);
                   return (
                     <>
-                      <p className="text-3xl font-bold text-gray-900">{sym}{converted.toLocaleString('tr-TR', { maximumFractionDigits: salaryCurrency === 'TRY' ? 0 : 0 })}</p>
-                      {salaryCurrency !== 'TRY' && (
+                      <p className="text-3xl font-bold text-gray-900">{converted === null ? '—' : `${sym}${converted.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}</p>
+                      {converted === null ? (
+                        <p className="text-xs text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Kur verisi yok — toplam hesaplanamıyor' : 'No exchange rate data — total unavailable'}</p>
+                      ) : salaryCurrency !== 'TRY' && totalTRY !== null && rate !== null ? (
                         <p className="text-xs text-gray-400 mt-0.5">₺{totalTRY.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · 1 {salaryCurrency} = ₺{rate.toFixed(2)}</p>
-                      )}
+                      ) : null}
                     </>
                   );
                 })()}

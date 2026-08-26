@@ -22,7 +22,7 @@ import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrency, formatInCurrency, kurCevir } from '../utils/currency';
 import { scoreLead } from '../services/geminiService';
 import { pushMikroEvrak, ziyaretPayload } from '../services/mikroEvrak';
 import { pullCariFromMikro, type MikroCariItem } from '../services/mikroService';
@@ -229,15 +229,22 @@ export default function CRMPage({
     setter: (v: { key: string; dir: 'asc' | 'desc' }) => void
   ) => setter({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' });
 
+  // KPI tutarı biçimlendirme. Kur yoksa UYDURMA (eskiden `?? 32` / `?? 35` ile
+  // 2024'ten kalma sabit kur kullanılıyordu) — `kurCevir` null döner, '—' basarız.
+  // TRY seçiliyken kur hiç gerekmez, davranış eskisiyle aynı.
   const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 32;
-    const eur = exchangeRates?.EUR ?? 35;
-    const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
+    const cv = kurCevir(v, kpiCurrency, exchangeRates);
+    if (cv === null) return '—';
     const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
     const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
+  };
+
+  // İşaretli fark (+/-). fmtKpi '—' döndüyse başına '+' KOYMA — "+—" saçma olur.
+  const fmtKpiDelta = (v: number, positive: boolean, fmt: 'full' | 'K' = 'K', decimals = 1): string => {
+    const s = fmtKpi(Math.abs(v), fmt, decimals);
+    return s === '—' ? s : `${positive ? '+' : ''}${s}`;
   };
 
   const KpiCurrencyToggle = () => (
@@ -1256,11 +1263,9 @@ export default function CRMPage({
                               <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">
                                 {currentLanguage === 'tr' ? 'Standart Fiyat' : 'Standard Price'}
                                 {' '}₺
-                                {priceOverrideForm.standardPrice > 0 && kpiCurrency !== 'TRY' && (() => {
-                                  const r = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
-                                  const sym = kpiCurrency === 'USD' ? '$' : '€';
-                                  return <span className="text-brand ml-1 normal-case font-bold">≈ {sym}{(priceOverrideForm.standardPrice / r).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>;
-                                })()}
+                                {priceOverrideForm.standardPrice > 0 && kpiCurrency !== 'TRY' && (
+                                  <span className="text-brand ml-1 normal-case font-bold">≈ {formatInCurrency(priceOverrideForm.standardPrice, kpiCurrency, exchangeRates ?? undefined)}</span>
+                                )}
                               </label>
                               <input type="number" className="apple-input w-full" value={priceOverrideForm.standardPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, standardPrice: Number(e.target.value) }))} />
                             </div>
@@ -1268,11 +1273,9 @@ export default function CRMPage({
                               <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">
                                 {currentLanguage === 'tr' ? 'Talep Edilen Fiyat' : 'Requested Price'}
                                 {' '}₺
-                                {priceOverrideForm.requestedPrice > 0 && kpiCurrency !== 'TRY' && (() => {
-                                  const r = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : (exchangeRates?.EUR || 1);
-                                  const sym = kpiCurrency === 'USD' ? '$' : '€';
-                                  return <span className="text-brand ml-1 normal-case font-bold">≈ {sym}{(priceOverrideForm.requestedPrice / r).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>;
-                                })()}
+                                {priceOverrideForm.requestedPrice > 0 && kpiCurrency !== 'TRY' && (
+                                  <span className="text-brand ml-1 normal-case font-bold">≈ {formatInCurrency(priceOverrideForm.requestedPrice, kpiCurrency, exchangeRates ?? undefined)}</span>
+                                )}
                               </label>
                               <input type="number" className="apple-input w-full" value={priceOverrideForm.requestedPrice || ''} onChange={e => setPriceOverrideForm(f => ({ ...f, requestedPrice: Number(e.target.value) }))} />
                             </div>
@@ -1694,7 +1697,7 @@ export default function CRMPage({
                                   </td>
                                   <td className="px-4 py-3 text-right text-gray-700">{actual > 0 ? fmtKpi(actual) : <span className="text-gray-300">—</span>}</td>
                                   <td className={`px-4 py-3 text-right ${target > 0 && actual > 0 ? (gap >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-gray-300'}`}>
-                                    {target > 0 && actual > 0 ? `${gap >= 0 ? '+' : ''}${fmtKpi(Math.abs(gap),'K',1)}` : '—'}
+                                    {target > 0 && actual > 0 ? fmtKpiDelta(gap, gap >= 0) : '—'}
                                   </td>
                                   <td className={`px-4 py-3 text-right font-bold ${statusColor}`}>{target > 0 ? `${pct}%` : '—'}</td>
                                   <td className="px-4 py-3 text-right text-gray-500">{dealsByMonth[m.key] || 0}</td>
@@ -1710,7 +1713,7 @@ export default function CRMPage({
                                 <td className="px-4 py-3 text-right text-xs">{fmtKpi(totalTarget12,'K',1)}</td>
                                 <td className="px-4 py-3 text-right text-xs">{fmtKpi(totalActual12,'K',1)}</td>
                                 <td className={`px-4 py-3 text-right text-xs ${totalActual12 >= totalTarget12 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                  {totalActual12 >= totalTarget12 ? '+' : ''}{fmtKpi(Math.abs(totalActual12-totalTarget12),'K',1)}
+                                  {fmtKpiDelta(totalActual12 - totalTarget12, totalActual12 >= totalTarget12)}
                                 </td>
                                 <td className={`px-4 py-3 text-right text-xs ${avg12Pct >= 100 ? 'text-emerald-600' : avg12Pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}>%{avg12Pct}</td>
                                 <td className="px-4 py-3 text-right text-xs">{Object.values(dealsByMonth).reduce((s, v) => s + v, 0)}</td>
@@ -1917,15 +1920,15 @@ export default function CRMPage({
                 const avgScore   = leads.filter(l => l.score != null).length > 0
                   ? Math.round(leads.filter(l => l.score != null).reduce((s, l) => s + (l.score ?? 0), 0) / leads.filter(l => l.score != null).length)
                   : null;
-                const p91Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
                 const p91Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const p91Val  = kpiCurrency === 'TRY' ? pipelineVal : pipelineVal / p91Rate;
+                // Kur yoksa null — TL rakamı '$'/'€' ile basmak ~38× şişkin gösterirdi.
+                const p91Val  = kurCevir(pipelineVal, kpiCurrency, exchangeRates);
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { label: currentLanguage === 'tr' ? 'Toplam Aday' : 'Total Leads',    value: total.toString(),       sub: null,                        color: 'text-gray-800' },
                       { label: currentLanguage === 'tr' ? 'Kazanma Oranı' : 'Win Rate',      value: `${winRate}%`,          sub: `${closed} ${currentLanguage==='tr'?'kapandı':'closed'}`, color: winRate >= 40 ? 'text-emerald-700' : winRate >= 20 ? 'text-amber-700' : 'text-red-600' },
-                      { label: currentLanguage === 'tr' ? 'Pipeline Değeri' : 'Pipeline Value', value: `${p91Sym}${p91Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, sub: currentLanguage==='tr'?'aktif adaylar':'active leads', color: 'text-blue-700' },
+                      { label: currentLanguage === 'tr' ? 'Pipeline Değeri' : 'Pipeline Value', value: p91Val === null ? '—' : `${p91Sym}${p91Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, sub: currentLanguage==='tr'?'aktif adaylar':'active leads', color: 'text-blue-700' },
                       { label: currentLanguage === 'tr' ? 'Ort. AI Puanı' : 'Avg AI Score',  value: avgScore != null ? `${avgScore}/100` : '—',  sub: `${convRate}% ${currentLanguage==='tr'?'dönüşüm':'conversion'}`, color: avgScore != null && avgScore >= 70 ? 'text-emerald-700' : 'text-gray-700' },
                     ].map((s, i) => (
                       <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
@@ -2195,12 +2198,11 @@ export default function CRMPage({
                                     .filter(o => o.customerName === lead.name || o.customerName === lead.company)
                                     .reduce((s, o) => s + (o.totalPrice || 0), 0);
                                   if (rev === 0) return null;
-                                  const p85Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
                                   const p85Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                                  const p85Val  = kpiCurrency === 'TRY' ? rev : rev / p85Rate;
+                                  const p85Val  = kurCevir(rev, kpiCurrency, exchangeRates);
                                   return (
                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0">
-                                      {p85Sym}{p85Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      {p85Val === null ? '—' : `${p85Sym}${p85Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
                                     </span>
                                   );
                                 })()}
@@ -2413,7 +2415,11 @@ export default function CRMPage({
                                   <div className="flex items-center justify-between mb-0.5">
                                     <p className="text-[11px] font-semibold text-gray-700 truncate">{name}</p>
                                     <p className="text-[11px] font-bold text-gray-800 ml-2 flex-shrink-0">
-                                      {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?rev:rev/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                                      {(() => {
+                                        const cevrilen = kurCevir(rev, kpiCurrency, exchangeRates);
+                                        if (cevrilen === null) return '—';
+                                        return `${kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}${cevrilen.toLocaleString('tr-TR',{maximumFractionDigits:0})}`;
+                                      })()}
                                     </p>
                                   </div>
                                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -3325,9 +3331,12 @@ export default function CRMPage({
                     {/* Phase 96 + Phase 104: Financial summary + CLV + Churn Risk */}
                     {(() => {
                       const custOrders = orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name);
-                      const p96Rate   = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
                       const p96Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                      const fmt       = (v: number) => `${p96Sym}${(kpiCurrency === 'TRY' ? v : v / p96Rate).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                      const fmt       = (v: number) => {
+                        const cevrilen = kurCevir(v, kpiCurrency, exchangeRates);
+                        if (cevrilen === null) return '—';
+                        return `${p96Sym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                      };
                       if (custOrders.length === 0) return null;
                       const totalRev  = custOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);

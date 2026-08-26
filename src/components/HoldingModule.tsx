@@ -59,19 +59,28 @@ const ACCOUNT_TYPES: { value: GLAccount['type']; label: string; sign: 1 | -1 }[]
   { value: 'expense', label: 'Gider / Expense', sign: -1 },
 ];
 
-function fmt(n: number, currency = 'TRY') {
+// `null` = kur verisi olmadigi icin hesaplanamadi. Uydurma sayi yerine '—'.
+function fmt(n: number | null, currency = 'TRY') {
+  if (n === null) return '—';
   return new Intl.NumberFormat('tr-TR', { style: 'currency', currency, minimumFractionDigits: 0 }).format(n);
 }
 
 export default function HoldingModule({ currentLanguage, isAuthenticated, exchangeRates }: HoldingModuleProps) {
   const tr = currentLanguage === 'tr';
-  // Konsolidasyon tek raporlama para birimine (₺) çevrilir. Canlı kur yoksa yedek.
-  const toTRY = (amount: number, currency = 'TRY') => {
+  // Konsolidasyon tek raporlama para birimine (₺) çevrilir.
+  // KUR UYDURULMAZ (2026-08-26): burada `?? 38` / `?? 41` sabitleri vardı ve 2024'ten kalma
+  // kurlarla TÜM konsolide bilanço/gelir tablosu sessizce yanlış çıkıyordu. Kur yoksa `null`
+  // döner ve o gösterge '—' olur (CLAUDE.md "sahte kesinlik gösterme").
+  const toTRY = (amount: number, currency = 'TRY'): number | null => {
     const amt = Number(amount) || 0;
-    if (currency === 'USD') return amt * (exchangeRates?.USD ?? 38);
-    if (currency === 'EUR') return amt * (exchangeRates?.EUR ?? 41);
-    return amt;
+    if (!currency || currency === 'TRY') return amt;
+    const kur = exchangeRates?.[currency];
+    if (typeof kur !== 'number' || !isFinite(kur) || kur <= 0) return null;
+    return amt * kur;
   };
+  // null "bulaşıcıdır": bir kalem çevrilemiyorsa onu içeren toplam da hesaplanamaz.
+  const topla = (a: number | null, b: number | null): number | null =>
+    a === null || b === null ? null : a + b;
   const [view, setView] = useState<'entities' | 'coa' | 'intercompany' | 'consolidation'>('entities');
   const [entities, setEntities] = useState<Entity[]>([]);
   const [accounts, setAccounts] = useState<GLAccount[]>([]);
@@ -135,18 +144,19 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
 
   // Consolidation: aggregate accounts across entities with ownership weighting, eliminate IC
   const consolidation = useMemo(() => {
-    const result: Record<GLAccount['type'], { code: string; name: string; balance: number; currency: string }[]> = {
+    const result: Record<GLAccount['type'], { code: string; name: string; balance: number | null; currency: string }[]> = {
       asset: [], liability: [], equity: [], revenue: [], expense: []
     };
     // Group by type+name for consolidation
-    const map: Record<string, { balance: number; currency: string; type: GLAccount['type']; name: string; code: string }> = {};
+    const map: Record<string, { balance: number | null; currency: string; type: GLAccount['type']; name: string; code: string }> = {};
     accounts.forEach(a => {
       const entity = entities.find(e => e.id === a.entityId);
       const ownershipFactor = (entity?.ownership ?? 100) / 100;
       const key = `${a.type}||${a.code}||${a.name}`;
       // Tüm bakiyeler ₺'ye çevrilip ağırlıklandırılır (önce karışık para birimi ham toplanıyordu).
       if (!map[key]) map[key] = { balance: 0, currency: 'TRY', type: a.type, name: a.name, code: a.code };
-      map[key].balance += toTRY(a.balance, a.currency) * ownershipFactor;
+      const tl = toTRY(a.balance, a.currency);
+      map[key].balance = topla(map[key].balance, tl === null ? null : tl * ownershipFactor);
     });
     Object.values(map).forEach(item => {
       result[item.type].push({ code: item.code, name: item.name, balance: item.balance, currency: 'TRY' });
@@ -157,29 +167,38 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
   }, [accounts, entities, exchangeRates]);
 
   // Elimine edilen şirketler-arası işlemler ₺ cinsinden (konsolide varlık+borçtan düşülür).
-  const icEliminatedTRY = useMemo(
-    () => intercompany.filter(ic => ic.eliminated).reduce((s, ic) => s + toTRY(ic.amount, ic.currency), 0),
+  const icEliminatedTRY = useMemo<number | null>(
+    () => intercompany.filter(ic => ic.eliminated).reduce<number | null>((s, ic) => topla(s, toTRY(ic.amount, ic.currency)), 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [intercompany, exchangeRates]
   );
 
-  const totalAssets = consolidation.asset.reduce((s,a) => s + a.balance, 0) - icEliminatedTRY;
-  const totalLiabilities = consolidation.liability.reduce((s,a) => s + a.balance, 0) - icEliminatedTRY;
-  const totalEquity = consolidation.equity.reduce((s,a) => s + a.balance, 0);
-  const totalRevenue = consolidation.revenue.reduce((s,a) => s + a.balance, 0);
-  const totalExpense = consolidation.expense.reduce((s,a) => s + a.balance, 0);
-  const netIncome = totalRevenue - totalExpense;
+  const toplamBakiye = (arr: { balance: number | null }[]): number | null =>
+    arr.reduce<number | null>((s, a) => topla(s, a.balance), 0);
+  const eksi = (a: number | null, b: number | null): number | null =>
+    a === null || b === null ? null : a - b;
+
+  const totalAssets = eksi(toplamBakiye(consolidation.asset), icEliminatedTRY);
+  const totalLiabilities = eksi(toplamBakiye(consolidation.liability), icEliminatedTRY);
+  const totalEquity = toplamBakiye(consolidation.equity);
+  const totalRevenue = toplamBakiye(consolidation.revenue);
+  const totalExpense = toplamBakiye(consolidation.expense);
+  const netIncome = eksi(totalRevenue, totalExpense);
+  // Net kâr bilinmiyorsa yeşil/kırmızı da yanıltıcı olur — nötr gri.
+  const netPozitif: boolean | null = netIncome === null ? null : netIncome >= 0;
+  const netRenk = netPozitif === null ? 'text-gray-400' : netPozitif ? 'text-green-600' : 'text-red-500';
 
   const entityMap = Object.fromEntries(entities.map(e => [e.id, e]));
 
   const icByEntity = useMemo(() => {
-    const totals: Record<string, { receivable: number; payable: number }> = {};
+    const totals: Record<string, { receivable: number | null; payable: number | null }> = {};
     intercompany.forEach(ic => {
       if (!totals[ic.fromEntityId]) totals[ic.fromEntityId] = { receivable: 0, payable: 0 };
       if (!totals[ic.toEntityId]) totals[ic.toEntityId] = { receivable: 0, payable: 0 };
       if (!ic.eliminated) {
-        totals[ic.fromEntityId].receivable += toTRY(ic.amount, ic.currency);
-        totals[ic.toEntityId].payable += toTRY(ic.amount, ic.currency);
+        const tl = toTRY(ic.amount, ic.currency);
+        totals[ic.fromEntityId].receivable = topla(totals[ic.fromEntityId].receivable, tl);
+        totals[ic.toEntityId].payable = topla(totals[ic.toEntityId].payable, tl);
       }
     });
     return totals;
@@ -295,8 +314,8 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                             <span>{e.ownership}%</span>
                           </div>
                         </td>
-                        <td className="p-3 text-right text-green-600">{ic.receivable > 0 ? fmt(ic.receivable, 'TRY') : '-'}</td>
-                        <td className="p-3 text-right text-red-500">{ic.payable > 0 ? fmt(ic.payable, 'TRY') : '-'}</td>
+                        <td className="p-3 text-right text-green-600">{ic.receivable === null ? '—' : ic.receivable > 0 ? fmt(ic.receivable, 'TRY') : '-'}</td>
+                        <td className="p-3 text-right text-red-500">{ic.payable === null ? '—' : ic.payable > 0 ? fmt(ic.payable, 'TRY') : '-'}</td>
                       </tr>
                     );
                   })}
@@ -456,9 +475,9 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: tr ? 'Toplam Varlık' : 'Total Assets', value: totalAssets, icon: TrendingUp, color: 'text-blue-600' },
-              { label: tr ? 'Net Gelir' : 'Net Income', value: netIncome, icon: netIncome >= 0 ? TrendingUp : TrendingDown, color: netIncome >= 0 ? 'text-green-600' : 'text-red-500' },
+              { label: tr ? 'Net Gelir' : 'Net Income', value: netIncome, icon: netPozitif === false ? TrendingDown : TrendingUp, color: netRenk },
               { label: tr ? 'Toplam Borç' : 'Total Liabilities', value: totalLiabilities, icon: Minus, color: 'text-red-500' },
-              { label: tr ? 'Özkaynak' : 'Equity', value: totalEquity + netIncome, icon: Building2, color: 'text-purple-600' },
+              { label: tr ? 'Özkaynak' : 'Equity', value: topla(totalEquity, netIncome), icon: Building2, color: 'text-purple-600' },
             ].map((m, i) => (
               <div key={i} className="apple-card p-4">
                 <div className="flex items-center justify-between mb-2">
@@ -472,6 +491,17 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
 
           {/* Bilanço eşitliği kontrolü: Varlık = Borç + Özkaynak (net gelir dahil) */}
           {(() => {
+            // Bilesenlerden biri kur eksikligi yuzunden hesaplanamiyorsa "dengeli/dengesiz"
+            // hukmu de verilemez — TL uzerinden hesaplayip ₺ basmak yaniltici olurdu.
+            if (totalAssets === null || totalLiabilities === null || totalEquity === null || netIncome === null) {
+              return (
+                <div className="apple-card p-3 flex items-center gap-2 text-sm text-gray-500">
+                  {tr
+                    ? 'Denge kontrolü yapılamıyor — bazı hesapların para birimi için kur verisi yok.'
+                    : 'Balance check unavailable — exchange rate data missing for some accounts.'}
+                </div>
+              );
+            }
             const fark = totalAssets - (totalLiabilities + totalEquity + netIncome);
             const dengeli = Math.abs(fark) < 1;
             return (
@@ -498,17 +528,17 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                 </div>
                 <div className="border-t border-gray-100 pt-2 flex justify-between text-sm font-semibold">
                   <span>{tr ? 'Net Kar/Zarar' : 'Net Income/Loss'}</span>
-                  <span className={netIncome >= 0 ? 'text-green-600' : 'text-red-500'}>{fmt(netIncome)}</span>
+                  <span className={netRenk}>{fmt(netIncome)}</span>
                 </div>
               </div>
               <div className="mt-3">
                 <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
                   <span>{tr ? 'Kar Marjı' : 'Net Margin'}</span>
-                  <span className="font-medium">{totalRevenue > 0 ? ((netIncome/totalRevenue)*100).toFixed(1) : 0}%</span>
+                  <span className="font-medium">{(totalRevenue === null || netIncome === null) ? '—' : `${totalRevenue > 0 ? ((netIncome/totalRevenue)*100).toFixed(1) : 0}%`}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${netIncome >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(Math.abs(totalRevenue > 0 ? (netIncome/totalRevenue)*100 : 0), 100)}%` }} />
+                  <div className={`h-full rounded-full ${netPozitif === false ? 'bg-red-500' : 'bg-green-500'}`}
+                    style={{ width: `${(totalRevenue === null || netIncome === null) ? 0 : Math.min(Math.abs(totalRevenue > 0 ? (netIncome/totalRevenue)*100 : 0), 100)}%` }} />
                 </div>
               </div>
             </div>
@@ -531,11 +561,11 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                 </div>
                 <div className="border-t border-gray-100 pt-2 flex justify-between text-sm font-semibold">
                   <span>{tr ? 'Dönem Net Karı' : 'Period Net Income'}</span>
-                  <span className={netIncome >= 0 ? 'text-green-600' : 'text-red-500'}>{fmt(netIncome)}</span>
+                  <span className={netRenk}>{fmt(netIncome)}</span>
                 </div>
               </div>
               {/* Debt ratio */}
-              {totalAssets > 0 && (
+              {totalAssets !== null && totalLiabilities !== null && totalAssets > 0 && (
                 <div className="mt-3">
                   <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
                     <span>{tr ? 'Borç Oranı' : 'Debt Ratio'}</span>

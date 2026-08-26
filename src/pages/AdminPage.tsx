@@ -19,6 +19,7 @@ import SuperAdminPanel from '../components/SuperAdminPanel';
 import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
+import { kurCevir } from '../utils/currency';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -140,13 +141,15 @@ export default function AdminPage({
     if (adminTab === 'system') void fetchSystemHealth();
   }, [adminTab, fetchSystemHealth]);
 
+  // Kur yoksa ARTIK 2024'ten kalma sabit kur (32/35) uydurulmuyor: kurCevir
+  // null döner ve hücre '—' basar. Sembol '—' yolunda EKLENMEZ ("$—" saçma).
+  // TRY yolu kasıtlı olarak AYNEN korundu: kurCevir(_, 'TRY', _) tutarı olduğu
+  // gibi döndürür, biçimleme (locale + maximumFractionDigits) hiç değişmedi.
   const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 32;
-    const eur = exchangeRates?.EUR ?? 35;
-    const rate = kpiCurrency === 'USD' ? usd : kpiCurrency === 'EUR' ? eur : 1;
+    const cv = kurCevir(v, kpiCurrency, exchangeRates);
+    if (cv === null) return '—';
     const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
     const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
   };
@@ -207,8 +210,9 @@ export default function AdminPage({
           {/* Revenue card with currency toggle */}
           {(() => {
             const totalTRY = orders.reduce((s,o)=>s+(o.totalPrice||0),0);
-            const rate = kpiCurrency === 'USD' ? (exchangeRates?.USD || 1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
-            const converted = kpiCurrency === 'TRY' ? totalTRY : totalTRY / rate;
+            // `|| 1` kaldırıldı: kur yokken TL tutarı olduğu gibi kalıp başına '$'
+            // konuyordu (₺40.000 → "$40.000", ~38× şişkin). Artık null → '—'.
+            const converted = kurCevir(totalTRY, kpiCurrency, exchangeRates);
             const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
             return (
               <div className="apple-card p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('reports')}>
@@ -223,7 +227,7 @@ export default function AdminPage({
                     ))}
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-green-600">{symbol}{converted.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
+                <div className="text-2xl font-bold text-green-600">{converted === null ? '—' : `${symbol}${converted.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0})}`}</div>
               </div>
             );
           })()}
@@ -681,7 +685,11 @@ export default function AdminPage({
               name: 'TCMB Kur API',
               ok: !!exchangeRates as boolean|null,
               status: exchangeRates ? (currentLanguage==='tr' ? 'Bağlı' : 'Connected') : (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending'),
-              desc: exchangeRates ? `1 USD = ₺${(exchangeRates.USD||0).toFixed(2)}` : (currentLanguage==='tr' ? 'Güncelleniyor...' : 'Fetching...'),
+              // Kurun KENDİSİNİ gösteren etiket: `|| 0` kur gelmeden "1 USD = ₺0.00"
+              // gibi sahte kesinlik üretiyordu. Geçerli kur yoksa rakam HİÇ basılmaz.
+              desc: (exchangeRates?.USD && isFinite(exchangeRates.USD) && exchangeRates.USD > 0)
+                ? `1 USD = ₺${exchangeRates.USD.toFixed(2)}`
+                : (currentLanguage==='tr' ? 'Güncelleniyor...' : 'Fetching...'),
               optional: false,
               settingsTab: null as string|null,
             },

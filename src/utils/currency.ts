@@ -67,6 +67,38 @@ export const formatAmount = (amount: number, currency: string): string => {
   return bicimle(amount, currency);
 };
 
+/**
+ * TL tutarını hedef para birimine çevirir. KUR YOKSA `null` — asla uydurma
+ * bir kur kullanmaz.
+ *
+ * NEDEN VAR (2026-08-26): `formatInCurrency` bu kararı zaten DOĞRU veriyordu
+ * ('—' döner, bkz. C4 notu aşağıda) ama bir STRING döndürdüğü için, sayıya
+ * ihtiyaç duyan çağıranlar onu kullanamıyor ve dönüşümü satır içinde YENİDEN
+ * yazıyordu. O kopyalar iki biçimde yanlıştı:
+ *
+ *   `exchangeRates?.USD || 1`      → kur yoksa TL tutarı OLDUĞU GİBİ kalır ve
+ *                                    başına '$' konur: ₺40.000 → "$40.000"
+ *                                    (~38× şişkin). 8 dosyada vardı.
+ *   `exchangeRates?.USD ?? 38`     → 2024'ten kalma SABİT kur. 5 dosyada vardı
+ *                                    (32 / 35 / 38 / 41 gibi değerlerle).
+ *
+ * İkisi de CLAUDE.md'nin "sahte kesinlik gösterme" kuralının ihlali: rakam
+ * güvenilir hesaplanamıyorsa yanıltıcı bir sayı değil '—' gösterilmeli.
+ *
+ * Çağıran `null` aldığında sayıyı BASMAMALI — '—' göstermeli.
+ */
+export const kurCevir = (
+  amountInTRY: number,
+  currency: string,
+  exchangeRates?: ExchangeRates | null,
+): number | null => {
+  if (!isFinite(amountInTRY)) return null;
+  if (currency === 'TRY') return amountInTRY;
+  const kur = exchangeRates?.[currency];
+  if (!kur || !isFinite(kur) || kur <= 0) return null;
+  return amountInTRY / kur;
+};
+
 export const formatInCurrency = (
   amountInTRY: number,
   currency: string,
@@ -74,6 +106,7 @@ export const formatInCurrency = (
 ): string => {
   if (!isFinite(amountInTRY)) return `0 ${currency}`;
 
+  // Cevirinin kendisi `kurCevir`de — iki kopya kacinilmaz olarak sapardi.
   let converted = amountInTRY;
   if (currency !== 'TRY') {
     const kur = exchangeRates?.[currency];

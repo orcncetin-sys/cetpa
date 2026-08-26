@@ -34,7 +34,7 @@ import {
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, kurCevir } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -87,12 +87,22 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   const [logisticsSummarySort, setLogisticsSummarySort] = useState<{key: string; dir: 'asc'|'desc'}>({key: 'customerName', dir: 'asc'});
   // fmtAna uses revenueCurrency (same as the per-card toggle — no separate global state needed)
   const fmtAna = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const usd = exchangeRates?.USD ?? 38; // FX fallback (App.tsx FX_FALLBACK ile hizalı)
-    const eur = exchangeRates?.EUR ?? 41;
-    const rate = revenueCurrency === 'USD' ? usd : revenueCurrency === 'EUR' ? eur : 1;
+    // TL YOLU DEĞİŞMEDİ: eskiden de `rate` 1'di ve `v / 1 === v`. Çeviri yalnız
+    // USD/EUR seçiliyken devreye girer.
+    //
+    // ESKİDEN: `exchangeRates?.USD ?? 38` / `?? 41` — 2024'ten kalma SABİT kur.
+    // TCMB kuru gelmemişken tüm rapor KPI'ları bu ölü kurla hesaplanıp gerçek
+    // rakammış gibi basılıyordu — CLAUDE.md'nin "sahte kesinlik gösterme"
+    // kuralının ihlali. Artık kur yoksa `kurCevir` null döner ve rakam yerine
+    // '—' gösterilir.
+    //
+    // '—' GÜVENLİ (2026-08-26 ölçüldü): fmtAna'nın 211 çağırma yerinin tamamı JSX
+    // içinde salt gösterim. Hiçbir CSV/PDF hücresine ya da hesaba akmıyor —
+    // aşağıdaki exportPDF ham TL tutarı kendi yazıyor.
+    const cv = revenueCurrency === 'TRY' ? v : kurCevir(v, revenueCurrency, exchangeRates);
+    if (cv === null) return '—';
     const sym = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
     const locale = revenueCurrency === 'USD' ? 'en-US' : revenueCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    const cv = v / rate;
     if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
     return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
   };

@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves, Info } from 'lucide-react';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { zamanMs } from '../utils/zaman';
+import { kurCevir } from '../utils/currency';
 
 interface Order {
   id?: string;
@@ -49,9 +50,20 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
 
   // Use external currency if provided, otherwise local toggle
   const currency = externalCurrency ?? localCurrency;
-  const fxRate   = currency === 'USD' ? (exchangeRates?.USD || 1) : currency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
   const sym      = currency === 'TRY' ? '₺' : currency === 'USD' ? '$' : '€';
-  const cvt      = (v: number) => (currency === 'TRY' ? v : v / fxRate).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+  // KUR UYDURMASI KALDIRILDI (2026-08-26). Eskiden kur okunurken "yoksa 1"
+  // yedegi vardi: bolen 1 olunca TL tutari OLDUGU GIBI kalip
+  // basina '$' konuyordu (₺40.000 -> "$40.000", ~38 kat sisirilmis).
+  // Cevirinin tek dogru yeri `kurCevir`; kur yoksa null doner, biz de
+  // yaniltici bir sayi yerine '—' basariz (CLAUDE.md: sahte kesinlik yok).
+  // TRY yolunda `kurCevir` tutari aynen dondurur -> davranis birebir ayni.
+  // Sembol de ICERIDE ekleniyor: cagri yerleri disaridan {sym} eklerse kur
+  // yokken "$—" gibi bir sey cikardi.
+  const cvt      = (v: number): string => {
+    const cevrilen = kurCevir(v, currency, exchangeRates);
+    if (cevrilen === null) return '—';
+    return `${sym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+  };
 
   // Native orders (bu caride Mikro-ağırlıklı satışlar orders'a değil mikroFaturalar'a
   // düşüyor — orders tek başına kullanılınca panel hep ₺0 gösteriyordu, 2026-08-13).
@@ -108,9 +120,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   };
 
   const kpis = [
-    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: `${sym}${cvt(combinedRevenue)}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: `${sym}${cvt(combinedCost)}`,    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
-    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: `${sym}${cvt(combinedProfit)}`,       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
+    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: cvt(combinedRevenue), icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: cvt(combinedCost),    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
+    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: cvt(combinedProfit),       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
   ];
 
   // Phase 98: Unpaid revenue analytics
@@ -192,7 +204,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 : `${unpaidOrders.length} order${unpaidOrders.length !== 1 ? 's' : ''} with pending payment`}
             </p>
             <p className="text-xs text-amber-600 mt-0.5">
-              {sym}{cvt(unpaidRevenue)} {currentLanguage === 'tr' ? 'tahsil bekliyor' : 'outstanding'} · {currentLanguage === 'tr' ? 'Tahsilat Oranı' : 'Collection Rate'}: <strong>{collectionRate}%</strong>
+              {cvt(unpaidRevenue)} {currentLanguage === 'tr' ? 'tahsil bekliyor' : 'outstanding'} · {currentLanguage === 'tr' ? 'Tahsilat Oranı' : 'Collection Rate'}: <strong>{collectionRate}%</strong>
             </p>
           </div>
           <div className="flex-shrink-0">
@@ -256,7 +268,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                         />
                       </div>
                       <span className={`text-xs font-bold flex-shrink-0 w-20 text-right ${b.color}`}>
-                        {sym}{cvt(amt)}
+                        {cvt(amt)}
                       </span>
                     </div>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${b.bg} ${b.color}`}>
@@ -270,7 +282,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
               <span className="text-[10px] text-gray-400">
                 {currentLanguage === 'tr' ? 'Toplam tahsil edilmemiş' : 'Total outstanding'}
               </span>
-              <span className="text-xs font-black text-gray-800">{sym}{cvt(unpaidRevenue)}</span>
+              <span className="text-xs font-black text-gray-800">{cvt(unpaidRevenue)}</span>
             </div>
           </div>
         );
@@ -370,7 +382,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Nakit Akış Tahmini' : 'Cash Flow Forecast'}</h3>
               </div>
               <span className="text-[10px] text-gray-400">
-                {currentLanguage === 'tr' ? '4 haftalık tahmin' : '4-week projection'} · {sym}{cvt(totalForecast)}
+                {currentLanguage === 'tr' ? '4 haftalık tahmin' : '4-week projection'} · {cvt(totalForecast)}
               </span>
             </div>
             <div className="px-5 py-4">
@@ -383,7 +395,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                     ? 'bg-blue-300'
                     : 'bg-emerald-300';
                   return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${w.label}: ${sym}${cvt(w.inflow)}`}>
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${w.label}: ${cvt(w.inflow)}`}>
                       <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
                         <div
                           className={`w-full rounded-t-md transition-all duration-500 ${barColor} ${w.isFuture ? 'opacity-60' : ''}`}
@@ -457,7 +469,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                     </td>
                     <td className="py-3.5 px-5 font-medium text-gray-800 hidden sm:table-cell">{o.customerName || '—'}</td>
                     <td className="py-3.5 px-5 text-right font-bold text-gray-900">
-                      {sym}{cvt(o.totalPrice || 0)}
+                      {cvt(o.totalPrice || 0)}
                     </td>
                     <td className="py-3.5 px-5 text-center">
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>

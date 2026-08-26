@@ -14,6 +14,7 @@ import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import type { Order, InventoryItem, Supplier, Lead } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
+import { kurCevir } from '../utils/currency';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
@@ -190,6 +191,11 @@ export default function SatinAlmaPage(props: Props) {
                         const maxCost = Math.max(...months.map(m => m.cost), 1);
                         const totalCost6m = months.reduce((s, m) => s + m.cost, 0);
                         if (totalCost6m === 0) return null;
+                        // Kur yoksa TL tutari yabanci sembolle basmak ~38x sisirme demekti
+                        // (`exchangeRates?.USD || 1`). kurCevir kur yoksa null doner; null'da
+                        // rakam degil '—' gosteriyoruz. TRY yolu aynen korunur.
+                        const sym6m = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+                        const cost6m = kpiCurrency === 'TRY' ? totalCost6m : kurCevir(totalCost6m, kpiCurrency, exchangeRates);
                         return (
                           <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                             <div className="flex items-center justify-between mb-4">
@@ -199,7 +205,7 @@ export default function SatinAlmaPage(props: Props) {
                               </h3>
                               <div className="flex items-center gap-2">
                                 <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
-                                  {kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}{(kpiCurrency==='TRY'?totalCost6m:totalCost6m/(kpiCurrency==='USD'?(exchangeRates?.USD||1):(exchangeRates?.EUR||1))).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                                  {cost6m === null ? '—' : `${sym6m}${cost6m.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
                                 </span>
                                 <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                               </div>

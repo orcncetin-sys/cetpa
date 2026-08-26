@@ -1,5 +1,6 @@
 import { motion } from 'motion/react';
 import { type Order, type Employee } from '../../types';
+import { kurCevir } from '../../utils/currency';
 
 interface GelirTablosuTabProps {
   currentLanguage: string;
@@ -67,9 +68,24 @@ export default function GelirTablosuTab({
   const netDonemKari = vergionceKar - vergiKarsıligi;
 
   // Currency conversion
-  const rate = gelirCurrency === 'USD' ? (exchangeRates?.USD || 1) : gelirCurrency === 'EUR' ? (exchangeRates?.EUR || 1) : 1;
+  //
+  // KUR UYDURMA YOK (2026-08-26). Eskiden `exchangeRates?.USD || 1` vardi: kur
+  // gelmemisse butun gelir tablosu TL rakamlariyla kalip basina '$'/'€' konuyordu
+  // (~38x sisirilmis bir gelir tablosu). Artik `kurCevir` kur yoksa null doner ve
+  // hucre '—' gosterir. TRY secili iken kur hic gerekmez — davranis birebir aynidir.
   const sym = gelirCurrency === 'TRY' ? '₺' : gelirCurrency === 'USD' ? '$' : '€';
-  const fmt = (v: number) => `${sym}${(v / rate).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const gecerliKur: number | null = (() => {
+    if (gelirCurrency === 'TRY') return null; // TRY icin kur gerekmiyor
+    const k = exchangeRates?.[gelirCurrency];
+    return typeof k === 'number' && isFinite(k) && k > 0 ? k : null;
+  })();
+  const kurYok = gelirCurrency !== 'TRY' && gecerliKur === null;
+  const fmt = (v: number) => {
+    const cevrilen = kurCevir(v, gelirCurrency, exchangeRates);
+    return cevrilen === null
+      ? '—'
+      : `${sym}${cevrilen.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
   const fmtPct = (v: number) => `%${v.toFixed(1)}`;
 
   const rows: { label: string; value: number; indent?: number; bold?: boolean; separator?: boolean; isNeg?: boolean; pct?: number; highlight?: string }[] = [
@@ -124,18 +140,29 @@ export default function GelirTablosuTab({
               {cur === 'TRY' ? '₺ TRY' : cur === 'USD' ? '$ USD' : '€ EUR'}
             </button>
           ))}
-          {exchangeRates && gelirCurrency !== 'TRY' && (
+          {gecerliKur !== null && (
             <span className="ml-2 text-[10px] text-gray-400 font-mono">
-              1 {gelirCurrency} = ₺{(gelirCurrency === 'USD' ? exchangeRates.USD : exchangeRates.EUR).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              1 {gelirCurrency} = ₺{gecerliKur.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
+          )}
+          {kurYok && (
+            <span className="ml-2 text-[10px] text-amber-600 font-medium">
+              {currentLanguage === 'tr' ? 'Guncel kur alinamadi' : 'Exchange rate unavailable'}
             </span>
           )}
         </div>
         {/* Export CSV */}
         <button
           onClick={() => {
+            // Kur yoksa yaniltici bir dosya URETME. Butonun kendisi zaten
+            // devre disi; bu yalnizca ikinci bir emniyet kilidi.
+            if (kurYok) return;
             const csvRows = [
               ['Kalem', 'Tutar', 'Marj %'],
-              ...rows.map(r => [r.label.trim(), (r.value / rate).toFixed(2), r.pct ? r.pct.toFixed(1) + '%' : ''])
+              ...rows.map(r => {
+                const cevrilen = kurCevir(r.value, gelirCurrency, exchangeRates);
+                return [r.label.trim(), cevrilen === null ? '' : cevrilen.toFixed(2), r.pct ? r.pct.toFixed(1) + '%' : ''];
+              })
             ];
             const csv = csvRows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
             const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -144,7 +171,9 @@ export default function GelirTablosuTab({
             a.href = url; a.download = `gelir-tablosu-${gtYear}-${String(gtMonth).padStart(2,'0')}.csv`;
             a.click(); URL.revokeObjectURL(url);
           }}
-          className="apple-button-secondary px-4 py-2 text-sm flex items-center gap-2"
+          disabled={kurYok}
+          title={kurYok ? (currentLanguage === 'tr' ? 'Guncel kur alinamadigi icin disa aktarilamiyor' : 'Cannot export: exchange rate unavailable') : undefined}
+          className="apple-button-secondary px-4 py-2 text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
           CSV {currentLanguage === 'tr' ? 'İndir' : 'Export'}

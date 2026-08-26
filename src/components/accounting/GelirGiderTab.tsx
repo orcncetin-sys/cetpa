@@ -3,6 +3,26 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 import { formatInCurrency } from '../../utils/currency';
 import { formatTRY, type AccountingT } from './shared';
 
+/**
+ * Kur ETİKETİ ("1 USD = ₺41,20"). Kur yoksa RAKAM BASMAZ.
+ *
+ * ESKİDEN: `(exchangeRates.USD || 0).toLocaleString(...)` — dış koşul yalnız
+ * `exchangeRates` nesnesinin varlığına bakıyordu, o nesnede USD/EUR anahtarı
+ * eksik ya da 0 olduğunda etiket "1 USD = ₺0,00" yazıyordu. Sıfır bir kur
+ * değil, "veri yok" demek; onu rakam olarak basmak sahte kesinlik.
+ */
+const kurEtiketi = (
+  currency: 'USD' | 'EUR',
+  exchangeRates: Record<string, number> | undefined,
+  currentLanguage: string,
+): string => {
+  const kur = exchangeRates?.[currency];
+  if (!kur || !isFinite(kur) || kur <= 0) {
+    return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
+  }
+  return `1 ${currency} = ₺${kur.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type MonthlyDatum = { month: string; gelir: number; gider: number };
 
@@ -94,8 +114,7 @@ export default function GelirGiderTab({
         ))}
         {exchangeRates && (
           <span className="ml-2 text-[10px] text-gray-400 font-mono">
-            {gelirCurrency === 'USD' ? `1 USD = ₺${(exchangeRates.USD || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
-             gelirCurrency === 'EUR' ? `1 EUR = ₺${(exchangeRates.EUR || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'TCMB'}
+            {gelirCurrency === 'TRY' ? 'TCMB' : kurEtiketi(gelirCurrency, exchangeRates, currentLanguage)}
           </span>
         )}
       </div>

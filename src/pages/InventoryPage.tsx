@@ -150,9 +150,6 @@ export default function InventoryPage(props: Props) {
                 const avgMarginPct = stockVal > 0 && costVal > 0
                   ? Math.round(((stockVal - costVal) / stockVal) * 100)
                   : null;
-                const p94Rate = kpiCurrency === 'USD' ? (exchangeRates?.USD||1) : kpiCurrency === 'EUR' ? (exchangeRates?.EUR||1) : 1;
-                const p94Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                const p94Val  = kpiCurrency === 'TRY' ? stockVal : stockVal / p94Rate;
                 return (
                   <>
                   <div className="flex items-center justify-between mb-1">
@@ -173,7 +170,7 @@ export default function InventoryPage(props: Props) {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
                       { label: currentLanguage === 'tr' ? 'Toplam SKU' : 'Total SKUs',       value: totalSKUs.toString(),  icon: '📋', color: 'text-gray-800',    bg: 'bg-white' },
-                      { label: currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value',     value: `${p94Sym}${p94Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, icon: '💰', color: 'text-blue-700', bg: 'bg-blue-50' },
+                      { label: currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value',     value: fmtKpi(stockVal), icon: '💰', color: 'text-blue-700', bg: 'bg-blue-50' },
                       { label: currentLanguage === 'tr' ? 'Stok Dışı' : 'Out of Stock',      value: outOfStock.toString(), icon: '⚠️', color: outOfStock > 0 ? 'text-red-600' : 'text-emerald-700', bg: outOfStock > 0 ? 'bg-red-50' : 'bg-emerald-50' },
                       { label: currentLanguage === 'tr' ? 'Ort. Marj' : 'Avg Margin',        value: avgMarginPct != null ? `${avgMarginPct}%` : `${totalUnits.toLocaleString()} ${currentLanguage==='tr'?'birim':'units'}`, icon: avgMarginPct != null ? '📊' : '📦', color: avgMarginPct != null ? (avgMarginPct >= 40 ? 'text-emerald-700' : avgMarginPct >= 20 ? 'text-amber-700' : 'text-red-600') : 'text-purple-700', bg: 'bg-white' },
                     ].map((s, i) => (
