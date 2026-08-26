@@ -1,10 +1,8 @@
-import KpiCurrencyToggle from './components/KpiCurrencyToggle';
 import { useShallow } from 'zustand/react/shallow';
 import { zamanMs } from './utils/zaman';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import MuhasebeGroupNav from './components/MuhasebeGroupNav';
-import AIInlineNudge from './components/AIInlineNudge';
 const InventoryViewComponent = React.lazy(() => import('./components/InventoryView'));
 const PriceIntelPanel        = React.lazy(() => import('./components/PriceIntelPanel'));
 const RaporlarPage            = React.lazy(() => import('./pages/RaporlarPage'));

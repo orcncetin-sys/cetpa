@@ -1717,6 +1717,7 @@ export default function LandingPage({
             <img src={heroImageUrl} alt="Demo" className="w-full h-auto blur-[1px] group-hover:blur-0 transition-all duration-500 brightness-75 group-hover:brightness-90" width={1024} height={1024} loading="lazy" />
             <div className="absolute inset-0 flex items-center justify-center">
               <button onClick={onTryClick}
+                aria-label={isTR ? 'Demoyu başlat' : 'Start the demo'}
                 className="relative w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-all duration-300 group-hover:bg-brand">
                 <div className="absolute inset-0 rounded-full bg-white/30" style={{ animation: 'cetpa-pulse-ring 2s ease-out infinite' }} />
                 <div className="absolute inset-0 rounded-full bg-white/20" style={{ animation: 'cetpa-pulse-ring 2s 0.5s ease-out infinite' }} />
@@ -1777,6 +1778,8 @@ export default function LandingPage({
                 {isTR ? 'Aylık' : 'Monthly'}
               </span>
               <button onClick={() => setPricingAnnual(v => !v)}
+                role="switch" aria-checked={pricingAnnual}
+                aria-label={isTR ? 'Yıllık faturalandırma' : 'Annual billing'}
                 className={cn('relative w-12 h-6 rounded-full transition-colors', pricingAnnual ? 'bg-brand' : d('bg-white/15', 'bg-black/15'))}>
                 <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform', pricingAnnual ? 'translate-x-7' : 'translate-x-1')} />
               </button>

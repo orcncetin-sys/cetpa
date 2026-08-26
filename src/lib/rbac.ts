@@ -106,6 +106,11 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   // ama kurali ACIKCA yazmak okumayi da netlestirir ve ileride bir ekran
   // yazmaya kalkarsa sessiz 403 yerine bilincli bir karar olur.
   stockCounts: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  // companies: firma profili (unvan/sektor/buyukluk). Onboarding'de kurucu
+  // yazar (App.tsx:1128), sonrasinda Ayarlar'dan duzenlenir. TENANT'a
+  // 2026-08-25'te eklendi; kuralini yazmayi unutmustum ve collections.test.ts
+  // bunu yakaladi (testin var olma sebebi tam olarak bu).
+  companies: { read: [...STAFF_ROLES], write: ['Admin', 'Manager'] },
   syncJobs: { read: [...STAFF_ROLES], write: [...STAFF_ROLES] },
   cariBalances: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
   mikroSiparisler: { read: [...STAFF_ROLES], write: ['Admin', 'Manager'] },
@@ -271,6 +276,23 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
  * Verilen rolün, koleksiyon+operasyon için yetkili olup olmadığını döner.
  * role null ise (kayıtsız kullanıcı) her zaman false (Public write hariç).
  */
+/**
+ * Bu koleksiyon için AÇIK bir erişim kuralı tanımlı mı?
+ *
+ * Kuralı olmayan koleksiyon `isAllowed`in zero-trust yedeğine düşer: Admin
+ * OLMAYAN personel yalnız OKUR. İstemci oraya yazıyorsa sonuç SESSİZ 403'tür —
+ * kullanıcı "buton çalışmıyor" der, hiçbir log tutulmaz. Bu proje o hatayı
+ * defalarca yaşadı (Araç Ekle, stockCounts sayım arşivi, syncJobs retry kuyruğu).
+ *
+ * `src/lib/collections.test.ts` bunu bir DEĞİŞMEZ olarak sınar: her TENANT
+ * koleksiyonunun ya açık kuralı olmalı, ya ADMIN_ONLY/APPEND_ONLY olmalı.
+ * Doğrudan `isAllowed('Manager', ...)` ile ölçmek YANLIŞ olur — bir kural
+ * Manager'ı BİLEREK dışlayabilir (ör. shareholders yalnız Admin/Corporate).
+ */
+export function hasExplicitRule(coll: string): boolean {
+  return coll in COLLECTION_PERMISSIONS;
+}
+
 export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean {
   // Halka açık koleksiyonlara dışarıdan veri eklenebilir (örn: Landing page). Okumak için Admin gerekir.
   if (PUBLIC_WRITE_COLLECTIONS.has(coll) && op === 'write') return true;
