@@ -265,7 +265,13 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   //    model + kota üçünü birden doğrula. (Probe startServer'da kurulur.)
   try {
     const probe = deps().getAiHealthProbe();
-    if (!probe) add('ai_gemini', true, 'AI probe hazır değil, atlandı');
+    // PROBE YOKSA BU BİR ARIZADIR — 'atlandı' diye YEŞİL geçmez.
+    // Eskiden `add('ai_gemini', true, ...)` idi: probe hiç kurulmamış olsa da
+    // kontrol BAŞARILI görünüyordu, yani "izleme var sanılan yerde izleme
+    // yok" sınıfı. Probe `aiRoutes(app, C)` çağrısında kurulur (server.ts) ve
+    // bekçi startServer'dan saatler sonra koşar; o noktada null olması,
+    // kayıt zincirinin kırıldığı anlamına gelir.
+    if (!probe) add('ai_gemini', false, 'AI sağlık sondası KURULMAMIŞ — aiRoutes kaydı yapılmamış olabilir (setAiHealthProbe hiç çağrılmadı)');
     else { const r = await probe(); add('ai_gemini', r.ok, r.detail); }
   } catch (e) { add('ai_gemini', false, e instanceof Error ? e.message : String(e)); }
 

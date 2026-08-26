@@ -10,6 +10,8 @@ import {
 import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
 import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
+import { erpRoutes } from "./src/server/routes/erpRoutes.js";
+import { aiRoutes } from "./src/server/routes/aiRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten } from "./src/server/eposta.js";
@@ -109,12 +111,8 @@ const EmailSendSchema = z.object({
 
 
 
-// AI chat şeması
-const AiChatSchema = z.object({
-  message:    z.string().min(1).max(4000),
-  context:    z.string().max(8000).optional(),
-  language:   z.enum(['tr', 'en']).optional(),
-});
+// AiChatSchema src/server/schemas.ts'e TASINDI (2026-08-26) - aiRoutes.ts
+// oradan import ediyor; sema ile tipi tek kaynakta tutmak icin.
 
 // ── Firebase Admin SDK ──────────────────────────────────────────────────────
 // adminDb is assigned after the PgFirestore class definition below: PostgreSQL
@@ -3177,168 +3175,6 @@ async function startServer() {
     return out;
   }
 
-  app.get('/api/parasut/status', requireAuth, async (_req: Request, res: Response) => {
-    const creds = await getParasutCreds();
-    if (!creds) return res.json({ configured: false, connected: false, message: 'Paraşüt yapılandırılmamış.' });
-    try {
-      await getParasutToken(creds);
-      res.json({ configured: true, connected: true, message: 'Paraşüt bağlantısı başarılı.' });
-    } catch (e) {
-      res.json({ configured: true, connected: false, error: (e as Error).message });
-    }
-  });
-
-  app.post('/api/parasut/import/cari', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
-    const creds = await getParasutCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
-    const companyId = await reqCompanyId(req);
-    const t0 = Date.now();
-    try {
-      const contacts = await parasutGetAll(creds, 'contacts');
-      // KİRACI SINIRI: Mikro cari import'unda bulunan sınıfın aynısı.
-      const leadSnap = await tenantSnap('leads', companyId);
-      const byParasutId = new Map<string, PgDocRef>();
-      const byVkn = new Map<string, PgDocRef>();
-      const byName = new Map<string, PgDocRef>();
-      const normalizeVknP = (v?: string) => (v || '').replace(/\D/g, '');
-      for (const d of leadSnap.docs) {
-        const data = d.data();
-        const dc = (data.companyId as string | undefined) || '';
-        if (dc && dc !== companyId) continue;
-        const pid = (data.parasutId as string) || '';
-        if (pid) byParasutId.set(pid, d.ref);
-        const vkn = normalizeVknP((data.taxId as string) || (data.taxNo as string));
-        if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
-        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
-      }
-      let created = 0, updated = 0;
-      let batch = adminDb.batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
-      for (const c of contacts) {
-        const a = (c.attributes as Record<string, unknown>) || {};
-        const pid = String(c.id);
-        const fields = {
-          name: (a.name as string) || pid,
-          company: (a.name as string) || '',
-          email: (a.email as string) || '',
-          phone: (a.phone as string) || '',
-          taxId: (a.tax_number as string) || '',
-          taxOffice: (a.tax_office as string) || '',
-          address: (a.address as string) || '',
-          city: (a.city as string) || '',
-          balance: Number(a.balance ?? 0),
-          type: a.account_type === 'supplier' ? 'Supplier' : 'Customer',
-          parasutId: pid, source: 'parasut', mikroSynced: false,
-          updatedAt: pgServerTimestamp(),
-          companyId, // güncellemede de etiketle (self-heal, Mikro ile aynı desen)
-        };
-        // Oncelik: parasutId -> VKN -> case-insensitive isim (ayni mikro/import/cari
-        // fix'i - manuel olusturulmus leads'in parasutId'si olmaz).
-        const vkn = normalizeVknP(fields.taxId);
-        const nameKey = fields.name.trim().toLowerCase();
-        const ref = byParasutId.get(pid)
-          || (vkn ? byVkn.get(vkn) : undefined)
-          || (nameKey ? byName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); updated++; }
-        else {
-          const newRef = adminDb.collection('leads').doc();
-          batch.set(newRef, { ...fields, status: 'Active', createdAt: pgServerTimestamp() });
-          byParasutId.set(pid, newRef);
-          created++;
-        }
-        if (++ops >= 400) await flush();
-      }
-      await flush();
-      await writeAuditLog(reqActor(req), 'Paraşüt Cari İçe Aktarma', `${created} yeni / ${updated} güncel`);
-      res.json({ success: true, created, updated, total: contacts.length, duration: Date.now() - t0 });
-    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
-  });
-
-  app.post('/api/parasut/import/stok', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
-    const creds = await getParasutCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    if (!adminDb) return res.status(503).json({ success: false, error: 'DB yok.' });
-    // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
-    const companyId = await reqCompanyId(req);
-    const t0 = Date.now();
-    try {
-      const products = await parasutGetAll(creds, 'products');
-      // KİRACI SINIRI: fiyat/barkod/BOM import'unda bulunan sınıfın aynısı —
-      // filtre yoktu. EAN barkod gibi SKU'lar farklı kiracılar arasında DOĞAL
-      // olarak çakışabilir (aynı fiziksel ürünü satan iki toptancı); bu uç ise
-      // name/unit/vatRate/stockLevel/price/prices'ın HEPSİNİ güncelliyordu —
-      // barkod/fiyattan daha geniş bir etki alanı.
-      const invSnap = await tenantSnap('inventory', companyId);
-      const bySku = new Map<string, PgDocRef>();
-      for (const d of invSnap.docs) {
-        const veri = d.data() as Record<string, unknown>;
-        const dc = (veri.companyId as string | undefined) || '';
-        if (dc && dc !== companyId) continue;
-        const sku = ((veri.sku as string) || '').trim();
-        if (sku && !bySku.has(sku)) bySku.set(sku, d.ref);
-      }
-      let created = 0, updated = 0;
-      let batch = adminDb.batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = adminDb!.batch(); ops = 0; } };
-      for (const p of products) {
-        const a = (p.attributes as Record<string, unknown>) || {};
-        const sku = ((a.code as string) || String(p.id)).trim();
-        const listPrice = Number(a.list_price ?? 0);
-        const fields = {
-          name: (a.name as string) || sku,
-          unit: (a.unit as string) || 'ADET',
-          vatRate: Number(a.vat_rate ?? 20),
-          stockLevel: Number(a.stock_count ?? a.inventory_level ?? 0),
-          price: listPrice,
-          prices: { 'Retail': listPrice, 'B2B Standard': listPrice, 'B2B Premium': listPrice, 'Dealer': listPrice },
-          parasutId: String(p.id), source: 'parasut',
-          updatedAt: pgServerTimestamp(),
-          companyId, // güncellemede de etiketle (self-heal)
-        };
-        const ref = bySku.get(sku);
-        if (ref) { batch.update(ref, fields); updated++; }
-        else { batch.set(adminDb.collection('inventory').doc(), { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: pgServerTimestamp() }); created++; }
-        if (++ops >= 400) await flush();
-      }
-      await flush();
-      await writeAuditLog(reqActor(req), 'Paraşüt Stok İçe Aktarma', `${created} yeni / ${updated} güncel (fiyat dahil)`);
-      res.json({ success: true, created, updated, total: products.length, duration: Date.now() - t0 });
-    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
-  });
-
-  app.post('/api/parasut/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const creds = await getParasutCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    const { order } = req.body as { order: Record<string, unknown> };
-    if (!order) return res.status(400).json({ success: false, error: 'order zorunlu.' });
-    const t0 = Date.now();
-    try {
-      const token = await getParasutToken(creds);
-      const payload = {
-        data: {
-          type: 'sales_invoices',
-          attributes: {
-            item_type: 'invoice',
-            description: (order.customerName as string) || '',
-            issue_date: new Date().toISOString().slice(0, 10),
-            currency: 'TRL',
-          },
-          ...(order.parasutContactId ? { relationships: { contact: { data: { id: String(order.parasutContactId), type: 'contacts' } } } } : {}),
-        },
-      };
-      const r = await fetch(`${PARASUT_BASE}/v4/${creds.companyId}/sales_invoices`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await r.json().catch(() => ({}));
-      const success = r.ok;
-      await writeSyncLog('ParasutFatura', 'order', String(order.id ?? 'unknown'), success, null, success ? null : `HTTP ${r.status}`, Date.now() - t0, reqActor(req));
-      res.json({ success, data, duration: Date.now() - t0 });
-    } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
-  });
 
   // ── Trendyol Seller API ─────────────────────────────────────────────────────
   // Credentials: TRENDYOL_SUPPLIER_ID, TRENDYOL_API_KEY, TRENDYOL_API_SECRET
@@ -4816,170 +4652,6 @@ async function startServer() {
     .replace(/AIza[0-9A-Za-z_\-]{10,}/g, 'AIza***')
     .replace(/key=[^&\s"']+/gi, 'key=***');
 
-  app.get('/api/ai/status', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
-    const client = await resolveGeminiClient(); // firestore önbelleğini doldurur
-    res.json({ configured: !!client, source: client ? geminiKeySource() : 'none' });
-  });
-
-  /**
-   * POST /api/ai/test — kaydedilen anahtarı UÇTAN UCA doğrular: gerçek (küçük) bir
-   * generateContent çağrısı yapar, başarı/hata + kullanılan kaynağı döner.
-   * Hata durumunda da 200 döner (ok:false) ki istemci gerçek hata mesajını görsün.
-   * requireAdmin: hata mesajı env anahtarını sızdırabilir → yalnız yöneticiye.
-   */
-  app.post('/api/ai/test', requireAuth, requireMfaVerified, requireAdmin, async (_req: Request, res: Response) => {
-    const client = await resolveGeminiClient();
-    if (!client) return res.status(200).json({ ok: false, source: 'none', error: 'AI yapılandırılmamış — Ayarlar → AI bölümünden Gemini API anahtarını girin.' });
-    const source = geminiKeySource();
-    const model = resolveGeminiModel();
-    try {
-      const r = await client.models.generateContent({ model, contents: 'ping' });
-      return res.json({ ok: true, source, model, sample: (r.text ?? '').slice(0, 40) });
-    } catch (e) {
-      return res.status(200).json({ ok: false, source, model, error: safeAiError(e instanceof Error ? e.message : String(e)) });
-    }
-  });
-
-  // Watchdog'un günlük AI sağlık kontrolü (runOpsWatchdog check 7 buradan çağırır).
-  aiHealthProbe = async () => {
-    const client = await resolveGeminiClient();
-    if (!client) return { ok: true, detail: 'AI yapılandırılmamış, atlandı' };
-    const model = resolveGeminiModel();
-    try {
-      await client.models.generateContent({ model, contents: 'ping' });
-      return { ok: true, detail: `${model} yanıt veriyor (kaynak: ${geminiKeySource()})` };
-    } catch (e) {
-      return { ok: false, detail: `${model}: ` + safeAiError(e instanceof Error ? e.message : String(e)) };
-    }
-  };
-
-  /**
-   * POST /api/ai/generate
-   * Body: { prompt, model?, systemInstruction?, thinkingLevel?, jsonSchema? }
-   * Returns: { text: string }
-   * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
-   */
-  app.post('/api/ai/generate', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const client = await resolveGeminiClient();
-    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const { prompt, model, systemInstruction, thinkingLevel, jsonSchema } = req.body as {
-      prompt: string; model?: string; systemInstruction?: string;
-      thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
-    };
-    if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
-    try {
-      const response = await client.models.generateContent({
-        model: resolveGeminiModel(model),
-        contents: prompt,
-        config: {
-          ...(systemInstruction ? { systemInstruction } : {}),
-          ...(thinkingLevel && thinkingLevel !== 'NONE' ? { thinkingConfig: { thinkingLevel: ThinkingLevel[thinkingLevel] } } : {}),
-          ...(jsonSchema ? { responseMimeType: 'application/json', responseSchema: jsonSchema } : {}),
-        } as Record<string, unknown>,
-      });
-      return res.json({ text: response.text ?? '' });
-    } catch (e) {
-      console.error('[Gemini generate]', e);
-      return res.status(500).json({ error: 'AI generation failed.' });
-    }
-  });
-
-  /**
-   * POST /api/ai/chat
-   * Body: { message, history?, systemInstruction?, model?, highThinking? }
-   * Returns: { text: string }
-   * Used by: AIChat.tsx
-   */
-  app.post('/api/ai/chat', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const client = await resolveGeminiClient();
-    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const chatValidated = validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
-    if (!chatValidated) return;
-    const { message, history = [], systemInstruction, model, highThinking = false } = req.body as {
-      message: string;
-      history?: { role: string; parts: { text: string }[] }[];
-      systemInstruction?: string;
-      model?: string;
-      highThinking?: boolean;
-    };
-    if (!message) return res.status(400).json({ error: 'message is required.' });
-    try {
-      const chat = client.chats.create({
-        model: resolveGeminiModel(model),
-        config: {
-          ...(systemInstruction ? { systemInstruction } : {}),
-          ...(highThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } } : {}),
-        } as Record<string, unknown>,
-        history: history as { role: 'user' | 'model'; parts: { text: string }[] }[],
-      });
-      const response = await chat.sendMessage({ message });
-      return res.json({ text: response.text ?? '' });
-    } catch (e) {
-      console.error('[Gemini chat]', e);
-      return res.status(500).json({ error: 'AI chat failed.' });
-    }
-  });
-
-  /**
-   * POST /api/ai/demand-forecast
-   * Body: { ordersCount, monthlyArr, topProductsCtx, inventoryCtx, today, lang }
-   * Calls Gemini server-side with structured JSON schema and returns ForecastData.
-   * Protected by Firebase Auth (requireAuth).
-   */
-  app.post('/api/ai/demand-forecast', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const client = await resolveGeminiClient();
-    if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const {
-      ordersCount = 0,
-      monthlyArr = [],
-      topProductsCtx = [],
-      inventoryCtx = '',
-      today = new Date().toISOString().slice(0, 7),
-      lang = 'tr',
-    } = req.body as {
-      ordersCount?: number;
-      monthlyArr?: string[];
-      topProductsCtx?: string[];
-      inventoryCtx?: string;
-      today?: string;
-      lang?: string;
-    };
-    const language = lang === 'tr' ? 'Turkish' : 'English';
-    const prompt = `You are a senior B2B sales analyst for Cetpa, a Turkish wholesale distributor.
-
-Context (today: ${today}):
-- Orders last 90 days: ${ordersCount}
-- Monthly revenue: ${monthlyArr.join(', ')}
-- Top products: ${topProductsCtx.join('; ')}
-- Inventory: ${inventoryCtx || 'N/A'}
-
-Based on these trends, respond in ${language} as valid JSON (no markdown fences).
-Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
-    try {
-      const result = await client.models.generateContent({
-        model: resolveGeminiModel(),
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary:         { type: Type.STRING },
-              topProducts:     { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, units: { type: Type.NUMBER }, trend: { type: Type.STRING } }, required: ['name','units','trend'] } },
-              cashFlow:        { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { month: { type: Type.STRING }, projected: { type: Type.NUMBER } }, required: ['month','projected'] } },
-              recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
-              reorderAlerts:   { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { product: { type: Type.STRING }, currentStock: { type: Type.NUMBER }, recommendedReorder: { type: Type.NUMBER } }, required: ['product','currentStock','recommendedReorder'] } },
-            },
-            required: ['summary','topProducts','cashFlow','recommendations','reorderAlerts'],
-          },
-        } as Record<string, unknown>,
-      });
-      return res.json(JSON.parse(result.text ?? '{}'));
-    } catch (e) {
-      console.error('[demand-forecast]', e);
-      return res.status(500).json({ error: 'Demand forecast failed.' });
-    }
-  });
 
   // ── Stripe Payment Integration ───────────────────────────────────────────
   const stripeClient = process.env.STRIPE_SECRET_KEY
@@ -5223,6 +4895,21 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
   });
 
+  // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.
+  erpRoutes(app, {
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin,
+    reqActor, reqCompanyId, writeAuditLog, writeSyncLog, pgServerTimestamp, tenantSnap,
+    getParasutCreds, getParasutToken, parasutGetAll,
+    getLogoCreds, getSAPSession, getSAPCredsFromFirestore,
+  });
+
+  aiRoutes(app, {
+    requireAuth, requireMfaVerified, requireAdmin, validate,
+    resolveGeminiClient, resolveGeminiModel, safeAiError, geminiKeySource,
+    // Modul, server.ts'teki `let aiHealthProbe`a YAZAR (bekci onu okuyor).
+    setAiHealthProbe: (fn) => { aiHealthProbe = fn; },
+  });
+
   dynamicsRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
     writeAuditLog, pgServerTimestamp, tenantSnap,
@@ -5348,43 +5035,6 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return { apiUrl: d.logoApiUrl || d.apiUrl || '', apiKey: d.logoApiKey || d.apiKey || '', firmNo: d.logoFirmNo || d.firmNo || '1' };
   }
 
-  app.get('/api/logo/status', async (_req: Request, res: Response) => {
-    const creds = await getLogoCreds();
-    const configured = !!creds;
-    if (!configured) return res.json({ configured: false, connected: false });
-    try {
-      // TODO: implement real Logo Tiger auth check (e.g. GET /api/v1/firms)
-      // const r = await fetch(`${process.env.LOGO_API_URL}/api/v1/firms`, {
-      //   headers: { 'X-Logo-ApiKey': process.env.LOGO_API_KEY },
-      // });
-      // const ok = r.ok;
-      // return res.json({ configured: true, connected: ok, error: ok ? undefined : `HTTP ${r.status}` });
-      return res.json({ configured: true, connected: false, error: 'Logo adapter not yet implemented — set LOGO_API_URL, LOGO_API_KEY, LOGO_FIRM_NO and build the adapter.' });
-    } catch (err) {
-      return res.json({ configured: true, connected: false, error: String(err) });
-    }
-  });
-
-  app.post('/api/logo/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
-    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: Logo REST'ten stok çek, inventory'ye upsert.
-    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo stok import not yet implemented.' });
-  });
-
-  app.post('/api/logo/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
-    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: Logo REST'ten cari çek, leads'e upsert.
-    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'Logo cari import not yet implemented.' });
-  });
-
-  app.post('/api/logo/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { orderId } = req.body as { orderId?: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    if (!(await getLogoCreds())) return res.json({ success: false, notConfigured: true });
-    return res.json({ success: false, notImplemented: true, error: 'Logo sipariş export not yet implemented.' });
-  });
 
   // ── Microsoft Dynamics 365 Business Central ──────────────────────────────────
   // Docs: https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/
@@ -5520,65 +5170,6 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
     return SAP_SESSION.sessionId;
   }
 
-  app.get('/api/sap/status', async (_req: Request, res: Response) => {
-    const hasEnvCreds = !!(process.env.SAP_SERVICE_LAYER_URL && process.env.SAP_USERNAME && process.env.SAP_PASSWORD && process.env.SAP_COMPANY_DB);
-    const fsCreds = hasEnvCreds ? null : await getSAPCredsFromFirestore();
-    const configured = hasEnvCreds || !!fsCreds;
-    if (!configured) return res.json({ configured: false, connected: false });
-    try {
-      const session = await getSAPSession();
-      if (!session) return res.json({ configured: true, connected: false, error: 'SAP B1 Login failed — check SAP_USERNAME, SAP_PASSWORD, SAP_COMPANY_DB' });
-      // Quick version check
-      const r = await fetch(`${process.env.SAP_SERVICE_LAYER_URL}/CompanyInfo`, {
-        headers: { Cookie: `B1SESSION=${session}`, Accept: 'application/json' },
-      });
-      if (!r.ok) return res.json({ configured: true, connected: false, error: `SAP Service Layer returned HTTP ${r.status}` });
-      const info = await r.json() as { CompanyName?: string; Version?: string };
-      return res.json({
-        configured:  true,
-        connected:   true,
-        companyDb:   process.env.SAP_COMPANY_DB,
-        sapVersion:  info.Version,
-        companyName: info.CompanyName,
-      });
-    } catch (err) {
-      return res.json({ configured: true, connected: false, error: String(err) });
-    }
-  });
-
-  app.post('/api/sap/import/stok', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
-    const session = await getSAPSession();
-    if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /Items?$select=ItemCode,ItemName,OnHand,Price, upsert to Firebase
-    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP items import not yet implemented.' });
-  });
-
-  app.post('/api/sap/import/cari', requireAuth, requireMfaVerified, async (_req: Request, res: Response) => {
-    const session = await getSAPSession();
-    if (!session) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
-    // TODO: paginate GET /BusinessPartners?$filter=CardType eq 'cCustomer', upsert to Firebase leads
-    // ⚠️ TENANT: her yazıma companyId ekle (reqCompanyId(req), create+update). Mikro/Paraşüt deseni.
-    return res.json({ success: false, notImplemented: true, created: 0, updated: 0, errors: 0, error: 'SAP business partner import not yet implemented.' });
-  });
-
-  app.post('/api/sap/export/siparis', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { orderId } = req.body as { orderId?: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    const session = await getSAPSession();
-    if (!session) return res.json({ success: false, notConfigured: true });
-    // TODO: fetch order from Firebase, POST /Orders to SAP Service Layer
-    return res.json({ success: false, notImplemented: true, error: 'SAP order export not yet implemented.' });
-  });
-
-  app.post('/api/sap/export/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { orderId } = req.body as { orderId?: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' });
-    const session = await getSAPSession();
-    if (!session) return res.json({ success: false, notConfigured: true });
-    // TODO: fetch order from Firebase, POST /Invoices to SAP Service Layer
-    return res.json({ success: false, notImplemented: true, error: 'SAP invoice export not yet implemented.' });
-  });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // END ERP PLUGIN ROUTES

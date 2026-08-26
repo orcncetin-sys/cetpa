@@ -54,3 +54,10 @@ export const GelenFaturaActionSchema = z.object({
   firebaseId:  z.string().optional(),
   aciklama:    z.string().optional(),
 });
+
+// AI chat şeması
+export const AiChatSchema = z.object({
+  message:    z.string().min(1).max(4000),
+  context:    z.string().max(8000).optional(),
+  language:   z.enum(['tr', 'en']).optional(),
+});

@@ -27,7 +27,9 @@ param(
     '/api/tracking/fedex',
     '/api/ops/watchdog/run',
     '/api/dynamics/export/siparis',
-    '/api/superadmin/tenants/test/status'
+    '/api/superadmin/tenants/test/status',
+    '/api/parasut/import/stok',
+    '/api/ai/lead-score'
   )
 )
 
