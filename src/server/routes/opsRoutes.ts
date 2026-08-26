@@ -103,7 +103,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
           ok: latest?.ok ?? null,
           failingCount: failing.length,
           failing,                       // yalnız BOZUK olanların detayı
-          checks: latest?.checks ?? [],  // tam liste (11 kontrol)
+          checks: latest?.checks ?? [],  // tam liste (15 kontrol - SAYIYI ELLE YAZMA, olc: grep -oE "add\('[a-z_]+'" src/server/opsWatchdog.ts | sort -u | wc -l)
           previousDate: previous?.date ?? null,
           previousOk: previous?.ok ?? null,
         },

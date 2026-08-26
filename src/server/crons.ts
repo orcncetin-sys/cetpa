@@ -18,6 +18,7 @@
  * tasiyor. Geriye kalan dort sey (adminDb, tenantSnap, serverTenantId,
  * pgServerTimestamp) server.ts'te kaldigi icin DI ile geciyor.
  */
+import { resendGonderici } from './eposta.js';
 import type { AdminDbLike, AdminDocRef } from './adminDbTypes.js';
 import cron from 'node-cron';
 import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
@@ -427,7 +428,7 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
         method: 'POST',
         headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from:    process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+          from:    resendGonderici(),
           to:      [recipient],
           subject: `CETPA Haftalık Rapor — ${weekStr}`,
           html,

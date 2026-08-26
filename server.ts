@@ -12,6 +12,7 @@ import { opsRoutes } from "./src/server/routes/opsRoutes.js";
 import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
+import { resendGonderici, resendSagligi, resendSagligiOnbellekten } from "./src/server/eposta.js";
 import { initCrons } from "./src/server/crons.js";
 import {
   initMikroMirror, initMikroTables,
@@ -2882,7 +2883,7 @@ async function startServer() {
         { id: 'mikro',       name: 'Mikro ERP (JumpBulut)', configured: has('MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'), requiredKeys: ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'], affects: 'Stok/cari/sipariş senkronizasyonu' },
         { id: 'parasut',     name: 'Paraşüt', configured: has('PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'), requiredKeys: ['PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'], affects: 'Cari/ürün (fiyat dahil)/fatura senkronizasyonu' },
         { id: 'shopify',     name: 'Shopify',               configured: has('SHOPIFY_ACCESS_TOKEN'),                 requiredKeys: ['SHOPIFY_ACCESS_TOKEN'],                 affects: 'Ürün/sipariş sync + SKU otomatik eşleştirme' },
-        { id: 'resend',      name: 'E-posta (Resend)',      configured: has('RESEND_API_KEY'),                       requiredKeys: ['RESEND_API_KEY'],                       affects: 'Sipariş onayı, davet ve bildirim e-postaları' },
+        { id: 'resend',      name: 'E-posta (Resend)',      configured: has('RESEND_API_KEY') && (await resendSagligi()).ok,                       requiredKeys: ['RESEND_API_KEY'],                       affects: 'Sipariş onayı, davet ve bildirim e-postaları' },
         { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
         { id: 'iyzico',      name: 'İyzico',                configured: has('IYZICO_API_KEY', 'IYZICO_SECRET_KEY'),  requiredKeys: ['IYZICO_API_KEY', 'IYZICO_SECRET_KEY'],  affects: 'Ödeme linki oluşturma' },
         { id: 'whatsapp',    name: 'WhatsApp',              configured: has('WHATSAPP_360DIALOG_API_KEY') || has('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'), requiredKeys: ['WHATSAPP_360DIALOG_API_KEY (veya Twilio çifti)'], affects: 'Müşteri mesajları ve sipariş bildirimleri' },
@@ -3664,7 +3665,7 @@ async function startServer() {
 
   async function getResendKey(): Promise<{ apiKey: string; from: string } | null> {
     const apiKey = process.env.RESEND_API_KEY;
-    const from   = process.env.RESEND_FROM || 'Cetpa <onboarding@resend.dev>';
+    const from   = resendGonderici();
     if (apiKey) return { apiKey, from };
     if (!adminDb) return null;
     const snap = await adminDb.collection('settings').doc('email').get();
@@ -3887,7 +3888,7 @@ async function startServer() {
       return res.json({ success: true, inviteUrl, emailSent: false, note: 'Resend not configured — share the invite URL manually.' });
     }
 
-    const fromAddress = process.env.RESEND_FROM || 'davet@cetpa.com.tr';
+    const fromAddress = resendGonderici();
     const html = `
 <!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="font-family:system-ui,sans-serif;background:#f5f5f7;margin:0;padding:24px;">
@@ -5089,14 +5090,35 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       ? await timeout(pgPool.query('SELECT 1 FROM docs LIMIT 1').then(() => true).catch(() => false), 4000, false)
       : false;
 
-    // ── Resend: env var OR Firestore settings/email (no extra DB read) ──────
-    let resendOk = !!process.env.RESEND_API_KEY;
-    if (!resendOk && adminDb) {
-      resendOk = await timeout(
+    // ── Resend ───────────────────────────────────────────────────────────────
+    // VARLIK DEĞİL GEÇERLİLİK (2026-08-25). Eskiden yalnız `!!RESEND_API_KEY`
+    // bakılıyordu: geçersiz bir anahtarla ya da doğrulanmamış gönderici alan
+    // adıyla panel "E-posta: OK" gösteriyordu — 2026-07-31'de tam bu yüzden
+    // "e-posta çalışıyor" sanılırken hiç posta gitmiyordu.
+    // `resendSagligi()` anahtarı Resend'e karşı sınar ve göndericinin alan
+    // adının doğrulanmış olduğunu kontrol eder; sonucu 1 saat önbellekler
+    // (/api/health 10 dk'da bir yoklanıyor).
+    let resendOk = false;
+    let resendDetay = '';
+    if (process.env.RESEND_API_KEY) {
+      // BLOKE ETME: önbellekten oku, yoksa arka planda tazelensin. Sağlık ucu
+      // dış bir servisi beklerse Resend'in yavaşlaması BİZİM sağlık
+      // yoklamamızı düşürür (uptime.yml + deploy kapısı bu ucu kullanıyor).
+      const d = resendSagligiOnbellekten();
+      resendOk = d?.ok ?? false;
+      resendDetay = d?.detay ?? 'henüz sınanmadı (arka planda kontrol ediliyor)';
+    } else if (adminDb) {
+      // settings/email yolunda anahtar Resend'e karşı sınanmaz (istek başına ek
+      // dış çağrı olmasın); yalnız tanımlı mı diye bakılır ve bu AÇIKÇA belirtilir.
+      const varMi = await timeout(
         adminDb.collection('settings').doc('email').get()
           .then(s => !!(s.data()?.resendApiKey)).catch(() => false),
         2000, false
       );
+      resendOk = varMi;
+      resendDetay = varMi ? 'settings/email anahtarı tanımlı (geçerliliği sınanmadı)' : 'anahtar yok';
+    } else {
+      resendDetay = 'RESEND_API_KEY tanımlı değil';
     }
 
     // ── WhatsApp ─────────────────────────────────────────────────────────────
@@ -5122,6 +5144,7 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
       firebase: firebaseOk,
       postgres: postgresOk,
       resend: resendOk,
+      resendDetail: resendDetay,   // neden yeşil/kırmızı — 'configured' tek başına yanıltıcıydı
       whatsapp: whatsappOk,
       iyzico: iyzicoOk,
     });

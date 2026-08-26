@@ -14,6 +14,7 @@
  * olurlardi. Getter ile her cagride guncel deger okunur ve veritabani
  * baslatma koduna HIC dokunmadan ayrilma yapilabildi.
  */
+import { resendGonderici, resendSagligi } from './eposta.js';
 import type { AdminDbLike } from './adminDbTypes.js';
 import cron from 'node-cron';
 import fs from 'fs';
@@ -394,6 +395,26 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
     }
   } catch (e) { add('pg_growth', false, e instanceof Error ? e.message : String(e)); }
 
+  // 15) UYARI HATTININ KENDİSİ. Diğer 14 kontrol bir arızayı bulur; bu kontrol
+  //     "bulduğunu HABER VEREBİLİYOR MUSUN?" sorusunu sorar. Bekçi postayı
+  //     gönderemezse sonuç yalnızca aşağıdaki `console.warn`'dur — kimse görmez,
+  //     yani izleme var sanılan yerde izleme YOKTUR. Bu kontrol de aynı e-postayla
+  //     bildirilemez (tavuk-yumurta) ama süper-admin panelindeki bekçi kartında
+  //     ve GET /api/ops/watchdog'da KIRMIZI görünür.
+  //     Günde bir kez tek bir Resend /domains çağrısı — ai_gemini ile aynı desen.
+  try {
+    const alici = process.env.OPS_ALERT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL;
+    const durum = await resendSagligi();
+    if (!alici) {
+      add('uyari_hatti', false,
+        'OPS_ALERT_EMAIL/REPORT_RECIPIENT_EMAIL tanımlı değil — bekçi arıza bulsa da haber veremez');
+    } else {
+      add('uyari_hatti', durum.ok, `${durum.detay} · alıcı: ${alici}`);
+    }
+  } catch (e) {
+    add('uyari_hatti', false, 'kontrol edilemedi: ' + (e instanceof Error ? e.message : String(e)));
+  }
+
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const ok = checks.every(c => c.ok);
@@ -533,7 +554,7 @@ export async function diskNobetcisi(zorla = false): Promise<{ freeGB: number; to
       method: 'POST',
       headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+        from: resendGonderici(),
         to: [recipient],
         subject: zorla
           ? '✅ CETPA disk uyarı TESTİ — bu posta geldiyse uyarı yolu çalışıyor'
@@ -615,7 +636,7 @@ export async function runOpsWatchdogAndAlert(): Promise<void> {
       method: 'POST',
       headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM || 'rapor@cetpa.com.tr',
+        from: resendGonderici(),
         to: [recipient],
         subject: failing.length
           ? `⚠️ CETPA: ${failing.length} kontrol başarısız (${failing.map(c => c.key).join(', ')})`

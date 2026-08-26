@@ -134,8 +134,11 @@ if ($depsChanged) {
 }
 
 # Off-server backup scheduled task - idempotent, registered on every deploy so it
-# self-heals if it was never set up or got removed. Runs backup-db-offsite.mjs
-# (pg_dump + uploads/ tar.gz -> Firebase Storage) daily at 03:30 as SYSTEM.
+# self-heals if it was never set up or got removed. Runs scripts\backup-tenants.mjs
+# (kiraci basina pg_dump -> rclone remote) daily at 03:30 as SYSTEM.
+# NOT (2026-08-25): bu yorum eskiden 'backup-db-offsite.mjs (-> Firebase Storage)'
+# diyordu ama gorev COKTAN backup-tenants.mjs kaydediyordu. Bir kesintide gorev
+# aciklamasina bakan kisi yanlis script'i ve yanlis yedek hedefini arardi.
 # Wrapped in try/catch: this is NOT on the critical deploy path, so a failure
 # here (e.g. non-elevated SSH token) must not fail the deploy.
 try {
@@ -150,7 +153,7 @@ try {
         $bkTrigger   = New-ScheduledTaskTrigger -Daily -At '03:30'
         $bkSettings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
         $bkPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask -TaskName $bkTask -Action $bkAction -Trigger $bkTrigger -Settings $bkSettings -Principal $bkPrincipal -Description 'Cetpa: gunluk pg_dump + uploads -> Firebase Storage off-server yedek.' | Out-Null
+        Register-ScheduledTask -TaskName $bkTask -Action $bkAction -Trigger $bkTrigger -Settings $bkSettings -Principal $bkPrincipal -Description 'Cetpa: gunluk kiraci-basina pg_dump -> rclone off-server yedek (backup-tenants.mjs).' | Out-Null
         Info "Backup scheduled task '$bkTask' ensured (daily 03:30, SYSTEM)."
 
     # ---- NSSM log rotation (idempotent) ---------------------------------

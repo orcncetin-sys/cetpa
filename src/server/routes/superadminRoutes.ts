@@ -14,6 +14,7 @@
  * ILK STAGING'DE DENENEN DEGISIKLIK: bu cikarma once `staging/db-routes`
  * dalina gidip cetpa-staging'de (port 5174) dogrulandi, sonra main'e alindi.
  */
+import { resendGonderici } from '../eposta.js';
 import type { Express, Request, Response } from 'express';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
@@ -369,7 +370,7 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
     const resendKey = process.env.RESEND_API_KEY;
     if (!resendKey) return res.json({ success: true, inviteUrl, emailSent: false, note: 'Resend yapılandırılmadı — daveti manuel paylaşın.' });
     try {
-      const fromAddress = process.env.RESEND_FROM || 'davet@cetpa.com.tr';
+      const fromAddress = resendGonderici();
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:system-ui,sans-serif;background:#f5f5f7;margin:0;padding:24px;">
   <div style="max-width:480px;margin:auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
     <div style="background:#ff4000;padding:28px 32px;"><h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;">CETPA'ya Davet Edildiniz</h1></div>
