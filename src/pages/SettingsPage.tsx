@@ -19,12 +19,11 @@ import ERPHubPanel from '../components/ERPHubPanel';
 import IntegrationHealthPanel from '../components/IntegrationHealthPanel';
 import SkuMappingPanel from '../components/SkuMappingPanel';
 import MarketplacePanel from '../components/MarketplacePanel';
+import type { WebhookConfig } from '../types';
 import type { UserSubscription, SubscriptionPlan, BillingCycle } from '../types/subscription';
 
 type ClassValue = string | null | undefined | boolean | ClassValue[];
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
-
-type WebhookConfig = { id: string; url: string; events: string[]; enabled: boolean; createdAt?: unknown };
 const WEBHOOK_EVENTS = ['order.created', 'order.updated', 'payment.received', 'lead.created', 'inventory.low'];
 
 type PaymentHistoryItem = { id: string; date: string; amount: number; plan: string; planName?: Record<string, string>; cycle: string; status: 'paid' | 'pending' | 'failed' };

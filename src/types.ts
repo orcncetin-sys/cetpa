@@ -564,3 +564,8 @@ export interface MikroConfig {
   accessToken?: string;      // maps to idmPassword
   endpoint?: string;
 }
+
+/** Giden webhook yapilandirmasi.
+ *  App.tsx ve SettingsPage'de AYRI AYRI tanimliydi (2026-08-26'da birlestirildi);
+ *  iki kopya kacinilmaz olarak sapar. */
+export type WebhookConfig = { id: string; url: string; events: string[]; enabled: boolean; createdAt?: unknown };

@@ -1,3 +1,4 @@
+import { useSekmeVerileri } from './hooks/useSekmeVerileri';
 import { useShallow } from 'zustand/react/shallow';
 import { zamanMs } from './utils/zaman';
 import AIChat from './components/AIChat';
@@ -1470,24 +1471,11 @@ function AppContent() {
   const [showOverduePanel, setShowOverduePanel] = useState(false); // Phase 538 — overdue payments panel
   const [shipmentsExpanded, setShipmentsExpanded] = useState(false); // Phase 539 — shipments KPI
   // ── Phase 543–545 ────────────────────────────────────────────────────────────
-  const [dashVergiDeadlines, setDashVergiDeadlines] = useState<{ id: string; vergiTuru: string; sonTarih: string; durum: string }[]>([]); // Phase 543
   // ── Phase 547: Bilanço — bank accounts fetched on demand ──────────────────
-  const [p547BankAccounts, setP547BankAccounts] = useState<Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>>([]);
-  const [p547FixedAssets, setP547FixedAssets]   = useState<Array<{ id: string; name: string; cost: number; depreciation: number }>>([]);
   // ── Phase 548: Masraf Yönetimi — expense claims ────────────────────────────
-  const [p548Masraflar, setP548Masraflar] = useState<Array<{
-    id: string; employeeName: string; category: string; amount: number; currency: string;
-    date: string; description: string; receiptUrl?: string;
-    status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi'; createdAt?: unknown; rejectionNote?: string;
-  }>>([]);
   const [p548Form, setP548Form] = useState(false);
   const [p548Draft, setP548Draft] = useState({ employeeName: '', category: 'Ulaşım', amount: '', currency: 'TRY', date: new Date().toISOString().slice(0,10), description: '' });
   // ── Phase 549: İade Yönetimi (RMA) ──────────────────────────────────────
-  const [p549Iadeler, setP549Iadeler] = useState<Array<{
-    id: string; orderId: string; customerName: string; items: string; reason: string;
-    condition: 'Hasarlı' | 'Sağlam' | 'Kısmen Hasarlı'; decision: 'İade' | 'Değişim' | 'Kredi Notu' | 'Bekliyor';
-    status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'Tamamlandı'; createdAt?: unknown; notes?: string;
-  }>>([]);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false); // Phase 28
   // ── User invite state ─────────────────────────────────────────────
@@ -1509,11 +1497,6 @@ function AppContent() {
   // ── Phase 551: Tedarikçi Portalı ─────────────────────────────────────────
   const [p551SelSupplier, setP551SelSupplier] = useState<string>('');
   // ── Phase 552: Mesai & Devam (Time & Attendance) ─────────────────────────
-  const [p552Records, setP552Records] = useState<Array<{
-    id: string; employeeName: string; employeeId?: string; date: string;
-    checkIn: string; checkOut: string; totalHours: number;
-    status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli';
-  }>>([]);
   const [p552AddForm, setP552AddForm] = useState(false);
   const [p552Draft, setP552Draft] = useState({ employeeName: '', date: new Date().toISOString().slice(0,10), checkIn: '09:00', checkOut: '18:00' });
   // ── Phase 553: Çalışan Self-Servis ───────────────────────────────────────
@@ -1523,11 +1506,6 @@ function AppContent() {
   // ── Phase 557: Senaryo Bütçesi ───────────────────────────────────────────
   const [p557Scenario, setP557Scenario] = useState<'base'|'best'|'worst'>('base');
   // ── Phase 554: WMS Bin/Location ──────────────────────────────────────────
-  const [p554Bins, setP554Bins] = useState<Array<{
-    id: string; warehouseId: string; warehouseName: string; binCode: string;
-    productSku: string; productName: string; quantity: number; minQty?: number;
-    lastCounted?: string; notes?: string; createdAt?: unknown;
-  }>>([]);
   // ── Phase 556: SGK e-Bildirge ─────────────────────────────────────────────
   const [p556Period, setP556Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   // ── Phase 558: KDV Analiz Raporu ─────────────────────────────────────────
@@ -1605,7 +1583,6 @@ function AppContent() {
   // ── Phase 572: Employee Performance Scorecard ─────────────────────────────
   const [p572SelEmpId, setP572SelEmpId] = useState<string>('');
   // ── Phase 573: Dynamic Pricing Rules Engine ───────────────────────────────
-  const [p573Rules, setP573Rules] = useState<Array<{id:string;name:string;type:'bulk'|'customer-tier'|'promo';minQty?:number;tierName?:string;discountPct:number;active:boolean}>>([]);
   const [p573Draft, setP573Draft] = useState({name:'',type:'bulk' as 'bulk'|'customer-tier'|'promo',minQty:'',tierName:'',discountPct:'',active:true});
   const [p573ShowForm, setP573ShowForm] = useState(false);
   // ── Phase 574: Inventory Valuation Report ─────────────────────────────────
@@ -1615,7 +1592,6 @@ function AppContent() {
   // ── Phase 578: PO Approval Workflow ──────────────────────────────────────
   const [p578Threshold, setP578Threshold] = useState(25000);
   // ── Phase 579: Batch/Serial Number Tracking ───────────────────────────────
-  const [p579Batches, setP579Batches] = useState<Array<{id:string;sku:string;productName:string;batchNo:string;expiryDate?:string;qty:number;location?:string;status:'Aktif'|'Karantina'|'Kullanıldı'}>>([]);
   const [p579ShowForm, setP579ShowForm] = useState(false);
   const [p579Draft, setP579Draft] = useState({sku:'',productName:'',batchNo:'',expiryDate:'',qty:'',location:''});
   const [p579Search, setP579Search] = useState('');
@@ -1680,15 +1656,12 @@ function AppContent() {
   // ── Phase 585: Customer Loyalty Score ─────────────────────────────────────
   // ── Phase 586: Sales Target by Rep ────────────────────────────────────────
   // ── Phase 587: Quality Inspection Checklist ───────────────────────────────
-  const [p587Checks, setP587Checks] = useState<Array<{id:string;item:string;checked:boolean;severity:'Kritik'|'Uyarı'|'Bilgi'}>>([]);
   const [p587NewItem, setP587NewItem] = useState('');
   // ── Phase 588: Consignment Stock ──────────────────────────────────────────
-  const [p588Consign, setP588Consign] = useState<Array<{id:string;supplierName:string;productName:string;sku:string;qty:number;agreedPrice:number;locationCode?:string;startDate:string;status:'Depoda'|'Satıldı'|'İade Edildi'}>>([]);
   const [p588ShowForm, setP588ShowForm] = useState(false);
   const [p588Draft, setP588Draft] = useState({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
   // ── Phase 590: Notification Inbox ─────────────────────────────────────────
   // ── Phase 591: Auto-Invoice Scheduler ─────────────────────────────────────
-  const [p591Schedules, setP591Schedules] = useState<Array<{id:string;customerName:string;amount:number;frequency:'monthly'|'quarterly'|'yearly';nextDate:string;description:string;active:boolean}>>([]);
   const [p591ShowForm, setP591ShowForm] = useState(false);
   const [p591Draft, setP591Draft] = useState({customerName:'',amount:'',frequency:'monthly' as 'monthly'|'quarterly'|'yearly',nextDate:'',description:''});
   // ── Phase 593: Vehicle Fleet Tracking ─────────────────────────────────────
@@ -1722,7 +1695,6 @@ function AppContent() {
   const [p607ReminderDays, setP607ReminderDays] = useState([7, 14, 30]);
   // ── Phase 608: Tedarikçi Fiyat Karşılaştırması ───────────────────────────
   const [p608SelProduct, setP608SelProduct] = useState('');
-  const [p608Quotes, setP608Quotes] = useState<Array<{id:string;supplier:string;price:number;leadDays:number;minQty:number;validUntil?:string}>>([]);
   const [p608ShowForm, setP608ShowForm] = useState(false);
   const [p608Draft, setP608Draft] = useState({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
   // ── Phase 609: SLA & Müşteri Memnuniyeti Takibi ───────────────────────────
@@ -1731,7 +1703,6 @@ function AppContent() {
   // ── Phase 611: Stok Devir Hızı ────────────────────────────────────────────
   const [p611Period, setP611Period] = useState<'30d'|'90d'|'180d'>('90d');
   // ── Phase 612: Satın Alma Bütçesi ─────────────────────────────────────────
-  const [p612Budgets, setP612Budgets] = useState<Array<{id:string;category:string;allocated:number;spent:number;period:string}>>([]);
   const [p612ShowForm, setP612ShowForm] = useState(false);
   const [p612Draft, setP612Draft] = useState({category:'',allocated:'',spent:'',period:new Date().toISOString().slice(0,7)});
   // ── Phase 613: Müşteri Portföy Analizi ────────────────────────────────────
@@ -1768,11 +1739,19 @@ function AppContent() {
   const [p624Draft, setP624Draft] = useState({productName:'',qty:'',plannedStart:'',plannedEnd:'',status:'Planlandı' as 'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal',priority:'Normal' as 'Normal'|'Acil',workCenter:''});
   // ── Phase 625: Gelir Gider Bütçe Karşılaştırması ─────────────────────────
   const [p625BudgetYear, setP625BudgetYear] = useState(()=>new Date().getFullYear());
-  const [p625BudgetData, setP625BudgetData] = useState<Array<{id?:string;month:number;budgetRevenue:number;budgetExpense:number}>>([]);
+  // SEKME-KAPILI CANLI VERI — 18 koleksiyonun dinleyicileri ve state'i
+  // src/hooks/useSekmeVerileri.ts'te. Kanca state'i SAHIPLENIR ve DONDURUR:
+  // cagrilmazsa asagidaki degiskenler tanimsiz kalir ve DERLEME KIRILIR —
+  // yani 'yazdim ama baglamadim' (olu useDataSync) hatasi imkansiz.
+  const {
+    p547BankAccounts, p547FixedAssets, p548Masraflar, p549Iadeler, p552Records, p554Bins, p573Rules, p579Batches, p587Checks, p588Consign, p591Schedules, p608Quotes, p612Budgets, p625BudgetData, p627Risks, p636Calculated, p636Payrolls, p638MatchResults, webhookConfigs, dashVergiDeadlines,
+    // Setter'lar: alt bilesenlere prop olarak geciyorlar
+    setP547BankAccounts, setP547FixedAssets, setP548Masraflar, setP549Iadeler, setP552Records, setP554Bins, setP573Rules, setP579Batches, setP587Checks, setP588Consign, setP591Schedules, setP608Quotes, setP612Budgets, setP625BudgetData, setP627Risks, setP636Calculated, setP636Payrolls, setP638MatchResults, setWebhookConfigs,
+  } = useSekmeVerileri({ user, activeTab, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
+
   const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
   // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
   // ── Phase 627: Tedarik Zinciri Riski ─────────────────────────────────────
-  const [p627Risks, setP627Risks] = useState<Array<{id:string;supplier:string;riskType:'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer';severity:'Düşük'|'Orta'|'Yüksek'|'Kritik';probability:number;mitigationPlan?:string;status:'Aktif'|'Azaltıldı'|'Kabul Edildi'}>>([]);
   const [p627ShowForm, setP627ShowForm] = useState(false);
   const [p627Draft, setP627Draft] = useState({supplier:'',riskType:'Tedarik Kesintisi' as 'Tedarik Kesintisi'|'Kalite'|'Fiyat Artışı'|'Teslimat Gecikmesi'|'Diğer',severity:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',probability:'50',mitigationPlan:''});
   // ── Phase 628: Stok Optimizasyon Analizi ─────────────────────────────────
@@ -1939,12 +1918,9 @@ function AppContent() {
   };
   // ── Phase 636: SGK/Net Bordro Hesaplama Motoru ────────────────────────────
   const [p636Month, setP636Month] = useState(()=>new Date().toISOString().slice(0,7));
-  const [p636Payrolls, setP636Payrolls] = useState<Array<{id:string;name:string;position:string;gross:number;sgkEmployee:number;sgkEmployer:number;incomeTax:number;stampTax:number;net:number}>>([]);
-  const [p636Calculated, setP636Calculated] = useState(false);
   // ── Phase 637: Kapasite Planlama ──────────────────────────────────────────
   const [p637Horizon, setP637Horizon] = useState<'7d'|'30d'|'90d'>('30d');
   // ── Phase 638: Otomatik Ödeme Eşleştirme ──────────────────────────────────
-  const [p638MatchResults, setP638MatchResults] = useState<Array<{invoiceId:string;invoiceNo:string;customer:string;invoiceAmount:number;matchedAmount:number;confidence:number;status:'Tam'|'Kısmi'|'Eşleşmedi'}>>([]);
   const [p638Running, setP638Running] = useState(false);
   // ── Phase 639: İade & Kredi Notu ──────────────────────────────────────────
   const [p639Returns, setP639Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;amount:number;status:'Bekliyor'|'Onaylandı'|'Reddedildi';createdAt:string}>>([]);
@@ -1966,102 +1942,26 @@ function AppContent() {
   const [p644Horizon, setP644Horizon] = useState(30);
 
   // ── Phase 645–650 state ───────────────────────────────────────────────────
-  type WebhookConfig = { id: string; url: string; events: string[]; enabled: boolean; createdAt?: unknown };
-  const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
 
 
   // ── Phase 649: Subscribe to webhookConfigs collection ────────────────────
-  useEffect(() => {
-    if (!user || activeTab !== 'settings') return; // yalnızca Ayarlar ekranında gösterilir
-    return onSnapshot(collection(db, 'webhookConfigs'), s =>
-      setWebhookConfigs(s.docs.map(d => ({ id: d.id, ...d.data() } as WebhookConfig))),
-      () => setWebhookConfigs([])
-    );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, activeTab]);
 
   // ── Phase 632: Konsolidasyon & Holding Raporu ─────────────────────────────
   // p632Consolidation kaldırıldı — hiç render edilmeyen hardcoded dummy veriydi.
   // ── Phase 547: Fetch bank accounts + fixed assets for Bilanço ───────────
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
-    const unsubBank = onSnapshot(collection(db, 'bankAccounts'), snap => {
-      setP547BankAccounts(sortByCreatedAt(snap.docs.map(d => ({
-        id: d.id, bankName: d.data().bankName || d.data().bank || '—',
-        accountType: d.data().accountType || 'Vadesiz',
-        balance: Number(d.data().balance) || 0,
-        currency: d.data().currency || 'TRY',
-      }))));
-    }, () => setP547BankAccounts([]));
-    const unsubFA = onSnapshot(collection(db, 'sabitKiymetler'), snap => {
-      setP547FixedAssets(sortByCreatedAt(snap.docs.map(d => ({
-        id: d.id, name: d.data().name || '—',
-        cost: Number(d.data().cost) || Number(d.data().edinimBedeli) || 0,
-        depreciation: Number(d.data().birikimliAmortisman) || 0,
-      }))));
-    }, () => setP547FixedAssets([]));
-    return () => { unsubBank(); unsubFA(); };
-   
-  }, [activeTab, muhasebeTab]);
 
   // ── Phase 548: Fetch expense claims (masraf) ───────────────────────────
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'masraf') return;
-    const unsub = onSnapshot(query(collection(db, 'masraflar')), snap => {
-      setP548Masraflar(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p548Masraflar[number]))));
-    }, () => {});
-    return () => unsub();
-   
-  }, [activeTab, muhasebeTab]);
 
   // ── Phase 591: Oto. Fatura planları — KALICI (autoInvoiceSchedules; p640
   //    Tekrarlayan Fatura'nın recurringBilling'inden BİLEREK ayrı, şema farklı) ──
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'oto-fatura') return;
-    const unsub = onSnapshot(query(collection(db, 'autoInvoiceSchedules')), snap => {
-      setP591Schedules(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p591Schedules[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, muhasebeTab]);
 
   // ── Phase 612: Satın alma bütçesi — KALICI (purchaseBudgets, 2026-07-21) ──
-  useEffect(() => {
-    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'satin-butce') return;
-    const unsub = onSnapshot(query(collection(db, 'purchaseBudgets')), snap => {
-      setP612Budgets(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p612Budgets[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, purchasingSubTab]);
 
   // ── Phase 608: RFQ teklif karşılaştırma — KALICI (rfqQuotes, 2026-07-21) ──
-  useEffect(() => {
-    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'suppliers') return;
-    const unsub = onSnapshot(query(collection(db, 'rfqQuotes')), snap => {
-      setP608Quotes(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p608Quotes[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, purchasingSubTab]);
 
   // ── Phase 627: Tedarikçi riskleri — KALICI (supplierRisks, 2026-07-21) ────
-  useEffect(() => {
-    if (activeTab !== 'satin-alma' || purchasingSubTab !== 'tedarik-risk') return;
-    const unsub = onSnapshot(query(collection(db, 'supplierRisks')), snap => {
-      setP627Risks(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p627Risks[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, purchasingSubTab]);
 
   // ── Phase 588+579: Konsinye + Lot/Parti — KALICI (2026-07-21) ─────────────
-  useEffect(() => {
-    if (activeTab !== 'inventory') return;
-    const unsub = onSnapshot(query(collection(db, 'supplierConsignments')), snap => {
-      setP588Consign(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p588Consign[number])));
-    }, () => {});
-    const unsub2 = onSnapshot(query(collection(db, 'stockBatches')), snap => {
-      setP579Batches(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p579Batches[number])));
-    }, () => {});
-    return () => { unsub(); unsub2(); };
-  }, [activeTab]);
 
   // ── Phase 584: Devam eden sayım oturumu — reload'da kaldığı yerden (tek-seferlik) ──
   useEffect(() => {
@@ -2079,101 +1979,22 @@ function AppContent() {
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phase 625: Gelir/Gider bütçe — KALICI (revExpBudgets, ay-bazlı doc) ───
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'gelir-gider-butce') return;
-    const unsub = onSnapshot(query(collection(db, 'revExpBudgets')), snap => {
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as {id:string;year:number;month:number;budgetRevenue:number;budgetExpense:number}));
-      setP625BudgetData(rows.filter(r => r.year === p625BudgetYear));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, muhasebeTab, p625BudgetYear]);
 
   // ── Phase 636: Bordro hesabı — son koşu geri yüklenir (payrollRuns) ───────
-  useEffect(() => {
-    if (activeTab !== 'ik') return;
-    const unsub = onSnapshot(query(collection(db, 'payrollRuns'), orderBy('calculatedAt', 'desc'), limit(1)), snap => {
-      const latest = snap.docs[0]?.data() as { rows?: typeof p636Payrolls } | undefined;
-      if (latest?.rows?.length) { setP636Payrolls(latest.rows); setP636Calculated(true); }
-    }, () => {});
-    return () => unsub();
-  }, [activeTab]);
 
   // ── Phase 638: Banka eşleştirme — son koşu geri yüklenir (bankMatchRuns) ──
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'banka') return;
-    const unsub = onSnapshot(query(collection(db, 'bankMatchRuns'), orderBy('ranAt', 'desc'), limit(1)), snap => {
-      const latest = snap.docs[0]?.data() as { results?: typeof p638MatchResults } | undefined;
-      if (latest?.results?.length) setP638MatchResults(latest.results);
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, muhasebeTab]);
 
   // ── Phase 587: Kalite kontrol çeklisti — KALICI (qualityChecklist) ────────
-  useEffect(() => {
-    if (activeTab !== 'kalite') return;
-    const unsub = onSnapshot(query(collection(db, 'qualityChecklist')), snap => {
-      setP587Checks(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p587Checks[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab]);
 
   // ── Phase 573: Fiyat kuralları — KALICI (pricingRules, 2026-07-21) ────────
-  useEffect(() => {
-    if (activeTab !== 'muhasebe' || muhasebeTab !== 'fiyat-kural') return;
-    const unsub = onSnapshot(query(collection(db, 'pricingRules')), snap => {
-      setP573Rules(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p573Rules[number])));
-    }, () => {});
-    return () => unsub();
-  }, [activeTab, muhasebeTab]);
 
   // ── Phase 552: Fetch time & attendance when on IK tab ────────────────────
-  useEffect(() => {
-    if (activeTab !== 'ik') return;
-    const unsub = onSnapshot(query(collection(db, 'timeAttendance')), snap => {
-      setP552Records(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p552Records[number]))));
-    }, () => {});
-    return () => unsub();
-   
-  }, [activeTab]);
 
   // ── Phase 554: Fetch WMS bins when on lojistik/wms tab ──────────────────
-  useEffect(() => {
-    if (activeTab !== 'lojistik' || lojistikTab !== 'wms') return;
-    const unsub = onSnapshot(collection(db, 'warehouseBins'), snap => {
-      setP554Bins(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p554Bins[number]))));
-    }, () => {});
-    return () => unsub();
-   
-  }, [activeTab, lojistikTab]);
 
   // ── Phase 549: Fetch RMA/İade requests ──────────────────────────────────
-  useEffect(() => {
-    if (activeTab !== 'iade') return;
-    const unsub = onSnapshot(query(collection(db, 'rmaRequests')), snap => {
-      setP549Iadeler(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof p549Iadeler[number]))));
-    }, () => {});
-    return () => unsub();
-   
-  }, [activeTab]);
 
   // ── Phase 543: Subscribe to vergiTakvimi when on dashboard ───────────────
-  useEffect(() => {
-    if (activeTab !== 'dashboard') return;
-    const today543 = new Date().toISOString().slice(0, 10);
-    const unsub = onSnapshot(
-      query(collection(db, 'vergiTakvimi')),
-      snap => {
-        const upcoming = snap.docs
-          .map(d => ({ id: d.id, ...(d.data() as { vergiTuru: string; sonTarih: string; durum: string }) }))
-          .filter(d => d.sonTarih >= today543 && d.durum !== 'Tamamlandı')
-          .slice(0, 4);
-        setDashVergiDeadlines(upcoming);
-      },
-      () => setDashVergiDeadlines([])
-    );
-    return () => unsub();
-   
-  }, [activeTab]);
 
   // ── Phase 100: In-App Email Compose ──────────────────────────────────────
   const [emailCompose, setEmailCompose] = useState<{ open: boolean; to: string; name: string; subject: string; body: string }>({
