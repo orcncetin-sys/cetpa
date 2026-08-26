@@ -208,7 +208,31 @@ interface Props {
   setP643Draft: React.Dispatch<React.SetStateAction<{ from: string; to: string; amount: string; currency: 'TRY' | 'USD' | 'EUR'; desc: string; date: string }>>;
 }
 
-const FX_FALLBACK: Record<string, number> = { USD: 38, EUR: 41 };
+// FX_FALLBACK KALDIRILDI (2026-08-26, kullanici karari). 2024'ten kalma sabit
+// kurlarla (USD 38 / EUR 41) BILANCO ve masraf toplamlari hesaplaniyordu — kur
+// beslemesi koptugunda finansal tablo sessizce yanlis rakam basiyordu.
+// Yeni kural: uydurma kur YOK. Cevrilemeyen kalem toplama KATILMAZ ve kac
+// kalemin disarida kaldigi kullaniciya YAZILIR. Kur gelince kendiliginden duzelir.
+/** Doviz tutarini TL'ye cevirir; kur yoksa `null` (asla uydurmaz). */
+const tlYap = (v: number, cur: string | undefined, kurlar: Record<string, number> | null | undefined): number | null => {
+  if (!cur || cur === 'TRY') return v;
+  const k = kurlar?.[cur];
+  return (!k || !isFinite(k) || k <= 0) ? null : v * k;
+};
+/** Toplarken cevrilemeyeni ATLAR ve sayar. */
+const tlTopla = <T,>(
+  kayitlar: readonly T[],
+  tutar: (x: T) => number,
+  birim: (x: T) => string | undefined,
+  kurlar: Record<string, number> | null | undefined,
+): { toplam: number; atlanan: number; birimler: string[] } => {
+  let toplam = 0, atlanan = 0; const eksik = new Set<string>();
+  for (const x of kayitlar) {
+    const v = tlYap(tutar(x), birim(x), kurlar);
+    if (v === null) { atlanan++; eksik.add(String(birim(x))); } else toplam += v;
+  }
+  return { toplam, atlanan, birimler: [...eksik].sort() };
+};
 
 export default function MuhasebePage(props: Props) {
   const {
@@ -1885,11 +1909,15 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 547: Bilanço (Balance Sheet) ─────────────────────────────── */}
                   {muhasebeTab === 'bilanco' && (() => {
                     const tr547 = currentLanguage === 'tr';
-                    const usd547 = exchangeRates?.USD ?? FX_FALLBACK.USD; const eur547 = exchangeRates?.EUR ?? FX_FALLBACK.EUR;
-                    const toTRY = (v: number, cur: string) => cur === 'USD' ? v * usd547 : cur === 'EUR' ? v * eur547 : v;
+                    // KUR UYDURMA YOK: kuru olmayan doviz hesabi bilancoya KATILMAZ,
+                    // kac tanesinin disarida kaldigi asagida yaziliyor.
+                    const kasaT547  = tlTopla(p547BankAccounts.filter(b => b.accountType === 'Kasa'), b => b.balance, b => b.currency, exchangeRates);
+                    const bankaT547 = tlTopla(p547BankAccounts.filter(b => b.accountType !== 'Kasa'), b => b.balance, b => b.currency, exchangeRates);
+                    const kurAtlanan547 = kasaT547.atlanan + bankaT547.atlanan;
+                    const kurEksik547 = [...new Set([...kasaT547.birimler, ...bankaT547.birimler])].join('/');
                     // — Aktif (Assets) —
-                    const kasa547   = p547BankAccounts.filter(b => b.accountType === 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
-                    const banka547  = p547BankAccounts.filter(b => b.accountType !== 'Kasa').reduce((s,b) => s + toTRY(b.balance, b.currency), 0);
+                    const kasa547   = kasaT547.toplam;
+                    const banka547  = bankaT547.toplam;
                     // Ticari Alacaklar/Borçlar: native (orders/apPurchaseOrders) bu caride
                     // neredeyse boş — satışlar/alışlar Mikro'dan geliyor. cariBalanceToplam
                     // (Finansal Oranlar'da zaten kullanılan, Mikro cariBalances'tan gerçek
@@ -1942,6 +1970,16 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div key="muhasebe-bilanco" initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }} className="space-y-4">
                         <ModuleHeader title={tr547?'Bilanço':'Balance Sheet'} subtitle={tr547?'Aktif = Pasif (MSUGT formatı)':'Assets = Liabilities + Equity (MSUGT format)'} icon={Scale} />
+                        {kurAtlanan547 > 0 && (
+                          <div role="status" className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            <p className="text-xs leading-relaxed">
+                              {tr547
+                                ? `${kurAtlanan547} kayıt için ${kurEksik547} kuru bulunamadı — bu tutarlar toplama DAHİL DEĞİL. Kur geldiğinde otomatik düzelir.`
+                                : `Exchange rate missing for ${kurEksik547} on ${kurAtlanan547} record(s) — EXCLUDED from totals. Resolves automatically once rates arrive.`}
+                            </p>
+                          </div>
+                        )}
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
@@ -2092,9 +2130,13 @@ export default function MuhasebePage(props: Props) {
                     const pending548 = p548Masraflar.filter(m=>m.status==='Bekliyor');
                     const approved548 = p548Masraflar.filter(m=>m.status==='Onaylandı');
                     // Karışık para birimlerini ₺'ye çevirerek topla (önce ham toplanıyordu).
-                    const toTRY548 = (amt:number, cur?:string) => (amt||0) * (cur==='USD' ? (exchangeRates?.USD ?? FX_FALLBACK.USD) : cur==='EUR' ? (exchangeRates?.EUR ?? FX_FALLBACK.EUR) : 1);
-                    const totalPending = pending548.reduce((s,m)=>s+toTRY548(m.amount,(m as {currency?:string}).currency),0);
-                    const totalApproved = approved548.reduce((s,m)=>s+toTRY548(m.amount,(m as {currency?:string}).currency),0);
+                    // KUR UYDURMA YOK: kuru olmayan doviz masrafi toplama KATILMAZ.
+                    const bekT548 = tlTopla(pending548, m=>m.amount||0, m=>(m as {currency?:string}).currency, exchangeRates);
+                    const onaT548 = tlTopla(approved548, m=>m.amount||0, m=>(m as {currency?:string}).currency, exchangeRates);
+                    const kurAtlanan548 = bekT548.atlanan + onaT548.atlanan;
+                    const kurEksik548 = [...new Set([...bekT548.birimler, ...onaT548.birimler])].join('/');
+                    const totalPending = bekT548.toplam;
+                    const totalApproved = onaT548.toplam;
                     const fE = (v:number, c:string='TRY') => c==='USD'?`$${v.toFixed(2)}`:c==='EUR'?`€${v.toFixed(2)}`:`₺${Math.round(v).toLocaleString('tr-TR')}`;
                     return (
                       <motion.div key="masraf" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -2108,6 +2150,16 @@ export default function MuhasebePage(props: Props) {
                             </button>
                           ) : undefined}
                         />
+                        {kurAtlanan548 > 0 && (
+                          <div role="status" className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            <p className="text-xs leading-relaxed">
+                              {tr548
+                                ? `${kurAtlanan548} kayıt için ${kurEksik548} kuru bulunamadı — bu tutarlar toplama DAHİL DEĞİL. Kur geldiğinde otomatik düzelir.`
+                                : `Exchange rate missing for ${kurEksik548} on ${kurAtlanan548} record(s) — EXCLUDED from totals. Resolves automatically once rates arrive.`}
+                            </p>
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
                             { label: tr548?'Bekleyen Talep':'Pending', v: pending548.length, sub: `₺${Math.round(totalPending).toLocaleString('tr-TR')}`, color:'text-orange-600', bg:'bg-orange-50' },

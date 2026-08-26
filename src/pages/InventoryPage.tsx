@@ -1,3 +1,4 @@
+import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -152,6 +153,9 @@ export default function InventoryPage(props: Props) {
                   : null;
                 return (
                   <>
+                  {/* Maliyet toplamlari cevrilemeyen kalemleri DISLIYOR (itemCostTRY 0 doner);
+                      bu bant o eksikligi gorunur kilar. Kur gelince kendiliginden kaybolur. */}
+                  <KurUyarisi inventory={inventory} exchangeRates={exchangeRates} currentLanguage={currentLanguage} className="mb-2" />
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Envanter Özeti' : 'Inventory Summary'}</p>
                     <div className="flex items-center gap-2">

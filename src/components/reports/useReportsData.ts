@@ -9,6 +9,7 @@
  * olarak alır. ReportsCtx tipi ReturnType ile OTOMATİK türetilir — 47 alanı
  * elle yazıp senkron tutma yükü yok.
  */
+import { itemCostTRY, itemPriceTRY } from '../../utils/cost';
 import React, { useState, useEffect, useMemo } from 'react';
 import { zamanMs } from '../../utils/zaman';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../../utils/pdfTheme';
@@ -46,19 +47,13 @@ import {
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
-function itemCostTRY(item: InventoryItem, rates: Record<string, number> | null | undefined): number {
-  const raw = item.costPrice ?? (item as unknown as { cost?: number }).cost ?? 0;
-  const cur = (item as unknown as { costCurrency?: string }).costCurrency;
-  if (!cur || cur === 'TRY' || !rates) return raw;
-  return raw * (rates[cur] ?? 1);
-}
-
-function itemPriceTRY(item: InventoryItem, tier: string, rates: Record<string, number> | null | undefined): number {
-  const raw = (item.prices?.[tier] as number | undefined) ?? (item as unknown as { price?: number }).price ?? 0;
-  const cur = (item as unknown as { priceCurrency?: string }).priceCurrency;
-  if (!cur || cur === 'TRY' || !rates) return raw;
-  return raw * (rates[cur] ?? 1);
-}
+// itemCostTRY / itemPriceTRY BURADAN KALDIRILDI (2026-08-26).
+// Uc ayri kopyasi vardi (burasi, src/utils/cost.ts, src/pages/OrdersPage.tsx)
+// ve UCU DE ayni hatayi tasiyordu: kur yoksa `?? 1` ile $100 maliyet ₺100
+// sayiliyordu (~40 kat dusuk maliyet -> siskin marj). Tek kaynak artik
+// src/utils/cost.ts; oradaki surum cevrilemeyeni 0 sayar ve
+// `cevrilemeyenler()` ile kac kalemin disarida kaldigini bildirir.
+// Yeniden disa aktarim korundu: 6 rapor dosyasi bunlari buradan import ediyor.
 
 /**
  * `Order.syncedAt` / `Order.createdAt` types.ts'te `unknown` tipli (kaynaga gore
@@ -286,4 +281,4 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
 /** Sekme bileşenlerinin aldığı bağlam — hook'un dönüşünden otomatik türer. */
 export type ReportsCtx = ReturnType<typeof useReportsData>;
 
-export { itemCostTRY, itemPriceTRY };
+export { itemCostTRY, itemPriceTRY, cevrilemeyenler, cevrilemeyenMesaji } from '../../utils/cost';

@@ -11,7 +11,7 @@
  * Veriyi kendi çeker (bankAccounts + bankTransactions getDocs, firma-filtreli).
  */
 import { useEffect, useState, useMemo } from 'react';
-import { Landmark, RefreshCw, Save, Bookmark, Trash2 } from 'lucide-react';
+import { Landmark, RefreshCw, Save, Bookmark, Trash2, AlertTriangle } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
@@ -26,7 +26,12 @@ interface Props {
   toast: (msg: string, type?: string) => void;
 }
 
-const FX_FALLBACK: Record<string, number> = { USD: 38, EUR: 41 };
+// FX_FALLBACK KALDIRILDI (2026-08-26, kullanici karari). 2024'ten kalma sabit
+// kurlarla (USD 38 / EUR 41) banka bakiye raporu doviz hesaplarini TL'ye
+// ceviriyordu — kur beslemesi koptugunda rapor sessizce yanlis rakam basiyordu.
+// Yeni kural: uydurma kur YOK. Kuru bulunamayan hesabin TL karsiligi '—'
+// gosterilir ve TOPLAMA katilmaz; kac hesabin disarida kaldigi yazilir.
+// Kur gelince kendiliginden duzelir.
 
 export default function BankBalanceReport({ currentLanguage, exchangeRates, toast }: Props) {
   const tr = currentLanguage === 'tr';
@@ -95,10 +100,14 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
 
   // Seçilen tarihin (asOf) sunucudan gelen TCMB kurunu kullanır; yoksa güncel
   // kura (exchangeRates) düşer. asOfRates useEffect ile asOf değişince yenilenir.
-  const rate = (cur: string): number => {
+  /** Kur; bulunamazsa `null` (asla uydurmaz). Once secilen tarihin TCMB kuru,
+   *  sonra guncel kur denenir. */
+  const rate = (cur: string): number | null => {
     if (cur === 'TRY') return 1;
-    if (asOfRates && typeof asOfRates[cur] === 'number') return asOfRates[cur];
-    return exchangeRates?.[cur] ?? FX_FALLBACK[cur] ?? 1;
+    const tarihli = asOfRates?.[cur];
+    if (typeof tarihli === 'number' && isFinite(tarihli) && tarihli > 0) return tarihli;
+    const guncel = exchangeRates?.[cur];
+    return (typeof guncel === 'number' && isFinite(guncel) && guncel > 0) ? guncel : null;
   };
   // Seçilen tarih için gerçek TCMB tarihsel kuru bulundu mu? ('fallback' ise
   // TCMB'den çekilemedi, güncel kur kullanıldı — nota basar)
@@ -115,11 +124,16 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
       .reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const balance = opening + movement;
     const cur = acc.currency || 'TRY';
-    const tryValue = balance * rate(cur);
+    const k = rate(cur);
+    // Kur yoksa TL karsiligi BILINMIYOR — 0 yazip toplama katmak da, uydurma
+    // kurla carpmak da yanlis olurdu. null: hucre '—', toplam disi.
+    const tryValue = k === null ? null : balance * k;
     return { acc, opening, movement, balance, cur, tryValue };
   }), [accounts, txns, asOf, exchangeRates, costCenterFilter]);
 
-  const totalTRY = rows.reduce((s, r) => s + r.tryValue, 0);
+  const totalTRY = rows.reduce((s, r) => s + (r.tryValue ?? 0), 0);
+  /** TL karsiligi hesaplanamayan hesaplar — toplam EKSIK demektir, yazilmali. */
+  const kurYokSatirlar = rows.filter(r => r.tryValue === null);
 
   const saveOpening = async (acc: BankAccount) => {
     const draft = openingDraft[acc.id];
@@ -205,8 +219,12 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
                   <td className={`py-2 pr-3 text-right tabular-nums ${movement >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmt(movement, cur)}</td>
                   <td className="py-2 pr-3 text-right tabular-nums font-bold">{fmt(balance, cur)}</td>
                   <td className="py-2 text-right tabular-nums font-bold text-gray-900">
-                    {fmt(tryValue)}
-                    {cur !== 'TRY' && <span className="block text-[9px] text-gray-400 font-normal">@ {rate(cur).toFixed(4)}</span>}
+                    {tryValue === null ? '—' : fmt(tryValue)}
+                    {cur !== 'TRY' && (() => { const k = rate(cur); return (
+                      <span className="block text-[9px] text-gray-400 font-normal">
+                        {k === null ? (currentLanguage === 'tr' ? 'kur yok' : 'no rate') : `@ ${k.toFixed(4)}`}
+                      </span>
+                    ); })()}
                   </td>
                 </tr>
               ))}
@@ -218,6 +236,16 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
               </tr>
             </tfoot>
           </table>
+          {kurYokSatirlar.length > 0 && (
+            <div role="status" className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 mt-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <p className="text-xs leading-relaxed">
+                {tr
+                  ? `${kurYokSatirlar.length} hesabın (${[...new Set(kurYokSatirlar.map(r => r.cur))].join('/')}) kuru bulunamadı — TL karşılıkları hesaplanamadı ve TOPLAMA DAHİL DEĞİL. Kur geldiğinde otomatik düzelir.`
+                  : `Exchange rate missing for ${kurYokSatirlar.length} account(s) (${[...new Set(kurYokSatirlar.map(r => r.cur))].join('/')}) — TRY values unavailable and EXCLUDED from the total. Resolves automatically once rates arrive.`}
+              </p>
+            </div>
+          )}
           {rows.some(r => r.cur !== 'TRY') && (
             <p className="text-[11px] text-gray-400 mt-2">
               {hasHistoricalRate

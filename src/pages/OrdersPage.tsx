@@ -1,3 +1,4 @@
+import { itemCostTRY } from '../utils/cost';
 import React, { useState, useEffect } from 'react';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
@@ -45,12 +46,7 @@ const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'a
   </span>
 );
 
-function itemCostTRY(item: InventoryItem, rates: Record<string, number> | null | undefined): number {
-  const raw = item.costPrice ?? (item.cost as number | undefined) ?? 0;
-  const cur = item.costCurrency;
-  if (!cur || cur === 'TRY' || !rates) return raw;
-  return raw * (rates[cur] ?? 1);
-}
+// itemCostTRY tek kaynaktan: src/utils/cost.ts (kopyasi 2026-08-26'da kaldirildi).
 
 type TimelineEntry = { action: string; actor: string; ts: number; note?: string };
 

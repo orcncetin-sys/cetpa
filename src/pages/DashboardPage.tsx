@@ -1,3 +1,4 @@
+import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -1778,6 +1779,9 @@ export default function DashboardPage(props: Props) {
                 const margin      = retailValue > 0 ? Math.round(((retailValue - costValue) / retailValue) * 100) : 0;
                 const totalUnits  = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
                 return (
+                  <>
+                  {/* costValue cevrilemeyen kalemleri DISLIYOR — eksikligi soyle. */}
+                  <KurUyarisi inventory={inventory} exchangeRates={exchangeRates} currentLanguage={currentLanguage} className="mb-2" />
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
@@ -1805,6 +1809,7 @@ export default function DashboardPage(props: Props) {
                       })()}
                     </div>
                   </div>
+                  </>
                 );
               })()}
 
