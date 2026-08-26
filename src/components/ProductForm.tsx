@@ -37,6 +37,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
     price: 0,
     costPrice: 0,
     costCurrency: 'TRY' as 'TRY' | 'USD' | 'EUR',
+    costDate: '',   // doviz maliyette FATURA TARIHI (YYYY-MM-DD)
     priceCurrency: 'TRY' as 'TRY' | 'USD' | 'EUR',
     location: '',
     warehouseId: '',
@@ -58,6 +59,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
         ...prev,
         ...initialData,
         costCurrency: (initialData.costCurrency as 'TRY' | 'USD' | 'EUR') || 'TRY',
+        costDate: (initialData.costDate as string) || '',
         priceCurrency: (initialData.priceCurrency as 'TRY' | 'USD' | 'EUR') || 'TRY',
         prices: {
           ...prev.prices,
@@ -68,7 +70,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
       // reset for new product
       setFormData({
         name: '', sku: '', category: '', stockLevel: 0, lowStockThreshold: 5,
-        price: 0, costPrice: 0, costCurrency: 'TRY', priceCurrency: 'TRY',
+        price: 0, costPrice: 0, costCurrency: 'TRY', costDate: '', priceCurrency: 'TRY',
         location: '', warehouseId: '', supplier: '', supplierSku: '',
         prices: { 'Retail': 0, 'B2B Standard': 0, 'B2B Premium': 0, 'Dealer': 0 }
       });
@@ -337,6 +339,32 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               </div>
               {tryHintFor(formData.costPrice, formData.costCurrency) && (
                 <p className="text-[10px] text-gray-400 pl-1">{tryHintFor(formData.costPrice, formData.costCurrency)}</p>
+              )}
+              {/* FATURA TARIHI — doviz maliyette TL karsiligi BU tarihin kuruyla
+                  hesaplanir (kullanici karari 2026-08-26). Bugunku kuru kullanmak
+                  gecmis donem stok degerini ve marji kur hareketi kadar kaydirirdi.
+                  Bos birakilirsa guncel kur kullanilir ve raporlarda "fatura tarihi
+                  yok, guncel kurla degerlendi" diye YAZILIR — sessizce dogru
+                  sanilmasin. */}
+              {formData.costCurrency !== 'TRY' && (
+                <div className="pt-1">
+                  <label htmlFor="cost-date" className="text-[10px] font-bold text-gray-500 uppercase block mb-1">
+                    Fatura Tarihi
+                  </label>
+                  <input
+                    id="cost-date"
+                    type="date"
+                    value={formData.costDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setFormData(prev => ({ ...prev, costDate: e.target.value }))}
+                    className="apple-input w-full"
+                  />
+                  <p className="text-[10px] text-gray-400 pl-1 mt-1">
+                    {formData.costDate
+                      ? 'TL karşılığı bu tarihin TCMB kuruyla hesaplanır.'
+                      : 'Boş bırakılırsa güncel kur kullanılır (raporlarda belirtilir).'}
+                  </p>
+                </div>
               )}
             </div>
           </div>

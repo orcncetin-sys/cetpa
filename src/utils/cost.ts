@@ -1,4 +1,5 @@
 import type { InventoryItem } from '../types';
+import { kurAl } from './kurArsivi';
 
 /**
  * Stok kalemi maliyetinin TL karşılığı — ve çevrilemediğinde bunu SÖYLEYEN
@@ -37,8 +38,11 @@ import type { InventoryItem } from '../types';
 const BILINEN_BIRIMLER = new Set(['TRY', 'USD', 'EUR']);
 
 export type MaliyetDurum =
-  /** TL cinsinden (ya zaten TL'ydi ya da kurla çevrildi). */
-  | { durum: 'tl'; tl: number }
+  /** TL cinsinden (ya zaten TL'ydi ya da kurla çevrildi).
+   *  `tarihsizKur` — çeviri FATURA TARİHİNİN kuruyla değil, GÜNCEL kurla
+   *  yapıldı (kalemde `costDate` yok). Rakam gösterilir ama kullanıcıya
+   *  "güncel kurla" denir; sessizce doğru sanılmasın. */
+  | { durum: 'tl'; tl: number; tarihsizKur?: true }
   /** Birim biliniyor ama KURU yok — kur gelince düzelir. */
   | { durum: 'kur-yok'; tutar: number; birim: string }
   /** Birim tanınmıyor (veri kirliliği / Mikro'dan gelen beklenmedik kod).
@@ -67,10 +71,24 @@ export function maliyetDurumu(
 
   if (!BILINEN_BIRIMLER.has(cur)) return { durum: 'bilinmeyen-birim', tutar: raw, birim: String(cur) };
 
+  // FATURA TARİHİNİN KURU önce (kullanıcı kararı 2026-08-26): maliyet, dayandığı
+  // faturanın tarihindeki kurla TL'ye çevrilir. Güncel kuru kullanmak geçmiş
+  // dönem stok değerini ve marjı kur hareketi kadar kaydırırdı.
+  // Arşiv `src/utils/kurArsivi.ts`te; tarihler ekran açılırken toplu yüklenir,
+  // burada SENKRON okunur.
+  if (item.costDate) {
+    const tarihliKur = kurAl(item.costDate, cur);
+    // Tarih VAR ama o günün kuru yoksa GÜNCEL kura DÜŞMEYİZ — istenen tarihin
+    // kuru bilinmiyorsa rakam da bilinmiyordur.
+    if (!tarihliKur) return { durum: 'kur-yok', tutar: raw, birim: cur };
+    return { durum: 'tl', tl: raw * tarihliKur };
+  }
+
+  // Tarih YOK (eski kayıt / elle giriş): güncel kur kullanılır ama işaretlenir.
   const kur = rates?.[cur];
   if (!kur || !isFinite(kur) || kur <= 0) return { durum: 'kur-yok', tutar: raw, birim: cur };
 
-  return { durum: 'tl', tl: raw * kur };
+  return { durum: 'tl', tl: raw * kur, tarihsizKur: true };
 }
 
 /**
@@ -121,6 +139,10 @@ export interface CevrilemeyenOzet {
   toplam: number;
   /** Hangi para birimlerinin kuru eksik (kullanıcıya "USD kuru yok" demek için). */
   eksikBirimler: string[];
+  /** Fatura tarihi OLMADIĞI için GÜNCEL kurla değerlenen kalem sayısı.
+   *  Toplama DAHİL edilirler (rakam vardır) ama "bugünkü kurla" olduğu
+   *  söylenmelidir — geçmiş dönem değeri değildir. */
+  tarihsizKur: number;
 }
 
 /**
@@ -134,11 +156,12 @@ export function cevrilemeyenler(
   items: readonly InventoryItem[],
   rates: Record<string, number> | null | undefined,
 ): CevrilemeyenOzet {
-  let kurYok = 0;
+  let kurYok = 0, tarihsizKur = 0;
   const na: Record<string, number> = {};
   const eksik = new Set<string>();
   for (const it of items) {
     const d = maliyetDurumu(it, rates);
+    if (d.durum === 'tl' && d.tarihsizKur) tarihsizKur++;
     if (d.durum === 'kur-yok') { kurYok++; eksik.add(d.birim); }
     else if (d.durum === 'bilinmeyen-birim') na[d.birim] = (na[d.birim] ?? 0) + 1;
     // Fiyat tarafi ayri bir para biriminde olabilir (priceCurrency) ve o da
@@ -150,13 +173,20 @@ export function cevrilemeyenler(
     }
   }
   const naToplam = Object.values(na).reduce((s, n) => s + n, 0);
-  return { kurYok, na, toplam: kurYok + naToplam, eksikBirimler: [...eksik].sort() };
+  return { kurYok, na, toplam: kurYok + naToplam, eksikBirimler: [...eksik].sort(), tarihsizKur };
 }
 
 /** Uyarı metni — `cevrilemeyenler()` sonucundan tek satırlık kullanıcı mesajı. */
 export function cevrilemeyenMesaji(o: CevrilemeyenOzet, dil: 'tr' | 'en' = 'tr'): string | null {
-  if (o.toplam === 0) return null;
+  if (o.toplam === 0 && o.tarihsizKur === 0) return null;
   const p: string[] = [];
+  // "Tarihsiz" uyarısı TEK BAŞINA da çıkabilir: rakam vardır ama fatura
+  // tarihinin değil BUGÜNÜN kuruyladır — bu, sessizce doğru sanılmamalı.
+  if (o.toplam === 0) {
+    return dil === 'tr'
+      ? `${o.tarihsizKur} kalemde fatura tarihi yok — güncel kurla değerlendi (geçmiş dönem değeri değildir).`
+      : `${o.tarihsizKur} item(s) have no invoice date — valued at today's rate (not the historical value).`;
+  }
   if (o.kurYok > 0) {
     p.push(dil === 'tr'
       ? `${o.kurYok} kalem için ${o.eksikBirimler.join('/')} kuru bulunamadı`
@@ -168,7 +198,26 @@ export function cevrilemeyenMesaji(o: CevrilemeyenOzet, dil: 'tr' | 'en' = 'tr')
       ? `${naAdet} kalem tanınmayan para biriminde (${Object.keys(o.na).join(', ')})`
       : `${naAdet} item(s) in unrecognised currency (${Object.keys(o.na).join(', ')})`);
   }
-  return dil === 'tr'
+  const kuyruk = o.tarihsizKur > 0
+    ? (dil === 'tr'
+        ? ` Ayrıca ${o.tarihsizKur} kalemde fatura tarihi yok, güncel kurla değerlendi.`
+        : ` Also ${o.tarihsizKur} item(s) have no invoice date and were valued at today's rate.`)
+    : '';
+  return (dil === 'tr'
     ? `${p.join(' · ')} — bu kalemler toplama DAHİL DEĞİL. Kur geldiğinde otomatik düzelir.`
-    : `${p.join(' · ')} — these are EXCLUDED from the total. Resolves automatically once rates arrive.`;
+    : `${p.join(' · ')} — these are EXCLUDED from the total. Resolves automatically once rates arrive.`) + kuyruk;
+}
+
+/**
+ * Listede geçen FARKLI fatura tarihleri — `kurlariYukle()` bunlarla beslenir.
+ *
+ * Ekran açılırken bir kez çağrılır: binlerce satır için satır başına ağ isteği
+ * yerine, birkaç düzine farklı tarih TOPLU çekilir.
+ */
+export function maliyetTarihleri(items: readonly InventoryItem[]): string[] {
+  const t = new Set<string>();
+  for (const it of items) {
+    if (it.costDate && it.costCurrency && it.costCurrency !== 'TRY') t.add(it.costDate);
+  }
+  return [...t];
 }

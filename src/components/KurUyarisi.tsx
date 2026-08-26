@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { cevrilemeyenler, cevrilemeyenMesaji } from '../utils/cost';
+import { cevrilemeyenler, cevrilemeyenMesaji, maliyetTarihleri } from '../utils/cost';
+import { kurlariYukle } from '../utils/kurArsivi';
 import type { InventoryItem } from '../types';
 
 /**
@@ -33,6 +35,25 @@ export default function KurUyarisi({
   currentLanguage?: 'tr' | 'en' | string;
   className?: string;
 }) {
+  // FATURA TARİHİ KURLARINI YÜKLE. `maliyetDurumu` kuru SENKRON okur
+  // (render sırasında ağ isteği olamaz), dolayısıyla tarihler önceden
+  // getirilmeli. Bu bileşen maliyet gösteren her ekranın üstünde olduğu için
+  // yükleme kancası da burada duruyor — her sayfaya ayrı ayrı eklenmesin.
+  //
+  // `sayac` yalnızca yükleme bitince YENİDEN RENDER tetiklemek için: arşiv
+  // modül düzeyinde bir Map, React onu izlemez.
+  const [sayac, setSayac] = useState(0);
+  const tarihler = maliyetTarihleri(inventory);
+  const anahtar = tarihler.join(',');
+  useEffect(() => {
+    if (!tarihler.length) return;
+    let iptal = false;
+    void kurlariYukle(tarihler).then(() => { if (!iptal) setSayac(n => n + 1); });
+    return () => { iptal = true; };
+    // `anahtar` tarih kümesini temsil eder; dizi kimliği her render değişir.
+  }, [anahtar]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  void sayac;   // yeniden render tetikleyicisi; değeri okunmuyor
   const ozet = cevrilemeyenler(inventory, exchangeRates);
   const mesaj = cevrilemeyenMesaji(ozet, currentLanguage === 'en' ? 'en' : 'tr');
   if (!mesaj) return null;

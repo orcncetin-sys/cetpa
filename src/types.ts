@@ -40,6 +40,11 @@ export interface InventoryItem {
   price?: number;
   costPrice: number;
   costCurrency?: 'TRY' | 'USD' | 'EUR';
+  /** Maliyetin dayandığı FATURA TARİHİ (YYYY-MM-DD). Döviz maliyette TL
+   *  karşılığı BU tarihin kuruyla hesaplanır — bugünkü kurla değil
+   *  (kullanıcı kararı 2026-08-26). Yoksa güncel kura düşülür ve bu
+   *  kullanıcıya bildirilir (bkz. src/utils/cost.ts). */
+  costDate?: string;
   cost?: number;
   priceCurrency?: 'TRY' | 'USD' | 'EUR';
   location?: string;
