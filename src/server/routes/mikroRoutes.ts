@@ -1283,7 +1283,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   function makeMikroSqlImport(opts: SqlImportOpts) {
     SQL_IMPORT_TANIMLARI.push(opts);   // cron da aynı tanımları kullanır
     if (!opts.route) return;
-    app.post(opts.route, C.requireAuth, async (req: Request, res: Response) => {
+    // MFA + ROL KAPISI (2026-08-25 denetimi): bu fabrika 12 import ucu kaydeder
+    // (siparis, fatura-listesi, cari-hareket, stok-hareket, banka, kasa,
+    // odeme-plan, depo, barkod, fiyat, demirbas, maliyet-merkezi) ve UCUNDE de
+    // yalnizca `requireAuth` vardi. Iki ayri bosluk:
+    //   1) MFA yok — kardes Mikro uclarinin (stok/kaydet, cari/kaydet,
+    //      ebelge/earsiv-iptal) hepsinde requireMfaVerified var; burada atlanmis.
+    //   2) ROL yok — B2B/Dealer rolu bile toplu import tetikleyebiliyordu.
+    //      `opts.collection` hedef koleksiyondur, dolayisiyla yetki o
+    //      koleksiyonun YAZMA kuralindan turetilir; ayri bir liste tutulmaz.
+    // Hiz siniri (mikroLimiter) BILEREK eklenmedi: import uzun surer ve
+    // kullanicinin "tum import'lari sirayla calistir" akisini kirardi.
+    app.post(opts.route, C.requireAuth, C.requireMfaVerified,
+             C.requireCollectionAccess(opts.collection, 'write'),
+             async (req: Request, res: Response) => {
       if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
       const sonuc = await mikroSqlImportCalistir(
         opts,
@@ -3284,7 +3297,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/gelen — GİB'den gelen e-faturaları listele → eBelgeler
    *  Body: { ilkTarih?: 'YYYY-MM-DD', sonTarih?: 'YYYY-MM-DD', vkn?: string } */
-  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -3322,7 +3335,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  V17'de giden belge listesi metodu YOK; EBELGE_EVRAK_HAREKETLERI tablosundan
    *  SQL ile çekilir. Kolonlar çalışma anında keşfedilir, tahmin edilmez.
    *  Body: { ilkTarih?, sonTarih? } */
-  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -3366,7 +3379,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/eirsaliye — e-irsaliye listesi → eBelgeler
    *  Body: { ilkTarih?, sonTarih?, yon?: 'gelen'|'giden' }  (EIrsaliyeTipi 0=giden, 1=gelen) */
-  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -3401,7 +3414,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/durum — GİB durum sorgusu (EBelgeDurumSorgulamaV2)
    *  Body: { uuid: string, tur?: 'e-fatura'|'e-arsiv', yon?: 'gelen'|'giden' } */
-  app.post('/api/mikro/ebelge/durum', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/durum', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });
@@ -3485,7 +3498,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Body: { uuid?: string, faturaGuid?: string }
    *  uuid → GelenFaturaPdfV2 (gelen), faturaGuid → FaturaPdfV2 (giden).
    *  Not: uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu uç gerçek olanı verir. */
-  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     const guid = String(req.body?.faturaGuid ?? '').trim();
@@ -3514,7 +3527,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  gönderirken veya arşivlerken istenen budur.
    *  Spec: EFaturaTipi 0=gönderilen 1=gelen · EBelgeTipi 0=EFatura 1=EArsiv 2=EIrsaliye
    */
-  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });

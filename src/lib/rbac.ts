@@ -93,6 +93,26 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   productionMetrics: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
   qualityChecklist: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Quality'] },
 
+  // ── Ayni bosluk, ikinci tur (2026-08-25 olcumu) ─────────────────────────
+  // 169 TENANT koleksiyonundan 10'u COLLECTION_PERMISSIONS'ta da
+  // ADMIN_ONLY'de de yoktu. Ucu (auditLog/syncLog/clientErrors) APPEND_ONLY
+  // ile zaten ele aliniyor; kalan 7 zero-trust yedegine dusuyordu.
+  // `isAllowed` en basta `role === 'Admin' -> true` dondugu icin bu, tam
+  // olarak "Admin'de calisiyor, digerlerinde sessizce 403" arizasi uretir:
+  //   stockCounts — App.tsx:1646 sayim oturumunu arsivler (istemci yazimi)
+  //   syncJobs    — syncRetryService.ts setDoc/updateDoc/deleteDoc yapar;
+  //                 yazamayinca Mikro retry kuyrugu Admin olmayanda ISLEMEZ
+  // Kalan 5 yalniz sunucu tarafindan yazilir (adminDb RBAC'i baypas eder),
+  // ama kurali ACIKCA yazmak okumayi da netlestirir ve ileride bir ekran
+  // yazmaya kalkarsa sessiz 403 yerine bilincli bir karar olur.
+  stockCounts: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  syncJobs: { read: [...STAFF_ROLES], write: [...STAFF_ROLES] },
+  cariBalances: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
+  mikroSiparisler: { read: [...STAFF_ROLES], write: ['Admin', 'Manager'] },
+  mikroDepolar: { read: [...STAFF_ROLES], write: ['Admin', 'Manager'] },
+  mikroBankalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager'] },
+  mikroKasalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager'] },
+
   salesReturns: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
   serviceRequests: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'Quality'] },
   helpdeskTickets: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales'] },

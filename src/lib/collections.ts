@@ -89,6 +89,22 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   // koleksiyonlarını kirletmesin diye ayrı tutulur; temiz doküman postProcess
   // ile ilgili UI koleksiyonuna yazılır.
   'mikroDepolar', 'mikroBankalar', 'mikroKasalar',
+  // ── 2026-08-25 denetimi: sinifi HIC olmayan iki is koleksiyonu ──
+  // Ikisi de "filtresiz" dalina dusuyordu (tenantWhere WHERE eki eklemiyor,
+  // rowVisible sonunda `true` donuyor) — yani her kiraci digerlerininkini
+  // okuyabiliyordu. Ikisi de ZATEN companyId yaziyordu; eksik olan tek sey
+  // bu kayitti. Kardes koleksiyon 'supplierConsignments' (GELEN mal) listedeydi,
+  // 'consignments' (GIDEN konsinye: musteri adi + urun + miktar) atlanmisti.
+  'consignments',
+  // subscriptions: doc id = kullanicinin uid'i. ADMIN_ONLY oldugu icin yalniz
+  // Admin/Manager okur, ama kiraci filtresi YOKTU: bir firmanin Admin'i
+  // GET /api/db/subscriptions ile TUM firmalarin abonelik/plan kaydini
+  // listeleyebiliyordu.
+  'subscriptions',
+  // companies: firma profili (unvan/sektor/buyukluk), doc id = kurucunun uid'i.
+  // App.tsx:1128 onboarding'de yazar. Sinifsiz oldugu icin her kiraci
+  // digerlerinin firma bilgisini okuyabiliyordu.
+  'companies',
 ];
 
 /** Kullanıcının kendi verisi — `userId` ile izole. */
@@ -107,4 +123,39 @@ export const USER_SCOPED_COLLECTIONS: readonly string[] = [
  */
 export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   'opsChecks', 'emailLog', 'whatsappMessages', 'waMessageLog',
+  // ── 2026-08-25: SaaS platform verisi — istemcide HIC kullanilmiyor ──
+  // Ucu de yalniz super-admin rotalarinca `adminDb` ile yaziliyor (adminDb
+  // /api/db'yi ve RBAC'i baypas eder), ama koleksiyonlar /api/db'ye ACIKTI ve
+  // hicbir kiraci filtresi yoktu. Olculdu: src/ altinda (server haric) sifir
+  // kullanim, yani kapatmak hicbir ekrani kirmaz.
+  //   tenantInvoices — iyzicoToken + odeme sayfasi linki + tutar + musteri
+  //     e-postasi tasir; ADMIN_ONLY'de DE degildi, yani zero-trust yedegiyle
+  //     HERHANGI bir personel rolu (Sales, HR...) tum kiracilarin odeme
+  //     linklerini okuyabiliyordu.
+  //   companyStatus — kiraci askiya alma durumu.
+  //   invites — davet JETONU (bearer benzeri sir) + davetli e-postasi.
+  //     Yalniz server.ts:3768/3798 ve superadminRoutes.ts:364 yazar,
+  //     /api/invites/redeem okur; hepsi adminDb uzerinden.
+  'tenantInvoices', 'companyStatus', 'invites',
+];
+
+/**
+ * BILEREK SINIFSIZ birakilanlar (2026-08-25 denetiminde tek tek gecildi).
+ *
+ * Bu dosyanin basligi "sinifsiz koleksiyon her kiraciya aciktir; bu bilincli
+ * bir secim olmali, kaza olmamali" diyor — ama o ana kadar bilinclileri
+ * kazalardan ayiran bir KAYIT yoktu, dolayisiyla her denetimde ayni adaylar
+ * bastan inceleniyordu. Liste artik burada:
+ *
+ *   users, settings   — platform verisi; kendi sahiplik/maskeleme mantiklari
+ *                       var (ownsDoc, pinProtectedUserFields, redactSettings).
+ *   paymentHistory    — ADMIN_ONLY; odeme kaydi.
+ *   demoRequests,
+ *   partnerApplications — PUBLIC_WRITE: kimliksiz halka acik formlar.
+ *   testimonials      — pazarlama icerigi. GIRIS ONCESI acilis sayfasindan
+ *                       okunur (LandingPage.tsx:1129), yani kiraci kavrami
+ *                       yok; TENANT yapmak acilis sayfasini kirardi.
+ */
+export const DELIBERATELY_UNSCOPED_COLLECTIONS: readonly string[] = [
+  'users', 'settings', 'paymentHistory', 'demoRequests', 'partnerApplications', 'testimonials',
 ];

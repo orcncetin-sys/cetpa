@@ -60,7 +60,7 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
   // rclone remote'un KENDISI sir degil (jeton sunucudaki rclone.conf'ta durur),
   // ama yine de super-admin disina acilmaz: hangi musterinin nereye
   // yedekledigi operasyonel bir bilgidir.
-  app.post('/api/superadmin/tenants/:companyId/backup', C.requireAuth, C.requireSuperAdmin, async (req: Request, res: Response) => {
+  app.post('/api/superadmin/tenants/:companyId/backup', C.requireAuth, C.requireMfaVerified, C.requireSuperAdmin, async (req: Request, res: Response) => {
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     const cid = String(req.params.companyId || '').trim();
     if (!cid) return res.status(400).json({ success: false, error: 'companyId gerekli.' });

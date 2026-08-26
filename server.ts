@@ -405,9 +405,27 @@ async function processShopifyWebhook(topic: string, body: any) {
         console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
       } else if (topic === 'orders/create') {
         const cid = await serverTenantId(); // webhook: kullanıcı yok → sunucu-tarafı çözümleyici
+        // FAIL-CLOSED (2026-08-25 denetimi): eskiden belirsizse ETİKETSİZ
+        // yazılıyordu. Sunucunun her yerindeki kural "lenient"tir — etiketsiz
+        // doküman HER kiracıya görünür (tenantWhere `OR NOT (data ? 'companyId')`,
+        // rowVisible `return !dc || dc === streamCid`). Yani çok-kiracıda
+        // Shopify'dan gelen her sipariş TÜM firmaların ekranında belirirdi.
+        // Yanlış kiracıya yazmak da, herkese yazmak da kabul edilemez → hiç
+        // yazma, GÜRÜLTÜLÜ başarısız ol.
+        //
+        // Burası bir pg-boss İŞ işleyicisidir (HTTP yanıtı yok, istek çoktan
+        // ack'lendi) → doğru sinyal `throw`: iş başarısız olarak işaretlenir ve
+        // pg-boss yeniden dener. Operatör env'i düzeltince sipariş KAYBOLMADAN
+        // akar; kuyruk bu arada olayı tutar.
+        // Tek-kiracıda serverTenantId() zaten o kiracıyı bulur (cids.size === 1),
+        // yani bu dal ancak 2. müşteri eklenip env unutulduğunda çalışır.
+        if (!cid) {
+          throw new Error('[shopify/webhook] kiracı belirlenemedi — sipariş YAZILMADI. ' +
+            "Çok-kiracılı kurulumda SERVER_TENANT_COMPANY_ID (veya MIKRO_CRON_COMPANY_ID) .env'e yazılmalı.");
+        }
         await adminDb.collection('orders').add({
           ...orderData,
-          ...(cid ? { companyId: cid } : {}), // çok-kiracıda belirsizse etiketsiz bırak
+          companyId: cid,
           lineItems: (body.line_items || []).map((li: any) => ({
             title: li.title,
             quantity: li.quantity,
@@ -521,6 +539,15 @@ async function processStripeWebhook(event: any) {
 
 async function processOutboundWebhook(data: any) {
   const { url, secret, event, payload } = data;
+  // SSRF KAPISI (2026-08-25): `/api/webhooks/test` ucu isSafePublicUrl'den
+  // geçiyordu ama GERÇEK gönderim geçmiyordu — yani kapı test yolunda kilitli,
+  // asıl yolda açıktı. Admin/Manager `webhookConfigs`'e http://127.0.0.1:.../
+  // ya da 169.254.169.254 (bulut metadata) yazıp sunucuya kendi iç ağına
+  // istek attırabilirdi. Kuyruğa düşmüş eski kayıtlar da buradan geçer.
+  if (!isSafePublicUrl(String(url ?? ''))) {
+    console.warn(`[webhook] ${event} → ${url} ENGELLENDİ: public olmayan/geçersiz URL`);
+    return; // throw ETME: pg-boss sonsuz retry'a girmesin, kalıcı bir hata bu
+  }
   try {
     const bodyStr = JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() });
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1569,6 +1596,34 @@ async function startServer() {
 
     // requireMfaVerified artık modül düzeyinde tanımlı (userHasMfa yanında).
 
+    // ── settings sır maskeleme — TEK KAYNAK (2026-08-25) ────────────────────
+    // Eskiden yalnız REST yolunda (`redactSettings`, aşağıda) vardı. SSE hem
+    // init'te ham `r.data`yı hem `broadcastDocChange`in olaya iliştirdiği
+    // `data`yı olduğu gibi yayınlıyordu — yani Manager rolü, REST'te
+    // ***REDACTED*** gördüğü canlı Mikro/Luca/iyzico kimlik bilgilerini
+    // SSE'den DÜZ METİN alıyordu. REST'i maskeleyip akışı açık bırakmak
+    // maskelemeyi tamamen anlamsız kılar.
+    //
+    // Rol akış başında BİR KEZ okunur (`streamRole`), satır başına DB'ye
+    // gidilmez — bu yüzden çekirdek SENKRON.
+    const SECRET_FIELD_RE = /(password|sifre|secret|apikey|api_key|accesstoken|access_token|token|privatekey|private_key)/i;
+    const REDACTED = '***REDACTED***';
+    /** Derinlemesine maskeler. Eski sürüm yalnız üst düzey string alanlara
+     *  bakıyordu; settings/mikro gibi İÇ İÇE nesne tutan dokümanlarda
+     *  (`{ mikro: { idmPassword } }`) sır maskesiz geçiyordu. */
+    const maskSecrets = (v: unknown, anahtar?: string): unknown => {
+      if (typeof v === 'string') return (anahtar && SECRET_FIELD_RE.test(anahtar) && v !== '') ? REDACTED : v;
+      if (Array.isArray(v)) return v.map(x => maskSecrets(x));
+      if (v && typeof v === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = maskSecrets(val, k);
+        return out;
+      }
+      return v;
+    };
+    const redactForRole = (role: AppRole | null, coll: string, data: unknown): unknown =>
+      (coll !== 'settings' || data == null || role === 'Admin') ? data : maskSecrets(data);
+
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
       // için query token. İkincisi rollout sonrası kaldırılabilir.
@@ -1662,7 +1717,7 @@ async function startServer() {
           : { rows: [] as Array<{ coll: string; id: string; data: unknown }> };
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
         for (const c of initColls) byColl[c] = [];
-        for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: r.data });
+        for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
         for (const c of initColls) {
           const docs = byColl[c];
           // Sessiz kırpma YOK: tavana çarpınca logla ve istemciye bildir.
@@ -1686,7 +1741,10 @@ async function startServer() {
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
         if (ev.coll === 'settings' && ev.cid && ev.cid !== streamCid) return; // firma-bazlı ayar yayını izolasyonu
-        res.write(`event: change\ndata: ${JSON.stringify(ev)}\n\n`);
+        // `broadcastDocChange` olaya dokümanın TAMAMINI iliştirir (pgShim.ts:97),
+        // yani maskelenmezse sır buradan da akar.
+        const gonder = 'data' in ev ? { ...ev, data: redactForRole(streamRole, ev.coll, (ev as { data?: unknown }).data) } : ev;
+        res.write(`event: change\ndata: ${JSON.stringify(gonder)}\n\n`);
       };
       dbEvents.on('change', onChange);
       const heartbeat = setInterval(() => res.write(': hb\n\n'), 25000);
@@ -1737,17 +1795,12 @@ async function startServer() {
     // Admin gerçek değeri görür (config ekranları çalışmaya devam eder);
     // Admin olmayan maskeli görür. Yazarken maske ASLA geri yazılmaz — aksi
     // halde maskeli formu kaydeden biri gerçek secret'i '***' ile ezerdi.
-    const SECRET_FIELD_RE = /(password|sifre|secret|apikey|api_key|accesstoken|access_token|token|privatekey|private_key)/i;
-    const REDACTED = '***REDACTED***';
+    // REST yolu: rolü isteğe göre okur, maskeleme çekirdeği yukarıdaki
+    // `redactForRole` ile ORTAK — iki ayrı kopya kaçınılmaz olarak sapardı.
     const redactSettings = async (req: Request, coll: string, data: Record<string, unknown> | undefined) => {
       if (coll !== 'settings' || !data) return data;
       const uid = (req as Request & { uid?: string }).uid || '';
-      if (await getUserRole(uid) === 'Admin') return data;
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(data)) {
-        out[k] = (SECRET_FIELD_RE.test(k) && typeof v === 'string' && v !== '') ? REDACTED : v;
-      }
-      return out;
+      return redactForRole(await getUserRole(uid), coll, data) as Record<string, unknown>;
     };
     const stripRedacted = (coll: string, data: Record<string, unknown>): Record<string, unknown> => {
       if (coll !== 'settings' || !data) return data;
@@ -2110,10 +2163,26 @@ async function startServer() {
         if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
           return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
         }
+        // KİRACI SINIRI (2026-08-25 denetimi): CAS'in `set` gövdesi POST/PUT/PATCH
+        // gibi keyfi alan yazar, ama o üçünün aksine `pinProtectedUserFields`ten
+        // GEÇMİYORDU. Üstteki `guardRoleEscalation` yalnız 'role' alanına bakar
+        // (rbac.ts:321-325) — 'companyId' ve 'status' süzgeçsiz geçiyordu.
+        // Sonuç: self-doc yazma izni olan herhangi bir kullanıcı
+        //   PATCH /api/db/users/<kendi-uid>/cas  { field:'x', expect:.., set:{companyId:'<kurban>'} }
+        // ile kendini başka kiracıya taşıyabiliyordu (getUserCompanyId bu alanı
+        // okur). Diğer üç yazma yolundaki kapının aynısı buraya da kondu.
+        const setYazilacak = coll === 'users'
+          ? await pinProtectedUserFields(
+              (req as Request & { uid?: string }).uid || '',
+              set as Record<string, unknown>,
+              rows[0].data as Record<string, unknown>,
+              isSuperAdmin(req),
+            )
+          : (set as Record<string, unknown>);
         const upd = await docsDb.query(
           `UPDATE docs SET data = data || $4::jsonb, updated_at = now()
            WHERE coll = $1 AND id = $2 AND data->>$3 = $5 RETURNING data`,
-          [coll, id, field, JSON.stringify(set), String(expect)],
+          [coll, id, field, JSON.stringify(setYazilacak), String(expect)],
         );
         const claimed = upd.rows.length > 0;
         if (claimed) broadcastDocChange(coll, 'set', id, upd.rows[0].data as Record<string, unknown>);
@@ -2193,7 +2262,7 @@ async function startServer() {
   // ... (keep existing routes)
   
   // Manual Sync Trigger
-  app.post("/api/shopify/sync", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/shopify/sync", requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const body = req.body || {};
     const accessToken = body.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
     let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
@@ -2483,7 +2552,7 @@ async function startServer() {
   });
 
   // ── Luca e-Fatura Gönderimi ──────────────────────────────────────────────
-  app.post("/api/luca/fatura-gonder", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     const { invoiceId, invoiceData } = req.body;
     console.log(`e-Fatura gönderimi başlatıldı: ${invoiceId}`);
 
