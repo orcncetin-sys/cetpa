@@ -10,6 +10,9 @@ import {
 import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
 import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
+import { kanalRoutes } from "./src/server/routes/kanalRoutes.js";
+import { paymentRoutes } from "./src/server/routes/paymentRoutes.js";
+import { reportsRoutes } from "./src/server/routes/reportsRoutes.js";
 import { erpRoutes } from "./src/server/routes/erpRoutes.js";
 import { aiRoutes } from "./src/server/routes/aiRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
@@ -2264,186 +2267,6 @@ async function startServer() {
 
   // ... (keep existing routes)
   
-  // Manual Sync Trigger
-  app.post("/api/shopify/sync", requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const body = req.body || {};
-    const accessToken = body.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
-    let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
-
-    if (!accessToken) {
-      // Env anahtar adlarını client'a sızdırma (yalnız sunucu logunda).
-      console.warn('[shopify/sync] SHOPIFY_ACCESS_TOKEN tanımlı değil.');
-      return res.status(400).json({ error: 'Shopify Access Token eksik. Ayarlardan SHOPIFY_ACCESS_TOKEN girin.' });
-    }
-
-    // Clean up domain if it has https://
-    storeDomain = storeDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-
-    // If the user accidentally pasted an email or service account into the domain secret
-    if (storeDomain.includes('@')) {
-      storeDomain = 'cetpa.myshopify.com';
-    }
-
-    // Ensure the domain is properly formatted
-    if (storeDomain.includes('cetpa.com.tr')) {
-      storeDomain = 'cetpa.myshopify.com';
-    } else if (!storeDomain.includes('myshopify.com')) {
-      storeDomain = `${storeDomain}.myshopify.com`;
-    }
-
-    // SSRF / token sızıntısı engeli: accessToken yalnız geçerli <shop>.myshopify.com
-    // host'una gönderilebilir (önce `includes('myshopify.com')` bypass'lanabiliyordu).
-    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(storeDomain)) {
-      return res.status(400).json({ error: 'Geçersiz Shopify mağaza alan adı (yalnız *.myshopify.com).' });
-    }
-
-    try {
-      console.log(`Syncing with Shopify: ${storeDomain}`);
-      
-      const headers = {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json'
-      };
-
-      // Fetch Products (Inventory)
-      const productsResponse = await fetch(`https://${storeDomain}/admin/api/2024-01/products.json?limit=50`, { headers });
-      if (!productsResponse.ok) {
-        if (productsResponse.status === 401) {
-          throw new Error(`Unauthorized (401). Please check that your SHOPIFY_ACCESS_TOKEN is an "Admin API access token" (it should start with "shpat_"). Also ensure your store domain is correct (e.g., your-store.myshopify.com instead of a custom domain). Current domain being tried: ${storeDomain}`);
-        } else if (productsResponse.status === 404) {
-          throw new Error(`Not Found (404). The store domain "${storeDomain}" might be incorrect. API calls usually require the .myshopify.com domain, not your custom domain.`);
-        }
-        throw new Error(`Failed to fetch products: ${productsResponse.statusText} (${productsResponse.status})`);
-      }
-      const productsData = await productsResponse.json();
-
-      // Fetch Orders
-      const ordersResponse = await fetch(`https://${storeDomain}/admin/api/2024-01/orders.json?status=any&limit=50`, { headers });
-      if (!ordersResponse.ok) {
-        throw new Error(`Failed to fetch orders: ${ordersResponse.statusText}`);
-      }
-      const ordersData = await ordersResponse.json();
-
-      await writeAuditLog(reqActor(req), 'Shopify Senkronizasyon',
-        `${(productsData.products || []).length} ürün, ${(ordersData.orders || []).length} sipariş çekildi`);
-      res.json({ 
-        message: "Shopify sync completed successfully", 
-        products: productsData.products || [],
-        orders: ordersData.orders || []
-      });
-    } catch (error: unknown) {
-      console.error("Shopify sync error:", error);
-      res.status(500).json({ error: error instanceof Error ? error.message : "Sync failed" });
-    }
-  });
-
-  // Create Draft Order
-  app.post('/api/shopify/draft-order', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
-    const storeDomain = (() => {
-      const raw = process.env.SHOPIFY_STORE_DOMAIN || 'cetpa.myshopify.com';
-      if (raw.includes('@')) return 'cetpa.myshopify.com';
-      if (raw.includes('myshopify.com')) return raw;
-      return `${raw.replace(/^www\./, '').replace(/\.com.*/, '')}.myshopify.com`;
-    })();
-
-    if (!accessToken) {
-      return res.status(400).json({ error: 'Shopify credentials missing.' });
-    }
-
-    try {
-      const { customerName, email, shippingAddress, lineItems, note } = req.body;
-
-      const shopifyPayload: Record<string, unknown> = {
-        draft_order: {
-          note: note || '',
-          line_items: lineItems.map((item: Record<string, unknown>) => ({
-            title: item.title,
-            price: Number(item.price).toFixed(2),
-            quantity: item.quantity,
-            ...(item.sku ? { sku: item.sku } : {}),
-            ...(item.variantId ? { variant_id: item.variantId } : {})
-          })),
-          customer: email
-            ? { email }
-            : {
-                first_name: customerName.split(' ')[0] || customerName,
-                last_name: customerName.split(' ').slice(1).join(' ') || ''
-              }
-        }
-      };
-
-      if (shippingAddress) {
-        (shopifyPayload.draft_order as Record<string, unknown>).shipping_address = {
-          address1: shippingAddress,
-          first_name: customerName.split(' ')[0] || customerName,
-          last_name: customerName.split(' ').slice(1).join(' ') || ''
-        };
-      }
-
-      const shopifyRes = await fetch(
-        `https://${storeDomain}/admin/api/2024-01/draft_orders.json`,
-        {
-          method: 'POST',
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(shopifyPayload)
-        }
-      );
-
-      if (!shopifyRes.ok) {
-        const err = await shopifyRes.json().catch(() => ({}));
-        throw new Error(JSON.stringify(err));
-      }
-
-      const data = await shopifyRes.json();
-      await writeAuditLog(reqActor(req), 'Shopify Taslak Sipariş',
-        `#${data.draft_order.order_number || data.draft_order.id} oluşturuldu`);
-      res.json({
-        shopifyDraftOrderId: `#${data.draft_order.order_number || data.draft_order.id}`,
-        shopifyAdminUrl: data.draft_order.admin_graphql_api_id,
-        invoiceUrl: data.draft_order.invoice_url,
-        raw: data.draft_order
-      });
-    } catch (err: unknown) {
-      console.error('Draft order error:', err);
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  // ── Shopify Webhook Handler ──────────────────────────────────────────────
-  app.post("/api/shopify/webhook", async (req: Request & { rawBody?: Buffer }, res: Response) => {
-    // ── HMAC doğrulaması (fail-closed) ───────────────────────────────────
-    // Secret tanımsızsa webhook doğrulanamaz → işlenmez (önce atlanıp sahte
-    // sipariş enjekte edilebiliyordu).
-    const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
-    const shopifyHmac   = req.headers['x-shopify-hmac-sha256'] as string | undefined;
-    if (!webhookSecret) { res.status(503).send('Webhook not configured'); return; }
-    if (!shopifyHmac || !req.rawBody) { res.status(401).send('Missing signature'); return; }
-    {
-      // P1-2: imza karşılaştırması sabit-zamanlı olmalı (timing yan-kanalı).
-      const computed = createHmac('sha256', webhookSecret).update(req.rawBody).digest('base64');
-      const a = Buffer.from(computed, 'utf8');
-      const b = Buffer.from(shopifyHmac, 'utf8');
-      if (a.length !== b.length || !timingSafeEqual(a, b)) { res.status(401).send('Invalid signature'); return; }
-    }
-
-    const topic = req.headers['x-shopify-topic'] as string;
-    const body  = req.body;
-
-    res.status(200).send("ok");
-
-    if (boss) {
-      // P6: aynı sipariş+topic için tekilleştirme anahtarı — Shopify aynı webhook'u
-      // yeniden teslim ederse (retry) eşzamanlı iki iş oluşmaz, tek sipariş yazılır.
-      const orderKey = `${topic}:${body?.order_number || body?.id || 'x'}`.slice(0, 200);
-      await boss.send('shopify-webhook', { topic, body }, { singletonKey: orderKey });
-    } else {
-      await processShopifyWebhook(topic, body).catch(() => {});
-    }
-  });
 
   // Get Exchange Rates
   app.get("/api/settings/exchange-rates", async (req: Request, res: Response) => {
@@ -3197,75 +3020,6 @@ async function startServer() {
     } catch { return null; }
   }
 
-  /** GET /api/trendyol/status */
-  app.get('/api/trendyol/status', async (_req: Request, res: Response) => {
-    const creds = await getTrendyolCreds();
-    if (!creds) return res.json({ configured: false, connected: false, message: 'Trendyol kimlik bilgileri eksik.' });
-    try {
-      const token = Buffer.from(`${creds.apiKey}:${creds.apiSecret}`).toString('base64');
-      const r = await fetch(
-        `https://api.trendyol.com/sapigw/suppliers/${creds.supplierId}/orders?status=Created&size=1`,
-        { headers: { Authorization: `Basic ${token}`, 'User-Agent': `${creds.supplierId} - SelfIntegration` } }
-      );
-      if (r.ok) return res.json({ configured: true, connected: true });
-      const txt = await r.text();
-      return res.json({ configured: true, connected: false, error: `HTTP ${r.status}: ${txt.substring(0, 200)}` });
-    } catch (e) {
-      return res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  /** POST /api/trendyol/sync — pull recent orders → Firebase */
-  app.post('/api/trendyol/sync', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const creds = await getTrendyolCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    const t0 = Date.now();
-    try {
-      const token = Buffer.from(`${creds.apiKey}:${creds.apiSecret}`).toString('base64');
-      const daysBack = Number(req.body?.daysBack ?? 7);
-      const startMs  = Date.now() - daysBack * 24 * 60 * 60 * 1000;
-      const url = `https://api.trendyol.com/sapigw/suppliers/${creds.supplierId}/orders?startDate=${startMs}&size=200&page=0`;
-      const r   = await fetch(url, {
-        headers: { Authorization: `Basic ${token}`, 'User-Agent': `${creds.supplierId} - SelfIntegration` }
-      });
-      if (!r.ok) {
-        const txt = await r.text();
-        return res.status(r.status).json({ success: false, error: `Trendyol API ${r.status}: ${txt.substring(0, 200)}` });
-      }
-      const data = await r.json() as { content?: Record<string, unknown>[] };
-      const orders = data.content ?? [];
-      let created = 0, updated = 0;
-      if (adminDb) {
-        for (const o of orders) {
-          const tyOrderNo = String(o.orderNumber ?? o.id ?? '');
-          if (!tyOrderNo) continue;
-          const existing = await adminDb.collection('orders').where('trendyolOrderNo', '==', tyOrderNo).limit(1).get();
-          const payload = {
-            trendyolOrderNo: tyOrderNo,
-            customerName:    (o.shipmentAddress as Record<string, unknown>)?.fullName as string ?? 'Trendyol',
-            totalPrice:      Number(o.totalPrice ?? 0),
-            status:          'Pending' as const,
-            customerType:    'Retail' as const,
-            source:          'Trendyol',
-            rawData:         o,
-            updatedAt:       pgServerTimestamp(),
-          };
-          if (existing.empty) {
-            await adminDb.collection('orders').add({ companyId: await reqCompanyId(req), ...payload, createdAt: pgServerTimestamp() });
-            created++;
-          } else {
-            await existing.docs[0].ref.set(payload, { merge: true });
-            updated++;
-          }
-        }
-      }
-      await writeAuditLog(reqActor(req), 'Trendyol Senkronizasyon', `${orders.length} sipariş — ${created} yeni, ${updated} güncellendi`);
-      await writeAuditLog(reqActor(req), 'Hepsiburada Senkronizasyon', `${orders.length} sipariş — ${created} yeni, ${updated} güncellendi`);
-      res.json({ success: true, total: orders.length, created, updated, duration: Date.now() - t0 });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
 
   // ── Hepsiburada Merchant API ────────────────────────────────────────────────
   // Credentials: HEPSIBURADA_MERCHANT_ID, HEPSIBURADA_USERNAME, HEPSIBURADA_PASSWORD
@@ -3287,70 +3041,6 @@ async function startServer() {
     } catch { return null; }
   }
 
-  /** GET /api/hepsiburada/status */
-  app.get('/api/hepsiburada/status', async (_req: Request, res: Response) => {
-    const creds = await getHepsiburadaCreds();
-    if (!creds) return res.json({ configured: false, connected: false, message: 'Hepsiburada kimlik bilgileri eksik.' });
-    try {
-      const token = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
-      const r = await fetch(
-        `https://mpop.hepsiburada.com/product-service/api/products/merchants/${creds.merchantId}/products?limit=1&offset=0`,
-        { headers: { Authorization: `Basic ${token}`, Accept: 'application/json' } }
-      );
-      if (r.ok) return res.json({ configured: true, connected: true });
-      return res.json({ configured: true, connected: false, error: `HTTP ${r.status}` });
-    } catch (e) {
-      return res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  /** POST /api/hepsiburada/sync — pull recent orders → Firebase */
-  app.post('/api/hepsiburada/sync', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const creds = await getHepsiburadaCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    const t0 = Date.now();
-    try {
-      const token = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
-      const daysBack  = Number(req.body?.daysBack ?? 7);
-      const beginDate = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0];
-      const url = `https://mpop.hepsiburada.com/order-service-module/api/orders/merchantid/${creds.merchantId}?beginDate=${beginDate}&pageSize=100&pageNumber=0`;
-      const r   = await fetch(url, { headers: { Authorization: `Basic ${token}`, Accept: 'application/json' } });
-      if (!r.ok) {
-        const txt = await r.text();
-        return res.status(r.status).json({ success: false, error: `Hepsiburada API ${r.status}: ${txt.substring(0, 200)}` });
-      }
-      const data = await r.json() as { data?: Record<string, unknown>[] };
-      const orders = data.data ?? [];
-      let created = 0, updated = 0;
-      if (adminDb) {
-        for (const o of orders) {
-          const hbOrderId = String(o.id ?? o.orderNumber ?? '');
-          if (!hbOrderId) continue;
-          const existing = await adminDb.collection('orders').where('hepsiburadaOrderId', '==', hbOrderId).limit(1).get();
-          const payload = {
-            hepsiburadaOrderId: hbOrderId,
-            customerName:       String(o.customerFirstName ?? '') + ' ' + String(o.customerLastName ?? ''),
-            totalPrice:         Number(o.totalPrice ?? o.orderAmount ?? 0),
-            status:             'Pending' as const,
-            customerType:       'Retail' as const,
-            source:             'Hepsiburada',
-            rawData:            o,
-            updatedAt:          pgServerTimestamp(),
-          };
-          if (existing.empty) {
-            await adminDb.collection('orders').add({ companyId: await reqCompanyId(req), ...payload, createdAt: pgServerTimestamp() });
-            created++;
-          } else {
-            await existing.docs[0].ref.set(payload, { merge: true });
-            updated++;
-          }
-        }
-      }
-      res.json({ success: true, total: orders.length, created, updated, duration: Date.now() - t0 });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
 
   // ── WhatsApp Business API ───────────────────────────────────────────────────
   // Supports 360dialog (primary) and Twilio (fallback)
@@ -3865,146 +3555,6 @@ async function startServer() {
   // Re-export via closure — the Shopify route calls it directly since it's in the same scope.
   // Usage: await fireWebhooks('order.created', { id, customerName, total });
 
-  // ── Reports Summary API ────────────────────────────────────────────────────
-  // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
-  app.get('/api/reports/summary', requireAuth, async (req: Request, res: Response) => {
-    if (!adminDb) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
-    try {
-      const now       = new Date();
-      const d30       = new Date(now); d30.setDate(d30.getDate() - 30);
-      const d60       = new Date(now); d60.setDate(d60.getDate() - 60);
-
-      // Kiracı izolasyonu + P8/P9: filtre PG'de, tüm koleksiyon belleğe çekilmez.
-      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const [orders, leads, inventory] = await Promise.all([
-        loadCompanyDocs('orders', cid),
-        loadCompanyDocs('leads', cid),
-        loadCompanyDocs('inventory', cid),
-      ]);
-
-      function dateOf(o: Record<string, unknown>): Date {
-        const raw = o.createdAt as { toDate?: () => Date } | string | null;
-        if (!raw) return new Date(0);
-        if (typeof raw === 'string') return new Date(raw);
-        return raw.toDate?.() ?? new Date(0);
-      }
-
-      const thisOrders = orders.filter(o => dateOf(o) >= d30 && dateOf(o) <= now);
-      const prevOrders = orders.filter(o => dateOf(o) >= d60 && dateOf(o) < d30);
-
-      const revenue = (arr: typeof orders) => arr.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
-      const thisRevenue = revenue(thisOrders);
-      const prevRevenue = revenue(prevOrders);
-
-      const lowStock = inventory.filter(i => ((i.stockLevel as number) || 0) <= ((i.lowStockThreshold as number) || 5));
-
-      res.json({
-        period: { start: d30.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
-        orders:     { count: thisOrders.length, prevCount: prevOrders.length, delta: thisOrders.length - prevOrders.length },
-        revenue:    { total: thisRevenue, prev: prevRevenue, delta: thisRevenue - prevRevenue },
-        leads:      { total: leads.length, new30: leads.filter(l => dateOf(l) >= d30).length },
-        inventory:  { total: inventory.length, lowStock: lowStock.length },
-        delivered:  thisOrders.filter(o => o.status === 'Delivered').length,
-      });
-    } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  // ── Stok Fiyat Karşılaştırma (alım vs satım ortalama fiyat) ────────────────
-  // Mikro'da hazır bir rapor değil — STOK_HAREKETLERI satır bazlı hareketleri
-  // (sth_stok_kod/sth_miktar/sth_tutar/sth_tip) zaten inventoryMovements'a
-  // çekiliyor (/api/mikro/import/stok-hareket). Burada SKU+yön bazında
-  // ağırlıklı ortalama fiyat (SUM(tutar)/SUM(miktar)) hesaplanır — InventoryView.tsx'in
-  // kanıtlı normalize deseniyle aynı formül (birimFiyat = tutar/miktar, KDV hariç,
-  // sth_tip 0=giriş/alış 1=çıkış/satış). Native (Cetpa) hareketlerde fiyat alanı
-  // hiç yok (InventoryMovement tipi) — yalnız Mikro satırları (sth_stok_kod dolu
-  // olanlar) hesaba katılır, bu bir eksiklik değil.
-  app.get('/api/reports/stok-fiyat-karsilastirma', requireAuth, async (req: Request, res: Response) => {
-    try {
-      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const [movements, inventory] = await Promise.all([
-        loadCompanyDocs('inventoryMovements', cid),
-        loadCompanyDocs('inventory', cid),
-      ]);
-      const adMap = new Map<string, string>();
-      const stokMap = new Map<string, number>();
-      for (const it of inventory) {
-        const rec = it as Record<string, unknown>;
-        const sku = String(rec.sku ?? '').trim();
-        if (!sku) continue;
-        adMap.set(sku, String(rec.name ?? sku));
-        // Kalan stok — hareket bazlı alış-satış netine DEĞİL, inventory.stockLevel'a
-        // (gerçek/güncel stok) dayanır: hareket penceresi tüm geçmişi kapsamayabilir
-        // (açılış bakiyesi, transfer, sayım farkı gibi alış/satış dışı hareketler),
-        // stockLevel Mikro gece senkronundan gelen otoriter değer (2026-08-13).
-        stokMap.set(sku, Number(rec.stockLevel ?? 0));
-      }
-
-      type Grup = { alisTutar: number; alisMiktar: number; alisAdet: number; satisTutar: number; satisMiktar: number; satisAdet: number };
-      const gruplar = new Map<string, Grup>();
-      for (const m of movements) {
-        const sku = String(m.sth_stok_kod ?? '').trim();
-        if (!sku) continue; // native (Cetpa) hareketi — fiyat alanı yok, atla
-        const iptal = m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1;
-        if (iptal) continue;
-        const miktar = Math.abs(Number(m.sth_miktar) || 0);
-        const tutar = Math.abs(Number(m.sth_tutar) || 0);
-        if (miktar <= 0) continue;
-        const g = gruplar.get(sku) ?? { alisTutar: 0, alisMiktar: 0, alisAdet: 0, satisTutar: 0, satisMiktar: 0, satisAdet: 0 };
-        if (Number(m.sth_tip) === 0) { g.alisTutar += tutar; g.alisMiktar += miktar; g.alisAdet++; }
-        else                         { g.satisTutar += tutar; g.satisMiktar += miktar; g.satisAdet++; }
-        gruplar.set(sku, g);
-      }
-
-      const rows = [...gruplar.entries()].map(([sku, g]) => {
-        const alisOrt  = g.alisMiktar  > 0 ? g.alisTutar  / g.alisMiktar  : null;
-        const satisOrt = g.satisMiktar > 0 ? g.satisTutar / g.satisMiktar : null;
-        const marj = alisOrt != null && satisOrt != null ? satisOrt - alisOrt : null;
-        const marjYuzde = marj != null && alisOrt ? (marj / alisOrt) * 100 : null;
-        return {
-          sku, ad: adMap.get(sku) ?? sku,
-          alisOrtFiyat: alisOrt, alisMiktar: g.alisMiktar, alisTutar: g.alisTutar, alisAdet: g.alisAdet,
-          satisOrtFiyat: satisOrt, satisMiktar: g.satisMiktar, satisTutar: g.satisTutar, satisAdet: g.satisAdet,
-          marjTL: marj, marjYuzde,
-          kalanStok: stokMap.has(sku) ? stokMap.get(sku)! : null,
-        };
-      }).sort((a, b) => (b.alisTutar + b.satisTutar) - (a.alisTutar + a.satisTutar));
-
-      res.json({ success: true, rows, toplamSku: rows.length });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  // GET /api/reports/stok-fiyat-karsilastirma/:sku/detay — bir SKU'nun tüm alım/satım satırları
-  app.get('/api/reports/stok-fiyat-karsilastirma/:sku/detay', requireAuth, async (req: Request, res: Response) => {
-    try {
-      const sku = String(req.params['sku'] || '').trim();
-      if (!sku) return res.status(400).json({ success: false, error: 'sku gerekli.' });
-      const cid = await getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const movements = await loadCompanyDocs('inventoryMovements', cid);
-      const satirlar = movements
-        .filter(m => String(m.sth_stok_kod ?? '').trim() === sku)
-        .filter(m => !(m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1))
-        .map(m => {
-          const miktar = Math.abs(Number(m.sth_miktar) || 0);
-          const tutar = Math.abs(Number(m.sth_tutar) || 0);
-          return {
-            tarih: m.sth_tarih ?? null,
-            yon: Number(m.sth_tip) === 0 ? 'alis' as const : 'satis' as const,
-            miktar, tutar,
-            birimFiyat: miktar > 0 ? tutar / miktar : 0,
-            cariKod: m.sth_cari_kodu ?? m.sth_cari_kod ?? null,
-            evrakNo: [m.sth_evrakno_seri, m.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
-          };
-        })
-        .sort((a, b) => String(b.tarih ?? '').localeCompare(String(a.tarih ?? '')));
-      res.json({ success: true, sku, satirlar, toplam: satirlar.length });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
 
   // ── Public Order Tracking ──────────────────────────────────────────────────
   // GET /api/track/:orderId — no auth required
@@ -4301,141 +3851,6 @@ async function startServer() {
     return Math.random().toString(36).slice(2, 2 + len).padEnd(len, '0');
   }
 
-  // GET /api/iyzico/status
-  app.get('/api/iyzico/status', async (_req: Request, res: Response) => {
-    const creds = await getIyzicoCreds();
-    if (!creds) return res.json({ configured: false, connected: false });
-    try {
-      // Lightweight check: retrieve installment info for 1 TRY
-      const body   = { locale: 'tr', conversationId: 'status-check', binNumber: '554960' };
-      const rndStr = randStr();
-      const auth   = iyzicoAuth(creds, rndStr, toPkiString(body));
-      const r = await fetch(`${creds.baseUrl}/payment/iyzipos/installment/detail`, {
-        method: 'POST',
-        headers: { Authorization: auth, 'x-iyzi-rnd': rndStr, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(8000),
-      });
-      const d = await r.json() as { status?: string };
-      res.json({ configured: true, connected: d.status === 'success' || r.ok, sandbox: creds.baseUrl.includes('sandbox') });
-    } catch (e) {
-      res.json({ configured: true, connected: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  // POST /api/iyzico/payment-link
-  // Body: { orderId, amount, currency?, customerName, customerEmail, customerPhone?,
-  //         shippingAddress?, taxId?, lineItems?, callbackUrl? }
-  // On success: stores paymentPageUrl + iyzicoToken on orders/{orderId}
-  app.post('/api/iyzico/payment-link', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const creds = await getIyzicoCreds();
-    if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-
-    const {
-      orderId, amount, currency = 'TRY',
-      customerName, customerEmail, customerPhone = '+905000000000',
-      shippingAddress = 'Türkiye', taxId = '11111111111',
-      lineItems = [], callbackUrl = `${req.protocol}://${req.get('host')}/payment/result`,
-    } = req.body as {
-      orderId: string; amount: number; currency?: string;
-      customerName: string; customerEmail: string; customerPhone?: string;
-      shippingAddress?: string; taxId?: string;
-      lineItems?: { name: string; price: number; qty?: number }[];
-      callbackUrl?: string;
-    };
-
-    if (!orderId || !amount || !customerName || !customerEmail) {
-      return res.status(400).json({ success: false, error: 'orderId, amount, customerName, customerEmail gerekli.' });
-    }
-
-    const amountStr = amount.toFixed(2);
-    const nameParts = customerName.trim().split(' ');
-    const firstName = nameParts[0];
-    const lastName  = nameParts.slice(1).join(' ') || 'Müşteri';
-
-    // Build basket items
-    const basket = lineItems.length > 0
-      ? lineItems.map((l, i) => ({
-          id: `item-${i}`,
-          name: l.name,
-          category1: 'B2B',
-          itemType: 'PHYSICAL',
-          price: (l.price * (l.qty ?? 1)).toFixed(2),
-        }))
-      : [{ id: orderId, name: 'Sipariş', category1: 'B2B', itemType: 'PHYSICAL', price: amountStr }];
-
-    const body = {
-      locale: 'tr',
-      conversationId: orderId,
-      price: amountStr,
-      paidPrice: amountStr,
-      currency,
-      basketId: orderId,
-      paymentGroup: 'PRODUCT',
-      callbackUrl,
-      buyer: {
-        id: orderId,
-        name: firstName,
-        surname: lastName,
-        email: customerEmail,
-        identityNumber: taxId,
-        registrationAddress: shippingAddress,
-        city: 'İstanbul',
-        country: 'Turkey',
-        ip: req.ip || '127.0.0.1',
-        gsmNumber: customerPhone,
-      },
-      shippingAddress: {
-        contactName: customerName,
-        city: 'İstanbul',
-        country: 'Turkey',
-        address: shippingAddress,
-        zipCode: '34000',
-      },
-      billingAddress: {
-        contactName: customerName,
-        city: 'İstanbul',
-        country: 'Turkey',
-        address: shippingAddress,
-        zipCode: '34000',
-      },
-      basketItems: basket,
-    };
-
-    const rndStr = randStr();
-    const pkiStr = toPkiString(body);
-    const auth   = iyzicoAuth(creds, rndStr, pkiStr);
-
-    try {
-      const r = await fetch(`${creds.baseUrl}/payment/initialize/checkout`, {
-        method: 'POST',
-        headers: {
-          Authorization: auth,
-          'x-iyzi-rnd': rndStr,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
-      const d = await r.json() as { status?: string; paymentPageUrl?: string; token?: string; errorMessage?: string };
-
-      const success = d.status === 'success' && !!d.paymentPageUrl;
-      if (success && adminDb) {
-        await adminDb.collection('orders').doc(orderId).set({
-          companyId: await reqCompanyId(req),
-          iyzicoPaymentUrl:   d.paymentPageUrl,
-          iyzicoToken:        d.token,
-          iyzicoCreatedAt:    pgServerTimestamp(),
-          iyzicoSandbox:      creds.baseUrl.includes('sandbox'),
-        }, { merge: true });
-      }
-      if (success) await writeAuditLog(reqActor(req), 'İyzico Ödeme Linki', `Sipariş ${orderId} için ödeme linki oluşturuldu (${amount} ${currency})`);
-      res.json({ success, paymentPageUrl: d.paymentPageUrl, token: d.token, error: d.errorMessage });
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      res.status(500).json({ success: false, error: errorMsg });
-    }
-  });
 
   // ── WhatsApp Business Cloud API ─────────────────────────────────────────────
   // Reads credentials from env vars or Firestore settings/whatsapp:
@@ -4658,91 +4073,6 @@ async function startServer() {
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-04-22.dahlia' })
     : null;
 
-  /**
-   * POST /api/stripe/create-checkout
-   * Body: { planId, cycle }
-   * Returns: { url: string } — Stripe Checkout hosted URL
-   * Protected by Firebase Auth (requireAuth).
-   */
-  app.post('/api/stripe/create-checkout', paymentLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
-    const uid = (req as Request & { uid: string }).uid;
-    const { planId, cycle } = req.body as { planId: string; cycle: 'monthly' | 'yearly' };
-
-    const prices = STRIPE_PLAN_PRICES[planId];
-    if (!prices) return res.status(400).json({ error: `Unknown plan: ${planId}` });
-    if (!['monthly', 'yearly'].includes(cycle)) return res.status(400).json({ error: 'cycle must be monthly or yearly' });
-
-    const unitAmount = cycle === 'monthly' ? prices.monthly : prices.yearly;
-    const interval  = cycle === 'monthly' ? 'month' : 'year';
-    const origin    = (req.headers.origin as string) || 'http://localhost:5173';
-
-    try {
-      // Fetch or create Stripe customer for this Firebase UID
-      let customerId: string | undefined;
-      if (adminDb) {
-        const subSnap = await adminDb.collection('subscriptions').doc(uid).get();
-        if (subSnap.exists) customerId = (subSnap.data() as { stripeCustomerId?: string }).stripeCustomerId;
-      }
-
-      const session = await stripeClient.checkout.sessions.create({
-        mode: 'subscription',
-        ...(customerId ? { customer: customerId } : {}),
-        line_items: [{
-          quantity: 1,
-          price_data: {
-            currency: 'try',
-            unit_amount: unitAmount,
-            product_data: { name: prices.name },
-            recurring: { interval },
-          },
-        }],
-        metadata: { firebaseUid: uid, plan: planId, cycle },
-        success_url: `${origin}/?checkout=success&plan=${planId}&cycle=${cycle}`,
-        cancel_url:  `${origin}/?checkout=cancel`,
-        subscription_data: { metadata: { firebaseUid: uid, plan: planId, cycle } },
-      });
-
-      return res.json({ url: session.url });
-    } catch (e) {
-      console.error('[Stripe create-checkout]', e);
-      return res.status(500).json({ error: 'Failed to create checkout session.' });
-    }
-  });
-
-  /**
-   * POST /api/stripe/webhook
-   * Stripe sends events here. Signature verified with STRIPE_WEBHOOK_SECRET.
-   * Handles:
-   *   checkout.session.completed       → activate subscription in Firestore
-   *   customer.subscription.updated    → sync status changes
-   *   customer.subscription.deleted    → mark cancelled
-   */
-  app.post('/api/stripe/webhook', async (req: Request & { rawBody?: Buffer }, res: Response) => {
-    if (!stripeClient) return res.status(503).json({ error: 'Stripe not configured.' });
-    const sig = req.headers['stripe-signature'] as string;
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!webhookSecret) return res.status(503).json({ error: 'Webhook secret not set.' });
-    if (!sig) return res.status(400).json({ error: 'Missing stripe-signature header.' });
-
-    let event: Stripe.Event;
-    try {
-      event = stripeClient.webhooks.constructEvent(req.rawBody ?? Buffer.from(''), sig, webhookSecret);
-    } catch (e) {
-      console.error('[Stripe webhook] signature verification failed:', e);
-      return res.status(400).json({ error: 'Invalid signature.' });
-    }
-
-    res.sendStatus(200);
-    if (boss) {
-      // P5-1: event.id başına tekilleştir — aynı olayın eşzamanlı iki teslimatı
-      // handler'ı paralel çalıştırıp çift ödeme satırı yazamaz (işaret artık
-      // handler'dan SONRA yazıldığı için bu serileştirme gerekli).
-      await boss.send('stripe-webhook', { event }, { singletonKey: String(event.id).slice(0, 200) });
-    } else {
-      await processStripeWebhook(event).catch(() => {});
-    }
-  });
 
   // ── Health & Stats endpoints (all modes) ──────────────────────────────────
 
@@ -4895,6 +4225,28 @@ async function startServer() {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
   });
 
+  // ⚠ Shopify ve Stripe webhook'lari `req.rawBody` ile HMAC/imza dogrular.
+  // rawBody `app.use(express.json({ verify }))` tarafindan yakalanir; bu
+  // cagrilar ondan SONRA kayitli oldugu icin imza calisir. Yukari alinirsa
+  // rawBody undefined olur ve TUM webhook'lar sessizce 401 doner.
+  kanalRoutes(app, {
+    getAdminDb: adminDbZorunlu, getBoss: () => boss,
+    requireAuth, requireMfaVerified, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
+    processShopifyWebhook, getTrendyolCreds, getHepsiburadaCreds, getAmazonCreds,
+  });
+
+  paymentRoutes(app, {
+    getAdminDb: adminDbZorunlu, getBoss: () => boss, getStripeClient: () => stripeClient,
+    requireAuth, requireMfaVerified, paymentLimiter,
+    reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
+    processStripeWebhook, getIyzicoCreds, iyzicoAuth, toPkiString, randStr,
+    STRIPE_PLAN_PRICES,
+  });
+
+  reportsRoutes(app, {
+    getAdminDb: adminDbZorunlu, requireAuth, getUserCompanyId, loadCompanyDocs,
+  });
+
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.
   erpRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin,
@@ -4937,73 +4289,6 @@ async function startServer() {
     return { clientId: d.clientId, clientSecret: d.clientSecret, refreshToken: d.refreshToken, marketplaceId: d.marketplaceId || marketplaceId, region: d.region || region };
   }
 
-  app.get('/api/marketplace/status', requireAuth, async (_req: Request, res: Response) => {
-    res.json({
-      trendyol: { configured: !!(await getTrendyolCreds()) },
-      amazon: { configured: !!(await getAmazonCreds()) },
-    });
-  });
-
-  // Amazon SP-API LWA access token (refresh_token → access_token)
-  async function amazonAccessToken(c: AmazonCreds): Promise<string | null> {
-    try {
-      const r = await fetch('https://api.amazon.com/auth/o2/token', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: c.refreshToken, client_id: c.clientId, client_secret: c.clientSecret }),
-        signal: AbortSignal.timeout(12000),
-      });
-      const d = await r.json() as { access_token?: string };
-      return d.access_token || null;
-    } catch { return null; }
-  }
-
-  // POST /api/marketplace/search { query?, barcode?, sku? } → rakip fiyatları
-  app.post('/api/marketplace/search', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
-    const { query, barcode, sku } = (req.body ?? {}) as { query?: string; barcode?: string; sku?: string };
-    const term = (barcode || sku || query || '').toString().trim();
-    if (!term) return res.status(400).json({ error: 'query, barcode veya sku gerekli.' });
-    const results: Array<{ source: string; title: string; price: number; currency: string; url?: string }> = [];
-    const providers: string[] = [];
-    const trendyol = await getTrendyolCreds();
-    const amazon = await getAmazonCreds();
-    if (!trendyol && !amazon) return res.json({ configured: false, results: [], providers: [] });
-
-    // ── Trendyol: tedarikçi ürün/fiyat API ──
-    if (trendyol) {
-      providers.push('trendyol');
-      try {
-        const auth = Buffer.from(`${trendyol.apiKey}:${trendyol.apiSecret}`).toString('base64');
-        const url = `https://api.trendyol.com/sapigw/suppliers/${trendyol.supplierId}/products?barcode=${encodeURIComponent(barcode || sku || '')}&size=20`;
-        const r = await fetch(url, { headers: { Authorization: `Basic ${auth}`, 'User-Agent': `${trendyol.supplierId} - SelfIntegration` }, signal: AbortSignal.timeout(12000) });
-        if (r.ok) {
-          const d = await r.json() as { content?: Array<{ title?: string; salePrice?: number; listPrice?: number; productUrl?: string }> };
-          (d.content || []).forEach(p => results.push({ source: 'Trendyol', title: p.title || term, price: Number(p.salePrice ?? p.listPrice) || 0, currency: 'TRY', url: p.productUrl }));
-        }
-      } catch (e) { console.warn('trendyol search:', (e as Error).message); }
-    }
-
-    // ── Amazon SP-API: competitivePrice (rakip teklif fiyatları) ──
-    if (amazon) {
-      providers.push('amazon');
-      const token = await amazonAccessToken(amazon);
-      if (token) {
-        try {
-          const host = amazon.region === 'na' ? 'sellingpartnerapi-na.amazon.com' : amazon.region === 'fe' ? 'sellingpartnerapi-fe.amazon.com' : 'sellingpartnerapi-eu.amazon.com';
-          const url = `https://${host}/products/pricing/v0/competitivePrice?MarketplaceId=${amazon.marketplaceId}&Skus=${encodeURIComponent(sku || barcode || '')}&ItemType=Sku`;
-          const r = await fetch(url, { headers: { 'x-amz-access-token': token }, signal: AbortSignal.timeout(12000) });
-          if (r.ok) {
-            const d = await r.json() as { payload?: Array<{ Product?: { CompetitivePricing?: { CompetitivePrices?: Array<{ Price?: { ListingPrice?: { Amount?: number; CurrencyCode?: string } } }> } } }> };
-            (d.payload || []).forEach(p => (p.Product?.CompetitivePricing?.CompetitivePrices || []).forEach(cp => {
-              const amt = cp.Price?.ListingPrice?.Amount;
-              if (amt) results.push({ source: 'Amazon', title: term, price: amt, currency: cp.Price?.ListingPrice?.CurrencyCode || 'TRY' });
-            }));
-          }
-        } catch (e) { console.warn('amazon search:', (e as Error).message); }
-      }
-    }
-
-    res.json({ configured: true, providers, results });
-  });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ERP PLUGIN ROUTES

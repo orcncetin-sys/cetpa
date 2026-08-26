@@ -29,7 +29,9 @@ param(
     '/api/dynamics/export/siparis',
     '/api/superadmin/tenants/test/status',
     '/api/parasut/import/stok',
-    '/api/ai/lead-score'
+    '/api/ai/lead-score',
+    '/api/shopify/sync',
+    '/api/iyzico/payment-link'
   )
 )
 

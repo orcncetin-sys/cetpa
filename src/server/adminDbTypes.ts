@@ -22,6 +22,11 @@
  * yapisal tip hem denetim saglar hem modulleri bagimsiz birakir (testte sahte
  * bir nesne yeterli).
  *
+ * 2026-08-26'da GENISLETILDI: kanalRoutes/paymentRoutes cikarilirken tsc
+ * `where` ve `add`in eksik oldugunu soyledi — yani tip, shim'in gercek
+ * yuzeyinden DARDI ve o cagrilar `any` iken denetimsiz gecmisti. Zincirlenebilir
+ * sorgu (`AdminQuery`) eklendi.
+ *
  * YENI BIR METOT GEREKIRSE buraya ekle - `any`'ye geri donme.
  */
 
@@ -47,10 +52,33 @@ export interface AdminDocRef {
   set(veri: Record<string, unknown>, opts?: { merge?: boolean }): Promise<unknown>;
 }
 
-export interface AdminCollectionRef {
+/**
+ * Koleksiyon sorgusunun sonucu. `AdminQuerySnapshot`ten farki `empty`/`size`
+ * tasimasi.
+ *
+ * NEDEN AYRI TIP: `tenantSnap` (server.ts) YALNIZ `{ docs }` donuyor — ona
+ * `empty` sart kosmak cagrilari kirardi. Koleksiyonun kendi `.get()`i ise
+ * shim'de (pgShim.ts:281) `empty` ve `size` de donduruyor. Iki farkli GERCEK
+ * yuzey var; tek tipe zorlamak birini yalan soylemek olurdu.
+ */
+export interface AdminCollectionSnapshot extends AdminQuerySnapshot {
+  readonly empty: boolean;
+  readonly size: number;
+}
+
+/** Zincirlenebilir sorgu — `where`/`orderBy`/`limit` sonra `get()`. */
+export interface AdminQuery {
+  where(alan: string, op: string, deger: unknown): AdminQuery;
+  orderBy(alan: string, yon?: 'asc' | 'desc'): AdminQuery;
+  limit(n: number): AdminQuery;
+  get(): Promise<AdminCollectionSnapshot>;
+}
+
+export interface AdminCollectionRef extends AdminQuery {
   /** id verilmezse yeni bir kimlik uretilir. */
   doc(id?: string): AdminDocRef;
-  get(): Promise<AdminQuerySnapshot>;
+  /** Yeni dokuman ekler (id uretilir). */
+  add(veri: Record<string, unknown>): Promise<AdminDocRef>;
 }
 
 export interface AdminBatch {
