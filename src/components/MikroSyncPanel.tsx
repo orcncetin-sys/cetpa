@@ -120,6 +120,20 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     uyusmazlikOrnek?: { sku: string; toplam: number; beklenen: number }[];
   } | null>(null);
   const [miktarStarting, setMiktarStarting] = useState(false);
+  /**
+   * "Başlatılamadı" hatası — `miktarJob`tan AYRI tutulur.
+   *
+   * Eskiden bu hata `setMiktarJob(prev => ({ ...prev, error }))` ile iş
+   * kaydının anlık görüntüsüne MERGE ediliyordu. `prev` ise GEÇMİŞ, BAŞARILI
+   * bir koşunun DB aynasıydı. Sonuç ekranda iki gerçeğin üst üste binmesiydi:
+   * kırmızı "Miktar çekme başlatılamadı" ile yeşil "2375/2375 · tamamlandı"
+   * aynı anda görünüyordu ve hangisinin geçerli olduğu belli değildi
+   * (2026-08-28 kullanıcı ekran görüntüsü).
+   *
+   * Bunlar iki AYRI olay: biri BU denemenin sonucu, diğeri ÖNCEKİ koşunun
+   * kaydı. Ayrı state + arayüzde ayrı etiket ile ayrıldılar.
+   */
+  const [miktarBaslatmaHatasi, setMiktarBaslatmaHatasi] = useState<string | null>(null);
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'jobs', 'stokMiktarImport'), snap => {
       setMiktarJob(snap.exists() ? snap.data() as typeof miktarJob : null);
@@ -129,6 +143,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
 
   async function handleStartMiktar() {
     setMiktarStarting(true);
+    // Yeni deneme, eski denemenin hatasını SİLER. Aksi hâlde bir kez
+    // başarısız olan çağrının mesajı ekranda süresiz kalıyordu.
+    setMiktarBaslatmaHatasi(null);
     try {
       // body ZORUNLU: govdesiz POST'ta Content-Length olmadigi icin uretimdeki
       // IIS istegi Node'a hic iletmeden `411 Length Required` ile reddediyor —
@@ -139,7 +156,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       const d = await r.json() as { success: boolean; started?: boolean; alreadyRunning?: boolean; error?: string };
       if (!d.success) throw new Error(d.error || 'Hata');
     } catch (e) {
-      setMiktarJob(prev => ({ ...prev, error: e instanceof Error ? e.message : String(e) }));
+      setMiktarBaslatmaHatasi(e instanceof Error ? e.message : String(e));
     } finally {
       setMiktarStarting(false);
     }
@@ -604,14 +621,26 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             running||processed'e bakiyordu, dolayisiyla istek basarisiz
             oldugunda kullaniciya hicbir sey gosterilmiyordu (dugme "bozuk"
             goruntusunun ikinci yarisi). */}
-        {miktarJob?.error && !miktarJob.running && (
+        {/* BU denemenin sonucu. `miktarJob.error` (ÖNCEKİ koşunun sunucu
+            hatası) ile karıştırılmaz — ikisi ayrı olaydır. */}
+        {miktarBaslatmaHatasi && (
           <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
             {t ? 'Miktar çekme başlatılamadı: ' : 'Could not start quantity pull: '}
-            <b>{miktarJob.error}</b>
+            <b>{miktarBaslatmaHatasi}</b>
           </p>
         )}
         {miktarJob && (miktarJob.running || miktarJob.processed) ? (
           <div className="space-y-1.5">
+            {/* Başlatma başarısız olduysa aşağıdaki ilerleme BU denemeye ait
+                DEĞİL — geçmiş bir koşunun kaydıdır. Etiketlenmezse kullanıcı
+                "başlatılamadı" ile "2375/2375 tamamlandı"yı aynı olay sanıyor. */}
+            {miktarBaslatmaHatasi && !miktarJob.running && (
+              <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                {t
+                  ? 'Aşağıdaki sonuç ÖNCEKİ bir koşuya aittir; bu deneme başlatılamadı.'
+                  : 'The result below is from a PREVIOUS run; this attempt did not start.'}
+              </p>
+            )}
             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-500 ${miktarJob.running ? 'bg-[#1a3a5c]' : 'bg-emerald-500'}`}
@@ -662,7 +691,16 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             )}
           </div>
         ) : null}
-        {miktarJob?.error && <p className="text-[11px] text-red-600 bg-red-50 rounded-xl px-3 py-2">⚠ {miktarJob.error}</p>}
+        {/* ÖNCEKİ koşunun SUNUCU hatası (iş kaydından). Yukarıdaki
+            "başlatılamadı" kutusundan farklıdır: o bu denemeye, bu ise
+            kaydedilmiş son koşuya aittir. Eskiden aynı mesaj iki ayrı blokta
+            birden çiziliyordu (biri 2026-06-11, diğeri 2026-08-18 eklenmiş,
+            eskisi silinmemişti) — kullanıcı aynı uyarıyı iki kez görüyordu. */}
+        {miktarJob?.error && !miktarJob.running && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+            {t ? '⚠ Son koşu hatası: ' : '⚠ Last run error: '}{miktarJob.error}
+          </p>
+        )}
       </div>
 
       {/* ── Gelen e-Fatura GİB Onay / Red ── */}

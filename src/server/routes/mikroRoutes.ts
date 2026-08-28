@@ -573,7 +573,6 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // kullanmak kararı YANLIŞ koleksiyona sordurur ve C11'in kapatmaya
     // çalıştığı kiracılar-arası id çakışmasını geri getirir (code-review).
     const whItemId = await C.mikroIdCozucu('warehouseItems', companyId);
-    const wmsId    = await C.mikroIdCozucu('wmsLocations', companyId);
 
     const t0 = Date.now();
     let created = 0, updated = 0, errors = 0;
@@ -777,15 +776,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           itemCount,
           updatedAt: pgServerTimestamp(),
         }, { merge: true });
-        await C.getAdminDb().collection('wmsLocations').doc(wmsId(`depo-${kod}`)).set({
-          companyId: await C.reqCompanyId(req),
-          code:      `DEPO-${kod}`,
-          aisle:     kod, rack: '00', level: '00',
-          zone:      'storage',
-          active:    true,
-          source:    'mikro_import',
-          updatedAt: pgServerTimestamp(),
-        }, { merge: true });
+        // wmsLocations BURADAN YAZILMIYOR (2026-08-28).
+        // Bu döngü `sto_yer_kod` üzerinden dönüyor; o alan bu kurulumda tüm
+        // ürünlerde boş, yani döngü hiç çalışmıyordu — Mobil WMS aylarca boş
+        // kaldı. Üstelik buradaki kayıt `warehouseId` taşımıyordu, dolayısıyla
+        // yazılsa bile ekranda Depo sütunu "—" görünürdü.
+        // Yetkili kaynak: /api/mikro/import/depo (DEPOLAR tablosu), gerçek
+        // depo adı + warehouseId ile yazar ve eski kayıtları temizler.
       }
 
       // Kategorileri senkronize et: Mikro kategorilerini ekle, kullanılmayan
@@ -1960,6 +1957,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     postProcess: async (rows, companyId) => {
       if (!C.getAdminDb()) return null;
       const depoId = await C.mikroIdCozucu('warehouses', companyId);
+      // Mobil WMS de aynı depolardan beslenmeli — bkz. (B) notu.
+      const wmsId = await C.mikroIdCozucu('wmsLocations', companyId);
+      const yazilanWmsKodlari = new Set<string>();
       let batch = C.getAdminDb().batch(); let ops = 0, yazilan = 0;
       for (const r of rows) {
         const depoNo = Number(r.dep_no);
@@ -1981,11 +1981,58 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           source: 'mikro',
           syncedAt: pgServerTimestamp(),
         }, { merge: true });
+
+        // ── Mobil WMS konumu ────────────────────────────────────────────
+        // Mobil Depo Yönetimi ekranı `wmsLocations`tan okur. O koleksiyona
+        // yazan TEK kod stok import'undaki `depotCodes` döngüsüydü; o döngü
+        // `sto_yer_kod` üzerinde dönüyor ve bu kurulumda o alan ürünlerin
+        // TAMAMINDA boş, yani döngü HİÇ dönmüyordu (2026-08-28 teşhisi).
+        // Ekrandaki tek `DEPO-1` satırı, kaldırılmış `|| '1'` kodunun
+        // merge:true yüzünden geri alınmayan artığıydı ve `warehouseId`
+        // taşımadığı için Depo sütunu "—" görünüyordu.
+        // Yetkili kaynak burasıdır: gerçek depo adı ve warehouseId ile.
+        const wmsKod = `DEPO-${depoNo}`;
+        yazilanWmsKodlari.add(wmsKod);
+        batch.set(C.getAdminDb().collection('wmsLocations').doc(wmsId(`depo-${depoNo}`)), {
+          companyId,
+          code: wmsKod,
+          // Depo sütununun dolması için ŞART: warehouses doküman kimliği.
+          warehouseId: depoId(`depo-${depoNo}`),
+          aisle: String(depoNo), rack: '00', level: '00',
+          zone: 'storage',
+          active: true,
+          source: 'mikro',
+          syncedAt: pgServerTimestamp(),
+        }, { merge: true });
+        ops++;
+
         yazilan++;
         if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
-      return `${yazilan} depo tanımı warehouses'a yazıldı`;
+
+      // ── Hayalet konum temizliği ──────────────────────────────────────────
+      // Mikro'dan TÜRETİLMİŞ (source: mikro/mikro_import) ama artık gerçek bir
+      // depoya karşılık gelmeyen konumları sil — ekrandaki eski `DEPO-1` böyle
+      // kalmıştı. Kullanıcının ELLE eklediği konumlara DOKUNULMAZ: onlarda
+      // `source` alanı yoktur.
+      let silinen = 0;
+      try {
+        const mevcut = await C.getAdminDb().collection('wmsLocations')
+          .where('companyId', '==', companyId).get();
+        for (const d of mevcut.docs) {
+          const v = d.data() as { code?: string; source?: string };
+          if (v.source !== 'mikro' && v.source !== 'mikro_import') continue;
+          if (v.code && yazilanWmsKodlari.has(v.code)) continue;
+          await d.ref.delete();
+          silinen++;
+        }
+      } catch (e) {
+        console.warn('[depo import] wmsLocations temizligi atlandi:', e);
+      }
+
+      return `${yazilan} depo tanımı warehouses + wmsLocations'a yazıldı`
+        + (silinen ? `, ${silinen} eski Mikro konumu temizlendi` : '');
     },
   });
 
