@@ -927,7 +927,7 @@ export default function AdminPage({
           <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Şirket Bilgileri':'Company Information'}</h3>
           <div className="space-y-3">
             {[
-              { label: currentLanguage==='tr'?'Şirket Adı':'Company Name', key: 'companyName', placeholder: 'CETPA Teknoloji A.Ş.' },
+              { label: currentLanguage==='tr'?'Şirket Adı':'Company Name', key: 'companyName', placeholder: 'CETPA A.Ş.' },
               { label: currentLanguage==='tr'?'Vergi No':'Tax No', key: 'taxNo', placeholder: '1234567890' },
               { label: currentLanguage==='tr'?'Vergi Dairesi':'Tax Office', key: 'taxOffice', placeholder: 'Kadıköy' },
               { label: currentLanguage==='tr'?'Adres':'Address', key: 'address', placeholder: 'İstanbul, Türkiye' },
@@ -955,7 +955,7 @@ export default function AdminPage({
                 rows={3}
                 defaultValue={(companySettings.signature as string) || ''}
                 onChange={e => setCompanySettings((prev: Record<string, unknown>) => ({...prev, signature: e.target.value}))}
-                placeholder={currentLanguage==='tr'?'CETPA Teknoloji A.Ş.\ninfo@cetpa.com.tr\n+90 212 000 0000':'CETPA Technology Inc.\ninfo@cetpa.com.tr\n+90 212 000 0000'}
+                placeholder={currentLanguage==='tr'?'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 212 000 0000':'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 212 000 0000'}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand transition-colors resize-none font-mono"
               />
             </div>

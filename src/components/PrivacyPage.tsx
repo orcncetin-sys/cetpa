@@ -18,7 +18,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
   const sections = isTR ? [
     {
       title: '1. Giriş',
-      content: 'CETPA Technology olarak gizliliğinizi ciddiye alıyoruz. Bu Gizlilik Politikası, CETPA Cloud ERP platformunu kullanırken topladığımız, işlediğimiz ve sakladığımız kişisel verileri kapsamaktadır. 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) kapsamında veri sorumlusu sıfatıyla hareket etmekteyiz.'
+      content: 'CETPA A.Ş. olarak gizliliğinizi ciddiye alıyoruz. Bu Gizlilik Politikası, CETPA Cloud ERP platformunu kullanırken topladığımız, işlediğimiz ve sakladığımız kişisel verileri kapsamaktadır. 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) kapsamında veri sorumlusu sıfatıyla hareket etmekteyiz.'
     },
     {
       title: '2. Toplanan Veriler',
@@ -42,12 +42,12 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '7. İletişim',
-      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA Technology, Levent, Beşiktaş, İstanbul 34330 | Talep yanıt süresi: 30 gün içinde.'
+      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA A.Ş., Levent, Beşiktaş, İstanbul 34330 | Talep yanıt süresi: 30 gün içinde.'
     }
   ] : [
     {
       title: '1. Introduction',
-      content: 'At CETPA Technology, we take your privacy seriously. This Privacy Policy covers the personal data we collect, process and store when you use the CETPA Cloud ERP platform. We act as a data controller under the General Data Protection Regulation (GDPR) and applicable data protection laws.'
+      content: 'At CETPA A.Ş., we take your privacy seriously. This Privacy Policy covers the personal data we collect, process and store when you use the CETPA Cloud ERP platform. We act as a data controller under the General Data Protection Regulation (GDPR) and applicable data protection laws.'
     },
     {
       title: '2. Data We Collect',
@@ -71,7 +71,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '7. Contact',
-      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA Technology, Levent, Beşiktaş, Istanbul 34330, Turkey | Response time: within 30 days.'
+      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA A.Ş., Levent, Beşiktaş, Istanbul 34330, Turkey | Response time: within 30 days.'
     }
   ];
 
@@ -97,7 +97,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
         <div className="mb-12">
           <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 16 {isTR ? 'Nisan' : 'April'} 2026</p>
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}</h1>
-          <p className={muted}>{isTR ? 'CETPA Technology olarak kişisel verilerinizin güvenliğini ön planda tutuyoruz.' : 'At CETPA Technology, the security of your personal data is our top priority.'}</p>
+          <p className={muted}>{isTR ? 'CETPA A.Ş. olarak kişisel verilerinizin güvenliğini ön planda tutuyoruz.' : 'At CETPA A.Ş., the security of your personal data is our top priority.'}</p>
         </div>
 
         <div className="space-y-8">
@@ -110,7 +110,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
         </div>
 
         <div className={`mt-12 pt-8 border-t ${border} text-center`}>
-          <p className={`text-xs ${muted}`}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
         </div>
       </main>
     </div>

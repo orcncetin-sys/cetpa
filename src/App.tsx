@@ -160,6 +160,27 @@ import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fn
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
+
+// ── Kimlik gerektirmeyen tanıtım/yasal sayfalar ───────────────────────────
+// Bunlar YAZILMIŞ ama HİÇ BAĞLANMAMIŞTI (bkz. src/lib/publicPaths.ts): landing
+// altbilgisindeki 5 bağlantının hedefi yoktu, çünkü uygulamada tek bir <Route>
+// bile tanımlı değil. Aşağıdaki harita `Record<PublicPageKey, ...>` tipinde —
+// publicPaths.ts'e yol eklenip buraya sayfası konmazsa DERLEME KIRILIR.
+const DevelopersPage = React.lazy(() => import('./components/ApiPage'));
+const BlogPage = React.lazy(() => import('./components/BlogPage'));
+const CareerPage = React.lazy(() => import('./components/CareerPage'));
+const PrivacyPage = React.lazy(() => import('./components/PrivacyPage'));
+const TermsPage = React.lazy(() => import('./components/TermsPage'));
+
+type GenelSayfaProps = { currentLanguage: Language; darkMode: boolean; onBack: () => void };
+
+const PUBLIC_PAGES: Record<PublicPageKey, React.LazyExoticComponent<React.ComponentType<GenelSayfaProps>>> = {
+  developers: DevelopersPage,
+  blog: BlogPage,
+  careers: CareerPage,
+  privacy: PrivacyPage,
+  terms: TermsPage,
+};
 import { confirmAction, setConfirmLanguage } from './lib/confirm';
 import GlobalConfirm from './components/GlobalConfirm';
 import { confirmDelete } from './lib/confirm';
@@ -239,6 +260,8 @@ import {
 } from './types/subscription';
 import { useAppStore } from './store/appStore';
 import { useRouteSync } from './hooks/useRouteSync';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -643,6 +666,8 @@ function AppContent() {
   });
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
+  const konum = useLocation();
+  const gezin = useNavigate();
 
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
@@ -3341,6 +3366,23 @@ function AppContent() {
   };
 
   // --- Render ---
+
+  // Genel tanıtım/yasal sayfalar — kimlik GEREKTİRMEZ.
+  // isAuthReady beklenmiyor: bu sayfalar tamamen statik, oturum durumundan
+  // bağımsız. Aynı dosyadaki public sipariş takibiyle aynı desendir.
+  const genelSayfa = publicPageKey(konum.pathname);
+  if (genelSayfa) {
+    const Sayfa = PUBLIC_PAGES[genelSayfa];
+    return (
+      <React.Suspense fallback={<div className={cn("h-screen flex items-center justify-center", darkMode ? "bg-[#0a0a0a]" : "bg-white")}><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+        <Sayfa
+          currentLanguage={currentLanguage}
+          darkMode={darkMode}
+          onBack={() => gezin('/')}
+        />
+      </React.Suspense>
+    );
+  }
 
   // Public order tracking — no auth required
   if (trackOrderId) {

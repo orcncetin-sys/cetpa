@@ -12,6 +12,7 @@ import {
   TrendingUp, Play, Pause, ChevronDown, Mail, Star, X, Minus,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { db } from '../firebase';
 import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from '../lib/dbClient';
 import { byField } from '../utils/fsSort';
@@ -2080,7 +2081,7 @@ export default function LandingPage({
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   Changelog
                 </button>
-                <Link to="/api"
+                <Link to={PUBLIC_PATHS.developers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   API
                 </Link>
@@ -2095,11 +2096,11 @@ export default function LandingPage({
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Hakkımızda' : 'About'}
                 </button>
-                <Link to="/careers"
+                <Link to={PUBLIC_PATHS.careers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Kariyer' : 'Careers'}
                 </Link>
-                <Link to="/blog"
+                <Link to={PUBLIC_PATHS.blog}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   Blog
                 </Link>
@@ -2114,11 +2115,11 @@ export default function LandingPage({
             <div>
               <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Yasal' : 'Legal'}</p>
               <div className="space-y-3">
-                <Link to="/privacy"
+                <Link to={PUBLIC_PATHS.privacy}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}
                 </Link>
-                <Link to="/terms"
+                <Link to={PUBLIC_PATHS.terms}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
                   {isTR ? 'Kullanım Koşulları' : 'Terms of Service'}
                 </Link>
@@ -2132,7 +2133,7 @@ export default function LandingPage({
 
           {/* ── Bottom bar ── */}
           <div className={cn('pt-8 border-t flex flex-col sm:flex-row items-center justify-between gap-4', d('border-white/6', 'border-black/6'))}>
-            <p className={cn('text-xs', d('text-white/55', 'text-black/60'))}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+            <p className={cn('text-xs', d('text-white/55', 'text-black/60'))}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
             <div className="flex items-center gap-1.5">
               <span className={cn('text-xs', d('text-white/55', 'text-black/60'))}>
                 {isTR ? 'CETPA tarafından' : 'Made by CETPA with'}

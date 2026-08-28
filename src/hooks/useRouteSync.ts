@@ -14,6 +14,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { publicPageKey } from '../lib/publicPaths';
 
 // Top-level tabs that map 1-to-1 with URL path segments.
 // 'finans' was a typo that never matched the real activeTab ('finance') — this
@@ -21,7 +22,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 // tab group (dunning/gelirtanima/finance/ebelge/vergi all missing too), which
 // is why switching those tabs left the URL path stuck on '/holding' with only
 // the unrelated hash changing (2026-08-13 kullanıcı bulgusu, app.cetpa.com.tr/holding#finance).
-const TOP_LEVEL_TABS = new Set([
+export const TOP_LEVEL_TABS = new Set([
   'dashboard', 'crm', 'orders', 'inventory', 'lojistik', 'muhasebe',
   'satin-alma', 'ik', 'hukuk', 'uretim', 'kalite', 'proje', 'servis',
   'bakim', 'raporlar', 'finance', 'ayarlar', 'entegrasyonlar', 'b2b',
@@ -63,6 +64,12 @@ export function useRouteSync({ activeTab, setActiveTab }: RouteState) {
   // ── On state change: state → URL ─────────────────────────────────────────
   useEffect(() => {
     if (syncingRef.current) return;
+    // Genel (kimliksiz) tanıtım/yasal sayfadayken URL'e DOKUNMA. Bu efektin
+    // bağımlılığı [activeTab] olduğu için MOUNT'ta da bir kez koşuyor: kullanıcı
+    // /privacy'yi açtığında activeTab hâlâ 'dashboard' olur, hedef '/' çıkar ve
+    // efekt sayfayı anında landing'e geri fırlatırdı. Bu guard olmadan
+    // gizlilik/koşullar bağlantıları bağlansa bile AÇILMAZDI.
+    if (publicPageKey(location.pathname)) return;
     if (!TOP_LEVEL_TABS.has(activeTab)) return; // sub-tabs / modals: no URL change
     const target = tabToPath(activeTab);
     if (location.pathname !== target) {

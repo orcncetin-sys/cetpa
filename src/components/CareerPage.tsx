@@ -145,7 +145,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
         </div>
 
         <div className={`mt-12 pt-8 border-t ${border} text-center`}>
-          <p className={`text-xs ${muted}`}>© 2026 CETPA Technology. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
         </div>
       </main>
     </div>
