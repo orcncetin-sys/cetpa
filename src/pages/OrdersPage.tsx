@@ -1,6 +1,8 @@
 import { itemCostTRY } from '../utils/cost';
+const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatPanel'));
 import { eslesir } from '../utils/arama';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
+import type { VehiclePosition } from '../types';
 import React, { useState, useEffect } from 'react';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
@@ -135,6 +137,12 @@ interface Props {
   darkMode: boolean;
   warehouses: Warehouse[];
   vehicles: Vehicle[];
+  /** Araçların son bilinen konumu — Canlı Sevkiyat ekranı için. */
+  aracKonumlari: VehiclePosition[];
+  /** Konum YAZMA yetkisi (Admin/Manager/Logistics) — yoksa 403 alınırdı. */
+  konumYazabilir: boolean;
+  /** Konumu kimin paylastigi kaydedilsin (izlenebilirlik). */
+  kullaniciUid?: string;
   locationStocks: LocationStock[];
   shipments: Shipment[];
   newOrder: Partial<Order>;
@@ -170,7 +178,7 @@ export default function OrdersPage({
   routeStops, isRouteOptimized, selectedDepot, setSelectedDepot, DEPOTS,
   recurringOrders, hasFullAccess, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
-  userRole, user, kpiCurrency, activeTab, darkMode, warehouses, vehicles, locationStocks, shipments,
+  userRole, user, kpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, kullaniciUid, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
   handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
@@ -246,7 +254,7 @@ export default function OrdersPage({
   const [p593ShowForm, setP593ShowForm] = useState(false);
   // Depo/araç QR etiket modalı
   const [locationQrModal, setLocationQrModal] = useState<{ type: 'warehouse' | 'vehicle'; id: string; name: string; subtitle?: string } | null>(null);
-  const [p593Draft, setP593Draft] = useState({plate:'',driver:'',model:'',status:'Müsait' as 'Müsait'|'Yolda'|'Bakımda'|'Arızalı',lastService:'',nextService:'',km:'',fuel:'Dizel' as 'Benzin'|'Dizel'|'LPG'|'Elektrik'});
+  const [p593Draft, setP593Draft] = useState({plate:'',driver:'',driverPhone:'',model:'',status:'Müsait' as 'Müsait'|'Yolda'|'Bakımda'|'Arızalı',lastService:'',nextService:'',km:'',fuel:'Dizel' as 'Benzin'|'Dizel'|'LPG'|'Elektrik'});
   const [p609Tickets, setP609Tickets] = useState<Array<{id:string;customer:string;subject:string;priority:'Düşük'|'Orta'|'Yüksek'|'Kritik';status:'Açık'|'İşlemde'|'Çözüldü'|'Kapatıldı';createdAt:string;resolvedAt?:string;slaHours:number;satisfaction?:1|2|3|4|5}>>([]);
   const [p609ShowForm, setP609ShowForm] = useState(false);
   const [p609Draft, setP609Draft] = useState({customer:'',subject:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek'|'Kritik',slaHours:'24'});
@@ -2256,6 +2264,7 @@ export default function OrdersPage({
                     { id: 'transfer', label: currentLanguage === 'tr' ? 'Depolar Arası' : 'Transfer', icon: ArrowRightLeft },
                     { id: 'qr-transfer', label: currentLanguage === 'tr' ? 'QR Transfer' : 'QR Transfer', icon: QrCode },
                     { id: 'arac-takip', label: currentLanguage === 'tr' ? 'Araç Takip' : 'Vehicles', icon: Truck },
+                    { id: 'canli', label: currentLanguage === 'tr' ? 'Canlı Sevkiyat' : 'Live Delivery', icon: Navigation },
                     { id: 'giden_irsaliye', label: currentLanguage === 'tr' ? 'Giden İrsaliye' : 'Outgoing', icon: FileUp },
                     { id: 'gelen_irsaliye', label: currentLanguage === 'tr' ? 'Gelen İrsaliye' : 'Incoming', icon: FileDown },
                   ].map(tab => {
@@ -2630,6 +2639,19 @@ export default function OrdersPage({
                 </div>
               )}
 
+              {lojistikTab === 'canli' && (
+                <React.Suspense fallback={<div className="apple-card p-8 text-center text-sm text-gray-400">…</div>}>
+                  <CanliSevkiyatPanel
+                    currentLanguage={currentLanguage}
+                    shipments={shipments}
+                    vehicles={vehicles}
+                    aracKonumlari={aracKonumlari}
+                    konumYazabilir={konumYazabilir}
+                    kullaniciUid={kullaniciUid}
+                  />
+                </React.Suspense>
+              )}
+
               {lojistikTab === 'arac-takip' && (() => {
                 const tr593 = currentLanguage === 'tr';
                 const statusColors593: Record<string,string> = {'Müsait':'bg-green-100 text-green-700','Yolda':'bg-blue-100 text-blue-700','Bakımda':'bg-amber-100 text-amber-700','Arızalı':'bg-red-100 text-red-700'};
@@ -2651,6 +2673,7 @@ export default function OrdersPage({
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Plaka':'Plate'} value={p593Draft.plate} onChange={e=>setP593Draft(d=>({...d,plate:e.target.value.toUpperCase()}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sürücü':'Driver'} value={p593Draft.driver} onChange={e=>setP593Draft(d=>({...d,driver:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" type="tel" placeholder={tr593?'Sürücü Telefonu':'Driver Phone'} value={p593Draft.driverPhone} onChange={e=>setP593Draft(d=>({...d,driverPhone:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Marka/Model':'Model'} value={p593Draft.model} onChange={e=>setP593Draft(d=>({...d,model:e.target.value}))} />
                           <select className="apple-input px-3 py-2 text-sm" value={p593Draft.fuel} onChange={e=>setP593Draft(d=>({...d,fuel:e.target.value as typeof d.fuel}))}>
                             {(['Benzin','Dizel','LPG','Elektrik'] as const).map(f=><option key={f}>{f}</option>)}
@@ -2666,7 +2689,7 @@ export default function OrdersPage({
                             if(!p593Draft.plate.trim()){ toast(tr593?'Plaka zorunlu.':'Plate is required.','error'); return; }
                             try {
                               await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate.trim(),driver:p593Draft.driver||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',km:Number(p593Draft.km)||0,fuel:p593Draft.fuel,createdAt:serverTimestamp()});
-                              setP593Draft({plate:'',driver:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
+                              setP593Draft({plate:'',driver:'',driverPhone:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
                               setP593ShowForm(false);
                             } catch(e){
                               // Sunucunun gerçek mesajını göster (örn. yetki reddi) — genel

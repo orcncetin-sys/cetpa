@@ -58,7 +58,7 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'rfqQuotes', 'stockBatches', 'pricingRules', 'qualityChecklist',
   // Batch 4 (2026-07-21): koşu-anlık-görüntüsü + oturum kalıcılığı
   'payrollRuns', 'bankMatchRuns', 'revExpBudgets', 'stockCountSessions',
-  'wmsLocations', 'dataRequests', 'vehicles', 'locationStocks', 'bankReportPresets',
+  'wmsLocations', 'dataRequests', 'vehicles', 'vehiclePositions', 'locationStocks', 'bankReportPresets',
   // ── 2026-06-22 review: eksik tenant-private iş koleksiyonları eklendi ──
   'akreditifler', 'amortismanKayitlari', 'arizalar', 'assemblyMeetings', 'auditItems',
   'bankAccounts', 'bankTransactions', 'boardMeetings', 'bom', 'campaigns', 'cargoTracking',

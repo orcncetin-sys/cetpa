@@ -21,6 +21,10 @@ export interface Shipment {
   customerName: string;
   destination: string;
   driver: string;
+  /** Sevkiyatı taşıyan araç — canlı konum bununla eşleşir. */
+  vehicleId?: string;
+  /** Sürücü telefonu (araç kaydından kopyalanır). */
+  driverPhone?: string;
   cargoFirm: string;
   date: string;
   status: 'Pending' | 'In Transit' | 'Delivered' | 'Cancelled';
@@ -471,6 +475,11 @@ export interface Vehicle {
   id: string;
   plate: string;
   driver?: string;
+  /** Sürücü telefonu — canlı sevkiyat kartındaki "Ara" düğmesi için.
+   *  Araç kaydına DENORMALIZE edilir; `employees` koleksiyonundan OKUNMAZ:
+   *  o koleksiyonun RBAC okuma listesinde 'Logistics' yok (rbac.ts), yani
+   *  lojistik personeli için sessizce boş gelirdi. */
+  driverPhone?: string;
   model?: string;
   status: 'Müsait' | 'Yolda' | 'Bakımda' | 'Arızalı';
   lastService?: string;
@@ -479,6 +488,37 @@ export interface Vehicle {
   fuel?: 'Benzin' | 'Dizel' | 'LPG' | 'Elektrik';
   companyId?: string | null;
   createdAt?: unknown;
+}
+
+/**
+ * Aracın SON bilinen konumu — canlı sevkiyat takibi (2026-08-28).
+ *
+ * Kaynak: sürücünün telefonundaki tarayıcı GPS'i (kullanıcı kararı). Doküman
+ * kimliği = `vehicleId`, yani araç başına TEK kayıt tutulur; izlek (geçmiş
+ * rota) SAKLANMAZ. Bu bilinçli: konum geçmişi tutmak KVKK'da ayrı bir
+ * aydınlatma ve saklama süresi sorusu doğurur, ve operasyon için "şu an
+ * nerede" yetiyor.
+ *
+ * `updatedAt` KRİTİK: tarayıcı GPS'i yalnız sayfa ön plandayken çalışır;
+ * iOS Safari'de sekme arka plana düşünce veya ekran kilitlenince PRATİKTE
+ * DURUR. O yüzden arayüz konumun YAŞINA bakar ve eskiyse "konum bayat" der —
+ * donmuş bir kurye ikonunu canlıymış gibi göstermez (CLAUDE.md: sahte
+ * kesinlik gösterme).
+ */
+export interface VehiclePosition {
+  /** = vehicleId (doküman kimliği) */
+  id: string;
+  vehicleId: string;
+  plate?: string;
+  lat: number;
+  lng: number;
+  /** GPS doğruluk yarıçapı (metre) — tarayıcı verir. */
+  accuracyM?: number;
+  /** Son güncelleme — bayatlık bunun üzerinden ölçülür. */
+  updatedAt?: unknown;
+  /** Konumu paylaşan kullanıcı — araç-kullanıcı bağı yok, izlenebilirlik için. */
+  sharedByUid?: string | null;
+  companyId?: string | null;
 }
 
 // Konum-bazlı stok — her depo/araç + ürün için ayrı miktar (Faz 2). Global

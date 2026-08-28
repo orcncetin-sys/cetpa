@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Plus } from 'lucide-react';
-import type { Lead, Shipment } from '../types';
+import type { Lead, Shipment, Vehicle } from '../types';
 import CustomerCombobox from './CustomerCombobox';
 
 interface AddShipmentModalProps {
   isOpen: boolean;
   onClose: () => void;
   leads: Lead[];
+  /** Araç listesi — sevkiyata araç atamak Canlı Sevkiyat ekranının ön koşulu. */
+  vehicles: Vehicle[];
   initialData?: Partial<Shipment>;
   onSubmit: (data: Partial<Shipment>) => Promise<void>;
 }
@@ -16,6 +18,7 @@ export default function AddShipmentModal({
   isOpen,
   onClose,
   leads,
+  vehicles,
   initialData,
   onSubmit
 }: AddShipmentModalProps) {
@@ -92,8 +95,35 @@ export default function AddShipmentModal({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-500 uppercase">Araç</label>
+              {/* Araç seçimi Canlı Sevkiyat ekranının ÖN KOŞULU: konum
+                  `vehicleId` ile eşleşiyor. Seçince sürücü adı ve telefonu
+                  araç kaydından OTOMATİK dolar; serbest yazma korunur, çünkü
+                  dış nakliyeci kullanılan sevkiyatta araç kaydı olmayabilir. */}
+              <select value={formData.vehicleId || ''}
+                onChange={e => {
+                  const v = vehicles.find(x => x.id === e.target.value);
+                  setFormData({
+                    ...formData,
+                    vehicleId: e.target.value,
+                    ...(v?.driver ? { driver: v.driver } : {}),
+                    ...(v?.driverPhone ? { driverPhone: v.driverPhone } : {}),
+                  });
+                }}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors">
+                <option value="">Araç seçin (opsiyonel)</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.driver ? ` — ${v.driver}` : ''}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
               <label className="text-[10px] font-bold text-gray-500 uppercase">Sürücü</label>
               <input required value={formData.driver || ''} onChange={e => setFormData({ ...formData, driver: e.target.value })}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-500 uppercase">Sürücü Telefonu</label>
+              <input type="tel" value={formData.driverPhone || ''} onChange={e => setFormData({ ...formData, driverPhone: e.target.value })}
+                placeholder="Canlı takipte 'Ara' düğmesi için"
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" />
             </div>
             <div className="space-y-1">

@@ -96,6 +96,11 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   // ekranda tek satır genel hata). Araç Ekle bu şekilde bulundu; aynı boşlukta
   // olan diğerleri de sahibi olan role göre burada tanımlandı.
   vehicles: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
+  // Araç canlı konumu. Yazma DAR tutuldu: konum gönderen taraf lojistik
+  // personeli/sürücüdür. Kuralı OLMAYAN koleksiyon Admin dışı herkese
+  // salt-okunur olurdu ve konum gönderimi sessizce 403 dönerdi (bu tuzağa
+  // daha önce düşüldü — bkz. hafıza: rbac-zero-trust-sessiz-403).
+  vehiclePositions: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
   locationStocks: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
   stockCountSessions: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
   stockDiscrepancies: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },

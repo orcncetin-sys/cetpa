@@ -261,6 +261,7 @@ import {
 import { useAppStore } from './store/appStore';
 import { useRouteSync } from './hooks/useRouteSync';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { isAllowed } from './lib/rbac';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 
 // --- Utility ---
@@ -1769,7 +1770,7 @@ function AppContent() {
   // cagrilmazsa asagidaki degiskenler tanimsiz kalir ve DERLEME KIRILIR —
   // yani 'yazdim ama baglamadim' (olu useDataSync) hatasi imkansiz.
   const {
-    p547BankAccounts, p547FixedAssets, p548Masraflar, p549Iadeler, p552Records, p554Bins, p573Rules, p579Batches, p587Checks, p588Consign, p591Schedules, p608Quotes, p612Budgets, p625BudgetData, p627Risks, p636Calculated, p636Payrolls, p638MatchResults, webhookConfigs, dashVergiDeadlines,
+    p547BankAccounts, p547FixedAssets, p548Masraflar, p549Iadeler, p552Records, p554Bins, aracKonumlari, p573Rules, p579Batches, p587Checks, p588Consign, p591Schedules, p608Quotes, p612Budgets, p625BudgetData, p627Risks, p636Calculated, p636Payrolls, p638MatchResults, webhookConfigs, dashVergiDeadlines,
     // Setter'lar: alt bilesenlere prop olarak geciyorlar
     setP547BankAccounts, setP547FixedAssets, setP548Masraflar, setP549Iadeler, setP552Records, setP554Bins, setP573Rules, setP579Batches, setP587Checks, setP588Consign, setP591Schedules, setP608Quotes, setP612Budgets, setP625BudgetData, setP627Risks, setP636Calculated, setP636Payrolls, setP638MatchResults, setWebhookConfigs,
   } = useSekmeVerileri({ user, activeTab, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
@@ -4321,6 +4322,7 @@ function AppContent() {
                 { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
                 { label: tr ? 'Tedarik Zinciri KPI' : 'Supply Chain KPI', subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
                 { label: tr ? 'Araç Takip' : 'Fleet Tracking', subId: 'arac-takip',         action: () => { setActiveTab('lojistik'); setLojistikTab('arac-takip'); } }, // Phase 593
+                { label: tr ? 'Canlı Sevkiyat' : 'Live Delivery', subId: 'canli',            action: () => { setActiveTab('lojistik'); setLojistikTab('canli'); } },
                 { label: tr ? 'İhracat & Gümrük' : 'Export & Customs', subId: 'ihracat-gumruk', action: () => { setActiveTab('lojistik'); setLojistikTab('ihracat-gumruk'); } }, // Phase 622
                 { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
                 { label: tr ? 'Mobil WMS' : 'Mobile WMS',           subId: 'mobilewms',        action: () => setActiveTab('mobilewms') },
@@ -6437,6 +6439,9 @@ function AppContent() {
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <OrdersPage
                 p554Bins={p554Bins}
+                aracKonumlari={aracKonumlari}
+                konumYazabilir={isAllowed(userRole, 'vehiclePositions', 'write')}
+                kullaniciUid={user?.uid}
                 selectedOrder={selectedOrder}
                 setSelectedOrder={setSelectedOrder}
                 lojistikTab={lojistikTab}
@@ -6521,6 +6526,7 @@ function AppContent() {
 
       {/* ── Add Shipment Modal ── */}
       <AddShipmentModal
+        vehicles={vehicles}
         isOpen={isAddingShipment}
         onClose={() => {
           setIsAddingShipment(false);

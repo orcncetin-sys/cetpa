@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, orderBy, limit, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
-import type { WebhookConfig } from '../types';
+import type { WebhookConfig, VehiclePosition } from '../types';
 
 /**
  * useSekmeVerileri — SEKME-KAPILI canli veri dinleyicileri (16 efekt,
@@ -100,6 +100,8 @@ export function useSekmeVerileri({
     status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli';
   }>>([]);
   const [p554Bins, setP554Bins] = useState<BinSatiri[]>([]);
+  /** Araçların SON bilinen konumu — Lojistik > Canlı Takip sekmesi açıkken. */
+  const [aracKonumlari, setAracKonumlari] = useState<VehiclePosition[]>([]);
   const [p573Rules, setP573Rules] = useState<Array<{id:string;name:string;type:'bulk'|'customer-tier'|'promo';minQty?:number;tierName?:string;discountPct:number;active:boolean}>>([]);
   const [p579Batches, setP579Batches] = useState<Array<{id:string;sku:string;productName:string;batchNo:string;expiryDate?:string;qty:number;location?:string;status:'Aktif'|'Karantina'|'Kullanıldı'}>>([]);
   const [p587Checks, setP587Checks] = useState<Array<{id:string;item:string;checked:boolean;severity:'Kritik'|'Uyarı'|'Bilgi'}>>([]);
@@ -223,6 +225,22 @@ export function useSekmeVerileri({
     return () => unsub();
   }, [activeTab, muhasebeTab]);
 
+  // ── Canlı araç konumları ────────────────────────────────────────────────
+  // Sekme-kapılı: yalnız Lojistik > Canlı Takip açıkken abone olunur. Konum
+  // saniyeler mertebesinde güncellendiği için her oturumda dinlemek gereksiz
+  // trafik olurdu.
+  useEffect(() => {
+    if (activeTab !== 'lojistik' || lojistikTab !== 'canli') return;
+    const unsub = onSnapshot(query(collection(db, 'vehiclePositions')), snap => {
+      setAracKonumlari(snap.docs.map(d => ({ id: d.id, ...d.data() } as VehiclePosition)));
+    }, () => {
+      // Hata durumunda listeyi BOŞALTMA: boş liste "araç konum paylaşmıyor"
+      // gibi görünür ve gerçek nedeni (ör. 403) gizler. Eski değer kalsın,
+      // arayüz zaten konumun YAŞINA bakıp bayatsa uyarıyor.
+    });
+    return () => unsub();
+  }, [activeTab, lojistikTab]);
+
   useEffect(() => {
     if (activeTab !== 'kalite') return;
     const unsub = onSnapshot(query(collection(db, 'qualityChecklist')), snap => {
@@ -291,6 +309,7 @@ export function useSekmeVerileri({
     p549Iadeler,
     p552Records,
     p554Bins,
+    aracKonumlari,
     p573Rules,
     p579Batches,
     p587Checks,
