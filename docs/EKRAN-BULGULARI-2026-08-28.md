@@ -10,8 +10,8 @@ canlı sistem.** Durum sütunu her madde bitince güncellenir.
 | 3 | ✅ **Mobil WMS'i Mikro/Cetpa yap** | "Mobil Depo Yönetimi" → Konumlar: tek satır `DEPO-1`, **Depo sütunu boş (—)**, Bölge `storage`, sağda `Mikro` rozeti. Receive/Pick/Ship/Return hepsi 0 | ✅ Çözüldü (`604282b`, `4bc99c9`) |
 | 4 | ✅ **Search bar düzelt** | Muhasebe & Finans → Faturalar (161 fatura), arama kutusuna `ahmet` yazılmış | ✅ Çözüldü (`604282b`, `4bc99c9`) |
 | 5 | ✅ **Barkod yanında QR da tarat** | Envanter → "Barkod Tara" düğmesi; QR okumuyor | ✅ Çözüldü (`604282b`, `4bc99c9`) |
-| 6 | **Personel / araç takibi ekranı** | Referans: Getir canlı sipariş takibi — canlı harita + kurye ikonu + yatay durum çubuğu (Hazırlanıyor → Yola Çıktı → Adreste → Teslim Edildi) + kurye kartı (Ara / Mesaj) | ✅ Çözüldü (`604282b`, `4bc99c9`) |
-| 7 | **İhracat/ithalat gemi takibi** | Referans: `marinetraffic.com/en/ais/home/centerx:-12.0/centery:25.0/zoom:4` | ⏸ Karar bekliyor — ⚠️ MarineTraffic API **ücretli**; kullanıcı kart harcaması istemiyor, ücretsiz alternatif aranıyor |
+| 6 | ✅ **Personel / araç takibi ekranı** | Referans: Getir canlı sipariş takibi — canlı harita + kurye ikonu + yatay durum çubuğu (Hazırlanıyor → Yola Çıktı → Adreste → Teslim Edildi) + kurye kartı (Ara / Mesaj) | ✅ Çözüldü (`604282b`, `4bc99c9`) |
+| 7 | ✅ **İhracat/ithalat gemi takibi** | Referans: `marinetraffic.com/en/ais/home/centerx:-12.0/centery:25.0/zoom:4` | ✅ Çözüldü (`f5c3f33`) — MarineTraffic/iframe ELENDİ (ölçüldü: 403 + X-Frame-Options), yerine doğrulanmış VesselFinder bağlantısı; ücretsiz, hesapsız |
 | 8 | ✅ **"Stok Miktarlarını Çek" çelişkili UI** | Aynı ekranda hem kırmızı **"Miktar çekme başlatılamadı"** (V17/`GenelAmacliMaliyetListesiV2` hatası) hem yeşil **"2375/2375 işlendi · tamamlandı"**. Ayrıca "Depo dağılımı yazılan ürün: **175/2375**" ve 2 üründe "Devir (depo bilinmiyor)" | ✅ Çözüldü (`604282b`, `4bc99c9`) |
 
 ## Madde 8 için ek not
@@ -32,7 +32,7 @@ araştırılıyor; ücretli bir yol gerekiyorsa uygulanmadan önce sorulacak.
 
 ---
 
-## Durum: 6/8 çözüldü (2026-08-28)
+## Durum: 8/8 çözüldü (2026-08-28)
 
 Teşhis 14 ajanla yapıldı. Beklenmedik bulgular:
 
@@ -51,7 +51,7 @@ Teşhis 14 ajanla yapıldı. Beklenmedik bulgular:
   `useSekmeVerileri.test.ts` ile kapatıldı (dönen her değer App.tsx'te ≥2 kez
   geçmeli). Test, prop geri çekilerek kırmızıya döndüğü doğrulanarak eklendi.
 
-### Kalan 2 madde — kullanıcı kararı bekliyor
+### Madde 6 ve 7 — kullanıcı kararlarıyla tamamlandı
 
 **6 · Personel/araç takibi (büyük).** Kod tabanında **hiç canlı konum katmanı
 yok** (`navigator.geolocation` → 0 isabet). Ama Getir ekranının alt yarısı
@@ -65,3 +65,35 @@ telematik cihaz / hiç konum yok).
 var (düzenleme yolu yok, `isAuthenticated` alınıp kullanılmıyor, kayıt
 fonksiyonlarında hata yakalama yok) — bunlar gemi işinden bağımsız,
 düzeltilecek.
+
+
+---
+
+## Madde 6 · Canlı Sevkiyat — bilinen sınırlar (gizlenmiyor)
+
+Kullanıcı kararı: konum kaynağı **şoför telefonunun GPS'i**.
+
+| Sınır | Ekran ne yapıyor |
+|---|---|
+| Tarayıcı GPS'i yalnız sayfa ön plandayken çalışır; iOS'ta ekran kilitlenince durur | Konumun **yaşına** bakar; 3 dk'dan eskiyse "konum bayat (N dk)" der, canlıymış gibi göstermez |
+| Hedef koordinatı hiçbir yerde tutulmuyor (geocode yok) | Tahmini varış **daima '—'**; uydurma dakika üretilmez |
+| `navigator.geolocation` HTTPS ister | Buton çalışmadan önce "yalnız güvenli bağlantıda çalışır" uyarısı verir |
+| **Araç–kullanıcı bağı YOK** — yetkili herhangi biri herhangi bir aracı seçebilir | `sharedByUid` kaydediliyor (kim paylaştı izlenebilir). Gerçek çözüm dar bir **"Sürücü" rolü** + araç ataması — bu bir yetki kararı, sorulmadan yapılmadı |
+
+**Açık iş:** app.cetpa.com.tr sertifika sorunu (Plesk varsayılan `*.plesk.page`)
+çözülmeden şoför telefonunda konum paylaşımı çalışmayabilir.
+
+## Madde 7 · Gemi takibi — neden gömme yok
+
+Ölçüldü (tahmin değil): `marinetraffic.com` → HTTP **403** + `X-Frame-Options:
+SAMEORIGIN`; `vesselfinder.com` → `frame-ancestors 'self'`. Yani iframe
+güvenilir çalışmaz, ayrıca üçüncü taraf çerezi (`ROUTEID`) bırakıp KVKK
+aydınlatması gerektirirdi.
+
+Doğrulanan çözüm: `vesselfinder.com/vessels/details/<IMO>` bağlantısı —
+geçerli IMO gerçek gemi sayfasını açıyor, uydurma IMO düzgün 404 veriyor
+(yumuşak-404 yok). Ücretsiz, hesapsız, kartsız.
+
+Konteyner/konşimento için **armatör derin-bağlantısı eklenmedi**: hangi
+armatörle çalışıldığı bilinmeden URL şablonu uydurulmaz. Armatör söylenirse
+eklenir.
