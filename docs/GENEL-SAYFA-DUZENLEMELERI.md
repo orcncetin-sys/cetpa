@@ -1,6 +1,6 @@
 # Genel (kimliksiz) sayfalar — düzenlenecekler
 
-**Durum:** Sayfalar 2026-08-26'da bağlandı ve **içerikleri olduğu gibi canlıya
+**Durum:** Sayfalar 2026-08-28'de bağlandı ve **içerikleri olduğu gibi canlıya
 alındı** (kullanıcı kararı: "hepsi böyle kalsın push et, sonra edit edilecek
 olarak not al"). Aşağıdaki maddeler **düzenlenmeyi bekliyor**.
 

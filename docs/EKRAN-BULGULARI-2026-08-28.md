@@ -1,4 +1,4 @@
-# Ekran görüntüsü bulguları — 2026-08-26
+# Ekran görüntüsü bulguları — 2026-08-28
 
 Kullanıcının ekran görüntüleriyle bildirdiği maddeler. **Kaynak: kullanıcı,
 canlı sistem.** Durum sütunu her madde bitince güncellenir.
