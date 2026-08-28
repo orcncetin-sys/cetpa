@@ -30,19 +30,23 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '4. Veri Güvenliği',
-      content: 'Verileriniz Google Firebase altyapısında, AES-256 şifreleme ile güvence altına alınmış sunucularda saklanmaktadır. Tüm veri iletimi TLS 1.3 protokolüyle şifrelenmektedir. Düzenli güvenlik denetimleri ve penetrasyon testleri uygulanmaktadır. İhlal durumunda KVKK kapsamında 72 saat içinde ilgili mercilere ve etkilenen kullanıcılara bildirim yapılacaktır.'
+      content: 'İş verileriniz, kendi yönetimimizdeki sunucuda çalışan PostgreSQL veritabanında saklanır. Kimlik doğrulama Google Firebase Authentication ile, yüklediğiniz dosyalar Firebase Storage ile yönetilir. Tüm veri iletimi TLS ile şifrelenir ve veritabanı erişimi yalnızca uygulama sunucusuna açıktır. Düzenli güvenlik denetimleri uygulanmaktadır. İhlal durumunda KVKK kapsamında 72 saat içinde ilgili mercilere ve etkilenen kullanıcılara bildirim yapılacaktır.'
     },
     {
       title: '5. Üçüncü Taraf Entegrasyonları',
-      content: 'CETPA; Firebase (Google LLC – veri depolama ve kimlik doğrulama), Shopify (e-ticaret entegrasyonu), Luca (e-Fatura/GİB entegrasyonu) ve Mikro ERP (muhasebe senkronizasyonu) ile entegre çalışmaktadır. Bu entegrasyonlar aracılığıyla iletilen veriler yalnızca belirtilen hizmetin sunulması amacıyla kullanılır ve her entegrasyon partneri kendi gizlilik politikasına tabidir.'
+      content: 'CETPA; Firebase (Google LLC – kimlik doğrulama ve dosya depolama), Shopify (e-ticaret entegrasyonu), Luca (e-Fatura/GİB entegrasyonu) ve Mikro ERP (muhasebe senkronizasyonu) ile entegre çalışmaktadır. Bu entegrasyonlar aracılığıyla iletilen veriler yalnızca belirtilen hizmetin sunulması amacıyla kullanılır ve her entegrasyon partneri kendi gizlilik politikasına tabidir.'
     },
     {
       title: '6. KVKK Kapsamında Haklarınız',
       content: 'Kişisel Verilerin Korunması Kanunu\'nun 11. maddesi uyarınca; kişisel verilerinizin işlenip işlenmediğini öğrenme, işlenmişse bilgi talep etme, işlenme amacını ve amacına uygun kullanılıp kullanılmadığını öğrenme, yurt içinde veya yurt dışında verilerin aktarıldığı üçüncü kişileri bilme, verilerin eksik veya yanlış işlenmişse düzeltilmesini isteme, silinmesini veya yok edilmesini talep etme, otomatik sistemler aracılığıyla aleyhinize bir sonucun ortaya çıkmasına itiraz etme ve zararın giderilmesini talep etme haklarına sahipsiniz.'
     },
     {
-      title: '7. İletişim',
-      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA A.Ş., Levent, Beşiktaş, İstanbul 34330 | Talep yanıt süresi: 30 gün içinde.'
+      title: '7. Aday Adayı (Özgeçmiş) Verisi',
+      content: 'Kariyer sayfamız üzerinden ilettiğiniz özgeçmiş ve başvuru bilgileri, yalnızca işe alım değerlendirmesi amacıyla işlenir. Bu veriler en fazla 1 yıl saklanır, süre sonunda imha edilir ve üçüncü kişilerle paylaşılmaz. Başvurunuzun silinmesini istediğiniz anda privacy@cetpa.com.tr adresine yazmanız yeterlidir.'
+    },
+    {
+      title: '8. İletişim',
+      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA A.Ş., Antalya, Türkiye | Talep yanıt süresi: 30 gün içinde.'
     }
   ] : [
     {
@@ -59,19 +63,23 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '4. Data Security',
-      content: 'Your data is stored on Google Firebase infrastructure with AES-256 encryption. All data transmission is encrypted with TLS 1.3. Regular security audits and penetration tests are performed. In the event of a breach, notification will be made to relevant authorities and affected users within 72 hours under GDPR Article 33.'
+      content: 'Your business data is stored in a PostgreSQL database running on infrastructure we operate. Authentication is handled by Google Firebase Authentication and uploaded files by Firebase Storage. All data transmission is encrypted with TLS, and database access is restricted to the application server. Regular security audits are performed. In the event of a breach, notification will be made to relevant authorities and affected users within 72 hours.'
     },
     {
       title: '5. Third-Party Integrations',
-      content: 'CETPA integrates with Firebase (Google LLC – data storage and authentication), Shopify (e-commerce integration), Luca (e-Invoice/tax authority integration), and Mikro ERP (accounting synchronisation). Data transmitted through these integrations is used solely for the stated service purpose, and each integration partner is subject to its own privacy policy.'
+      content: 'CETPA integrates with Firebase (Google LLC – authentication and file storage), Shopify (e-commerce integration), Luca (e-Invoice/tax authority integration), and Mikro ERP (accounting synchronisation). Data transmitted through these integrations is used solely for the stated service purpose, and each integration partner is subject to its own privacy policy.'
     },
     {
       title: '6. Your Rights (GDPR)',
       content: 'Under GDPR, you have the right to: access your personal data, rectify inaccurate data, erase your data ("right to be forgotten"), restrict processing, data portability, object to processing, and withdraw consent at any time. To exercise any of these rights, contact us at privacy@cetpa.com.tr. We will respond within 30 days.'
     },
     {
-      title: '7. Contact',
-      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA A.Ş., Levent, Beşiktaş, Istanbul 34330, Turkey | Response time: within 30 days.'
+      title: '7. Job Applicant (CV) Data',
+      content: 'CVs and application details sent through our careers page are processed solely to assess your application. They are kept for at most one year, deleted at the end of that period, and never shared with third parties. To have your application deleted at any time, write to privacy@cetpa.com.tr.'
+    },
+    {
+      title: '8. Contact',
+      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA A.Ş., Antalya, Türkiye | Response time: within 30 days.'
     }
   ];
 

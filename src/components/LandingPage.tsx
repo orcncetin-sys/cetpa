@@ -35,28 +35,6 @@ interface LandingPageProps {
 
 function cn(...c: (string | boolean | undefined | null)[]) { return c.filter(Boolean).join(' '); }
 
-// ── Animated Counter ──────────────────────────────────────────────────────────
-
-function Counter({ to, prefix = '', suffix = '', duration = 1800 }: { to: number; prefix?: string; suffix?: string; duration?: number }) {
-  const [val, setVal] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-60px' });
-  useEffect(() => {
-    if (!inView) return;
-    const steps = 60;
-    const inc = to / steps;
-    let cur = 0; let i = 0;
-    const id = setInterval(() => {
-      i++;
-      cur = Math.min(Math.round(i * inc), to);
-      setVal(cur);
-      if (cur >= to) clearInterval(id);
-    }, duration / steps);
-    return () => clearInterval(id);
-  }, [inView, to, duration]);
-  return <span ref={ref}>{prefix}{val.toLocaleString()}{suffix}</span>;
-}
-
 // ── Sparkle SVG ───────────────────────────────────────────────────────────────
 
 function SparkleIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
@@ -1385,7 +1363,7 @@ export default function LandingPage({
               <div className="w-2 h-2 rounded-full bg-emerald-400" />
               <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
-            {isTR ? 'Türkiye\'nin #1 B2B Cloud ERP\'si · 200+ aktif müşteri' : 'Turkey\'s #1 B2B Cloud ERP · 200+ active customers'}
+            {isTR ? 'Türkiye\'nin B2B Cloud ERP yazılımı' : 'Turkey\'s B2B Cloud ERP software'}
           </motion.div>
 
           <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}
@@ -1524,12 +1502,17 @@ export default function LandingPage({
             {[...Array(2)].map((_, rep) => (
               <div key={rep} className="flex gap-16 items-center">
                 {[
-                  { label: isTR ? '200+ müşteri' : '200+ Clients', val: '200+' },
-                  { label: isTR ? 'işlenen ciro' : 'Revenue Processed', val: '₺2B+' },
-                  { label: isTR ? 'aylık sipariş' : 'Monthly Orders', val: '50K+' },
-                  { label: isTR ? 'çalışma süresi' : 'Uptime', val: '99.9%' },
-                  { label: isTR ? 'entegrasyon' : 'Integrations', val: '15+' },
-                  { label: isTR ? 'destek puanı' : 'Support Score', val: '4.9★' },
+                  // Bu satırdaki her değer KODDAN DOĞRULANABİLİR olmalı.
+                  // Önceki hâli uydurmaydı (200+ müşteri, ₺2B+ ciro, 50K+ sipariş,
+                  // 99.9% uptime, 4.9★, 15+ entegrasyon) — hiçbiri bir ölçümden
+                  // gelmiyordu ve "15+ entegrasyon" gerçek sayının (12) üstündeydi.
+                  // 26 = useRouteSync TOP_LEVEL_TABS · 12 = /api altındaki entegrasyon önekleri.
+                  { label: isTR ? 'modül' : 'modules', val: '26' },
+                  { label: isTR ? 'entegrasyon' : 'integrations', val: '12' },
+                  { label: 'Logo · SAP · Dynamics', val: 'Mikro' },
+                  { label: isTR ? 'GİB entegrasyonu' : 'GİB integration', val: 'e-Fatura' },
+                  { label: isTR ? 'bayi portalı' : 'dealer portal', val: 'B2B' },
+                  { label: isTR ? 'Türkiye\'de geliştirildi' : 'built in Türkiye', val: 'Antalya' },
                 ].map((s, i) => (
                   <div key={i} className="flex items-center gap-3 flex-shrink-0">
                     <SparkleIcon size={10} style={{ color: brand, opacity: 0.5 }} />
@@ -1732,22 +1715,7 @@ export default function LandingPage({
               <Play className="w-3 h-3" /> {isTR ? 'Demo Talep Et' : 'Request Demo'}
             </div>
           </motion.div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16">
-            {[
-              { label: isTR ? 'Aktif Müşteri' : 'Active Clients',     to: 200,  suffix: '+',   prefix: '' },
-              { label: isTR ? 'İşlenen Ciro' : 'Revenue Processed',   to: 2,    suffix: 'B+ ₺',prefix: '' },
-              { label: isTR ? 'Aylık Sipariş' : 'Monthly Orders',     to: 50,   suffix: 'K+',  prefix: '' },
-              { label: isTR ? 'Ortalama Puan' : 'Avg. Rating',        to: 4,    suffix: '.9★', prefix: '' },
-            ].map((s, i) => (
-              <motion.div key={i} initial={{ opacity: 0, y: 12 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1 }}
-                className={cn('p-6 rounded-2xl border text-center', d('bg-white/3 border-white/8', 'bg-white border-black/8 shadow-sm'))}>
-                <p className="text-3xl font-black text-brand">
-                  <Counter to={s.to} prefix={s.prefix} suffix={s.suffix} />
-                </p>
-                <p className={cn('text-xs mt-1 font-medium', d('text-white/65', 'text-black/70'))}>{s.label}</p>
-              </motion.div>
-            ))}
-          </div>
+
         </div>
       </section>
 
@@ -1935,23 +1903,7 @@ export default function LandingPage({
                   }
                 </p>
               </div>
-              {/* Right: KPI badges */}
-              <div className="flex flex-col gap-4 shrink-0">
-                {[
-                  { val: '98', label: isTR ? 'Performans Puanı' : 'Performance Score', sub: 'Lighthouse' },
-                  { val: '4.9★', label: isTR ? 'Müşteri Puanı' : 'Customer Rating', sub: isTR ? '200+ inceleme' : '200+ reviews' },
-                  { val: '99.9%', label: 'Uptime SLA', sub: isTR ? 'Garanti' : 'Guaranteed' },
-                ].map((kpi, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1 }}
-                    className={cn('flex items-center gap-4 px-6 py-4 rounded-2xl border', d('bg-white/[0.04] border-white/10','bg-black/[0.03] border-black/8'))}>
-                    <span className="text-2xl font-black text-brand leading-none">{kpi.val}</span>
-                    <div>
-                      <p className={cn('text-xs font-bold', d('text-white/80','text-black/80'))}>{kpi.label}</p>
-                      <p className={cn('text-[10px]', d('text-white/60','text-black/65'))}>{kpi.sub}</p>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
+
             </div>
           </motion.div>
         </div>
@@ -2058,12 +2010,9 @@ export default function LandingPage({
             <div className="col-span-2 md:col-span-1">
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 mb-4" />
               <p className={cn('text-xs leading-relaxed mb-4', d('text-white/60', 'text-black/65'))}>
-                {isTR ? 'Türkiye\'nin lider B2B Cloud ERP platformu.' : "Turkey's leading B2B Cloud ERP platform."}
+                {isTR ? 'Türkiye\'nin B2B Cloud ERP platformu.' : "Turkey's B2B Cloud ERP platform."}
               </p>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className={cn('text-xs', d('text-white/60', 'text-black/65'))}>99.9% uptime</span>
-              </div>
+
             </div>
             {/* ── Product column ── */}
             <div>

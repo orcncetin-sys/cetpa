@@ -134,13 +134,13 @@ X-Cetpa-Signature: sha256=...
       <main className="max-w-3xl mx-auto px-6 py-16">
         <div className="mb-12">
           <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>
-            {isTR ? "Türkiye'nin Lider B2B Cloud ERP Platformu" : "Turkey's Leading B2B Cloud ERP Platform"}
+            {isTR ? "Türkiye'nin B2B Cloud ERP Platformu" : "Turkey's B2B Cloud ERP Platform"}
           </p>
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'API ve Entegrasyonlar' : 'API & Integrations'}</h1>
           <p className={`leading-relaxed ${muted}`}>
             {isTR
-              ? 'CETPA, işletmenizi mevcut araçlarınızdan koparmaz; onlarla konuşur. Amacımız köklü sistemlerinizi baştan değiştirmenizi istemek değil, Mikro, Logo, SAP veya Dynamics gibi zaten kullandığınız ERP altyapılarıyla, muhasebe programlarınızla ve pazaryeri hesaplarınızla CETPA arasında güvenilir bir köprü kurmaktır. 200+ aktif müşteri, verilerini bu şekilde kesintisiz akıtıyor.'
-              : "CETPA doesn't rip your business away from the tools you already use — it talks to them. Our goal isn't to force a wholesale replacement of your established systems, but to build a reliable bridge between CETPA and the ERP infrastructure, accounting software and marketplace accounts you already run, whether that's Mikro, Logo, SAP or Dynamics. 200+ active customers keep their data flowing this way, without interruption."}
+              ? 'CETPA, işletmenizi mevcut araçlarınızdan koparmaz; onlarla konuşur. Amacımız köklü sistemlerinizi baştan değiştirmenizi istemek değil, Mikro, Logo, SAP veya Dynamics gibi zaten kullandığınız ERP altyapılarıyla, muhasebe programlarınızla ve pazaryeri hesaplarınızla CETPA arasında güvenilir bir köprü kurmaktır.'
+              : "CETPA doesn't rip your business away from the tools you already use — it talks to them. Our goal isn't to force a wholesale replacement of your established systems, but to build a reliable bridge between CETPA and the ERP infrastructure, accounting software and marketplace accounts you already run, whether that's Mikro, Logo, SAP or Dynamics."}
           </p>
         </div>
 

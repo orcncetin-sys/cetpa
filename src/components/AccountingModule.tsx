@@ -2662,8 +2662,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                     <div className="grid grid-cols-2 gap-8 text-xs">
                       <div>
                         <div className="font-bold uppercase text-gray-400 mb-1">Müşteri Bilgileri</div>
-                        <div>CETPA DIŞ TİCARET A.Ş.</div>
-                        <div>İSTANBUL, TÜRKİYE</div>
+                        <div>CETPA A.Ş.</div>
+                        <div>ANTALYA, TÜRKİYE</div>
                       </div>
                       <div className="text-right">
                         <div className="font-bold uppercase text-gray-400 mb-1">Hesap Özeti</div>

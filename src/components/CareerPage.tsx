@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { ArrowLeft, Heart, Zap, Eye, Trophy, MapPin, Clock, Mail } from 'lucide-react';
 
 interface Props {
@@ -16,28 +18,30 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
   const card = darkMode ? 'bg-white/5 border border-white/10' : 'bg-gray-50 border border-gray-100';
 
   const values = isTR ? [
-    { icon: Heart, title: 'Müşteri Odaklılık', description: 'Her kararı, 200+ aktif müşterimizin işini kolaylaştırıp kolaylaştırmayacağını sorarak veririz.' },
+    { icon: Heart, title: 'Müşteri Odaklılık', description: 'Her kararı, müşterilerimizin işini kolaylaştırıp kolaylaştırmayacağını sorarak veririz.' },
     { icon: Zap, title: 'Hız', description: 'Küçük bir ekibiz ve bunu avantaja çeviririz: hızlı karar alır, hızlı geliştirir, hızlı yayınlarız.' },
     { icon: Eye, title: 'Şeffaflık', description: 'Ekip içinde de müşterilerimizle de net konuşuruz; sorunları saklamak yerine birlikte çözeriz.' },
     { icon: Trophy, title: 'Sahiplenme', description: 'Görevin sınırını değil sonucunu düşünürüz. İşin sahibi biziz, mazeret değil çözüm üretiriz.' },
   ] : [
-    { icon: Heart, title: 'Customer Obsession', description: 'We make every decision by asking whether it truly helps our 200+ active customers run their business.' },
+    { icon: Heart, title: 'Customer Obsession', description: 'We make every decision by asking whether it truly helps our customers run their business.' },
     { icon: Zap, title: 'Speed', description: 'We are a small team and we use that as an advantage: fast decisions, fast development, fast releases.' },
     { icon: Eye, title: 'Transparency', description: 'We speak openly, both within the team and with our customers, and solve problems together instead of hiding them.' },
     { icon: Trophy, title: 'Ownership', description: 'We think about outcomes, not job descriptions. We own the work and bring solutions, not excuses.' },
   ];
 
-  const positions = isTR ? [
-    { title: 'Full Stack Developer', location: 'Antalya / Uzaktan', type: 'Tam Zamanlı' },
-    { title: 'Backend Developer / Node.js', location: 'Antalya / Uzaktan', type: 'Tam Zamanlı' },
-    { title: 'Müşteri Başarı Uzmanı', location: 'Antalya / Uzaktan', type: 'Tam Zamanlı' },
-    { title: 'Satış Temsilcisi', location: 'Antalya / Uzaktan', type: 'Tam Zamanlı' },
-  ] : [
-    { title: 'Full Stack Developer', location: 'Antalya / Remote', type: 'Full-time' },
-    { title: 'Backend Developer / Node.js', location: 'Antalya / Remote', type: 'Full-time' },
-    { title: 'Customer Success Specialist', location: 'Antalya / Remote', type: 'Full-time' },
-    { title: 'Sales Representative', location: 'Antalya / Remote', type: 'Full-time' },
-  ];
+  /**
+   * Açık pozisyonlar. ŞU AN BOŞ.
+   *
+   * Burada 4 ilan vardı (Full Stack Developer, Backend Developer/Node.js,
+   * Müşteri Başarı Uzmanı, Satış Temsilcisi) ve hiçbiri GERÇEK DEĞİLDİ
+   * (kullanıcı teyidi, 2026-08-28). Fark edilmemişlerdi çünkü bu sayfa
+   * hiçbir yere bağlanmamıştı ve bugüne dek hiç render edilmedi —
+   * bkz. src/lib/publicPaths.ts.
+   *
+   * Gerçek bir ilan açılınca buraya eklenir; dizi boşken sayfa "şu anda
+   * açık pozisyon yok" der ve genel başvuru yolunu gösterir.
+   */
+  const positions: Array<{ title: string; location: string; type: string }> = [];
 
   const applyHref = (title: string) => {
     const subject = isTR ? `${title} Başvurusu` : `${title} Application`;
@@ -69,8 +73,8 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'CETPA\'da Kariyer' : 'Careers at CETPA'}</h1>
           <p className={`leading-relaxed ${muted}`}>
             {isTR
-              ? 'CETPA, Antalya merkezli, Türkiye\'nin lider B2B Cloud ERP platformunu geliştiren küçük ve hızlı hareket eden bir ekiptir. 200+ aktif müşteriye hizmet veriyoruz ve büyük şirketlerin bürokrasisi olmadan gerçek sorunları çözmeyi seviyoruz. Ekibimiz uzaktan çalışmaya açıktır; önemli olan nerede oturduğunuz değil, ne ürettiğinizdir.'
-              : 'CETPA is a small, fast-moving, Antalya-based team building Turkey\'s leading B2B Cloud ERP platform. We serve 200+ active customers and enjoy solving real problems without the bureaucracy of a large company. Our team is remote-friendly — what matters is what you build, not where you sit.'}
+              ? 'CETPA, Antalya merkezli, B2B Cloud ERP yazılımı geliştiren küçük ve hızlı hareket eden bir ekiptir. Büyük şirketlerin bürokrasisi olmadan gerçek sorunları çözmeyi seviyoruz. Ekibimiz uzaktan çalışmaya açıktır; önemli olan nerede oturduğunuz değil, ne ürettiğinizdir.'
+              : 'CETPA is a small, fast-moving, Antalya-based team building B2B Cloud ERP software. We enjoy solving real problems without the bureaucracy of a large company. Our team is remote-friendly — what matters is what you build, not where you sit.'}
           </p>
         </div>
 
@@ -98,6 +102,15 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
         <div className="mb-14">
           <h2 className="text-lg font-bold mb-5">{isTR ? 'Açık Pozisyonlar' : 'Open Positions'}</h2>
           <div className="space-y-4">
+            {positions.length === 0 && (
+              <div className={`rounded-2xl p-6 text-center ${card}`}>
+                <p className={`text-sm leading-relaxed ${muted}`}>
+                  {isTR
+                    ? 'Şu anda açık pozisyon yok. Aşağıdan genel başvurunuzu iletebilirsiniz.'
+                    : 'There are no open positions right now. You can send a general application below.'}
+                </p>
+              </div>
+            )}
             {positions.map((position, i) => (
               <div key={i} className={`rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${card}`}>
                 <div>
@@ -132,8 +145,28 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
           </h3>
           <p className={`text-sm leading-relaxed mb-4 ${muted}`}>
             {isTR
-              ? 'Size uygun bir açık pozisyon olmasa bile, genel başvurunuzu bize gönderebilirsiniz. Ekibimiz büyüdükçe özgeçmişinizi değerlendireceğiz.'
-              : 'Even if there is no open role that fits right now, feel free to send us a general application. We\'ll consider your CV as our team grows.'}
+              ? 'Size uygun bir açık pozisyon olmasa bile, genel başvurunuzu bize gönderebilirsiniz. Özgeçmişinizi açık pozisyonlarımızla eşleştirmek üzere en fazla 1 yıl saklar, süre sonunda imha ederiz.'
+              : 'Even if there is no open role that fits right now, feel free to send us a general application. We keep your CV for at most one year to match it against open roles, then delete it.'}
+          </p>
+          {/* KVKK aydınlatması — özgeçmiş kişisel veridir ve bu sayfa onu TALEP EDİYOR.
+              Sayfa 2026-08-28'e dek hiç render edilmediği için bu eksiklik
+              görülmemişti (bkz. src/lib/publicPaths.ts). */}
+          <p className={`text-xs leading-relaxed mb-4 ${muted}`}>
+            {isTR ? (
+              <>
+                Gönderdiğiniz özgeçmiş, 6698 sayılı KVKK kapsamında <strong>CETPA A.Ş.</strong> (Antalya)
+                tarafından veri sorumlusu sıfatıyla, yalnızca işe alım değerlendirmesi amacıyla işlenir;
+                en fazla 1 yıl saklanır ve üçüncü kişilerle paylaşılmaz. Ayrıntı ve haklarınız için{' '}
+                <Link to={PUBLIC_PATHS.privacy} className="underline hover:opacity-80">Gizlilik Politikası</Link>.
+              </>
+            ) : (
+              <>
+                Your CV is processed by <strong>CETPA A.Ş.</strong> (Antalya) as data controller under
+                Turkish data protection law (KVKK No. 6698), solely to assess your application; it is kept
+                for at most one year and is not shared with third parties. See the{' '}
+                <Link to={PUBLIC_PATHS.privacy} className="underline hover:opacity-80">Privacy Policy</Link>.
+              </>
+            )}
           </p>
           <a
             href={generalApplyHref}
