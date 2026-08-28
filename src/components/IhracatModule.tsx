@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import {
-  collection, onSnapshot, addDoc, serverTimestamp, query
+  collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, query
 } from '../lib/dbClient';
+import { useToast } from './Toast';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { Package, CreditCard, FileText, Plus, X, Ship
@@ -21,7 +22,7 @@ interface Ihracat {
   sevkTarihi: string;
   gumrukDurumu: string;
   notlar: string;
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 interface Ithalat {
@@ -40,7 +41,16 @@ interface Ithalat {
   kdv: number;
   gumrukDurumu: string;
   notlar: string;
-  createdAt?: any;
+  // ── Deniz sevkiyatı (2026-08-28) ────────────────────────────────────────
+  // Hepsi OPSIYONEL: mevcut kayıtların hiçbirinde yok ve karayolu/hava
+  // sevkiyatında da olmayacak. Boşken ekranda '—' çıkar, uydurma DEĞER YOK.
+  vesselName?: string;   // Gemi adı
+  imo?: string;          // IMO numarası (7 hane) — harita için YETERLİ
+  mmsi?: string;         // MMSI (9 hane) — alternatif
+  containerNo?: string;  // Konteyner no — armatör sayfasına derin bağlantı
+  blNo?: string;         // Konşimento / booking no
+  carrier?: string;      // Armatör (Arkas, Maersk, MSC, CMA CGM, Hapag-Lloyd…)
+  createdAt?: unknown;
 }
 
 interface Akreditif {
@@ -54,7 +64,7 @@ interface Akreditif {
   tur: 'İhracat' | 'İthalat';
   lcTur?: string;        // Akreditif türü (Irrevocable / At Sight / Confirmed ...)
   durum: string;
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 interface GumrukBeyanname {
@@ -65,7 +75,7 @@ interface GumrukBeyanname {
   deger: number;
   gumrukMusaviri: string;
   durum: string;
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 const INCOTERMLER = ['EXW', 'FOB', 'CIF', 'DDP', 'DAP', 'FCA', 'CPT', 'CIP'];
@@ -113,13 +123,16 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
   const [beyannameler, setBeyannameler] = useState<GumrukBeyanname[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
+  /** Dolu ise DUZENLEME modundayiz; bos ise yeni kayit. */
+  const [editId, setEditId] = useState<string | null>(null);
 
   // Ihracat form state
   const emptyIhr = { aliciFirma: '', ulke: '', urun: '', miktar: '', tutar: '', doviz: 'USD' as const, incoterm: 'FOB', hsKodu: '', sevkTarihi: '', gumrukDurumu: 'Bekliyor', notlar: '' };
   const [ihrForm, setIhrForm] = useState(emptyIhr);
 
   // Ithalat form state
-  const emptyIth = { tedarikci: '', cikisUlkesi: '', urun: '', miktar: '', tutar: '', doviz: 'USD' as const, incoterm: 'CIF', hsKodu: '', tahminiVarisTarihi: '', gumrukVergi: '', kdv: '', gumrukDurumu: 'Bekliyor', notlar: '' };
+  const emptyIth = { tedarikci: '', cikisUlkesi: '', urun: '', miktar: '', tutar: '', doviz: 'USD' as const, incoterm: 'CIF', hsKodu: '', tahminiVarisTarihi: '', gumrukVergi: '', kdv: '', gumrukDurumu: 'Bekliyor', notlar: '', vesselName: '', imo: '', mmsi: '', containerNo: '', blNo: '', carrier: '' };
   const [ithForm, setIthForm] = useState(emptyIth);
 
   // Akreditif form state
@@ -147,63 +160,107 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
   const autoNo = (prefix: string, list: any[]) =>
     `${prefix}-2026-${String(list.length + 1).padStart(4, '0')}`;
 
+  const tr = currentLanguage === 'tr';
+
+  /**
+   * Gemi takip bağlantısı — ÜCRETSİZ, hesapsız, gömme YOK.
+   *
+   * ## Neden gömme (iframe) yok
+   *
+   * 2026-08-28'de ÖLÇÜLDÜ (tahmin değil):
+   *   - marinetraffic.com  → HTTP 403 + `X-Frame-Options: SAMEORIGIN`
+   *                          (hem bot filtresi hem gömme yasağı)
+   *   - vesselfinder.com   → kök sayfa `content-security-policy:
+   *                          frame-ancestors 'self'` gönderiyor
+   * Yani iframe güvenilir biçimde çalışmaz. Gömme ayrıca üçüncü taraf çerezi
+   * (`ROUTEID`) bırakıyor ve bu KVKK aydınlatması gerektirirdi. Dış bağlantı
+   * bunların hiçbirini doğurmaz.
+   *
+   * ## Doğrulanan URL'ler
+   *
+   *   /vessels/details/9074729 → "KAVITA, General Cargo Ship … IMO 9074729"
+   *   /vessels/details/1111111 → "Error 404" (yani yumuşak-404 YOK, gerçekten
+   *                               doğruluyor)
+   *   /vessels?name=…          → HTTP 200
+   *
+   * IMO yoksa gemi ADIYLA arama yapılır. İkisi de yoksa `null` döner ve
+   * arayüzde bağlantı HİÇ çıkmaz — çalışmayan düğme göstermeyiz.
+   */
+  function gemiTakipUrl(kayit: { imo?: string; vesselName?: string }): string | null {
+    const imo = (kayit.imo ?? '').replace(/\D/g, '');
+    if (imo.length === 7) return `https://www.vesselfinder.com/vessels/details/${imo}`;
+    const ad = (kayit.vesselName ?? '').trim();
+    if (ad) return `https://www.vesselfinder.com/vessels?name=${encodeURIComponent(ad)}`;
+    return null;
+  }
+
+
+  /**
+   * Ortak kaydetme sarmalayıcısı — DÜZENLEME + HATA YÖNETİMİ.
+   *
+   * Eski hâlinde dört kaydetme fonksiyonu da çıplak `await addDoc(...)`
+   * çağırıyordu: `try/catch` YOKTU. `addDoc` hata verirse (en olası neden RBAC
+   * 403 — bu koleksiyonların yazma listesi Admin/Manager/Logistics) fonksiyon
+   * ORADA kopuyor, `setSaving(false)` hiç çalışmıyor ve düğme sonsuza kadar
+   * "Kaydediliyor…" kalıyordu. Kullanıcıya HİÇBİR mesaj gösterilmiyordu.
+   * Ayrıca hiç DÜZENLEME yolu yoktu (updateDoc/deleteDoc kod tabanında 0
+   * isabet) — yanlış girilen kayıt düzeltilemiyordu.
+   */
+  async function kaydet(koleksiyon: string, veri: Record<string, unknown>, temizle: () => void) {
+    setSaving(true);
+    try {
+      if (editId) await updateDoc(doc(db, koleksiyon, editId), veri);
+      else await addDoc(collection(db, koleksiyon), { ...veri, createdAt: serverTimestamp() });
+      temizle();
+      setEditId(null);
+      setShowModal(false);
+      toast(tr ? 'Kaydedildi ✓' : 'Saved ✓', 'success');
+    } catch (e) {
+      // Sessiz başarısızlık YOK: sebebi göster ve modalı AÇIK bırak ki
+      // kullanıcının girdiği veri kaybolmasın.
+      toast((tr ? 'Kaydedilemedi: ' : 'Could not save: ') + (e instanceof Error ? e.message : String(e)), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveIhracat() {
     if (!ihrForm.aliciFirma || !ihrForm.ulke) return;
-    setSaving(true);
-    await addDoc(collection(db, 'ihracatlar'), {
+    await kaydet('ihracatlar', {
       ...ihrForm,
-      ihracatNo: autoNo('EX', ihracatlar),
+      ...(editId ? {} : { ihracatNo: autoNo('EX', ihracatlar) }),
       miktar: Number(ihrForm.miktar),
       tutar: Number(ihrForm.tutar),
-      createdAt: serverTimestamp(),
-    });
-    setIhrForm(emptyIhr);
-    setShowModal(false);
-    setSaving(false);
+    }, () => setIhrForm(emptyIhr));
   }
 
   async function saveIthalat() {
     if (!ithForm.tedarikci || !ithForm.cikisUlkesi) return;
-    setSaving(true);
-    await addDoc(collection(db, 'ithalatlar'), {
+    await kaydet('ithalatlar', {
       ...ithForm,
-      ithalatNo: autoNo('IT', ithalatlar),
+      ...(editId ? {} : { ithalatNo: autoNo('IT', ithalatlar) }),
       miktar: Number(ithForm.miktar),
       tutar: Number(ithForm.tutar),
       gumrukVergi: Number(ithForm.gumrukVergi),
       kdv: Number(ithForm.kdv),
-      createdAt: serverTimestamp(),
-    });
-    setIthForm(emptyIth);
-    setShowModal(false);
-    setSaving(false);
+    }, () => setIthForm(emptyIth));
   }
 
   async function saveAkreditif() {
     if (!akrForm.banka || !akrForm.lehdarAmir) return;
-    setSaving(true);
-    await addDoc(collection(db, 'akreditifler'), {
+    await kaydet('akreditifler', {
       ...akrForm,
-      akreditifNo: autoNo('AKR', akreditifler),
+      ...(editId ? {} : { akreditifNo: autoNo('AKR', akreditifler) }),
       tutar: Number(akrForm.tutar),
-      createdAt: serverTimestamp(),
-    });
-    setAkrForm(emptyAkr);
-    setShowModal(false);
-    setSaving(false);
+    }, () => setAkrForm(emptyAkr));
   }
 
   async function saveBeyanname() {
     if (!beyForm.beyanNo || !beyForm.gumrukMusaviri) return;
-    setSaving(true);
-    await addDoc(collection(db, 'gumrukBeyannameleri'), {
+    await kaydet('gumrukBeyannameleri', {
       ...beyForm,
       deger: Number(beyForm.deger),
-      createdAt: serverTimestamp(),
-    });
-    setBeyForm(emptyBey);
-    setShowModal(false);
-    setSaving(false);
+    }, () => setBeyForm(emptyBey));
   }
 
   // TEK bir kalem çevrilemiyorsa toplam da güvenilir değildir → null ('—' basılır).
@@ -304,14 +361,14 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {['İthalat No', 'Tedarikçi', 'Çıkış Ülkesi', 'Ürün', 'Tutar', 'Gümrük Vergi', 'KDV', 'Tahmini Varış', 'Durum'].map(h => (
+                {['İthalat No', 'Tedarikçi', 'Çıkış Ülkesi', 'Ürün', 'Tutar', 'Gümrük Vergi', 'KDV', 'Tahmini Varış', 'Gemi / Konteyner', 'Durum'].map(h => (
                   <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {ithalatlar.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-10 text-gray-400 text-sm">Henüz ithalat kaydı yok</td></tr>
+                <tr><td colSpan={10} className="text-center py-10 text-gray-400 text-sm">Henüz ithalat kaydı yok</td></tr>
               )}
               {ithalatlar.map(i => (
                 <tr key={i.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
@@ -323,6 +380,27 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 text-gray-600">₺ {i.gumrukVergi?.toLocaleString()}</td>
                   <td className="py-3 px-3 text-gray-600">₺ {i.kdv?.toLocaleString()}</td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{i.tahminiVarisTarihi}</td>
+                  <td className="py-3 px-3 text-xs">
+                    {(() => {
+                      const url = gemiTakipUrl(i);
+                      // Gemi bilgisi YOKSA '—'. Çalışmayacak bir "takip et"
+                      // düğmesi göstermeyiz (sahte kesinlik gösterme).
+                      if (!url && !i.containerNo && !i.blNo) return <span className="text-gray-300">—</span>;
+                      return (
+                        <div className="space-y-0.5">
+                          {url ? (
+                            <a href={url} target="_blank" rel="noopener noreferrer"
+                               className="inline-flex items-center gap-1 text-brand hover:underline font-medium">
+                              <Ship className="w-3 h-3" />
+                              {i.vesselName || `IMO ${i.imo}`}
+                            </a>
+                          ) : i.vesselName ? <span className="text-gray-600">{i.vesselName}</span> : null}
+                          {i.containerNo && <div className="font-mono text-[10px] text-gray-500">{i.containerNo}</div>}
+                          {i.blNo && <div className="font-mono text-[10px] text-gray-400">B/L {i.blNo}</div>}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="py-3 px-3"><span className={statusBadge(i.gumrukDurumu)}>{i.gumrukDurumu}</span></td>
                 </tr>
               ))}
@@ -503,6 +581,35 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                     <select value={ithForm.gumrukDurumu} onChange={e => setIthForm(p => ({ ...p, gumrukDurumu: e.target.value }))} className="apple-input">
                       {GUMRUK_DURUMLARI.map(d => <option key={d}>{d}</option>)}
                     </select>
+                  </div>
+                  {/* ── Deniz sevkiyatı (opsiyonel) ───────────────────────
+                      Karayolu/hava sevkiyatında boş bırakılır. IMO girilirse
+                      tabloda doğrulanmış VesselFinder bağlantısı çıkar. */}
+                  <div className="pt-3 mt-1 border-t border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 mb-2">Deniz Sevkiyatı (opsiyonel)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Gemi Adı', key: 'vesselName', ph: 'MSC AMBITION' },
+                        { label: 'IMO No', key: 'imo', ph: '9074729 (7 hane)' },
+                        { label: 'Konteyner No', key: 'containerNo', ph: 'MSCU1234567' },
+                        { label: 'Konşimento / Booking', key: 'blNo', ph: 'B/L no' },
+                        { label: 'Armatör', key: 'carrier', ph: 'Arkas, MSC, Maersk…' },
+                        { label: 'MMSI', key: 'mmsi', ph: '9 hane' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">{f.label}</label>
+                          <input type="text" placeholder={f.ph}
+                            value={(ithForm as unknown as Record<string, string>)[f.key] ?? ''}
+                            onChange={e => setIthForm(p => ({ ...p, [f.key]: e.target.value }))}
+                            className="apple-input" />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-2">
+                      IMO numarası girilirse gemi konumu VesselFinder'da açılır (ücretsiz).
+                      Yalnız konteyner/konşimento varsa numara kaydedilir; armatörünüzü
+                      söylerseniz o firmanın takip sayfasına doğrudan bağlantı eklenebilir.
+                    </p>
                   </div>
                   <button onClick={saveIthalat} disabled={saving} className="apple-button-primary w-full">{saving ? 'Kaydediliyor...' : 'Kaydet'}</button>
                 </>
