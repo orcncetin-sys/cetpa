@@ -6,7 +6,7 @@ import { cn } from '../lib/utils';
 import ProductForm from './ProductForm';
 import { format } from 'date-fns';
 
-import { InventoryItem } from '../types';
+import { InventoryItem, Warehouse } from '../types';
 
 /** Hem Cetpa şeması hem normalize edilmiş Mikro hareketi buraya oturur. */
 interface InventoryMovement {
@@ -29,6 +29,8 @@ interface ProductDetailProps {
   onClose: () => void;
   /** InventoryView'da normalize edilmiş TÜM hareketler — burada bu ürüne göre süzülür. */
   movements?: InventoryMovement[];
+  /** Düzenle formundaki DEPO açılır listesi için — ProductForm'a iletilir. */
+  warehouses: Warehouse[];
 }
 
 const tl = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -41,7 +43,7 @@ function toDate(ts: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export default function ProductDetail({ product, onClose, movements = [] }: ProductDetailProps) {
+export default function ProductDetail({ product, onClose, movements = [], warehouses }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
 
   if (!product) return null;
@@ -220,6 +222,7 @@ export default function ProductDetail({ product, onClose, movements = [] }: Prod
               isOpen={isEditing}
               onClose={() => setIsEditing(false)}
               initialData={product}
+              warehouses={warehouses}
               onSave={() => {
                 setIsEditing(false);
                 // The parent component will handle the real-time update via onSnapshot

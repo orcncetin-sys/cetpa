@@ -14,19 +14,22 @@ interface ProductFormProps {
   onClose: () => void;
   onSave?: () => void;
   initialData?: InventoryItem;
-  warehouses?: Warehouse[];
+  /**
+   * Depo listesi — ZORUNLU (opsiyonel DEĞİL).
+   *
+   * Opsiyoneldi ve `ProductDetail` çağrısında HİÇ GEÇİLMİYORDU: ürün
+   * detayından "Ürünü Düzenle" açılınca DEPO açılır listesi boş geliyordu
+   * (kullanıcı bulgusu, 2026-08-26). Derleyici susuyordu çünkü prop
+   * opsiyoneldi. Zorunlu olunca eksik geçen çağrı DERLEME HATASI olur.
+   */
+  warehouses: Warehouse[];
   existingCategories?: string[];
   exchangeRates?: Record<string, number>; // { USD: ..., EUR: ... }
 }
 
-export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses: warehousesProp, existingCategories = [], exchangeRates }: ProductFormProps) {
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-
-  useEffect(() => {
-    if (warehousesProp) {
-      setWarehouses(warehousesProp);
-    }
-  }, [warehousesProp]);
+export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses, existingCategories = [], exchangeRates }: ProductFormProps) {
+  // NOT: `warehouses` eskiden prop'tan state'e KOPYALANIYORDU. Gereksizdi ve
+  // bir tur gecikme yaratıyordu; prop doğrudan kullanılıyor.
 
   const [formData, setFormData] = useState({
     name: '',

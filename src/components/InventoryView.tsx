@@ -843,7 +843,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         existingCategories={categories}
         exchangeRates={exchangeRates ?? undefined}
       />
-      {selectedProduct && <ProductDetail product={selectedProduct} movements={(detailMovements.length ? detailMovements : movements) as never} onClose={() => setSelectedProduct(null)} />}
+      {selectedProduct && <ProductDetail product={selectedProduct} movements={(detailMovements.length ? detailMovements : movements) as never} warehouses={warehouses} onClose={() => setSelectedProduct(null)} />}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 space-y-6">
