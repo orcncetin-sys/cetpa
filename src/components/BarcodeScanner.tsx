@@ -54,8 +54,8 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
               <Scan className="w-5 h-5 text-brand" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title || (currentLanguage === 'tr' ? 'Barkod Tara' : 'Scan Barcode')}</h2>
-              <p className="text-sm text-gray-500">{currentLanguage === 'tr' ? 'Ürün barkodunu okutun veya manuel girin.' : 'Scan product barcode or enter manually.'}</p>
+              <h2 className="text-xl font-bold text-gray-900">{title || (currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR')}</h2>
+              <p className="text-sm text-gray-500">{currentLanguage === 'tr' ? 'Barkod veya QR kodu okutun ya da manuel girin.' : 'Scan a barcode or QR code, or enter it manually.'}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">

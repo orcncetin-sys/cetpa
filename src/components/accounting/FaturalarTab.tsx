@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { eslesir } from '../../utils/arama';
 import { confirmAction } from '../../lib/confirm';
 import { X, Plus, Search, FileText, Trash2 } from 'lucide-react';
 import { doc, deleteDoc } from '../../lib/dbClient';
@@ -267,10 +268,9 @@ export default function FaturalarTab({
             <tbody>
               {invoices
                 .filter(inv => invoiceTypeFilter==='all' || inv.faturaTipi===invoiceTypeFilter)
-                .filter(inv => {
-                  const s = invoiceSearch.toLowerCase();
-                  return !s || (inv.customerName as string||'').toLowerCase().includes(s) || (inv.faturaNo as string||'').toLowerCase().includes(s);
-                })
+                // Türkçe-duyarlı arama: düz toLowerCase 'IŞIK'ı 'işık' yapıp
+                // 'ışık' aramasını sessizce boş döndürüyordu (bkz. utils/arama.ts).
+                .filter(inv => eslesir(invoiceSearch, inv.customerName, inv.faturaNo, inv.totalPrice))
                 .sort((a, b) => {
                   const av = (a[invoiceSort.key as keyof typeof a] as string | number) ?? '';
                   const bv = (b[invoiceSort.key as keyof typeof b] as string | number) ?? '';
@@ -315,7 +315,12 @@ export default function FaturalarTab({
                   Bu ekran `invoices` (Cetpa'da kesilen) okuyor; Mikro'dan çekilenler
                   `mikroFaturalar`da duruyordu ve hiç görünmüyordu (2026-07-31).
                   Mevcut mantık değişmedi, kaynak seçici opt-in. */}
-              {faturaKaynak !== 'cetpa' && [...mikroFaturaSatirlari].sort((a, b) => {
+              {/* Mikro satırlarında ARAMA HİÇ YOKTU (2026-08-28 kullanıcı bulgusu):
+                  kutuya yazınca yalnız Cetpa faturaları süzülüyor, Mikro'dan
+                  gelen tüm satırlar ekranda kalıyordu. */}
+              {faturaKaynak !== 'cetpa' && [...mikroFaturaSatirlari]
+                .filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, f.tutar))
+                .sort((a, b) => {
                 const key = MIKRO_SORT_KEY[invoiceSort.key];
                 if (!key) return 0;
                 const av = (a[key] as string | number) ?? '';

@@ -40,6 +40,13 @@ export default function BarcodeScannerCamera({ onScan, currentLanguage }: Props)
   onScanRef.current = onScan;
 
   useEffect(() => {
+    // QR ZATEN DESTEKLENIYOR — ek yapilandirma GEREKMIYOR.
+    // BrowserMultiFormatReader argumansiz kurulunca hints null kalir; ZXing'in
+    // MultiFormatReader'i bu durumda "format listesi bos" dalina girip TUM
+    // cozuculeri yukler: QRCodeReader, MicroQRCodeReader, DataMatrix, Aztec,
+    // PDF417, MaxiCode + 1B barkodlar. Yani eklenecek bir 'qr_code' bayragi YOK.
+    // (2026-08-28: kullanici "barkod yaninda QR da tarat" dedi; olcum QR'in
+    // zaten calistigini gosterdi — eksik olan yalnizca ARAYUZ ETIKETIYDI.)
     const reader = new BrowserMultiFormatReader();
     let durduruldu = false;
 

@@ -25,12 +25,26 @@ import type { WebhookConfig } from '../types';
  * Daha onceki bir cikarma denemesi (`src/hooks/useDataSync.ts`) YARIM
  * kalmisti: dosya yazilmis ama HICBIR YERDEN IMPORT EDILMEMISTI. Sonuc
  * sessizdi — `vehicles` ve `locationStocks` dinleyicileri AYLARCA olu kaldi
- * ve QR Depo/Arac Transfer sistemi calismiyordu. Kimse fark etmedi cunku
- * derleyici de calisma zamani da hicbir sey soylemedi.
+ * ve QR Depo/Arac Transfer sistemi calismiyordu.
  *
- * Bu kanca o hatayi YAPISAL OLARAK imkansiz kilar: state'i KENDI tutar ve
- * DONDURUR. Cagrilmazsa `p548Masraflar` gibi degiskenler App.tsx'te hic
- * tanimli olmaz ve derleme KIRILIR. "Yazdim ama baglamadim" mumkun degil.
+ * Bu kanca state'i KENDI tutar ve DONDURUR: cagrilmazsa degiskenler App.tsx'te
+ * hic tanimli olmaz ve DERLEME KIRILIR.
+ *
+ * ## ⚠ AMA BU GARANTI YETMEDI — ikinci bir bosluk vardi
+ *
+ * Bu basligin eski hali "yazdim ama baglamadim IMKANSIZ" diyordu. YANLISTI.
+ * Kanca degiskenin App.tsx'te VAR OLMASINI garanti eder; ALT BILESENE
+ * GECIRILMESINI etmez. Iki deger tam bu boslugtan dustu (2026-08-28):
+ * `p554Bins` ve `p549Iadeler` App.tsx'te destructure ediliyordu ama
+ * <OrdersPage> / <CRMPage> cagrilarina HIC gecirilmiyordu; o ekranlar da
+ * kendi icinde setter'siz bos bir yerel state tutuyordu. Sonuc: Bin/Lokasyon
+ * ve Iade/RMA ekranlari sayaclari 0 gosteriyor, eklenen kayit listede
+ * gorunmuyordu. Derleyici sustu cunku `noUnusedLocals` kapali ve
+ * `no-unused-vars` eslint'te 'off'.
+ *
+ * Bosluk artik TESTLE kapatildi: `useSekmeVerileri.test.ts` bu dosyanin
+ * donus listesindeki HER degerin App.tsx'te en az iki kez (destructure +
+ * en az bir kullanim) gectigini dogrular.
  *
  * ## p584 (stok sayim oturumu) BURADA DEGIL
  *
@@ -38,6 +52,27 @@ import type { WebhookConfig } from '../types';
  * (`p584Active`/`p584CountItems`/`p584SessionId`) kullanici etkilesimiyle de
  * degistiriliyor, yani sahipligi kancaya vermek yanlis olurdu.
  */
+/**
+ * Bu iki tip DIŞA AKTARILIYOR çünkü verileri gösteren ekranlar (OrdersPage'in
+ * Bin/Lokasyon sekmesi, CRMPage'in İade/RMA sekmesi) bunları PROP olarak alır.
+ *
+ * Eskiden her iki ekran da kendi içinde `const [p554Bins] = useState([])` gibi
+ * SETTER'SIZ, kalıcı olarak BOŞ bir yerel state tanımlıyordu — yani kancanın
+ * canlı verisi hiç ekrana ulaşmıyordu (2026-08-28 bulgusu). Tipi tek yerde
+ * tutmak, o kopya-state'lerin geri gelmesini zorlaştırır.
+ */
+export type IadeSatiri = {
+  id: string; orderId: string; customerName: string; items: string; reason: string;
+  condition: 'Hasarlı' | 'Sağlam' | 'Kısmen Hasarlı'; decision: 'İade' | 'Değişim' | 'Kredi Notu' | 'Bekliyor';
+  status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'Tamamlandı'; createdAt?: unknown; notes?: string;
+};
+
+export type BinSatiri = {
+  id: string; warehouseId: string; warehouseName: string; binCode: string;
+  productSku: string; productName: string; quantity: number; minQty?: number;
+  lastCounted?: string; notes?: string; createdAt?: unknown;
+};
+
 export interface SekmeVeriGirdi {
   user: { uid: string } | null | undefined;
   activeTab: string;
@@ -58,21 +93,13 @@ export function useSekmeVerileri({
     date: string; description: string; receiptUrl?: string;
     status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi'; createdAt?: unknown; rejectionNote?: string;
   }>>([]);
-  const [p549Iadeler, setP549Iadeler] = useState<Array<{
-    id: string; orderId: string; customerName: string; items: string; reason: string;
-    condition: 'Hasarlı' | 'Sağlam' | 'Kısmen Hasarlı'; decision: 'İade' | 'Değişim' | 'Kredi Notu' | 'Bekliyor';
-    status: 'Bekliyor' | 'Onaylandı' | 'Reddedildi' | 'Tamamlandı'; createdAt?: unknown; notes?: string;
-  }>>([]);
+  const [p549Iadeler, setP549Iadeler] = useState<IadeSatiri[]>([]);
   const [p552Records, setP552Records] = useState<Array<{
     id: string; employeeName: string; employeeId?: string; date: string;
     checkIn: string; checkOut: string; totalHours: number;
     status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli';
   }>>([]);
-  const [p554Bins, setP554Bins] = useState<Array<{
-    id: string; warehouseId: string; warehouseName: string; binCode: string;
-    productSku: string; productName: string; quantity: number; minQty?: number;
-    lastCounted?: string; notes?: string; createdAt?: unknown;
-  }>>([]);
+  const [p554Bins, setP554Bins] = useState<BinSatiri[]>([]);
   const [p573Rules, setP573Rules] = useState<Array<{id:string;name:string;type:'bulk'|'customer-tier'|'promo';minQty?:number;tierName?:string;discountPct:number;active:boolean}>>([]);
   const [p579Batches, setP579Batches] = useState<Array<{id:string;sku:string;productName:string;batchNo:string;expiryDate?:string;qty:number;location?:string;status:'Aktif'|'Karantina'|'Kullanıldı'}>>([]);
   const [p587Checks, setP587Checks] = useState<Array<{id:string;item:string;checked:boolean;severity:'Kritik'|'Uyarı'|'Bilgi'}>>([]);

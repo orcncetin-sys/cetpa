@@ -6391,6 +6391,7 @@ function AppContent() {
           {(activeTab === 'crm' || activeTab === 'iade') && (
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <CRMPage
+                p549Iadeler={p549Iadeler}
                 crmTab={crmTab}
                 setCrmTab={setCrmTab}
                 selectedLead={selectedLead}
@@ -6435,6 +6436,7 @@ function AppContent() {
           {(activeTab === 'orders' || activeTab === 'lojistik') && (
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <OrdersPage
+                p554Bins={p554Bins}
                 selectedOrder={selectedOrder}
                 setSelectedOrder={setSelectedOrder}
                 lojistikTab={lojistikTab}

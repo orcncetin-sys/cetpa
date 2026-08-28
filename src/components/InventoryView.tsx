@@ -618,10 +618,10 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           <button
             onClick={() => setIsScannerOpen(true)}
             className="apple-button-secondary flex items-center justify-center gap-2"
-            title={currentLanguage === 'tr' ? 'Barkod Tara' : 'Scan Barcode'}
+            title={currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR'}
           >
             <Scan className="w-4 h-4" />
-            <span>{currentLanguage === 'tr' ? 'Barkod Tara' : 'Scan Barcode'}</span>
+            <span>{currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR'}</span>
           </button>
           {/* hidden CSV file picker */}
           <input

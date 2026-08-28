@@ -1742,10 +1742,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       return false; // ihracat
     })
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
-    .filter(f => {
-      const q = satisSearch.toLowerCase();
-      return !q || f.musteri.toLowerCase().includes(q) || String(f.tutar).includes(q) || f.faturaNo.toLowerCase().includes(q);
-    })
+    // ARAMA FİLTRESİ BURADAN KALDIRILDI (2026-08-28).
+    //
+    // Burada `satisSearch` ile süzülüyordu — ama bu liste YALNIZCA Faturalar
+    // sekmesinde kullanılıyor (FaturalarTab'a prop olarak gider); `satisSearch`
+    // ise SATIŞLAR sekmesinin arama kutusu. İki sonucu vardı:
+    //   1. Faturalar'da arama yapınca Mikro satırları HİÇ filtrelenmiyordu
+    //      (`satisSearch` orada daima ''), yani 161 faturada "ahmet" aramak
+    //      Cetpa faturalarını süzüp Mikro faturalarının tamamını bırakıyordu.
+    //   2. Satışlar'da arama yapmak, dokunulmaması gereken Faturalar listesini
+    //      sessizce süzüyordu.
+    // Filtre artık FaturalarTab'ın kendi tablosunda `invoiceSearch` ile
+    // uygulanıyor — Cetpa faturalarıyla AYNI desende (KPI'lar tam listeyi,
+    // tablo süzülmüş listeyi gösterir).
     .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
       satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
       : satisSortKey === 'totalPrice' ? a.tutar - b.tutar

@@ -1,4 +1,6 @@
 import { itemCostTRY } from '../utils/cost';
+import { eslesir } from '../utils/arama';
+import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import React, { useState, useEffect } from 'react';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
@@ -142,6 +144,15 @@ interface Props {
   handleMikroFatura: (order: Order) => Promise<void>;
   handleIyzicoPaymentLink: (order: Order) => Promise<void>;
   setRouteStops: React.Dispatch<React.SetStateAction<RouteStop[]>>;
+  /**
+   * p554Bins — kancadan (useSekmeVerileri) gelen CANLI veri.
+   *
+   * Burada eskiden `const [p554Bins] = useState<...>([])` vardi: setter'siz,
+   * kalici olarak BOS bir yerel state. Ekran onu okuyordu, dolayisiyla
+   * sayaclar hep 0 gorunuyor ve eklenen kayit listede cikmiyordu — oysa veri
+   * DB'ye yaziliyor ve kancadaki dinleyici okuyordu. Prop olarak alinmali.
+   */
+  p554Bins: BinSatiri[];
   handleBuildRoute: () => void;
   handleClearRoute: () => void;
   handleToggleOrderPaid: (order: Order) => void;
@@ -161,7 +172,7 @@ export default function OrdersPage({
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, activeTab, darkMode, warehouses, vehicles, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
-  handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute,
+  handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
   toast, setActiveTab, setSelectedLead, setIsAddingOrder,
   logAuditAction,
@@ -219,7 +230,6 @@ export default function OrdersPage({
   const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
 
   const [p513Selected, setP513Selected] = useState<string|null>(null);
-  const [p554Bins] = useState<Array<{ id: string; warehouseId: string; warehouseName?: string; binCode: string; productSku: string; productName: string; quantity: number; minQty: number; lastCounted?: string; notes?: string }>>([]);
   const [p554AddForm, setP554AddForm] = useState(false);
   const [p554Draft, setP554Draft] = useState({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
   const [p554Search, setP554Search] = useState('');
@@ -2286,13 +2296,17 @@ export default function OrdersPage({
               {/* ── Phase 554: WMS Bin/Location Management ─────────────────────────── */}
               {lojistikTab === 'wms' && (() => {
                 const tr554 = currentLanguage === 'tr';
+                // Türkçe-duyarlı arama (bkz. utils/arama.ts): düz toLowerCase
+                // 'IŞIK'ı 'işık' yapıp 'ışık' aramasını sessizce boş döndürüyordu.
                 const filtered554 = p554Bins.filter(b =>
-                  !p554Search || b.binCode.toLowerCase().includes(p554Search.toLowerCase()) ||
-                  b.productSku.toLowerCase().includes(p554Search.toLowerCase()) ||
-                  b.productName.toLowerCase().includes(p554Search.toLowerCase())
-                );
+                  eslesir(p554Search, b.binCode, b.productSku, b.productName, b.warehouseName));
                 const warehouseGroups = filtered554.reduce<Record<string,typeof p554Bins>>((acc, b) => {
-                  const key = b.warehouseName || b.warehouseId || tr554 ? 'Depo' : 'Warehouse';
+                  // OPERATÖR ÖNCELİĞİ HATASI DÜZELTİLDİ (2026-08-28):
+                  // `a || b || tr554 ? 'Depo' : 'Warehouse'` ifadesi
+                  // `(a || b || tr554) ? 'Depo' : 'Warehouse'` diye çözülüyordu,
+                  // yani depo adı GRUP BAŞLIĞINDA HİÇ kullanılmıyor, tüm binler
+                  // tek bir 'Depo' başlığı altında toplanıyordu.
+                  const key = b.warehouseName || b.warehouseId || (tr554 ? 'Depo' : 'Warehouse');
                   if (!acc[key]) acc[key] = [];
                   acc[key].push(b);
                   return acc;
@@ -2352,8 +2366,33 @@ export default function OrdersPage({
                               </div>
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase">SKU</label>
-                                <input className="apple-input text-sm w-full" placeholder="SKU-001" value={p554Draft.productSku}
-                                  onChange={e => setP554Draft(d => ({ ...d, productSku: e.target.value }))} />
+                                {/* ENVANTERDEN SEÇİM (2026-08-28 kullanıcı isteği).
+                                    Eskiden serbest metindi: yazım hatası sessizce
+                                    var olmayan bir SKU'ya bin açıyordu. `inventory`
+                                    zaten bu sayfanın prop'uydu, kullanılmıyordu.
+                                    Desen: AccountingModule'deki irsaliye ürün
+                                    seçicisiyle aynı (datalist + otomatik doldurma) —
+                                    serbest yazmaya da izin verir, çünkü Mikro'da
+                                    olmayan bir SKU'yu elle girmek meşru olabilir. */}
+                                <input className="apple-input text-sm w-full" list="p554SkuListesi"
+                                  placeholder={tr554 ? 'SKU seçin veya yazın' : 'Pick or type a SKU'}
+                                  value={p554Draft.productSku}
+                                  onChange={e => {
+                                    const kod = e.target.value;
+                                    const urun = inventory.find(i => i.sku === kod);
+                                    setP554Draft(d => ({
+                                      ...d,
+                                      productSku: kod,
+                                      // Ürün bulunduysa adı OTOMATİK dolsun; bulunamadıysa
+                                      // kullanıcının elle yazdığını EZME.
+                                      productName: urun ? urun.name : d.productName,
+                                    }));
+                                  }} />
+                                <datalist id="p554SkuListesi">
+                                  {inventory.map(i => (
+                                    <option key={i.id} value={i.sku}>{i.name}</option>
+                                  ))}
+                                </datalist>
                               </div>
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Ürün Adı' : 'Product Name'}</label>

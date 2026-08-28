@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import type { IadeSatiri } from '../hooks/useSekmeVerileri';
 import { huniAsamasi } from '../lib/huni';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
@@ -73,6 +74,15 @@ interface Props {
   warehouses: Warehouse[];
   supportTickets: SupportTicket[];
   commissionRules: CommissionRule[];
+  /**
+   * İade/RMA satırları — kancadan (useSekmeVerileri) gelen CANLI veri.
+   *
+   * Eskiden burada değil, bileşenin İÇİNDE `const [p549Iadeler] = useState([])`
+   * olarak duruyordu: setter'sız, kalıcı olarak BOŞ. İade & Değişim ekranı onu
+   * okuyordu; sayaçlar hep 0, eklenen iade listede yok. Oysa kayıt DB'ye
+   * yazılıyor ve dinleyici okuyordu (2026-08-28 bulgusu).
+   */
+  p549Iadeler: IadeSatiri[];
   trackView: (item: { type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }) => void;
   setIsEditingLead: React.Dispatch<React.SetStateAction<boolean>>;
   setEmailCompose: React.Dispatch<React.SetStateAction<{ open: boolean; to: string; name: string; subject: string; body: string }>>;
@@ -108,7 +118,7 @@ export default function CRMPage({
   hasFullAccess = () => true, currentLanguage, currentT,
   orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
-  appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [],
+  appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [], p549Iadeler,
   trackView, setIsEditingLead, setEmailCompose,
   setNewOrder, handleToggleOrderPaid, openConfirm,
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,
@@ -147,7 +157,6 @@ export default function CRMPage({
   const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null);
   const [p515Dismissed, setP515Dismissed] = useState(false);
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null);
-  const [p549Iadeler] = useState<Array<{ id: string; orderId: string; customerName: string; items: string; reason: string; condition: string; notes?: string; status: string; decision?: string; createdAt?: unknown }>>([]);
   const [p549Form, setP549Form] = useState(false);
   const [p549Draft, setP549Draft] = useState({ orderId: '', customerName: '', items: '', reason: 'Hasarlı Ürün', condition: 'Hasarlı' as const, notes: '' });
   const [monthlyTarget, setMonthlyTarget] = useState<number>(0);
