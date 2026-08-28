@@ -41,12 +41,15 @@ export default function ApiPage({ currentLanguage: lang, darkMode, onBack }: Pro
     {
       icon: Building2,
       name: 'Logo',
-      desc: isTR ? 'Logo ERP muhasebe ve stok modülleriyle çift yönlü entegrasyon.' : 'Two-way integration with Logo ERP accounting and inventory modules.',
+      // Logo entegrasyonu şu an STUB (gerçek REST spec bekleniyor — erpRoutes.ts).
+      // "Çift yönlü entegrasyon" iddiası kaldırıldı; hazırlık aşaması dürüstçe yazıldı.
+      desc: isTR ? 'Logo ERP bağlantısı hazırlık aşamasında; kurulum kapsamı birlikte belirlenir.' : 'Logo ERP connectivity is in preparation; setup is scoped together.',
     },
     {
       icon: Cloud,
       name: 'SAP',
-      desc: isTR ? 'Kurumsal SAP altyapısına özel bağlantı desteği.' : 'Dedicated connectivity support for enterprise SAP infrastructure.',
+      // SAP: yalnız durum/bağlantı kontrolü gerçek, veri uçları stub (erpRoutes.ts).
+      desc: isTR ? 'SAP Business One bağlantısı hazırlık aşamasında; kurulum kapsamı birlikte belirlenir.' : 'SAP Business One connectivity is in preparation; setup is scoped together.',
     },
     {
       icon: Factory,
@@ -60,8 +63,9 @@ export default function ApiPage({ currentLanguage: lang, darkMode, onBack }: Pro
     },
     {
       icon: FileText,
-      name: 'Luca (GİB e-Fatura/e-Defter)',
-      desc: isTR ? 'GİB uyumlu e-fatura ve e-defter süreçlerini bağlar.' : 'Connects GİB-compliant e-invoice and e-ledger processes.',
+      // e-Defter kod tabanında YOK (2026-08-28 ölçümü) — yalnız e-Fatura gerçek.
+      name: 'Luca (GİB e-Fatura)',
+      desc: isTR ? 'GİB uyumlu e-fatura süreçlerini bağlar.' : 'Connects GİB-compliant e-invoice processes.',
     },
     {
       icon: ShoppingCart,

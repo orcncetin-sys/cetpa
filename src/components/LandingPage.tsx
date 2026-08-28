@@ -348,9 +348,9 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
   const [orderVolume, setOrderVolume] = useState(300);
   const [manualHours, setManualHours] = useState(20);
 
-  // McKinsey: ERP otomasyon verimliliği %68
+  // Varsayım: otomasyonla %68 verimlilik (atıf 2026-08-28'de kaldırıldı — kaynak doğrulanamadı)
   const savedHours       = Math.round(manualHours * 4 * 0.68);
-  // Gartner 2024: SME ERP ROI ortalaması %12/çalışan/ay
+  // Varsayım: çalışan başına aylık %12 getiri
   const productivityGain = employees * 1800 * 0.12;
   const roiRatio         = ((productivityGain - 2499) / 2499 * 100).toFixed(0);
   const paybackMonths    = (2499 / (productivityGain / 12)).toFixed(1);
@@ -432,16 +432,16 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                   labelEN: 'Hours saved / month',
                   value:   `${savedHours} ${isTR ? 'saat' : 'hours'}`,
                   accent:  false,
-                  citationTR: 'McKinsey: ERP otomasyon verimliliği %68',
-                  citationEN: 'McKinsey: ERP automation efficiency 68%',
+                  citationTR: 'Varsayım: otomasyonla %68 verimlilik',
+                  citationEN: 'Assumption: 68% efficiency from automation',
                 },
                 {
                   labelTR: 'Verimlilik artışı',
                   labelEN: 'Productivity gain',
                   value:   `₺${productivityGain.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} / ${isTR ? 'ay' : 'mo'}`,
                   accent:  false,
-                  citationTR: 'Gartner 2024: SME ERP ROI ortalaması %12/çalışan/ay',
-                  citationEN: 'Gartner 2024: SME ERP ROI avg. 12%/employee/mo',
+                  citationTR: 'Varsayım: çalışan başına aylık %12 getiri',
+                  citationEN: 'Assumption: 12% ROI per employee per month',
                 },
                 {
                   labelTR: 'ROI oranı',
@@ -488,21 +488,14 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
 
               <p className={cn('text-[10px] text-center mt-2', d('text-white/55', 'text-black/60'))}>
                 {isTR
-                  ? '* Hesaplamalar McKinsey & Gartner 2024 kıyaslamaları baz alınarak tahmin edilmiştir.'
-                  : '* Estimates based on McKinsey & Gartner 2024 benchmarks.'}
+                  ? '* Bu hesaplayıcı sektör genelinde yaygın varsayımlara dayalı bir TAHMİNDİR; sonuçlar işletmeye göre değişir.'
+                  : '* This calculator is an ESTIMATE based on common industry assumptions; results vary by business.'}
               </p>
 
-              {/* Testimonial blockquote */}
-              <blockquote className={cn('border-l-4 border-brand pl-5 py-3 rounded-r-xl', d('bg-white/[0.03]', 'bg-[#fff5f0]'))}>
-                <p className={cn('text-sm leading-relaxed italic', d('text-white/70', 'text-black/65'))}>
-                  {isTR
-                    ? '"İlk 3 ayda sipariş işleme süremiz %71 azaldı."'
-                    : '"Our order processing time dropped 71% in the first 3 months."'}
-                </p>
-                <footer className={cn('text-xs mt-2 font-semibold', d('text-white/65', 'text-black/70'))}>
-                  — Emre K., {isTR ? 'Tekstil A.Ş. Genel Müdürü' : 'CEO, Tekstil A.Ş.'}
-                </footer>
-              </blockquote>
+              {/* UYDURMA referans alıntısı KALDIRILDI (2026-08-28): "Emre K.,
+                  Tekstil A.Ş. CEO, %71" — gerçek olmayan kişi, şirket ve rakam.
+                  Sahte müşteri değerlendirmesi sınıfı; gerçek bir alıntı
+                  gelirse buraya kaynağıyla konur. */}
 
               <button
                 onClick={onTryClick}
@@ -988,10 +981,14 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
     },
     {
       emoji: '🏆',
+      // İSMMMO referansı KALDIRILDI (2026-08-28): gerçek bir kuruma
+      // (İstanbul SMMM Odası) doğrulanamayan bir 'uyumluluk/sertifika'
+      // bağlantısı iddia ediliyordu. Rozet programı gerçekse kurumun adı
+      // ancak yazılı izinle geri konur.
       titleTR: 'Sertifika & Rozet',
       titleEN: 'Certification & Badge',
-      descTR: 'İSMMMO uyumlu CETPA Sertifikalı Ortak rozetini web sitenize ekleyin.',
-      descEN: 'Add the ISMMO-compatible CETPA Certified Partner badge to your site.',
+      descTR: 'CETPA Ortak rozetini web sitenize ekleyin.',
+      descEN: 'Add the CETPA Partner badge to your site.',
     },
   ];
 
@@ -1096,11 +1093,16 @@ export default function LandingPage({
   }, []);
 
   // ─── Firestore-backed testimonials (with static fallback) ────────────────────
-  const staticTestimonials = [
-    { quote: isTR ? 'Sipariş yönetiminde harcadığımız zamanı %60 azalttık. CETPA\'nın Shopify entegrasyonu fatura keserken hayat kurtardı.' : 'We reduced time spent on order management by 60%. CETPA\'s Shopify integration is a lifesaver when invoicing.', name: 'Ahmet Y.', role: isTR ? 'Operasyon Müdürü' : 'Operations Manager', company: 'YapıTrade A.Ş.', rating: 5 },
-    { quote: isTR ? 'CRM modülü sayesinde müşteri kaybı %35 düştü. AI lead skorlaması satış ekibimizin önceliklerini doğru belirledi.' : 'Customer churn dropped 35% with the CRM module. AI lead scoring helps our sales team set the right priorities.', name: 'Selin K.', role: isTR ? 'Satış Direktörü' : 'Sales Director', company: 'KozmoTex', rating: 5 },
-    { quote: isTR ? 'e-Fatura ve Mikro entegrasyonu muhasebe ekibimizi kurtardı. Artık ay sonu kapanış 3 gün yerine 3 saatte bitiyor.' : 'The e-Invoice and Mikro integration saved our accounting team. Month-end close takes 3 hours now instead of 3 days.', name: 'Murat D.', role: isTR ? 'CFO' : 'CFO', company: 'DeltaCargo', rating: 5 },
-  ];
+  /**
+   * Statik yedek KALDIRILDI (2026-08-28). Burada üç UYDURMA müşteri referansı
+   * vardı: gerçek olmayan isimler ("Ahmet Y.", "Selin K."), gerçek olmayan
+   * şirketler ("YapıTrade A.Ş.", "KozmoTex"), uydurma rakamlar (%60, %35,
+   * "3 gün yerine 3 saat") ve 5 yıldız. Sahte müşteri değerlendirmesi
+   * yayınlamak Ticari Reklam ve Haksız Ticari Uygulamalar Yönetmeliği'ne
+   * aykırıdır; gerçek referans gelene dek bölüm HİÇ gösterilmez —
+   * `testimonials` koleksiyonuna gerçek kayıt girildiğinde kendiliğinden açılır.
+   */
+  const staticTestimonials: Array<{ quote: string; name: string; role: string; company: string; rating: number }> = [];
   const [firestoreTestimonials, setFirestoreTestimonials] = useState<typeof staticTestimonials | null>(null);
   const testimonials = firestoreTestimonials ?? staticTestimonials;
 
@@ -1182,8 +1184,8 @@ export default function LandingPage({
       monthlyEN: null, yearlyEN: null,
       desc: isTR ? 'Kurumsal & holdingler için' : 'For enterprise & holdings',
       features: isTR
-        ? ['Özel Geliştirme', 'Yerinde Kurulum', 'Özel API Entegrasyonları', 'Dedicated Sunucu', 'VIP Hesap Yöneticisi', 'SLA Garantili Destek']
-        : ['Custom Development', 'On-premise Setup', 'Custom API Integrations', 'Dedicated Server', 'VIP Account Manager', 'SLA-Guaranteed Support'],
+        ? ['Özel Geliştirme', 'Yerinde Kurulum', 'Özel API Entegrasyonları', 'Dedicated Sunucu', 'VIP Hesap Yöneticisi', 'Sözleşmeyle Belirlenen SLA']
+        : ['Custom Development', 'On-premise Setup', 'Custom API Integrations', 'Dedicated Server', 'VIP Account Manager', 'Contract-Defined SLA'],
       highlight: false, cta: isTR ? 'Teklif Al' : 'Get Quote',
     },
   ];
@@ -1720,6 +1722,7 @@ export default function LandingPage({
       </section>
 
       {/* ── Testimonials ─────────────────────────────────────────────────── */}
+      {testimonials.length > 0 && (
       <section className="py-32">
         <div className="w-full max-w-6xl mx-auto px-6">
           <div className="text-center mb-16">
@@ -1735,6 +1738,7 @@ export default function LandingPage({
           </div>
         </div>
       </section>
+      )}
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section id="pricing" className={cn('py-32 relative overflow-hidden', d('bg-white/[0.015]', 'bg-black/[0.015]'))}>

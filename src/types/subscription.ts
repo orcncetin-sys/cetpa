@@ -141,7 +141,9 @@ export const PLANS: PlanConfig[] = [
       { tr: 'İşletme planındaki her şey', en: 'Everything in Business' },
       { tr: 'Özel API Entegrasyonları', en: 'Custom API Integrations' },
       { tr: 'Dedike Hesap Yöneticisi', en: 'Dedicated Account Manager' },
-      { tr: 'SLA Garantisi', en: 'SLA Guarantee' },
+      // 'SLA Garantisi' -> sozlesmeye bagli ifade (2026-08-28): sayisal/mutlak
+      // SLA taahhudu hicbir olcume dayanmiyordu, landing'deki muadili kaldirildi.
+      { tr: 'Sözleşmeyle Belirlenen SLA', en: 'Contract-Defined SLA' },
       { tr: 'On-Premise Seçeneği', en: 'On-Premise Option' },
       { tr: 'Özel Eğitim & Onboarding', en: 'Custom Training & Onboarding' },
     ],

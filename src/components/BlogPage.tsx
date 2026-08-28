@@ -20,87 +20,63 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
     {
       category: 'Envanter',
       title: 'Stok Yönetiminde Sık Yapılan 7 Hata ve Çözümleri',
-      excerpt: 'Fazla stok, stoksuz kalma ve manuel sayım hataları KOBİ\'lerin en çok karşılaştığı sorunlardır. Doğru envanter süreçleriyle bu maliyetleri nasıl azaltabileceğinizi ele alıyoruz.',
-      readTime: '6 dk okuma',
-      date: '2 hafta önce'
+      excerpt: 'Fazla stok, stoksuz kalma ve manuel sayım hataları KOBİ\'lerin en çok karşılaştığı sorunlardır. Doğru envanter süreçleriyle bu maliyetleri nasıl azaltabileceğinizi ele alıyoruz.'
     },
     {
       category: 'ERP',
       title: 'Mikro, Logo ve SAP Arasında Seçim Yaparken Dikkat Edilmesi Gerekenler',
-      excerpt: 'Her ERP altyapısının güçlü ve zayıf yönleri farklıdır. İşletme büyüklüğüne, sektöre ve entegrasyon ihtiyaçlarına göre doğru platformu seçmek için pratik bir karşılaştırma çerçevesi.',
-      readTime: '8 dk okuma',
-      date: '3 hafta önce'
+      excerpt: 'Her ERP altyapısının güçlü ve zayıf yönleri farklıdır. İşletme büyüklüğüne, sektöre ve entegrasyon ihtiyaçlarına göre doğru platformu seçmek için pratik bir karşılaştırma çerçevesi.'
     },
     {
       category: 'E-ticaret',
       title: 'B2B Fiyatlandırmada Katman Stratejisi: Perakende, Standart, Premium ve Bayi',
-      excerpt: 'Aynı ürüne farklı müşteri segmentlerinde farklı fiyat uygulamak, hem kâr marjını korumak hem de bayi ilişkilerini güçlendirmek için etkili bir yöntemdir. Katmanlı fiyatlandırma nasıl kurgulanır?',
-      readTime: '5 dk okuma',
-      date: '1 ay önce'
+      excerpt: 'Aynı ürüne farklı müşteri segmentlerinde farklı fiyat uygulamak, hem kâr marjını korumak hem de bayi ilişkilerini güçlendirmek için etkili bir yöntemdir. Katmanlı fiyatlandırma nasıl kurgulanır?'
     },
     {
       category: 'Muhasebe',
-      title: 'E-Fatura ve E-Defter Uyumluluğunda Nelere Dikkat Etmeli?',
-      excerpt: 'GİB entegrasyonlarında sık karşılaşılan uyumsuzluklar ve bunları önlemenin yolları. Otomatik senkronizasyonun manuel süreçlere kıyasla sağladığı zaman ve hata avantajı.',
-      readTime: '7 dk okuma',
-      date: '1 ay önce'
+      title: 'E-Fatura Uyumluluğunda Nelere Dikkat Etmeli?',
+      excerpt: 'GİB entegrasyonlarında sık karşılaşılan uyumsuzluklar ve bunları önlemenin yolları. Otomatik senkronizasyonun manuel süreçlere kıyasla sağladığı zaman ve hata avantajı.'
     },
     {
       category: 'Lojistik',
       title: 'Çoklu Depo Yönetiminde Verimliliği Artıran 5 Prensip',
-      excerpt: 'Birden fazla depo ile çalışan işletmelerde sevkiyat gecikmeleri ve stok tutarsızlıkları büyür. Depolar arası görünürlük ve merkezi takip ile bu riskler nasıl azaltılır?',
-      readTime: '6 dk okuma',
-      date: '2 ay önce'
+      excerpt: 'Birden fazla depo ile çalışan işletmelerde sevkiyat gecikmeleri ve stok tutarsızlıkları büyür. Depolar arası görünürlük ve merkezi takip ile bu riskler nasıl azaltılır?'
     },
     {
       category: 'Dijital Dönüşüm',
       title: 'KOBİ\'ler İçin Dijital Dönüşüme Nereden Başlamalı?',
-      excerpt: 'Kağıt tabanlı süreçlerden bulut tabanlı bir sisteme geçiş, doğru planlandığında sanılandan çok daha az sancılı olabilir. Adım adım bir yol haritası.',
-      readTime: '9 dk okuma',
-      date: '2 ay önce'
+      excerpt: 'Kağıt tabanlı süreçlerden bulut tabanlı bir sisteme geçiş, doğru planlandığında sanılandan çok daha az sancılı olabilir. Adım adım bir yol haritası.'
     }
   ] : [
     {
       category: 'Inventory',
       title: '7 Common Inventory Management Mistakes and How to Fix Them',
-      excerpt: 'Overstocking, stockouts and manual counting errors are among the most frequent problems SMEs face. We look at how the right inventory processes can reduce these costs.',
-      readTime: '6 min read',
-      date: '2 weeks ago'
+      excerpt: 'Overstocking, stockouts and manual counting errors are among the most frequent problems SMEs face. We look at how the right inventory processes can reduce these costs.'
     },
     {
       category: 'ERP',
       title: 'Choosing Between Mikro, Logo and SAP: What Actually Matters',
-      excerpt: 'Every ERP backbone has different strengths and trade-offs. A practical comparison framework for picking the right platform based on company size, industry and integration needs.',
-      readTime: '8 min read',
-      date: '3 weeks ago'
+      excerpt: 'Every ERP backbone has different strengths and trade-offs. A practical comparison framework for picking the right platform based on company size, industry and integration needs.'
     },
     {
       category: 'E-commerce',
       title: 'Tiered B2B Pricing: Retail, Standard, Premium and Dealer Explained',
-      excerpt: 'Applying different prices for the same product across customer segments is an effective way to protect margins and strengthen dealer relationships. How to structure tiered pricing.',
-      readTime: '5 min read',
-      date: '1 month ago'
+      excerpt: 'Applying different prices for the same product across customer segments is an effective way to protect margins and strengthen dealer relationships. How to structure tiered pricing.'
     },
     {
       category: 'Accounting',
       title: 'What to Watch for in E-Invoice Compliance in Turkey',
-      excerpt: 'Common mismatches in tax authority (GİB) e-invoice integrations and how to avoid them. The time and error advantage of automated synchronisation over manual processes.',
-      readTime: '7 min read',
-      date: '1 month ago'
+      excerpt: 'Common mismatches in tax authority (GİB) e-invoice integrations and how to avoid them. The time and error advantage of automated synchronisation over manual processes.'
     },
     {
       category: 'Logistics',
       title: '5 Principles for More Efficient Multi-Warehouse Operations',
-      excerpt: 'Businesses running multiple warehouses often see shipping delays and stock inconsistencies grow. How cross-warehouse visibility and centralised tracking reduce these risks.',
-      readTime: '6 min read',
-      date: '2 months ago'
+      excerpt: 'Businesses running multiple warehouses often see shipping delays and stock inconsistencies grow. How cross-warehouse visibility and centralised tracking reduce these risks.'
     },
     {
       category: 'Digital Transformation',
       title: 'Where Should SMEs Start Their Digital Transformation?',
-      excerpt: 'Moving from paper-based processes to a cloud-based system can be far less painful than expected when properly planned. A step-by-step roadmap.',
-      readTime: '9 min read',
-      date: '2 months ago'
+      excerpt: 'Moving from paper-based processes to a cloud-based system can be far less painful than expected when properly planned. A step-by-step roadmap.'
     }
   ];
 
@@ -139,13 +115,14 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
               </span>
               <h2 className="text-base font-bold mb-2 leading-snug">{post.title}</h2>
               <p className={`text-sm leading-relaxed mb-4 flex-1 ${muted}`}>{post.excerpt}</p>
-              <div className={`flex items-center gap-3 text-xs pt-4 border-t ${border} ${muted}`}>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  {post.readTime}
-                </span>
-                <span>·</span>
-                <span>{post.date}</span>
+              {/* Eskiden burada "6 dk okuma · 2 hafta önce" yazıyordu. İkisi de
+                  UYDURMAYDI ve sayfanın kendi "henüz yayında değil" beyanıyla
+                  çelişiyordu: yayınlanmamış bir yazının yayın tarihi ve okuma
+                  süresi olamaz (2026-08-28). Yazı gerçekten yayınlanınca
+                  gerçek tarih buraya konur. */}
+              <div className={`flex items-center gap-2 text-xs pt-4 border-t ${border} ${muted}`}>
+                <Clock className="w-3.5 h-3.5" />
+                <span>{isTR ? 'Hazırlanıyor' : 'In preparation'}</span>
               </div>
             </div>
           ))}
@@ -158,18 +135,18 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
           </h2>
           <p className={`text-sm leading-relaxed mb-6 max-w-md mx-auto ${muted}`}>
             {isTR
-              ? 'Yukarıdaki kartlar hazırlığını sürdürdüğümüz içeriklerin bir önizlemesidir; henüz okunabilir tam yazılar yayında değildir. Yayınlandıklarında haberdar olmak için bültenimize abone olabilirsiniz.'
+              ? 'Yukarıdaki kartlar hazırlığını sürdürdüğümüz içeriklerin bir önizlemesidir; henüz okunabilir tam yazılar yayında değildir. Yayınlandıklarında haber vermemizi isterseniz bize e-posta gönderebilirsiniz.'
               : 'The cards above are a preview of content we are preparing; full, readable articles are not live yet. Subscribe to our newsletter to be notified when they publish.'}
           </p>
           <a
             href={isTR
-              ? 'mailto:info@cetpa.com.tr?subject=Blog%20B%C3%BClten%C4%B1ne%20Abone%20Ol'
-              : 'mailto:info@cetpa.com.tr?subject=Subscribe%20to%20Blog%20Newsletter'}
+              ? 'mailto:info@cetpa.com.tr?subject=Blog%20yay%C4%B1nlan%C4%B1nca%20haber%20ver'
+              : 'mailto:info@cetpa.com.tr?subject=Notify%20me%20when%20the%20blog%20is%20live'}
             className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-full text-white transition-opacity hover:opacity-90"
             style={{ backgroundColor: '#ff4000' }}
           >
             <Mail className="w-4 h-4" />
-            {isTR ? 'Bültene Abone Ol' : 'Subscribe for Updates'}
+            {isTR ? 'Yayınlanınca Haber Ver' : 'Notify Me When Live'}
           </a>
         </div>
 

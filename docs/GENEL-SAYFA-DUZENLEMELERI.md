@@ -72,3 +72,33 @@ tekrar koşturulmalı:
 ```
 Workflow({scriptPath: '.../genel-sayfa-olgu-denetimi-wf_1026f545-d03.js', resumeFromRunId: 'wf_1026f545-d03'})
 ```
+
+
+---
+
+## ✅ KAPANIŞ — 2026-08-28 (2. tur)
+
+Kalan tüm maddeler kapatıldı; denetim ajanları limite takıldığı için son 5
+dosya elle tarandı. Yapılanlar:
+
+| Bulgu | İşlem |
+|---|---|
+| **3 uydurma müşteri referansı** (Ahmet Y./YapıTrade, Selin K./KozmoTex + blockquote'ta Emre K./Tekstil A.Ş., %60/%35/%71 rakamlarıyla, 5 yıldız) | KALDIRILDI. "Müşteri Hikayeleri" bölümü artık yalnız `testimonials` koleksiyonunda GERÇEK kayıt varsa görünür |
+| **McKinsey/Gartner atıfları** (ROI hesaplayıcı) | Gerçek kurumlara doğrulanamayan rakam atfetmek atıfsız tahminden risklidir → dürüst "Varsayım" etiketi + "sonuçlar işletmeye göre değişir" notu |
+| **"İSMMMO uyumlu Sertifikalı Ortak rozeti"** | Gerçek kuruma (İstanbul SMMM Odası) doğrulanamayan bağlantı → kurum adı kaldırıldı; program gerçekse yazılı izinle geri konur |
+| **"SLA Garantili Destek"** (Kurumsal plan, 2 dosya) | "Sözleşmeyle Belirlenen SLA" — kurumsal SLA zaten sözleşmede pazarlık edilir, mutlak taahhüt kaldırıldı |
+| **Blog "2 hafta önce · 6 dk okuma"** (6 kartta) | Yayınlanmamış yazıya yayın tarihi/okuma süresi olamaz → "Hazırlanıyor" rozeti. Sayfa zaten "tam yazılar yayında değil" diye dürüst beyan taşıyordu |
+| **Blog "E-Defter" başlığı + ApiPage "e-defter"** | e-Defter kod tabanında YOK (ölçüm: 0 isabet) → başlık ve açıklamalar yalnız e-Fatura'ya çekildi |
+| **"Bültene Abone Ol"** | Bülten altyapısı yok, düğme yalnız mailto → "Yayınlanınca Haber Ver" |
+| **ApiPage Logo "çift yönlü entegrasyon" / SAP "bağlantı desteği"** | Gerçek: ikisi de STUB (erpRoutes.ts) → "hazırlık aşamasında; kurulum kapsamı birlikte belirlenir" |
+| **`privacy@cetpa.com.tr`** | Varlığı doğrulanamadı (port 25 engelli, SMTP sınanamadı). KVKK talebinin ölü kutuya düşme riskine karşı doğrulanmış `info@cetpa.com.tr`e çevrildi; privacy@ açılıp test edilirse geri döner |
+| **og:image** | Ölçüldü: `erp_hero.png` canlıda HTTP 200 — sorun yok |
+| **index.html** | Tarandı — kanıtsız iddia yok (açıklama bilinçli olarak üstünlük sıfatsız) |
+
+### Sahibin teyidine kalan (kod değil, İŞ KARARI)
+- **Ortaklık programı şartları** (landing "Partners" bölümü): "Ücretsiz CPA
+  Lisansı" + "her abonelikten %20 aylık komisyon". Form gerçek (demoRequests'e
+  yazıyor) ama bu ŞARTLARIN sahibi tarafından konulduğu belirsiz — CPA bu
+  vaatle başvuruyor. Şartlar doğru değilse söyleyin, düzeltilir.
+- **"%20 yıllık indirim"** (fiyatlandırma anahtarı): fiyat yapısı sahibinin
+  tasarrufu; PricingPage ile tutarlı görünüyor, dokunulmadı.

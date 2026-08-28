@@ -15,6 +15,11 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
   const border = darkMode ? 'border-white/8' : 'border-black/8';
   const card = darkMode ? 'bg-white/5 border border-white/10' : 'bg-gray-50 border border-gray-100';
 
+  // KVKK iletişim adresi info@cetpa.com.tr (2026-08-28): sayfa daha önce
+  // privacy@cetpa.com.tr diyordu ama o kutunun VAR OLDUĞU doğrulanamadı
+  // (port 25 engelli, SMTP sınaması yapılamadı). KVKK veri talebinin ölü bir
+  // kutuya düşmesi ciddi bir uyum hatası olur; info@ ise doğrulanmış ve
+  // izlenen adres. privacy@ kutusu açılıp test edilirse geri çevrilebilir.
   const sections = isTR ? [
     {
       title: '1. Giriş',
@@ -42,11 +47,11 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '7. Aday Adayı (Özgeçmiş) Verisi',
-      content: 'Kariyer sayfamız üzerinden ilettiğiniz özgeçmiş ve başvuru bilgileri, yalnızca işe alım değerlendirmesi amacıyla işlenir. Bu veriler en fazla 1 yıl saklanır, süre sonunda imha edilir ve üçüncü kişilerle paylaşılmaz. Başvurunuzun silinmesini istediğiniz anda privacy@cetpa.com.tr adresine yazmanız yeterlidir.'
+      content: 'Kariyer sayfamız üzerinden ilettiğiniz özgeçmiş ve başvuru bilgileri, yalnızca işe alım değerlendirmesi amacıyla işlenir. Bu veriler en fazla 1 yıl saklanır, süre sonunda imha edilir ve üçüncü kişilerle paylaşılmaz. Başvurunuzun silinmesini istediğiniz anda info@cetpa.com.tr adresine yazmanız yeterlidir.'
     },
     {
       title: '8. İletişim',
-      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: privacy@cetpa.com.tr | Adres: CETPA A.Ş., Antalya, Türkiye | Talep yanıt süresi: 30 gün içinde.'
+      content: 'Gizlilik politikamız hakkındaki sorularınız veya veri talepleriniz için: E-posta: info@cetpa.com.tr | Adres: CETPA A.Ş., Antalya, Türkiye | Talep yanıt süresi: 30 gün içinde.'
     }
   ] : [
     {
@@ -71,15 +76,15 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
     },
     {
       title: '6. Your Rights (GDPR)',
-      content: 'Under GDPR, you have the right to: access your personal data, rectify inaccurate data, erase your data ("right to be forgotten"), restrict processing, data portability, object to processing, and withdraw consent at any time. To exercise any of these rights, contact us at privacy@cetpa.com.tr. We will respond within 30 days.'
+      content: 'Under GDPR, you have the right to: access your personal data, rectify inaccurate data, erase your data ("right to be forgotten"), restrict processing, data portability, object to processing, and withdraw consent at any time. To exercise any of these rights, contact us at info@cetpa.com.tr. We will respond within 30 days.'
     },
     {
       title: '7. Job Applicant (CV) Data',
-      content: 'CVs and application details sent through our careers page are processed solely to assess your application. They are kept for at most one year, deleted at the end of that period, and never shared with third parties. To have your application deleted at any time, write to privacy@cetpa.com.tr.'
+      content: 'CVs and application details sent through our careers page are processed solely to assess your application. They are kept for at most one year, deleted at the end of that period, and never shared with third parties. To have your application deleted at any time, write to info@cetpa.com.tr.'
     },
     {
       title: '8. Contact',
-      content: 'For questions about this policy or data requests: Email: privacy@cetpa.com.tr | Address: CETPA A.Ş., Antalya, Türkiye | Response time: within 30 days.'
+      content: 'For questions about this policy or data requests: Email: info@cetpa.com.tr | Address: CETPA A.Ş., Antalya, Türkiye | Response time: within 30 days.'
     }
   ];
 
