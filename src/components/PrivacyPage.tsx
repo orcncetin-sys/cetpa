@@ -108,7 +108,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
 
       <main className="max-w-3xl mx-auto px-6 py-16">
         <div className="mb-12">
-          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 16 {isTR ? 'Nisan' : 'April'} 2026</p>
+          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 28 {isTR ? 'Ağustos' : 'August'} 2026</p>
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}</h1>
           <p className={muted}>{isTR ? 'CETPA A.Ş. olarak kişisel verilerinizin güvenliğini ön planda tutuyoruz.' : 'At CETPA A.Ş., the security of your personal data is our top priority.'}</p>
         </div>

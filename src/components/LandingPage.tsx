@@ -1919,7 +1919,7 @@ export default function LandingPage({
           <div className="text-center mb-14">
             <p className="text-xs font-black uppercase tracking-widest text-brand mb-3">{isTR ? 'Modüller' : "What's Inside"}</p>
             <h2 className={cn('text-3xl md:text-5xl font-black tracking-tight', d('text-white','text-[#111]'))}>
-              {isTR ? '18 entegre modül, sıfır silo' : '18 integrated modules. Zero silos.'}
+              {isTR ? '26 entegre modül, sıfır silo' : '26 integrated modules. Zero silos.'}
             </h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1999,7 +1999,7 @@ export default function LandingPage({
                 </a>
               </div>
               <p className={cn('text-xs mt-6', d('text-white/55', 'text-black/60'))}>
-                {isTR ? 'veya bizi arayın: +90 212 000 00 00' : 'or call us: +90 212 000 00 00'}
+                {isTR ? 'veya bize yazın: info@cetpa.com.tr' : 'or write to us: info@cetpa.com.tr'}
               </p>
             </div>
           </motion.div>

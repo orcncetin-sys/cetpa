@@ -54,7 +54,7 @@ export default function TermsPage({ currentLanguage: lang, darkMode, onBack }: P
 
       <main className="max-w-3xl mx-auto px-6 py-16">
         <div className="mb-12">
-          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 16 {isTR ? 'Nisan' : 'April'} 2026</p>
+          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 28 {isTR ? 'Ağustos' : 'August'} 2026</p>
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'Kullanım Koşulları' : 'Terms of Service'}</h1>
           <p className={muted}>{isTR ? 'CETPA platformunu kullanmadan önce lütfen bu koşulları dikkatlice okuyunuz.' : 'Please read these terms carefully before using the CETPA platform.'}</p>
         </div>

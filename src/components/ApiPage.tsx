@@ -90,16 +90,21 @@ export default function ApiPage({ currentLanguage: lang, darkMode, onBack }: Pro
   ];
 
   const capabilities = isTR ? [
-    { title: 'Webhook Desteği', text: 'Sipariş oluşturma, stok seviyesi değişimi, fatura durumu ve kargo takip olayları için webhook bildirimleri tanımlanabilir.' },
+    { title: 'Webhook Desteği', text: 'Webhook bildirimleri (sipariş oluşturma, stok değişimi, fatura durumu, kargo takip) hazırlık aşamasındadır; biçim taslağı aşağıdadır.' },
     { title: 'Özel REST Erişimi', text: 'Kurumsal ihtiyaçlara göre şekillendirilmiş REST uç noktaları ile envanter, cari ve sipariş verilerine programatik erişim sağlanır.' },
     { title: 'Kurulum ve Destek', text: 'Entegrasyon kapsamı, kimlik doğrulama yöntemi ve veri alanları CETPA ekibiyle birlikte özel olarak tasarlanır ve devreye alınır.' },
   ] : [
-    { title: 'Webhook Support', text: 'Webhook notifications can be configured for order creation, stock level changes, invoice status and shipment tracking events.' },
+    { title: 'Webhook Support', text: 'Webhook notifications (order creation, stock changes, invoice status, shipment tracking) are in preparation; the draft format is below.' },
     { title: 'Custom REST Access', text: 'Programmatic access to inventory, customer and order data through REST endpoints tailored to enterprise requirements.' },
     { title: 'Setup & Support', text: 'Integration scope, authentication method and data fields are custom-designed and rolled out together with the CETPA team.' },
   ];
 
-  const codeExample = `POST /webhooks/stock-updated
+  // TASLAK ÖRNEK: /webhooks/stock-updated diye bir uç HENÜZ YOK (2026-08-28
+  // ölçümü: sunucu tarafında 0 isabet). Sayfa bunu artık "planlanan biçim"
+  // olarak etiketliyor — var olmayan bir ucu çalışıyormuş gibi göstermek,
+  // entegrasyon deneyen geliştiriciyi boşa uğraştırır.
+  const codeExample = `# Planlanan webhook biçimi (henüz yayında değil)
+POST /webhooks/stock-updated
 Content-Type: application/json
 X-Cetpa-Signature: sha256=...
 
