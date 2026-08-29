@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+const CariEkstrePanel = React.lazy(() => import('../components/CariEkstrePanel'));
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Building2, Plus, Award, ShoppingCart, AlertTriangle, Search, Calendar,
@@ -143,6 +144,9 @@ export default function SatinAlmaPage(props: Props) {
   const mikroFaturalarSA = useMikroFaturalar(!!user && canAccess('satin-alma'));
   const mikroTedarikciler = useMikroTedarikciler(tedarikciLeads, mikroFaturalarSA, suppliers);
   const allSuppliers = [...suppliers, ...mikroTedarikciler];
+  /** Karta tıklanınca açılan tedarikçi cari ekstresi (2026-08-28 isteği:
+   *  "tedarikçilerde detaya gidemiyorum karta basınca"). */
+  const [acikTedarikci, setAcikTedarikci] = useState<{ ad: string; cariKod?: string } | null>(null);
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -327,7 +331,8 @@ export default function SatinAlmaPage(props: Props) {
                             // suppliers dokümanına karşılık gelmeyebilir).
                             const isNative = suppliers.some(x => x.id === s.id);
                             return (
-                            <div key={s.id} className="apple-card p-5 space-y-3 group">
+                            <div key={s.id} className="apple-card p-5 space-y-3 group cursor-pointer"
+                              onClick={() => setAcikTedarikci({ ad: s.name, cariKod: s.mikroCariKod })}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
                                   <Building2 className="w-5 h-5 text-emerald-600" />
@@ -335,11 +340,11 @@ export default function SatinAlmaPage(props: Props) {
                                 {isNative ? (
                                   hasFullAccess('satin-alma') && (
                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button onClick={() => { setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
+                                      <button onClick={e => { e.stopPropagation(); setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
                                         className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
                                         <Edit2 className="w-3.5 h-3.5" />
                                       </button>
-                                      <button onClick={() => void handleDeleteSupplier(s.id)}
+                                      <button onClick={e => { e.stopPropagation(); void handleDeleteSupplier(s.id); }}
                                         className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
                                         <Trash2 className="w-3.5 h-3.5" />
                                       </button>
@@ -361,6 +366,30 @@ export default function SatinAlmaPage(props: Props) {
                             </div>
                             );
                           })}
+                        {acikTedarikci && (
+                          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAcikTedarikci(null)}>
+                            <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-xl p-5" onClick={e => e.stopPropagation()}>
+                              {acikTedarikci.cariKod ? (
+                                <React.Suspense fallback={<p className="text-center text-gray-400 text-sm py-8">…</p>}>
+                                  <CariEkstrePanel
+                                    currentLanguage={currentLanguage}
+                                    cariKod={acikTedarikci.cariKod}
+                                    customerName={acikTedarikci.ad}
+                                  />
+                                </React.Suspense>
+                              ) : (
+                                <p className="text-center text-gray-400 text-sm py-8">
+                                  {currentLanguage === 'tr'
+                                    ? 'Bu tedarikçinin Mikro cari kodu yok — ekstre yalnız Mikro carisi olan tedarikçilerde açılır.'
+                                    : 'This supplier has no Mikro account code.'}
+                                </p>
+                              )}
+                              <button onClick={() => setAcikTedarikci(null)} className="apple-button-secondary w-full text-sm mt-4">
+                                {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {allSuppliers.length === 0 && (
                           <div className="col-span-full text-center py-16 border-2 border-dashed border-gray-100 rounded-2xl">
                             <Building2 className="w-10 h-10 text-gray-200 mx-auto mb-3" />

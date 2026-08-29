@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from '../components/MikroFaturaDetay';
+import { faturaEsle } from '../utils/faturaEsle';
 import { motion } from 'motion/react';
 import BankStatementImportModal from '../components/BankStatementImportModal';
 import BankBalanceReport from '../components/BankBalanceReport';
@@ -342,6 +344,8 @@ export default function MuhasebePage(props: Props) {
   };
   const [fkDetaySku, setFkDetaySku] = useState<string | null>(null);
   const [fkDetaySatirlari, setFkDetaySatirlari] = useState<FiyatDetaySatiri[]>([]);
+  /** Evrak numarasına basınca açılan fatura (2026-08-28 kullanıcı isteği). */
+  const [fkFatura, setFkFatura] = useState<MikroFaturaDetayVerisi | null>(null);
   const [fkDetayLoading, setFkDetayLoading] = useState(false);
 
   useEffect(() => {
@@ -1469,9 +1473,9 @@ export default function MuhasebePage(props: Props) {
                                 <thead>
                                   <tr className="bg-gray-50 border-b border-gray-100">
                                     <SortHeader label={trFk ? 'Ürün' : 'Product'} sortKey="ad" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} />
-                                    <SortHeader label={trFk ? 'Ort. Alım Fiyatı' : 'Avg. Purchase'} sortKey="alisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
+                                    <SortHeader label={trFk ? 'Ort. Alım (KDV hariç)' : 'Avg. Purchase (excl. VAT)'} sortKey="alisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <SortHeader label={trFk ? 'Alım Miktarı' : 'Purchase Qty'} sortKey="alisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
-                                    <SortHeader label={trFk ? 'Ort. Satış Fiyatı' : 'Avg. Sale'} sortKey="satisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
+                                    <SortHeader label={trFk ? 'Ort. Satış (KDV hariç)' : 'Avg. Sale (excl. VAT)'} sortKey="satisOrtFiyat" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <SortHeader label={trFk ? 'Satış Miktarı' : 'Sale Qty'} sortKey="satisMiktar" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right hidden md:table-cell" />
                                     <SortHeader label={trFk ? 'Kalan Stok' : 'Remaining Stock'} sortKey="kalanStok" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
                                     <SortHeader label={trFk ? 'Marj' : 'Margin'} sortKey="marjTL" currentSort={{ key: fkSortKey, direction: fkSortDir }} onSort={k => toggleFkSort(k as FkSortKey)} className="text-right" />
@@ -1505,6 +1509,11 @@ export default function MuhasebePage(props: Props) {
                         )}
                         <p className="text-[10px] text-gray-400 text-center">{trFk ? 'Fiyatlar KDV hariç, satır bazlı gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI) ağırlıklı ortalamadır.' : 'Prices are VAT-excluded, weighted averages from real Mikro stock movement lines.'}</p>
 
+                        {/* Evrak → fatura modalı */}
+                        {fkFatura && (
+                          <MikroFaturaDetay fatura={fkFatura} currentLanguage={currentLanguage} onClose={() => setFkFatura(null)} />
+                        )}
+
                         {/* SKU detay modalı */}
                         {fkDetaySku && (
                           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setFkDetaySku(null)}>
@@ -1528,7 +1537,7 @@ export default function MuhasebePage(props: Props) {
                                         <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tarih' : 'Date'}</th>
                                         <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Yön' : 'Direction'}</th>
                                         <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Miktar' : 'Qty'}</th>
-                                        <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Birim Fiyat' : 'Unit Price'}</th>
+                                        <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Birim Fiyat (KDV hariç)' : 'Unit Price (excl. VAT)'}</th>
                                         <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tutar' : 'Amount'}</th>
                                         <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{trFk ? 'Evrak' : 'Doc'}</th>
                                       </tr>
@@ -1545,7 +1554,28 @@ export default function MuhasebePage(props: Props) {
                                           <td className="py-2 px-2 text-right text-gray-700">{s.miktar.toLocaleString('tr-TR')}</td>
                                           <td className="py-2 px-2 text-right font-medium text-gray-800">{fmtF(s.birimFiyat)}</td>
                                           <td className="py-2 px-2 text-right text-gray-600">{fmtF(s.tutar)}</td>
-                                          <td className="py-2 px-2 text-gray-400 hidden sm:table-cell">{s.evrakNo || '—'}</td>
+                                          <td className="py-2 px-2 hidden sm:table-cell">
+                                            {(() => {
+                                              if (!s.evrakNo) return <span className="text-gray-400">—</span>;
+                                              // Eşleşme MUHAFAZAKÂR (bkz. utils/faturaEsle.ts):
+                                              // sıra + cari + gün ÜÇÜ de tutmalı ve tek fatura
+                                              // çıkmalı; yoksa düğme yok, düz metin. Yanlış
+                                              // faturayı açmak hiç açmamaktan kötü.
+                                              const f = faturaEsle(mikroFaturalar, {
+                                                evrakSira: s.evrakNo, cariKod: s.cariKod,
+                                                tarih: s.tarih ? String(s.tarih).slice(0, 10) : null,
+                                              });
+                                              if (!f) return <span className="text-gray-400" title={trFk ? 'Eşleşen fatura kaydı yok (Faturaları Çek çalıştırılmamış olabilir)' : 'No matching invoice'}>{s.evrakNo}</span>;
+                                              return (
+                                                <button
+                                                  onClick={() => setFkFatura({ ...f, musteri: f.cariKod })}
+                                                  className="text-brand hover:underline font-medium"
+                                                >
+                                                  {s.evrakNo}
+                                                </button>
+                                              );
+                                            })()}
+                                          </td>
                                         </tr>
                                       ))}
                                     </tbody>

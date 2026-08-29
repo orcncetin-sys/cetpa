@@ -1959,6 +1959,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const depoId = await C.mikroIdCozucu('warehouses', companyId);
       // Mobil WMS de aynı depolardan beslenmeli — bkz. (B) notu.
       const wmsId = await C.mikroIdCozucu('wmsLocations', companyId);
+      const aracId = await C.mikroIdCozucu('vehicles', companyId);
+      // TR plaka deseni — utils/filo.ts'teki istemci birlesimiyle AYNI kural.
+      const PLAKA = /^\d{2}\s?[A-Z\u00c7\u011e\u0130\u00d6\u015e\u00dc]{1,3}\s?\d{2,4}$/;
       const yazilanWmsKodlari = new Set<string>();
       let batch = C.getAdminDb().batch(); let ops = 0, yazilan = 0;
       for (const r of rows) {
@@ -1991,6 +1994,24 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         // merge:true yüzünden geri alınmayan artığıydı ve `warehouseId`
         // taşımadığı için Depo sütunu "—" görünüyordu.
         // Yetkili kaynak burasıdır: gerçek depo adı ve warehouseId ile.
+        // ── Plaka-adli depo = ARAC ──────────────────────────────────────
+        // Mikro'da arac filosu ayri tablo degil: depolarin 3'u arac plakasi
+        // (07 AGU 291, 07 ACR 832, 34 CGC 119 — QR transfer de bunlari
+        // kullaniyor). vehicles'ta yalniz elle eklenen kayit vardi; Canli
+        // Sevkiyat 1 arac gosteriyordu (2026-08-28 bildirimi). Plaka-adli depo
+        // artik vehicles'a da yazilir — idempotent (id plakadan turer), merge
+        // ile elle girilen surucu/telefon EZILMEZ.
+        if (PLAKA.test(ad.toUpperCase())) {
+          batch.set(C.getAdminDb().collection('vehicles').doc(aracId(`plaka-${ad.replace(/\s+/g, '-').toLowerCase()}`)), {
+            companyId,
+            plate: ad.toUpperCase(),
+            status: 'M\u00fcsait',
+            source: 'mikro',
+            syncedAt: pgServerTimestamp(),
+          }, { merge: true });
+          ops++;
+        }
+
         const wmsKod = `DEPO-${depoNo}`;
         yazilanWmsKodlari.add(wmsKod);
         batch.set(C.getAdminDb().collection('wmsLocations').doc(wmsId(`depo-${depoNo}`)), {

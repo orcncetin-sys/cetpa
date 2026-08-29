@@ -66,6 +66,8 @@ export function useMikroTedarikciler(
           taxNo: l.taxId || '',
           balance: Number(x.bakiye ?? x.balance ?? 0),
           riskGroup: (x.riskGroup as Supplier['riskGroup']) || 'Düşük',
+          // Karttan cari ekstre açılabilsin diye (2026-08-28 kullanıcı isteği).
+          mikroCariKod: ((l as unknown as { mikroCariKod?: string }).mikroCariKod || l.cariKod || l.taxId || '') || undefined,
         } as Supplier;
       });
 

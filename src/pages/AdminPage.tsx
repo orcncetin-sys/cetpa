@@ -98,6 +98,14 @@ export default function AdminPage({
   toast, logAuditAction, setActiveTab,
 }: Props) {
   const [inviteEmail, setInviteEmail] = useState('');
+  // Manuel kullanıcı ekleme (2026-08-28): hesap HEMEN açılır, davet akışı
+  // gerekmez. Dönen parola-belirleme linki admin'e gösterilir (Resend'e
+  // bağımlı değil — canlıdaki anahtar geçersiz çıkmıştı).
+  const [yeniKullanici, setYeniKullanici] = useState({ email: '', ad: '', rol: 'Sales' });
+  const [yeniKullaniciDurum, setYeniKullaniciDurum] = useState<{ tip: 'ok' | 'hata'; mesaj: string; link?: string } | null>(null);
+  const [yeniKullaniciMesgul, setYeniKullaniciMesgul] = useState(false);
+  /** Detayı açık kullanıcı satırı (Göster). */
+  const [acikKullanici, setAcikKullanici] = useState<string | null>(null);
   const [inviteRole, setInviteRole] = useState('Sales');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [p571AuditFilter, setP571AuditFilter] = useState('');
@@ -358,8 +366,13 @@ export default function AdminPage({
                               message: currentLanguage === 'tr' ? 'Bu kullanıcıyı silmek istediğinizden emin misiniz?' : 'Are you sure you want to delete this user?',
                               variant: 'danger',
                               onConfirm: async () => {
+                                // Sunucu ucu: Firebase AUTH hesabı + users dokümanı
+                                // birlikte silinir. Eskiden yalnız doc siliniyordu,
+                                // Auth hesabı yetim yaşıyordu (2026-08-28 düzeltmesi).
                                 try {
-                                  await deleteDoc(doc(db, 'users', u.id as string));
+                                  const r = await authFetch(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+                                  const d = await r.json() as { success: boolean; error?: string };
+                                  if (!d.success) throw new Error(d.error || 'Silinemedi');
                                 } catch (error) {
                                   handleFirestoreError(error, OperationType.DELETE, `users/${u.id}`);
                                 }
@@ -374,14 +387,99 @@ export default function AdminPage({
                       {u.id === user?.uid && (
                         <span className="text-[10px] text-gray-400">{currentLanguage==='tr'?'(Siz)':'(You)'}</span>
                       )}
+                      <button
+                        onClick={() => setAcikKullanici(acikKullanici === u.id ? null : u.id as string)}
+                        className="ml-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                      >
+                        {acikKullanici === u.id ? (currentLanguage==='tr'?'Gizle':'Hide') : (currentLanguage==='tr'?'Göster':'Show')}
+                      </button>
                     </td>
                   </tr>
-                )) : (
+                )).flatMap((satir, i) => {
+                  const u = firestoreUsers[i] as Record<string, unknown>;
+                  if (acikKullanici !== u.id) return [satir];
+                  return [satir, (
+                    <tr key={`${u.id}-detay`} className="bg-gray-50/70">
+                      <td colSpan={4} className="px-4 py-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+                          <div><span className="text-gray-400 font-bold uppercase block">UID</span><span className="font-mono text-gray-600 break-all">{u.id as string}</span></div>
+                          <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Ad':'Name'}</span><span className="text-gray-600">{(u.displayName as string)||'—'}</span></div>
+                          <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Durum':'Status'}</span><span className="text-gray-600">{(u.status as string)||'—'}</span></div>
+                          <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Firma':'Company'}</span><span className="font-mono text-gray-600 break-all">{(u.companyId as string)||'—'}</span></div>
+                        </div>
+                      </td>
+                    </tr>
+                  )];
+                }) : (
                   <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-xs">{currentLanguage==='tr'?'Veritabanında kullanıcı kaydı bulunamadı. Kullanıcılar ilk giriş yaptıklarında buraya eklenir.':'No user records in the database. Users are added here when they first log in.'}</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* ── Manuel Kullanıcı Ekle (2026-08-28) ── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 bg-brand/10 rounded-xl flex items-center justify-center">
+              <Users size={16} className="text-brand" />
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-800 text-sm">{currentLanguage==='tr'?'Kullanıcı Ekle (manuel)':'Add User (manual)'}</h3>
+              <p className="text-xs text-gray-400">
+                {currentLanguage==='tr'
+                  ? 'Hesap hemen açılır; parola belirleme linkini kullanıcıya siz iletirsiniz (e-posta servisine bağımlı değildir).'
+                  : 'Account is created immediately; you share the password-setup link yourself.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 mt-3">
+            <input type="email" placeholder="ornek@sirket.com" value={yeniKullanici.email}
+              onChange={e => setYeniKullanici(k => ({ ...k, email: e.target.value }))}
+              className="apple-input flex-1 text-sm" />
+            <input type="text" placeholder={currentLanguage==='tr'?'Ad Soyad':'Full name'} value={yeniKullanici.ad}
+              onChange={e => setYeniKullanici(k => ({ ...k, ad: e.target.value }))}
+              className="apple-input flex-1 text-sm" />
+            <select value={yeniKullanici.rol} onChange={e => setYeniKullanici(k => ({ ...k, rol: e.target.value }))}
+              className="apple-input text-sm">
+              {(['Admin','Manager','Accounting','Sales','Logistics','HR','Purchasing','B2B','Dealer'] as string[]).map(r => <option key={r}>{r}</option>)}
+            </select>
+            <button
+              disabled={yeniKullaniciMesgul || !yeniKullanici.email.trim()}
+              onClick={async () => {
+                setYeniKullaniciMesgul(true); setYeniKullaniciDurum(null);
+                try {
+                  const r = await authFetch('/api/admin/users', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: yeniKullanici.email.trim(), displayName: yeniKullanici.ad.trim(), role: yeniKullanici.rol }),
+                  });
+                  const d = await r.json() as { success: boolean; parolaLinki?: string; error?: string };
+                  if (!d.success) throw new Error(d.error || 'Hata');
+                  setYeniKullaniciDurum({ tip: 'ok', mesaj: currentLanguage==='tr' ? 'Kullanıcı oluşturuldu. Parola belirleme linkini iletin:' : 'User created. Share the password link:', link: d.parolaLinki });
+                  setYeniKullanici({ email: '', ad: '', rol: 'Sales' });
+                } catch (e) {
+                  setYeniKullaniciDurum({ tip: 'hata', mesaj: e instanceof Error ? e.message : String(e) });
+                } finally { setYeniKullaniciMesgul(false); }
+              }}
+              className="apple-button-primary text-sm px-5 disabled:opacity-40 whitespace-nowrap"
+            >
+              {yeniKullaniciMesgul ? '…' : (currentLanguage==='tr'?'Oluştur':'Create')}
+            </button>
+          </div>
+          {yeniKullaniciDurum && (
+            <div className={`mt-3 text-xs rounded-xl px-3 py-2 border ${yeniKullaniciDurum.tip==='ok' ? 'bg-green-50 border-green-100 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+              <p>{yeniKullaniciDurum.mesaj}</p>
+              {yeniKullaniciDurum.link && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <code className="flex-1 bg-white rounded-lg px-2 py-1 text-[10px] break-all border border-green-100">{yeniKullaniciDurum.link}</code>
+                  <button onClick={() => { void navigator.clipboard.writeText(yeniKullaniciDurum.link!); }}
+                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 transition-colors shrink-0">
+                    {currentLanguage==='tr'?'Kopyala':'Copy'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Invite User ── */}

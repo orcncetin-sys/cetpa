@@ -168,6 +168,9 @@ export default function CariEkstrePanel({
   // senkronlu customer.balance kullanılıyor, lead.balance ise hiç güncellenmiyor).
   // Formül doğrulanmış (2026-07-30): eksi = Cetpa borçlu. SUM(cha_tip=0 ? +meblag : -meblag).
   const [computedBalance, setComputedBalance] = useState<number | null>(null);
+  /** Yaşlandırmanın yönü: 'ar' = cari bize borçlu (alacağımız yaşlanıyor),
+   *  'ap' = biz cariye borçluyuz (borcumuz yaşlanıyor). Net bakiyeden türer. */
+  const [agingYonu, setAgingYonu] = useState<'ar' | 'ap'>('ar');
   const [filter, setFilter]   = useState<'all' | 'overdue'>('all');
   const [sortCol, setSortCol] = useState<'ageD' | 'amount' | 'customerName'>('ageD');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
@@ -202,6 +205,24 @@ export default function CariEkstrePanel({
         const newBuckets: AgingBuckets = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
         const newRows: AgingRow[] = [];
         let balanceAcc = 0;
+        // ── ÖN GEÇİŞ: net yönü bul ────────────────────────────────────────
+        // Yaşlandırma eskiden YALNIZ borç satırlarını kovalıyordu (standart AR
+        // aging). Bu, TEK YÖNLÜ alacak carilerinde (ör. 7 MEHMET: masraf
+        // carisi, tüm hareketler cha_tip=1 = CETPA'nın borcu) kartları kalıcı
+        // olarak ₺0 bırakıyordu — tabloda "120+ gün" rozetli 40 satır dururken
+        // (2026-08-28 kullanıcı ekran görüntüsü). Net bakiye hangi yöndeyse O
+        // yönün satırları kovalanır; kart etiketleri de yönü söyler
+        // ("alacağımız" / "borcumuz"). Sınır: FIFO kapama YOK — karışık
+        // carilerde kovalar baskın yönün brüt tutarıdır, kapatılmış eski
+        // kalemleri de içerir; başlıktaki yön etiketi bu yüzden önemli.
+        let netOn = 0;
+        (json.satirlar ?? []).forEach(x0 => {
+          const x = x0 as Record<string, unknown>;
+          const tutar = Number(x.cha_meblag ?? 0);
+          netOn += Number(x.cha_tip ?? 0) === 0 ? tutar : -tutar;
+        });
+        const yonAp = netOn < 0; // eksi = CETPA borçlu (doğrulanmış formül)
+        setAgingYonu(yonAp ? 'ap' : 'ar');
         (json.satirlar ?? []).forEach(x0 => {
           const x = x0 as Record<string, unknown>;
           const dt = toDate(x.cha_tarihi);
@@ -219,11 +240,12 @@ export default function CariEkstrePanel({
           const finalAciklama = aciklama || (hizKod ? `Hizmet/Masraf Kodu: ${hizKod}` : '');
           const evrakNo = [x.cha_evrakno_seri, x.cha_evrakno_sira].filter(Boolean).join('');
           const anaEtiket = finalAciklama || evrakNo || (customerName ?? '—');
-          // Yaşlandırma yalnız BORÇ (alacak/receivable) hareketlerini kovalar — standart
-          // AR aging. Alacak (tahsilat/ödeme) "vadesi geçmiş alacak" DEĞİLDİR; bakiyeyi
-          // azaltır. Eskiden borç+alacak karışık toplanıyordu → "Vadesi Geçmiş" şişiyordu
-          // (code-review bulgusu). Tüm hareketler yine satır olarak listelenir.
-          if (borc) {
+          // Yaşlandırma BASKIN YÖNÜN satırlarını kovalar (yukarıdaki ön geçiş).
+          // Karşı yön karıştırılmaz — eskiden borç+alacak karışık toplanıp
+          // "Vadesi Geçmiş" şişiyordu (code-review bulgusu); sonra yalnız borca
+          // sabitlendi ve bu kez borç carileri hep 0 gösterdi. Tüm hareketler
+          // yine satır olarak listelenir.
+          if (yonAp ? !borc : borc) {
             if (ageD <= 30)       newBuckets.current += amount;
             else if (ageD <= 60)  newBuckets.d30     += amount;
             else if (ageD <= 90)  newBuckets.d60     += amount;
@@ -353,11 +375,11 @@ export default function CariEkstrePanel({
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 rounded-xl p-3 text-center">
-          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (t ? 'Toplam Borç' : 'Total Debit') : (t ? 'Toplam Alacak' : 'Total AR')}</div>
+          <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (agingYonu === 'ap' ? (t ? 'Toplam Borcumuz' : 'Total Payable') : (t ? 'Toplam Alacağımız' : 'Total Receivable')) : (t ? 'Toplam Alacak' : 'Total AR')}</div>
           <div className="text-base font-bold text-blue-700">₺{fmt(totalAR)}</div>
         </div>
         <div className={`rounded-xl p-3 text-center ${overdueAR > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
-          <div className={`text-[10px] font-bold uppercase ${overdueAR > 0 ? 'text-red-500' : 'text-green-500'}`}>{t ? 'Vadesi Geçmiş' : 'Overdue'}</div>
+          <div className={`text-[10px] font-bold uppercase ${overdueAR > 0 ? 'text-red-500' : 'text-green-500'}`}>{mikroModu && agingYonu === 'ap' ? (t ? 'Vadesi Geçmiş (borcumuz)' : 'Overdue (payable)') : (t ? 'Vadesi Geçmiş' : 'Overdue')}</div>
           <div className={`text-base font-bold ${overdueAR > 0 ? 'text-red-700' : 'text-green-700'}`}>₺{fmt(overdueAR)}</div>
         </div>
         {mikroModu && (computedBalance !== null || balance !== undefined) ? (() => {
@@ -369,7 +391,7 @@ export default function CariEkstrePanel({
           const bal = computedBalance ?? balance ?? 0;
           return (
             <div className={`rounded-xl p-3 text-center ${bal < 0 ? 'bg-green-50' : bal > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-              <div className={`text-[10px] font-bold uppercase ${bal < 0 ? 'text-green-500' : bal > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? 'Bakiye' : 'Balance'}</div>
+              <div className={`text-[10px] font-bold uppercase ${bal < 0 ? 'text-green-500' : bal > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? (bal < 0 ? 'Bakiye (borcumuz)' : bal > 0 ? 'Bakiye (alacağımız)' : 'Bakiye') : 'Balance'}</div>
               <div className={`text-base font-bold ${bal < 0 ? 'text-green-700' : bal > 0 ? 'text-red-700' : 'text-gray-700'}`}>₺{fmt(Math.abs(bal))}</div>
             </div>
           );

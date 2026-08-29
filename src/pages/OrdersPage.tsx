@@ -2645,6 +2645,7 @@ export default function OrdersPage({
                     currentLanguage={currentLanguage}
                     shipments={shipments}
                     vehicles={vehicles}
+                    warehouses={warehouses}
                     aracKonumlari={aracKonumlari}
                     konumYazabilir={konumYazabilir}
                     kullaniciUid={kullaniciUid}

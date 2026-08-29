@@ -7,6 +7,9 @@ import ProductForm from './ProductForm';
 import { format } from 'date-fns';
 
 import { InventoryItem, Warehouse } from '../types';
+import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
+import { faturaEsle } from '../utils/faturaEsle';
+import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 
 /** Hem Cetpa şeması hem normalize edilmiş Mikro hareketi buraya oturur. */
 interface InventoryMovement {
@@ -45,6 +48,13 @@ function toDate(ts: unknown): Date | null {
 
 export default function ProductDetail({ product, onClose, movements = [], warehouses }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
+  /** Son Hareketler'de tıklanan satır — detay modalı (2026-08-28 isteği:
+   *  "hareketlere tıklayınca detaya giremiyorum"). */
+  const [seciliHareket, setSeciliHareket] = useState<InventoryMovement | null>(null);
+  const [seciliFatura, setSeciliFatura] = useState<MikroFaturaDetayVerisi | null>(null);
+  // Fatura eşleştirme için — bileşen yalnız ürün detayı AÇIKKEN mount olur,
+  // dinleyici de o süreyle sınırlı kalır.
+  const mikroFaturalar = useMikroFaturalar(true);
 
   if (!product) return null;
 
@@ -188,7 +198,8 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                     urunHareketleri.slice(0, 20).map((m) => {
                       const d = toDate(m.timestamp);
                       return (
-                      <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
+                      <tr key={m.id} className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                        onClick={() => setSeciliHareket(m)}>
                         <td className="px-4 py-3 text-xs text-gray-600">{d ? format(d, 'dd.MM.yyyy') : '—'}</td>
                         <td className="px-4 py-3 text-xs font-medium">
                           <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>
@@ -215,6 +226,58 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
             </div>
           </div>
         </div>
+
+        {/* Hareket Detayı — satıra tıklanınca (2026-08-28) */}
+        {seciliHareket && (() => {
+          const m = seciliHareket;
+          const d = toDate(m.timestamp);
+          // Eşleşme MUHAFAZAKÂR (utils/faturaEsle.ts): cari + gün ikisi de
+          // tutmalı ve TEK fatura çıkmalı; yoksa düğme hiç görünmez.
+          const f = faturaEsle(mikroFaturalar, {
+            cariKod: m.cariKod ?? null,
+            tarih: d ? format(d, 'yyyy-MM-dd') : null,
+          });
+          return (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setSeciliHareket(null)}>
+              <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-5 space-y-3" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between">
+                  <h3 className="font-bold text-gray-800">Hareket Detayı</h3>
+                  <button onClick={() => setSeciliHareket(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Tarih</span>{d ? format(d, 'dd.MM.yyyy') : '—'}</div>
+                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Tür</span>
+                    <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>{m.type === 'in' ? '▲ Giriş' : '▼ Çıkış'}</span></div>
+                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Miktar</span>{m.quantity}</div>
+                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Birim Fiyat (KDV hariç)</span>
+                    {(m.birimFiyat ?? 0) > 0 ? tl(m.birimFiyat!) : '—'}</div>
+                  <div className="col-span-2"><span className="text-gray-400 font-bold uppercase block text-[10px]">Cari</span>
+                    <span className="font-mono">{m.cariKod || '—'}</span></div>
+                  {(m.notes || m.reason) && (
+                    <div className="col-span-2"><span className="text-gray-400 font-bold uppercase block text-[10px]">Not</span>{m.notes || m.reason}</div>
+                  )}
+                </div>
+                {f ? (
+                  <button
+                    onClick={() => { setSeciliFatura({ ...f, musteri: f.cariKod }); setSeciliHareket(null); }}
+                    className="apple-button-primary w-full text-sm"
+                  >
+                    Faturayı Aç ({f.faturaNo})
+                  </button>
+                ) : m.cariKod ? (
+                  <p className="text-[10px] text-gray-400 text-center">
+                    Bu hareket için tek bir fatura kaydı eşleştirilemedi
+                    (aynı gün birden çok fatura olabilir ya da Faturaları Çek çalıştırılmamış olabilir).
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          );
+        })()}
+
+        {seciliFatura && (
+          <MikroFaturaDetay fatura={seciliFatura} currentLanguage="tr" onClose={() => setSeciliFatura(null)} />
+        )}
 
         <AnimatePresence>
           {isEditing && (

@@ -5,7 +5,9 @@ import {
   Truck, Phone, MessageSquare, MapPin, Clock, CheckCircle2, Package,
   Navigation, AlertTriangle, Radio, RadioTower,
 } from 'lucide-react';
-import type { Shipment, Vehicle, VehiclePosition } from '../types';
+import type { Shipment, Vehicle, Warehouse, VehiclePosition } from '../types';
+import { birlesikAraclar } from '../utils/filo';
+import { KONUM_ARAC_ANAHTARI, KONUM_OLAYI } from '../hooks/useKonumYayini';
 import { useToast } from './Toast';
 
 /**
@@ -69,6 +71,8 @@ interface Props {
   currentLanguage: string;
   shipments: Shipment[];
   vehicles: Vehicle[];
+  /** Plaka-adlı Mikro depoları araç listesine katmak için (utils/filo.ts). */
+  warehouses: Warehouse[];
   aracKonumlari: VehiclePosition[];
   /** Konum gönderme yetkisi (Admin/Manager/Logistics) — yoksa 403 alırdı. */
   konumYazabilir: boolean;
@@ -77,17 +81,22 @@ interface Props {
 }
 
 export default function CanliSevkiyatPanel({
-  currentLanguage, shipments, vehicles, aracKonumlari, konumYazabilir, kullaniciUid,
+  currentLanguage, shipments, vehicles: hamAraclar, warehouses, aracKonumlari, konumYazabilir, kullaniciUid,
 }: Props) {
   const tr = currentLanguage === 'tr';
   const toast = useToast();
+  // 3 araçtan yalnız 1'i vehicles'taydı; diğer 2'si Mikro'da plaka-adlı DEPO
+  // (2026-08-28 kullanıcı bildirimi). Birleşim: utils/filo.ts.
+  const vehicles = useMemo(() => birlesikAraclar(hamAraclar, warehouses), [hamAraclar, warehouses]);
   const [seciliId, setSeciliId] = useState<string | null>(null);
-  const [paylasilanAracId, setPaylasilanAracId] = useState<string>('');
-  const [paylasimAktif, setPaylasimAktif] = useState(false);
+  const [paylasilanAracId, setPaylasilanAracId] = useState<string>(() => {
+    try { return localStorage.getItem(KONUM_ARAC_ANAHTARI) ?? ''; } catch { return ''; }
+  });
+  const [paylasimAktif, setPaylasimAktif] = useState(() => {
+    try { return !!localStorage.getItem(KONUM_ARAC_ANAHTARI); } catch { return false; }
+  });
   const [paylasimHatasi, setPaylasimHatasi] = useState<string | null>(null);
   const [simdi, setSimdi] = useState(() => Date.now());
-  const watchIdRef = useRef<number | null>(null);
-  const sonGonderimRef = useRef(0);
 
   // Bayatlık göstergesi zamana bağlı. Timer YALNIZ gösterilecek bir konum
   // varken döner — aksi hâlde ekranda hiç konum yokken de saniyede bir tüm
@@ -115,15 +124,15 @@ export default function CanliSevkiyatPanel({
   const konumBayat = konumYasiSn === null || konumYasiSn > BAYAT_ESIK_SN;
 
   // ── Konum paylaşımı (sürücü tarafı) ────────────────────────────────────
+  // Yayının kendisi ARTIK BURADA DEĞİL: useKonumYayini (AppContent'te) yapar.
+  // Kullanıcı düzeltmesi (2026-08-28): "sürücü bu ekranı açık tutmalı diye bir
+  // şey yok — app açıkken hep çeksin." Panel yalnız aracı seçip kalıcı bayrağı
+  // yazar; yayın, uygulama açık olduğu sürece hangi sekmede olursa olsun sürer.
   function paylasimiDurdur() {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
+    try { localStorage.removeItem(KONUM_ARAC_ANAHTARI); } catch { /* yoksay */ }
+    window.dispatchEvent(new Event(KONUM_OLAYI));
     setPaylasimAktif(false);
   }
-
-  useEffect(() => () => paylasimiDurdur(), []);
 
   function paylasimiBaslat() {
     setPaylasimHatasi(null);
@@ -135,53 +144,31 @@ export default function CanliSevkiyatPanel({
       setPaylasimHatasi(tr ? 'Bu tarayıcı konum desteklemiyor.' : 'This browser has no geolocation.');
       return;
     }
-    // Güvenli bağlam şartı — HTTP'de sessizce başarısız olur, önden söyle.
     if (!window.isSecureContext) {
       setPaylasimHatasi(tr
         ? 'Konum yalnız güvenli bağlantıda (HTTPS) çalışır. Sertifika uyarısı veren bir adreste telefon konum vermez.'
         : 'Geolocation requires a secure (HTTPS) context.');
       return;
     }
-    const secilenArac = vehicles.find(v => v.id === paylasilanAracId);
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      async pos => {
-        // Pil/veri için üst sınır: PING_ARALIK_SN'den sık yazma.
-        const now = Date.now();
-        if (now - sonGonderimRef.current < PING_ARALIK_SN * 1000) return;
-        sonGonderimRef.current = now;
-        try {
-          await setDoc(doc(db, 'vehiclePositions', paylasilanAracId), {
-            vehicleId: paylasilanAracId,
-            plate: secilenArac?.plate ?? '',
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracyM: Math.round(pos.coords.accuracy),
-            updatedAt: serverTimestamp(),
-            // KİM paylaştı: bu ekran araç-kullanıcı bağı KURMUYOR, yetkili
-            // herhangi bir kullanıcı herhangi bir aracı seçebilir. Ofisteki
-            // biri yanlışlıkla bir aracı seçerse o aracın konumu ofis olarak
-            // yazılır. Bağ kurulana kadar en azından İZLENEBİLİR olsun.
-            sharedByUid: kullaniciUid ?? null,
-          }, { merge: true });
-        } catch (e) {
-          // Sessiz başarısızlık YOK: en olası neden RBAC 403.
-          setPaylasimHatasi((tr ? 'Konum gönderilemedi: ' : 'Could not send location: ')
-            + (e instanceof Error ? e.message : String(e)));
-          paylasimiDurdur();
-        }
+    // İzni ŞİMDİ iste ki ret burada, kullanıcının gözü önünde görünsün —
+    // arka plan kancası sessiz kalır.
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        try { localStorage.setItem(KONUM_ARAC_ANAHTARI, paylasilanAracId); } catch { /* yoksay */ }
+        window.dispatchEvent(new Event(KONUM_OLAYI));
+        setPaylasimAktif(true);
+        toast(tr ? 'Konum paylaşımı başladı — uygulama açık olduğu sürece sürer' : 'Location sharing started', 'success');
       },
       err => {
         setPaylasimHatasi(
           err.code === err.PERMISSION_DENIED
             ? (tr ? 'Konum izni verilmedi.' : 'Location permission denied.')
             : (tr ? `Konum alınamadı: ${err.message}` : `Location error: ${err.message}`));
-        paylasimiDurdur();
       },
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
+      { enableHighAccuracy: true, timeout: 20_000 },
     );
-    setPaylasimAktif(true);
-    toast(tr ? 'Konum paylaşımı başladı' : 'Location sharing started', 'success');
   }
+
 
   // ── Tahmini varış — YALNIZ iki koordinat da varken ─────────────────────
   // Hedef koordinatı henüz hiçbir yerde tutulmuyor (sipariş adresleri
@@ -212,7 +199,7 @@ export default function CanliSevkiyatPanel({
         </div>
         <p className="text-[11px] text-gray-500 leading-relaxed">
           {tr
-            ? 'Sürücü bu ekranı telefonunda AÇIK tutmalı. Tarayıcı konumu yalnız sayfa ön plandayken gönderir; ekran kilitlenince durur — o zaman aşağıda "konum bayat" görünür.'
+            ? 'Konum, UYGULAMA AÇIK OLDUĞU SÜRECE otomatik gönderilir — bu sekmede durmak gerekmez. Telefon kilitlenince/tarayıcı arka plana düşünce tarayıcı konumu duraklatır; o zaman aşağıda "konum bayat" görünür.'
             : 'The driver must keep this screen open. The browser only reports location while the page is in the foreground.'}
         </p>
         {!konumYazabilir && (

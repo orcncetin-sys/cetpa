@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, incrementField } from '../lib/dbClient';
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
@@ -76,6 +76,30 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const tr = currentLanguage === 'tr';
   const [view, setView] = useState<'dashboard' | 'receive' | 'pick' | 'transfer' | 'cycle' | 'locations' | 'tasks'>('dashboard');
   const [locations, setLocations] = useState<WMSLocation[]>([]);
+  /**
+   * GÖRÜNÜM listesi = wmsLocations ∪ (warehouses'tan türetilen satırlar).
+   *
+   * Mobil WMS "gerçek depoları" göstermiyordu (2026-08-28 bildirimi): depolar
+   * `warehouses`ta duruyor (Depo QR Etiketleri onları listeliyor) ama bu ekran
+   * yalnız `wmsLocations` okuyordu ve oraya yazan içe aktarma henüz
+   * koşmamıştı. Türetilmiş satırlar SALT-GÖRÜNÜMdür (id `wh-` önekli):
+   * düzenle/sil çıkmaz, çünkü kaynakları warehouses kaydıdır.
+   */
+  const konumlarBirlesik = useMemo<WMSLocation[]>(() => {
+    const kapsananDepolar = new Set(locations.map(l => l.warehouseId).filter(Boolean));
+    const turetilen = warehouses
+      .filter(w => !kapsananDepolar.has(w.id))
+      .map(w => ({
+        id: `wh-${w.id}`,
+        code: (w as unknown as { depoNo?: number }).depoNo != null
+          ? `DEPO-${(w as unknown as { depoNo?: number }).depoNo}` : w.name.toUpperCase(),
+        warehouseId: w.id,
+        aisle: '—', rack: '—', level: '—',
+        zone: 'storage' as WMSLocation['zone'],
+        active: true,
+      } as WMSLocation));
+    return [...locations, ...turetilen];
+  }, [locations, warehouses]);
   const [tasks, setTasks] = useState<WMSTask[]>([]);
   const [activeTask, setActiveTask] = useState<WMSTask | null>(null);
   const [scanInput, setScanInput] = useState('');
@@ -96,7 +120,15 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   useEffect(() => {
     const unsubs: (() => void)[] = [];
     unsubs.push(onSnapshot(collection(db, 'wmsLocations'), snap => {
-      setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() } as WMSLocation)));
+      // HAYALET FİLTRESİ (2026-08-28): source mikro* olup warehouseId'siz kayıt
+      // eski `|| '1'` kodunun artığıdır (ekrandaki 'DEPO-1' böyle kalmıştı) —
+      // gerçek depoya karşılık gelmez, listelenmez. Sunucu tarafı temizlik
+      // /api/mikro/import/depo koşunca bunları kalıcı siler; bu filtre import
+      // koşulana kadar da ekranı doğru tutar. Elle eklenen kayıtlarda source
+      // yoktur, etkilenmezler.
+      setLocations(snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as WMSLocation))
+        .filter(l => !(String((l as unknown as { source?: string }).source ?? '').startsWith('mikro') && !l.warehouseId)));
       setLoading(false);
     }));
     unsubs.push(onSnapshot(collection(db, 'wmsTasks'), snap => {
@@ -718,7 +750,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   </tr>
                 </thead>
                 <tbody>
-                  {locations.sort((a,b) => a.code.localeCompare(b.code)).map(l => (
+                  {[...konumlarBirlesik].sort((a,b) => a.code.localeCompare(b.code)).map(l => (
                     <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="p-3 font-mono font-medium">{l.code}</td>
                       <td className="p-3 text-xs">
@@ -740,7 +772,11 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                       </td>
                       {isAuthenticated && (
                         <td className="p-3">
-                          {l.source === 'mikro_import' ? (
+                          {l.id.startsWith('wh-') ? (
+                            <span className="text-[10px] text-gray-400" title={tr ? 'Gerçek depo kaydından türedi (warehouses) — Depo sekmesinden yönetilir' : 'Derived from warehouse record'}>
+                              {tr ? 'Depo' : 'WH'}
+                            </span>
+                          ) : l.source === 'mikro_import' ? (
                             // Mikro depo senkronu bu satırı periyodik olarak merge:true ile
                             // ÜZERİNE YAZIYOR — elle düzenleme/silme sessizce geri alınır/
                             // yeniden oluşur. Kafa karıştırmamak için düzenle/sil gizli.

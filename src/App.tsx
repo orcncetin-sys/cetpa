@@ -262,6 +262,8 @@ import { useAppStore } from './store/appStore';
 import { useRouteSync } from './hooks/useRouteSync';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isAllowed } from './lib/rbac';
+import { useKonumYayini } from './hooks/useKonumYayini';
+import { birlesikAraclar } from './utils/filo';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 
 // --- Utility ---
@@ -668,6 +670,15 @@ function AppContent() {
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
   const konum = useLocation();
+  // Araç konum yayını — UYGULAMA AÇIKKEN sürer, Canlı Sevkiyat sekmesine
+  // bağlı değildir (2026-08-28 kullanıcı düzeltmesi). Panel yalnız aracı
+  // seçip localStorage bayrağını yazar; yayın burada yaşar.
+  useKonumYayini({
+    aktif: !!user && isAllowed(userRole, 'vehiclePositions', 'write'),
+    kullaniciUid: user?.uid,
+    plakaBul: id => vehicles.find(v => v.id === id)?.plate
+      ?? warehouses.find(w => `wh-${w.id}` === id)?.name ?? '',
+  });
   const gezin = useNavigate();
 
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
@@ -6526,7 +6537,7 @@ function AppContent() {
 
       {/* ── Add Shipment Modal ── */}
       <AddShipmentModal
-        vehicles={vehicles}
+        vehicles={birlesikAraclar(vehicles, warehouses) /* plaka-adlı Mikro depoları da araç sayar */}
         isOpen={isAddingShipment}
         onClose={() => {
           setIsAddingShipment(false);

@@ -3953,6 +3953,11 @@ async function startServer() {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff,
     authLimiter, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp, validate,
     getResendKey, sendEmail,
+    authYonetimi: {
+      createUser: (d) => getAuth().createUser(d),
+      deleteUser: (uid) => getAuth().deleteUser(uid),
+      generatePasswordResetLink: (email) => getAuth().generatePasswordResetLink(email),
+    },
   });
 
   reportsRoutes(app, {

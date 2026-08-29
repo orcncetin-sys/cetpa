@@ -37,6 +37,14 @@ export interface EpostaRouteCtx {
   pgServerTimestamp: () => any;
   validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   getResendKey: () => Promise<{ apiKey: string; from: string } | null>;
+  /** Firebase Auth yönetimi — DAR yüzey (yalnız kullanıcı yönetimi uçları
+   *  için). Parola HİÇBİR yerde tutulmaz/gösterilmez: hesap rastgele parolayla
+   *  açılır, kullanıcı kendi parolasını sıfırlama LİNKİ ile belirler. */
+  authYonetimi: {
+    createUser: (d: { email: string; displayName?: string; password: string }) => Promise<{ uid: string }>;
+    deleteUser: (uid: string) => Promise<void>;
+    generatePasswordResetLink: (email: string) => Promise<string>;
+  };
   sendEmail: (to: string, subject: string, html: string, fromOverride?: string, replyTo?: string)
     => Promise<{ id?: string; error?: string }>;
 }
@@ -198,6 +206,72 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
   // ── Admin: User Invite ────────────────────────────────────────────────────
   // POST /api/admin/invite — sends invite email via Resend, stores invite doc in Firestore
   // Body: { email, role }
+  // ── Manuel kullanıcı oluşturma (2026-08-28 kullanıcı isteği) ────────────
+  // Davetten farkı: hesap HEMEN açılır, kullanıcının kayıt akışına girmesi
+  // gerekmez. Parola akışı Resend'e BAĞIMLI DEĞİL (canlıdaki anahtar geçersiz
+  // çıkmıştı): rastgele parolayla açılır, dönen parola-belirleme LİNKİNİ admin
+  // istediği kanaldan (WhatsApp vb.) iletir. Parola hiçbir yerde görünmez.
+  app.post('/api/admin/users', C.authLimiter, C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
+    const { email, displayName = '', role = 'Sales' } = req.body as { email?: string; displayName?: string; role?: string };
+    if (!email || !isValidEmail(email)) { res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' }); return; }
+    if (!(APP_ROLES as readonly string[]).includes(role)) {
+      res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` }); return;
+    }
+    try {
+      // Rastgele parola — kimseye gösterilmez; kullanıcı linkle kendininkini koyar.
+      const geciciParola = Array.from(crypto.getRandomValues(new Uint8Array(24)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'[b % 55]).join('');
+      const yeni = await C.authYonetimi.createUser({ email, displayName: displayName || undefined, password: geciciParola });
+      await C.getAdminDb().collection('users').doc(yeni.uid).set({
+        email, displayName, role,
+        companyId: await C.reqCompanyId(req),
+        status: 'active',
+        createdAt: C.pgServerTimestamp(),
+        createdBy: C.reqActor(req).uid,
+      }, { merge: true });
+      const parolaLinki = await C.authYonetimi.generatePasswordResetLink(email);
+      await C.writeAuditLog(req, 'admin_user_create', { email, role, uid: yeni.uid });
+      res.json({ success: true, uid: yeni.uid, parolaLinki });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Firebase 'email-already-exists' gibi hataları olduğu gibi göster — admin
+      // teşhis edebilmeli (genel "hata oldu" bu ekranda işe yaramaz).
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  // ── Kullanıcı silme — Auth hesabı DAHİL ─────────────────────────────────
+  // Eski istemci-tarafı silme yalnız `users` dokümanını siliyordu; Firebase
+  // Auth hesabı YAŞIYORDU. Rol kaydı olmadığı için giriş açıkça durduruluyor
+  // (2026-08-17 düzeltmesi) ama hesap yetim kalıyordu. Artık ikisi birlikte.
+  app.delete('/api/admin/users/:uid', C.authLimiter, C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
+    const uid = String(req.params.uid || '');
+    if (!uid) { res.status(400).json({ success: false, error: 'uid gerekli' }); return; }
+    if (uid === C.reqActor(req).uid) { res.status(400).json({ success: false, error: 'Kendi hesabınızı silemezsiniz.' }); return; }
+    // Kiracı sınırı: yalnız kendi firmasının kullanıcısını silebilir.
+    const docSnap = await C.getAdminDb().collection('users').doc(uid).get();
+    const veri = (docSnap?.exists ? docSnap.data() : null) as { companyId?: string } | null;
+    // users dokümanı YOKSA hangi firmaya ait olduğu BİLİNEMEZ — silme reddedilir.
+    // (Aksi hâlde kiracı kontrolü atlanır ve bir Admin, BAŞKA firmanın yetim
+    // Auth hesabını uid tahmin ederek silebilirdi.)
+    if (!veri) { res.status(404).json({ success: false, error: 'Kullanıcı kaydı bulunamadı.' }); return; }
+    const cid = await C.reqCompanyId(req);
+    if (veri.companyId && veri.companyId !== cid) {
+      res.status(403).json({ success: false, error: 'Bu kullanıcı başka bir firmaya ait.' }); return;
+    }
+    try {
+      try { await C.authYonetimi.deleteUser(uid); }
+      catch (e) {
+        // Auth'ta yoksa (yalniz doc kalmis yetim kayit) devam — doc silinsin.
+        if (!(e instanceof Error && /no user record|user-not-found/i.test(e.message))) throw e;
+      }
+      await C.getAdminDb().collection('users').doc(uid).delete();
+      await C.writeAuditLog(req, 'admin_user_delete', { uid });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.post('/api/admin/invite', C.authLimiter, C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
