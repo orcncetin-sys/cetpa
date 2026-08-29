@@ -1030,7 +1030,7 @@ export default function AdminPage({
               { label: currentLanguage==='tr'?'Vergi Dairesi':'Tax Office', key: 'taxOffice', placeholder: 'Kadıköy' },
               { label: currentLanguage==='tr'?'Adres':'Address', key: 'address', placeholder: 'İstanbul, Türkiye' },
               { label: 'E-posta', key: 'email', placeholder: 'info@cetpa.com.tr' },
-              { label: currentLanguage==='tr'?'Telefon':'Phone', key: 'phone', placeholder: '+90 212 000 0000' },
+              { label: currentLanguage==='tr'?'Telefon':'Phone', key: 'phone', placeholder: '+90 5xx xxx xx xx' },
               { label: currentLanguage==='tr'?'IBAN':'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
               { label: currentLanguage==='tr'?'Web Sitesi':'Website', key: 'website', placeholder: 'https://cetpa.com.tr' },
             ].map(f => (
@@ -1053,7 +1053,7 @@ export default function AdminPage({
                 rows={3}
                 defaultValue={(companySettings.signature as string) || ''}
                 onChange={e => setCompanySettings((prev: Record<string, unknown>) => ({...prev, signature: e.target.value}))}
-                placeholder={currentLanguage==='tr'?'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 212 000 0000':'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 212 000 0000'}
+                placeholder={currentLanguage==='tr'?'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 5xx xxx xx xx':'CETPA A.Ş.\ninfo@cetpa.com.tr\n+90 5xx xxx xx xx'}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand transition-colors resize-none font-mono"
               />
             </div>
