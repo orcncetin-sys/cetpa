@@ -7,6 +7,7 @@ import {
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
 import OpsWatchdogCard from './OpsWatchdogCard';
+import TrafikKarti from './TrafikKarti';
 import ModuleStatusBoard from './ModuleStatusBoard';
 
 /** Kiracının KENDİ yedek kurulumu (2026-08-21: "her şirket kendi setup'ı"). */
@@ -382,6 +383,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
 
       {/* Operasyon Bekçisi — günlük altyapı sağlık kontrolleri */}
       <OpsWatchdogCard currentLanguage={currentLanguage} toast={toast} />
+      <TrafikKarti currentLanguage={currentLanguage} />
 
       {/* Sistem Sağlığı & Modül Durumu — canlı uç nokta nabzı + sezgisel modül olgunluğu */}
       <ModuleStatusBoard currentLanguage={currentLanguage} toast={toast} />

@@ -15,20 +15,12 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { publicPageKey } from '../lib/publicPaths';
+import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
+import { sayfaGoruntulendi } from '../lib/trafik';
 
-// Top-level tabs that map 1-to-1 with URL path segments.
-// 'finans' was a typo that never matched the real activeTab ('finance') — this
-// silently disabled URL sync (deep-link + back/forward) for the whole Holding
-// tab group (dunning/gelirtanima/finance/ebelge/vergi all missing too), which
-// is why switching those tabs left the URL path stuck on '/holding' with only
-// the unrelated hash changing (2026-08-13 kullanıcı bulgusu, app.cetpa.com.tr/holding#finance).
-export const TOP_LEVEL_TABS = new Set([
-  'dashboard', 'crm', 'orders', 'inventory', 'lojistik', 'muhasebe',
-  'satin-alma', 'ik', 'hukuk', 'uretim', 'kalite', 'proje', 'servis',
-  'bakim', 'raporlar', 'finance', 'ayarlar', 'entegrasyonlar', 'b2b',
-  'holding', 'ihracat', 'sube', 'performans',
-  'dunning', 'gelirtanima', 'ebelge', 'vergi',
-]);
+// TOP_LEVEL_TABS artık paylaşılan modülde (nedeni: src/lib/topLevelTabs.ts
+// başlığı). Buradan re-export — mevcut import'lar kırılmasın.
+export { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
 
 function tabToPath(tab: string): string {
   return tab === 'dashboard' ? '/' : `/${tab}`;
@@ -60,6 +52,13 @@ export function useRouteSync({ activeTab, setActiveTab }: RouteState) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // only on mount
+
+  // ── Çerezsiz trafik sayacı ────────────────────────────────────────────────
+  // Burada, çünkü useRouteSync HER yol değişimini zaten görüyor ve App'te
+  // daima çağrılı — ayrı bir hook "yazıldı ama bağlanmadı" riski taşırdı.
+  useEffect(() => {
+    sayfaGoruntulendi(location.pathname);
+  }, [location.pathname]);
 
   // ── On state change: state → URL ─────────────────────────────────────────
   useEffect(() => {

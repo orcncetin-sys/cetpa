@@ -48,6 +48,15 @@ describe('publicPaths — değişmezler', () => {
       expect(landing, `${a}: bağlantı yok`).toContain(`<Link to={PUBLIC_PATHS.${a}}`);
   });
 
+  // Sitemap, genel yollarla senkron kalmalı: yol eklenip sitemap'e konmazsa
+  // Search Console o sayfayı hiç görmez; sitemap'te olup rotası olmayan URL
+  // ise yumuşak-404 olarak raporlanır (5 sayfa 2 ay boyunca tam bu durumdaydı).
+  it('her genel yol sitemap.xml içinde', () => {
+    const sitemap = oku('../../public/sitemap.xml');
+    for (const a of ANAHTARLAR)
+      expect(sitemap, `${a}: sitemap'te yok`).toContain(`https://app.cetpa.com.tr${PUBLIC_PATHS[a]}</loc>`);
+  });
+
   // Harita zaten Record<PublicPageKey,...> — eksik anahtar DERLEME hatası.
   // Bu test o haritanın `as`/`any` ile gevşetilmediğini de doğrular.
   it('App.tsx haritası her anahtarı bağlar', () => {

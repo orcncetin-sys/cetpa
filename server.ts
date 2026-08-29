@@ -9,6 +9,7 @@ import {
 } from "./src/server/pgShim.js";
 import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
+import { trafikRoutes } from './src/server/routes/trafikRoutes.js';
 import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
 import { epostaRoutes } from "./src/server/routes/epostaRoutes.js";
 import { kanalRoutes } from "./src/server/routes/kanalRoutes.js";
@@ -3915,6 +3916,19 @@ async function startServer() {
 
   opsRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
+  });
+
+  // Cerezsiz trafik sayaci - /api/hit (kimliksiz, kendi hiz limitiyle) +
+  // /api/trafik/ozet (super-admin). Ayrinti: trafikRoutes.ts basligi.
+  trafikRoutes(app, {
+    getAdminDb: adminDbZorunlu, requireAuth, requireSuperAdmin,
+    hitLimiter: rateLimit({
+      windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+      // IP yalniz bellek ici limit anahtari - diske yazilmaz (KVKK notu
+      // trafikRoutes.ts basliginda).
+      message: { error: 'Too many hits' },
+    }),
+    pgServerTimestamp,
   });
 
   // ⚠ Shopify ve Stripe webhook'lari `req.rawBody` ile HMAC/imza dogrular.
