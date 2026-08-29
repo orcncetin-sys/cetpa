@@ -7,6 +7,7 @@ import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, query, wh
 import { db, auth } from '../firebase';
 
 import { InventoryItem, Warehouse } from '../types';
+import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
 import { formatCurrency } from '../utils/currency';
 
 interface ProductFormProps {
@@ -28,6 +29,8 @@ interface ProductFormProps {
 }
 
 export default function ProductForm({ isOpen, onClose, onSave, initialData, warehouses, existingCategories = [], exchangeRates }: ProductFormProps) {
+  // Klavye + fokus davranisi (ESC, Tab dongusu, fokus iade) — a11y teshisi.
+  const dialogRef = useModalErisilebilirlik(isOpen, onClose);
   // NOT: `warehouses` eskiden prop'tan state'e KOPYALANIYORDU. Gereksizdi ve
   // bir tur gecikme yaratıyordu; prop doğrudan kullanılıyor.
 
@@ -184,6 +187,9 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <motion.div
+        ref={dialogRef}
+        role="dialog" aria-modal="true"
+        aria-label={initialData ? 'Ürünü Düzenle' : 'Yeni Ürün Ekle'}
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
@@ -198,7 +204,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
               <p className="text-sm text-gray-500">Envanter bilgilerini aşağıdan yönetebilirsiniz.</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+          <button onClick={onClose} aria-label="Kapat" className="p-2 hover:bg-gray-200 rounded-full transition-colors">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>

@@ -10,7 +10,14 @@ interface Props {
 }
 
 export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: Props) {
-  useEffect(() => { window.scrollTo(0, 0); }, []);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    // Sekme basligi — SPA'da genel sayfalar kendi basligini koymuyordu; tum
+    // sayfalar "CETPA Cloud ERP — ..." gorunuyordu (a11y teshisi 2026-08-28).
+    const onceki = document.title;
+    document.title = (lang === 'tr' ? 'Kariyer' : 'Careers') + ' — CETPA';
+    return () => { document.title = onceki; };
+  }, [lang]);
   const isTR = lang === 'tr';
   const bg = darkMode ? 'bg-[#0a0a0a] text-[#f5f5f7]' : 'bg-white text-[#1D1D1F]';
   const muted = darkMode ? 'text-white/65' : 'text-black/70';
@@ -56,7 +63,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
         <div className="max-w-3xl mx-auto px-6 h-16 flex items-center gap-4">
           <button
             onClick={onBack}
-            className={`flex items-center gap-2 text-sm font-medium transition-colors outline-none ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
+            className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
           >
             <ArrowLeft className="w-4 h-4" />
             {isTR ? 'Geri' : 'Back'}
@@ -170,7 +177,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
           </p>
           <a
             href={generalApplyHref}
-            className={`inline-flex items-center gap-2 text-sm font-medium transition-colors outline-none ${darkMode ? 'text-white/80 hover:text-white' : 'text-black/80 hover:text-black'}`}
+            className={`inline-flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg ${darkMode ? 'text-white/80 hover:text-white' : 'text-black/80 hover:text-black'}`}
           >
             <Mail className="w-4 h-4" style={{ color: '#ff4000' }} />
             info@cetpa.com.tr

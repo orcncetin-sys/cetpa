@@ -9,8 +9,7 @@ import {
   ArrowRight, LayoutDashboard, Zap, Package, Truck, Landmark, Users,
   BarChart3, ShieldCheck, Globe, Check, MessageSquare, Briefcase,
   Activity, Scale, Building2, Code, Database, Moon, Sun,
-  TrendingUp, Play, Pause, ChevronDown, Mail, Star, X, Minus,
-} from 'lucide-react';
+  TrendingUp, Play, Pause, ChevronDown, Mail, Star, X, Minus, Menu as MenuIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { db } from '../firebase';
@@ -273,12 +272,15 @@ const COMP_ROWS = [
 ];
 
 function CellIcon({ val, isTR }: { val: string; isTR: boolean }) {
-  if (val === 'check') return <Check className="w-4 h-4 text-emerald-500 mx-auto" />;
-  if (val === 'x')     return <X     className="w-4 h-4 text-black/60 mx-auto dark:text-white/55" />;
+  // sr-only metinler: ikonlar aria'sizdi, ekran okuyucu karsilastirma
+  // tablosunda HICBIR sey duymuyordu (a11y teshisi 2026-08-28).
+  if (val === 'check') return <><Check aria-hidden="true" className="w-4 h-4 text-emerald-500 mx-auto" /><span className="sr-only">{isTR ? 'Var' : 'Yes'}</span></>;
+  if (val === 'x')     return <><X aria-hidden="true" className="w-4 h-4 text-black/60 mx-auto dark:text-white/55" /><span className="sr-only">{isTR ? 'Yok' : 'No'}</span></>;
   return (
     <span className="flex flex-col items-center gap-0.5">
-      <Minus className="w-4 h-4 text-amber-500 mx-auto" />
-      <span className="text-[9px] font-semibold text-amber-500">{isTR ? 'Kısmi' : 'Partial'}</span>
+      <Minus aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-500 mx-auto" />
+      {/* amber-500 beyaz zeminde ~2.15:1 idi (9px metin, AA=4.5:1); amber-700 ~4.9:1 */}
+      <span className="text-[9px] font-semibold text-amber-700 dark:text-amber-500">{isTR ? 'Kısmi' : 'Partial'}</span>
     </span>
   );
 }
@@ -415,6 +417,8 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                     min={min} max={max} step={step}
                     value={value}
                     onChange={e => setter(Number(e.target.value))}
+                    aria-label={isTR ? labelTR : labelEN}
+                    aria-valuetext={display}
                     className={sliderClass}
                   />
                   <div className={cn('flex justify-between text-[10px] mt-1', d('text-white/55', 'text-black/60'))}>
@@ -652,8 +656,8 @@ function InnovationOrb({ isTR, darkMode, activeIdx }: {
               <text x={lx} y={ly - 5} textAnchor="middle" fill={s.color}
                 fontSize="12.5" fontWeight="800" fontFamily="system-ui,sans-serif">{s.label}</text>
               <text x={lx} y={ly + 9} textAnchor="middle"
-                fill={darkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'}
-                fontSize="8.5" fontFamily="system-ui,sans-serif">{s.sub}</text>
+                fill={darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.6)'}
+                fontSize="10" fontFamily="system-ui,sans-serif">{s.sub}</text>
             </g>
           );
         })}
@@ -946,10 +950,12 @@ function SpotlightSection({ isTR, darkMode, d, eyebrow, title, desc, bullets, ct
 function AccountantPartnerSection({ isTR, d }: SectionProps) {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [hata, setHata] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
+    setHata(false);
     try {
       await addDoc(collection(db, 'partnerApplications'), {
         email: email.trim(),
@@ -958,10 +964,13 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
         status: 'new',
         source: 'landing_partner_section',
       });
+      // "Alındı" YALNIZ gerçekten yazılınca denir. Eski kod catch'i yutup
+      // koşulsuz success gösteriyordu — yazma düşerse başvuru KAYBOLUYOR ve
+      // başvuran bunu asla öğrenemiyordu (a11y teşhisi 2026-08-28).
+      setSubmitted(true);
     } catch {
-      // Non-blocking — still show success
+      setHata(true);
     }
-    setSubmitted(true);
   };
 
   const benefits = [
@@ -1037,6 +1046,13 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
             <p className={cn('text-xs font-bold uppercase tracking-widest text-center mb-5', d('text-white/50', 'text-black/70'))}>
               {isTR ? 'Mali müşavir ortaklık programına başvurun' : 'Apply for the CPA partner program'}
             </p>
+            {hata && (
+              <p className="text-xs rounded-xl px-3 py-2 mb-3 border bg-red-50 border-red-100 text-red-600">
+                {isTR
+                  ? 'Kaydedemedik — lütfen info@cetpa.com.tr adresine yazın.'
+                  : 'Could not save — please email info@cetpa.com.tr.'}
+              </p>
+            )}
             {!submitted ? (
               <form onSubmit={handleSubmit} action={`mailto:info@cetpa.com.tr`} className="flex flex-col sm:flex-row gap-3">
                 <input
@@ -1262,6 +1278,21 @@ export default function LandingPage({
         }
         .cetpa-float { animation: cetpa-float 6s ease-in-out infinite; }
         .cetpa-marquee-track { animation: cetpa-marquee 28s linear infinite; }
+        /* WCAG 2.2.2: 5 sn'den uzun otomatik hareket durdurulabilir olmali. */
+        .cetpa-marquee-track:hover, .cetpa-marquee-track:focus-within { animation-play-state: paused; }
+        /* WCAG 2.3.3 / prefers-reduced-motion: sonsuz animasyonlarin tamami
+           kapanir (a11y teshisi 2026-08-28 — hicbir yerde taninmiyordu).
+           motion/react giris animasyonlari KISA ve TEK SEFERLIK — reduce
+           kapsaminda kritik olan sonsuz hareketti; MotionConfig denendi ama
+           reducedMotion="user" TUM whileInView animasyonlarini reduce KAPALI
+           iken bile opacity:0'da kilitledi (152 eleman, 2026-08-29 olcumu) —
+           regresyon oldugu icin geri alindi. */
+        @media (prefers-reduced-motion: reduce) {
+          .cetpa-float, .cetpa-marquee-track, .cetpa-gradient-text,
+          [class*='cetpa-spin'], [class*='cetpa-pulse'], [class*='cetpa-sparkle'] {
+            animation: none !important;
+          }
+        }
         .cetpa-glow {
           box-shadow: 0 0 0 1px rgba(255,64,0,0.15), 0 8px 32px -8px rgba(255,64,0,0.3), 0 32px 80px -16px rgba(255,64,0,0.15);
         }
@@ -1325,10 +1356,51 @@ export default function LandingPage({
                 className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
                 {darkMode ? <Sun className="w-[15px] h-[15px]" aria-hidden="true" /> : <Moon className="w-[15px] h-[15px]" aria-hidden="true" />}
               </button>
+              {/* Mobil menu (EN SAGDA: solda EN/tema ile cakisiyordu — olculdu: EN 112-149, burger 128-172 ustuste) (a11y teshisi: 6 bolum baglantisi md alti TAMAMEN
+                  kayboluyordu, Fiyatlar'a tek yol ~10 ekran scroll'du).
+                  Native <details>: JS'siz, ESC/fokus tarayicidan bedava. */}
+              <details className="md:hidden relative">
+                <summary
+                  aria-label={isTR ? 'Menü' : 'Menu'}
+                  className={cn('list-none cursor-pointer w-11 h-11 -my-1 flex items-center justify-center rounded-lg border transition-all',
+                    d('border-white/15 text-white/70', 'border-black/15 text-black/70'))}
+                >
+                  <MenuIcon className="w-5 h-5" aria-hidden="true" />
+                </summary>
+                <div className={cn('absolute right-0 top-12 z-50 min-w-44 rounded-2xl border shadow-xl py-2',
+                  d('bg-[#0c0c12] border-white/10', 'bg-white border-black/10'))}>
+                  {[
+                    { id: 'innovation', label: isTR ? 'Ürünler'       : 'Products'    },
+                    { id: 'how',        label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
+                    { id: 'features',   label: isTR ? 'Özellikler'    : 'Features'    },
+                    { id: 'pricing',    label: isTR ? 'Fiyatlar'      : 'Pricing'     },
+                    { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
+                    { id: 'partners',   label: isTR ? 'Ortaklar'      : 'Partners'    },
+                  ].map(({ id, label }) => (
+                    <button key={id}
+                      onClick={e => {
+                        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+                        (e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open');
+                      }}
+                      className={cn('block w-full text-left px-4 py-2.5 text-sm font-medium transition-colors',
+                        d('text-white/70 hover:text-white hover:bg-white/5', 'text-black/70 hover:text-black hover:bg-black/5'))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={onLoginClick}
+                    className={cn('block w-full text-left px-4 py-2.5 text-sm font-bold border-t mt-1 pt-3 transition-colors',
+                      d('text-white border-white/10 hover:bg-white/5', 'text-black border-black/10 hover:bg-black/5'))}
+                  >
+                    {isTR ? 'Giriş' : 'Sign in'}
+                  </button>
+                </div>
+              </details>
               {!isLoggedIn ? (
                 <>
                   <button onClick={onLoginClick}
-                    className={cn('text-[13px] font-semibold px-3 py-1.5 whitespace-nowrap transition-colors', d('text-white/65 hover:text-white', 'text-black/65 hover:text-black'))}>
+                    className={cn('hidden sm:inline-flex text-[13px] font-semibold px-3 py-1.5 whitespace-nowrap transition-colors', d('text-white/65 hover:text-white', 'text-black/65 hover:text-black'))}>
                     {isTR ? 'Giriş' : 'Sign In'}
                   </button>
                   <button onClick={onTryClick}
@@ -1888,7 +1960,7 @@ export default function LandingPage({
       <section className="py-24 overflow-hidden">
         <div className="w-full max-w-6xl mx-auto px-6">
           <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-            className={cn('relative rounded-[2.5rem] overflow-hidden p-14 md:p-20 cetpa-noise cetpa-grid-bg', d('bg-[#0b0b14]','bg-white border border-black/8 shadow-xl'))}>
+            className={cn('relative rounded-[2.5rem] overflow-hidden p-8 sm:p-14 md:p-20 cetpa-noise cetpa-grid-bg', d('bg-[#0b0b14]','bg-white border border-black/8 shadow-xl'))}>
             <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 20% 50%, rgba(255,64,0,0.12) 0%, transparent 65%)' }} />
             <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
               {/* Left: statement */}
@@ -1966,7 +2038,7 @@ export default function LandingPage({
       <section className="py-32 px-4">
         <div className="max-w-5xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-            className="relative rounded-[3rem] overflow-hidden p-16 md:p-24 text-center cetpa-noise"
+            className="relative rounded-[3rem] overflow-hidden p-8 sm:p-16 md:p-24 text-center cetpa-noise"
             style={{ background: d('linear-gradient(135deg, #0f0a08 0%, #1a0800 30%, #0f0a08 100%)', 'linear-gradient(135deg, #fff5f0 0%, #fff0e8 50%, #fff5f0 100%)') }}>
             <div className="absolute inset-0 rounded-[3rem] pointer-events-none" style={{ background: 'linear-gradient(135deg, rgba(255,64,0,0.3) 0%, transparent 50%, rgba(255,140,0,0.2) 100%)', WebkitMask: 'padding-box, border-box', padding: '1px' }} />
             <SparkleField count={16} color={brand} />
@@ -2032,7 +2104,7 @@ export default function LandingPage({
                 </button>
                 <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  Changelog
+                  {isTR ? 'Nasıl Çalışır' : 'How It Works'}
                 </button>
                 <Link to={PUBLIC_PATHS.developers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
@@ -2047,7 +2119,7 @@ export default function LandingPage({
               <div className="space-y-3">
                 <button onClick={() => document.getElementById('solutions')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Hakkımızda' : 'About'}
+                  {isTR ? 'Sektörler' : 'Industries'}
                 </button>
                 <Link to={PUBLIC_PATHS.careers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>

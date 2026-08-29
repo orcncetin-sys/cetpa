@@ -670,6 +670,9 @@ function AppContent() {
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
   const konum = useLocation();
+  // <html lang> dil secimini izlesin: EN icerik acikken lang="tr" kalirsa
+  // ekran okuyucu Ingilizceyi Turkce fonetikle okur (WCAG 3.1.1, a11y teshisi).
+  useEffect(() => { document.documentElement.lang = currentLanguage; }, [currentLanguage]);
   // Araç konum yayını — UYGULAMA AÇIKKEN sürer, Canlı Sevkiyat sekmesine
   // bağlı değildir (2026-08-28 kullanıcı düzeltmesi). Panel yalnız aracı
   // seçip localStorage bayrağını yazar; yayın burada yaşar.

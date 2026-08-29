@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import type { Lead, Shipment, Vehicle } from '../types';
 import CustomerCombobox from './CustomerCombobox';
+import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
 
 interface AddShipmentModalProps {
   isOpen: boolean;
@@ -22,6 +23,8 @@ export default function AddShipmentModal({
   initialData,
   onSubmit
 }: AddShipmentModalProps) {
+  // Klavye + fokus davranisi (ESC, Tab dongusu, fokus iade) — a11y teshisi.
+  const dialogRef = useModalErisilebilirlik(isOpen, onClose);
   const [formData, setFormData] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [customerSearch, setCustomerSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,11 +56,16 @@ export default function AddShipmentModal({
         className="absolute inset-0 bg-black/40 backdrop-blur-sm" 
       />
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} 
+        ref={dialogRef}
+        role="dialog" aria-modal="true"
+        aria-label={initialData?.id ? 'Sevkiyatı Düzenle' : 'Sevkiyat Ekle'}
         className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-xl font-bold">{initialData?.id ? 'Sevkiyatı Düzenle' : 'Sevkiyat Ekle'}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <Plus className="w-6 h-6 rotate-45" />
+          {/* Eskiden 45° döndürülmüş Plus ikonuydu ve aria-label yoktu —
+              ekran okuyucu yalnız "düğme" diyordu (a11y teşhisi). */}
+          <button onClick={onClose} aria-label="Kapat" className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
