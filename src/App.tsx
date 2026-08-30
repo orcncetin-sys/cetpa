@@ -3424,7 +3424,12 @@ function AppContent() {
   // app.cetpa.com.tr/dashboard LANDING açıyordu (2026-08-30 canlı bulgu).
   // Kök '/' bilinçli olarak landing'de kalır: oturumlu kullanıcı siteyi
   // gezebilmeli; panele "Panele Git" ya da herhangi bir derin yol götürür.
-  const uygulamaYolundaMi = konum.pathname !== '/' && TOP_LEVEL_TABS.has(konum.pathname.replace(/^\//, '').split('/')[0]);
+  // İLK yola bakılır, güncel pathname'e DEĞİL: useRouteSync '/dashboard'ı
+  // hemen '/'a çevirir (tabToPath eşlemesi) ve render yarışında bu kapı '/'
+  // görüp landing'de kalıyordu — /crm çalışırken /dashboard çalışmıyordu
+  // (2026-08-30 canlı ayrıştırma). useState başlatıcısı yalnız mount'ta koşar.
+  const [ilkYol] = useState(() => window.location.pathname);
+  const uygulamaYolundaMi = ilkYol !== '/' && TOP_LEVEL_TABS.has(ilkYol.replace(/^\//, '').split('/')[0]);
   if (!enteredApp && !isGuestMode && user && uygulamaYolundaMi) {
     setEnteredApp(true);
   }
