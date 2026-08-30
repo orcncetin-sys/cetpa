@@ -671,6 +671,12 @@ function AppContent() {
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
   const konum = useLocation();
+  // İLK yol — useRouteSync '/dashboard'ı anında '/'a çevirdiği için (tabToPath)
+  // landing kapısı güncel pathname'e bakamaz; mount anındaki yol saklanır.
+  // ⚠ Bu hook BURADA olmak zorunda: koşullu return'lerden (trackOrderId,
+  // isAuthReady) sonra çağrılınca React #310 (hook sırası) ile TÜM uygulama
+  // ErrorBoundary'ye düştü (2026-08-30 canlı hata — 10 dk içinde geri alındı).
+  const [ilkYol] = useState(() => window.location.pathname);
   // <html lang> dil secimini izlesin: EN icerik acikken lang="tr" kalirsa
   // ekran okuyucu Ingilizceyi Turkce fonetikle okur (WCAG 3.1.1, a11y teshisi).
   useEffect(() => { document.documentElement.lang = currentLanguage; }, [currentLanguage]);
@@ -3424,11 +3430,6 @@ function AppContent() {
   // app.cetpa.com.tr/dashboard LANDING açıyordu (2026-08-30 canlı bulgu).
   // Kök '/' bilinçli olarak landing'de kalır: oturumlu kullanıcı siteyi
   // gezebilmeli; panele "Panele Git" ya da herhangi bir derin yol götürür.
-  // İLK yola bakılır, güncel pathname'e DEĞİL: useRouteSync '/dashboard'ı
-  // hemen '/'a çevirir (tabToPath eşlemesi) ve render yarışında bu kapı '/'
-  // görüp landing'de kalıyordu — /crm çalışırken /dashboard çalışmıyordu
-  // (2026-08-30 canlı ayrıştırma). useState başlatıcısı yalnız mount'ta koşar.
-  const [ilkYol] = useState(() => window.location.pathname);
   const uygulamaYolundaMi = ilkYol !== '/' && TOP_LEVEL_TABS.has(ilkYol.replace(/^\//, '').split('/')[0]);
   if (!enteredApp && !isGuestMode && user && uygulamaYolundaMi) {
     setEnteredApp(true);
