@@ -1347,13 +1347,13 @@ export default function LandingPage({
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-4">
               <button onClick={onLanguageToggle}
                 aria-label={isTR ? 'Dili İngilizce yap' : 'Switch to Turkish'}
-                className={cn('text-[11px] font-bold min-w-11 min-h-11 md:min-w-0 md:min-h-0 px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
+                className={cn('text-[12px] font-bold min-w-11 min-h-11 md:min-w-0 md:min-h-0 px-2 py-1.5 rounded-lg transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('text-white/60 hover:text-white hover:bg-white/8', 'text-black/70 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
               <button onClick={onDarkModeToggle}
                 aria-label={darkMode ? (isTR ? 'Açık moda geç' : 'Switch to light mode') : (isTR ? 'Koyu moda geç' : 'Switch to dark mode')}
                 aria-pressed={darkMode}
-                className={cn('w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
+                className={cn('w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('text-white/60 hover:text-white hover:bg-white/8', 'text-black/70 hover:text-black hover:bg-black/5'))}>
                 {darkMode ? <Sun className="w-[15px] h-[15px]" aria-hidden="true" /> : <Moon className="w-[15px] h-[15px]" aria-hidden="true" />}
               </button>
               {/* Mobil menu (EN SAGDA: solda EN/tema ile cakisiyordu — olculdu: EN 112-149, burger 128-172 ustuste) (a11y teshisi: 6 bolum baglantisi md alti TAMAMEN
@@ -1362,8 +1362,8 @@ export default function LandingPage({
               <details className="md:hidden relative">
                 <summary
                   aria-label={isTR ? 'Menü' : 'Menu'}
-                  className={cn('list-none cursor-pointer w-11 h-11 -my-1 flex items-center justify-center rounded-lg border transition-all',
-                    d('border-white/15 text-white/70', 'border-black/15 text-black/70'))}
+                  className={cn('list-none cursor-pointer w-11 h-11 -my-1 flex items-center justify-center rounded-lg transition-all',
+                    d('text-white/70 hover:bg-white/8', 'text-black/70 hover:bg-black/5'))}
                 >
                   <MenuIcon className="w-5 h-5" aria-hidden="true" />
                 </summary>
@@ -1499,8 +1499,8 @@ export default function LandingPage({
                         <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#febc2e', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
                         <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#28c840', boxShadow: '0 0 0 0.5px rgba(0,0,0,0.2)' }} />
                       </div>
-                      <div style={{ flex: 1, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.07)'), borderRadius: 6, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 40px' }}>
-                        <span style={{ fontSize: 10, color: d('rgba(255,255,255,0.35)', 'rgba(0,0,0,0.4)'), fontFamily: 'system-ui, sans-serif', letterSpacing: '0.01em' }}>
+                      <div style={{ flex: 1, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.07)'), borderRadius: 6, height: 20, display: 'flex', alignItems: 'center', overflow: 'hidden', minWidth: 0, justifyContent: 'center', margin: '0 40px' }}>
+                        <span style={{ fontSize: 10, color: d('rgba(255,255,255,0.35)', 'rgba(0,0,0,0.4)'), fontFamily: 'system-ui, sans-serif', letterSpacing: '0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '20px' }}>
                           🔒 app.cetpa.com.tr/dashboard
                         </span>
                       </div>

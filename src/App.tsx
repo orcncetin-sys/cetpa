@@ -265,6 +265,7 @@ import { isAllowed } from './lib/rbac';
 import { useKonumYayini } from './hooks/useKonumYayini';
 import { birlesikAraclar } from './utils/filo';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
+import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -3417,7 +3418,17 @@ function AppContent() {
   );
 
   // --- Entrance Logic: Landing vs Login vs App ---
-  if (!enteredApp && !isGuestMode) {
+  // OTURUMLU kullanıcı bir UYGULAMA yoluna geldiyse (ör. /dashboard, /crm)
+  // landing gösterilmez — doğrudan panele girer. `enteredApp` yalnız bellekte
+  // olduğundan her tam yenilemede sıfırlanıyordu; oturum açıkken bile
+  // app.cetpa.com.tr/dashboard LANDING açıyordu (2026-08-30 canlı bulgu).
+  // Kök '/' bilinçli olarak landing'de kalır: oturumlu kullanıcı siteyi
+  // gezebilmeli; panele "Panele Git" ya da herhangi bir derin yol götürür.
+  const uygulamaYolundaMi = konum.pathname !== '/' && TOP_LEVEL_TABS.has(konum.pathname.replace(/^\//, '').split('/')[0]);
+  if (!enteredApp && !isGuestMode && user && uygulamaYolundaMi) {
+    setEnteredApp(true);
+  }
+  if (!enteredApp && !isGuestMode && !(user && uygulamaYolundaMi)) {
     if (!showLoginPage || user) {
       const handleDemoSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -4607,7 +4618,7 @@ function AppContent() {
                 </div>
                 <p className="text-sm text-gray-600 leading-relaxed">
                   {currentLanguage === 'tr'
-                    ? 'CETPA, verilerinizi Google Firebase altyapısında (Frankfurt, Avrupa Birliği) saklamaktadır. İşletme ve Kurumsal plan kullanıcıları için 6698 sayılı KVKK kapsamında kişisel verilerin işlenmesine açık rızanız gerekmektedir. Verileriniz üçüncü şahıslarla paylaşılmaz.'
+                    ? 'CETPA, iş verilerinizi kendi yönetimindeki sunucuda çalışan veritabanında saklar; kimlik doğrulama ve dosya depolama Google Firebase (AB/Frankfurt) üzerindedir. 6698 sayılı KVKK kapsamında kişisel verilerin işlenmesine açık rızanız gerekmektedir. Verileriniz üçüncü şahıslarla paylaşılmaz.'
                     : 'CETPA stores your data on Google Firebase infrastructure (Frankfurt, EU). Enterprise plan users must explicitly consent to personal data processing under KVKK (Law 6698). Your data is never shared with third parties.'}
                 </p>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
