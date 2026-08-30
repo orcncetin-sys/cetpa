@@ -339,7 +339,7 @@ export default function SatinAlmaPage(props: Props) {
                                 </div>
                                 {isNative ? (
                                   hasFullAccess('satin-alma') && (
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                                       <button onClick={e => { e.stopPropagation(); setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
                                         className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
                                         <Edit2 className="w-3.5 h-3.5" />
@@ -408,14 +408,14 @@ export default function SatinAlmaPage(props: Props) {
                         onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); }}>
                         <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
                           onClick={e => e.stopPropagation()}
-                          className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                          className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                           <div className="flex items-center justify-between">
                             <h2 className="font-bold text-lg">
                               {editingSupplier
                                 ? (currentLanguage === 'tr' ? 'Tedarikçi Düzenle' : 'Edit Supplier')
                                 : (currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier')}
                             </h2>
-                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }}>
+                            <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }} aria-label="Kapat" className="p-2 -m-2 rounded-lg hover:bg-gray-100">
                               <X className="w-5 h-5 text-gray-400" />
                             </button>
                           </div>
@@ -1083,7 +1083,7 @@ export default function SatinAlmaPage(props: Props) {
                         )}
                         {p612Budgets.length > 0 && (
                           <>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                               <div className="apple-card p-4 bg-blue-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Toplam Bütçe':'Total Budget'}</p><p className="text-xl font-black text-blue-600">₺{Math.round(totalAllocated).toLocaleString('tr-TR')}</p></div>
                               <div className="apple-card p-4 bg-amber-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Harcanan':'Spent'}</p><p className="text-xl font-black text-amber-600">₺{Math.round(totalSpent).toLocaleString('tr-TR')}</p></div>
                               <div className={`apple-card p-4 ${utilizationPct>90?'bg-red-50':utilizationPct>70?'bg-orange-50':'bg-emerald-50'}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Kullanım':'Utilization'}</p><p className={`text-xl font-black ${utilizationPct>90?'text-red-600':utilizationPct>70?'text-orange-600':'text-emerald-600'}`}>%{utilizationPct.toFixed(1)}</p></div>

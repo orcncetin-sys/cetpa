@@ -3921,7 +3921,7 @@ function AppContent() {
                   </div>
                 )}
                 {userRole === 'Admin' && (
-                  <label className="absolute -bottom-1.5 -right-1.5 bg-brand rounded-full p-1 shadow-md ring-2 ring-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
+                  <label className="absolute -bottom-1.5 -right-1.5 bg-brand rounded-full p-1 shadow-md ring-2 ring-white cursor-pointer opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
                     <Upload className="w-3 h-3 text-white" />
                     <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/avif,image/webp" className="hidden" onChange={handleLogoUpload} />
                   </label>
@@ -4003,8 +4003,7 @@ function AppContent() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-84 apple-card z-[100] shadow-2xl overflow-hidden"
-                      style={{ width: 320 }}
+                      className="fixed sm:absolute inset-x-3 sm:inset-x-auto sm:right-0 top-16 sm:top-auto sm:mt-2 sm:w-80 apple-card z-[100] shadow-2xl overflow-hidden"
                     >
                       {/* Header */}
                       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -4129,7 +4128,7 @@ function AppContent() {
               </button>
               {user && (
                 <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
-                  className={cn("p-1.5 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
+                  className={cn("p-2.5 -m-1 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
                   <ShieldCheck className="w-4 h-4" />
                 </button>
               )}

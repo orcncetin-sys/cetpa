@@ -222,7 +222,7 @@ export default function GelirTablosuTab({
       </div>
 
       {/* KPI summary cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: currentLanguage === 'tr' ? 'Net Satışlar' : 'Net Sales', value: fmt(netSatislar), color: '#3b82f6' },
           { label: currentLanguage === 'tr' ? 'Brüt Kâr Marjı' : 'Gross Margin', value: fmtPct(brutKarMarji), color: brutKarMarji >= 30 ? '#10b981' : brutKarMarji >= 15 ? '#f59e0b' : '#ef4444' },

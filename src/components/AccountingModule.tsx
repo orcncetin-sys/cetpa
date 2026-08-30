@@ -105,7 +105,7 @@ export const SortHeader = ({
         <TrendingUp 
           className={cn(
             "w-3 h-3 transition-all",
-            isActive ? "text-[#ff4000] opacity-100" : "text-gray-300 opacity-0 group-hover:opacity-100",
+            isActive ? "text-[#ff4000] opacity-100" : "text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100",
             isActive && currentSort.direction === 'desc' ? "rotate-180" : ""
           )} 
         />
@@ -2533,7 +2533,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 <button onClick={() => setShowWaybillModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.waybillNo}</label>
                     <input type="text" value={waybillForm.waybillNo} onChange={e => setWaybillForm(prev => ({ ...prev, waybillNo: e.target.value }))} placeholder="IRS-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
@@ -2581,7 +2581,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   </datalist>
                   {waybillForm.items.map((item, idx) => (
                     <div key={idx} className="p-3 bg-gray-50 rounded-xl border border-gray-100 space-y-2 relative group">
-                      <button onClick={() => setWaybillForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setWaybillForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity">
                         <X size={14} />
                       </button>
                       <input type="text" list="waybillProductList" value={item.productName} onChange={e => {
@@ -2656,7 +2656,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                   <button onClick={() => setViewingPdf(null)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors"><X size={18} /></button>
                 </div>
               </div>
-              <div className="flex-1 bg-gray-100 p-4 overflow-hidden flex flex-col items-center">
+              <div className="flex-1 bg-gray-100 p-4 overflow-auto flex flex-col items-center">
                 {viewingPdf.dataUrl ? (
                   <iframe src={viewingPdf.dataUrl} className="w-full h-full rounded-xl shadow-lg border-0" title="PDF Viewer" />
                 ) : (
@@ -2729,7 +2729,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 <h3 className="font-bold text-gray-800">{drillDown.title}</h3>
                 <button onClick={() => setDrillDown(null)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
-              <div className="max-h-[60vh] overflow-y-auto">
+              <div className="max-h-[60vh] overflow-auto">
                 {drillDown.rows.length === 0 ? (
                   <div className="py-12 text-center text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Kayıt bulunamadı.' : 'No records found.'}</div>
                 ) : (

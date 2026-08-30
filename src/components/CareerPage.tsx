@@ -63,7 +63,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
         <div className="max-w-3xl mx-auto px-6 h-16 flex items-center gap-4">
           <button
             onClick={onBack}
-            className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
+            className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
           >
             <ArrowLeft className="w-4 h-4" />
             {isTR ? 'Geri' : 'Back'}
@@ -177,7 +177,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
           </p>
           <a
             href={generalApplyHref}
-            className={`inline-flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg ${darkMode ? 'text-white/80 hover:text-white' : 'text-black/80 hover:text-black'}`}
+            className={`inline-flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/80 hover:text-white' : 'text-black/80 hover:text-black'}`}
           >
             <Mail className="w-4 h-4" style={{ color: '#ff4000' }} />
             info@cetpa.com.tr

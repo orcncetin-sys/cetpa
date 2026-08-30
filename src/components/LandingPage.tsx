@@ -759,7 +759,7 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
             <button
               onClick={() => setPaused(p => !p)}
               className={cn(
-                'mt-3 w-8 h-8 rounded-full border flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+                'mt-3 w-11 h-11 md:w-8 md:h-8 rounded-full border flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
                 d('border-white/15 text-white/60 hover:text-white/65 hover:bg-white/6',
                   'border-black/12 text-black/65 hover:text-black/55 hover:bg-black/5')
               )}
@@ -1347,13 +1347,13 @@ export default function LandingPage({
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-4">
               <button onClick={onLanguageToggle}
                 aria-label={isTR ? 'Dili İngilizce yap' : 'Switch to Turkish'}
-                className={cn('text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
+                className={cn('text-[11px] font-bold min-w-11 min-h-11 md:min-w-0 md:min-h-0 px-2.5 py-1.5 rounded-lg border transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
                 {currentLanguage === 'tr' ? 'EN' : 'TR'}
               </button>
               <button onClick={onDarkModeToggle}
                 aria-label={darkMode ? (isTR ? 'Açık moda geç' : 'Switch to light mode') : (isTR ? 'Koyu moda geç' : 'Switch to dark mode')}
                 aria-pressed={darkMode}
-                className={cn('w-8 h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
+                className={cn('w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand', d('border-white/12 text-white/50 hover:text-white hover:bg-white/8', 'border-black/10 text-black/70 hover:text-black hover:bg-black/5'))}>
                 {darkMode ? <Sun className="w-[15px] h-[15px]" aria-hidden="true" /> : <Moon className="w-[15px] h-[15px]" aria-hidden="true" />}
               </button>
               {/* Mobil menu (EN SAGDA: solda EN/tema ile cakisiyordu — olculdu: EN 112-149, burger 128-172 ustuste) (a11y teshisi: 6 bolum baglantisi md alti TAMAMEN

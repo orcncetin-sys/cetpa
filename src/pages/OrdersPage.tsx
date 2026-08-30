@@ -1056,7 +1056,7 @@ export default function OrdersPage({
                                     setCopiedOrderId(order.id);
                                     setTimeout(() => setCopiedOrderId(null), 1500);
                                   }}
-                                  className="text-gray-400 hover:text-brand transition-colors"
+                                  className="text-gray-400 hover:text-brand transition-colors p-2 -m-2"
                                   title={currentLanguage === 'tr' ? 'Sipariş ID\'yi kopyala' : 'Copy order ID'}
                                 >
                                   {copiedOrderId === order.id
@@ -1276,7 +1276,7 @@ export default function OrdersPage({
                                   confirmLabel: currentT.delete,
                                   variant: 'danger',
                                   onConfirm: () => handleDeleteOrder(order.id)
-                                })} className="text-gray-400 hover:text-red-600 transition-colors" title={currentT.delete_order}>
+                                })} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors" title={currentT.delete_order}>
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -3254,12 +3254,12 @@ export default function OrdersPage({
         {returnModal.open && returnModal.order && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReturnModal({ open: false, order: null })} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İade Oluştur' : 'Create Return'} — #{returnModal.order.id.slice(0, 6)}</h3>
-                <button onClick={() => setReturnModal({ open: false, order: null })} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
-              <div className="p-5 space-y-3">
+              <div className="p-5 space-y-3 flex-1 overflow-y-auto">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Tutarı (₺)' : 'Return Amount (₺)'}</label>
                   <input type="number" className="apple-input w-full text-sm" value={returnAmount || ''} onChange={e => setReturnAmount(Number(e.target.value))} />
@@ -3310,10 +3310,10 @@ export default function OrdersPage({
         {isAddingShipment && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{editingShipmentId ? (currentLanguage === 'tr' ? 'Sevkiyat Düzenle' : 'Edit Shipment') : (currentLanguage === 'tr' ? 'Yeni Sevkiyat' : 'New Shipment')}</h3>
-                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 <div>
@@ -3384,12 +3384,12 @@ export default function OrdersPage({
         {deliveryNoteOrder && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeliveryNoteOrder(null)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İrsaliye / Teslimat Notu' : 'Delivery Note'} — #{deliveryNoteOrder.id.slice(0, 6)}</h3>
-                <button onClick={() => setDeliveryNoteOrder(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                <button onClick={() => setDeliveryNoteOrder(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
-              <div className="p-5 space-y-3">
+              <div className="p-5 space-y-3 flex-1 overflow-y-auto">
                 <p className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Sipariş teslim edildi olarak işaretlenecek. Teslimat notu ekleyebilirsiniz.' : 'Order will be marked Delivered. You may add a delivery note.'}</p>
                 <textarea className="apple-input w-full text-sm resize-none" rows={4} placeholder={currentLanguage === 'tr' ? 'Teslim alan, tarih, not...' : 'Received by, date, note...'} value={deliveryNoteText} onChange={e => setDeliveryNoteText(e.target.value)} />
               </div>
@@ -3418,12 +3418,12 @@ export default function OrdersPage({
         {isEditingOrder && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsEditingOrder(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Siparişi Düzenle' : 'Edit Order'}</h3>
-                <button onClick={() => setIsEditingOrder(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                <button onClick={() => setIsEditingOrder(false)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
-              <div className="p-5 space-y-3">
+              <div className="p-5 space-y-3 flex-1 overflow-y-auto">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
                   <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
@@ -3473,7 +3473,7 @@ export default function OrdersPage({
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
-                <button onClick={() => setShowQuickShipment(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+                <button onClick={() => setShowQuickShipment(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-2 text-sm text-gray-600">
                 <p>{currentLanguage === 'tr' ? 'Bu siparişten sevkiyat oluşturulsun mu?' : 'Create a shipment from this order?'}</p>

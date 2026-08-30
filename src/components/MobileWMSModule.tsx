@@ -718,7 +718,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
           </div>
 
           {/* Zone summary */}
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {(['receive','storage','pick','ship','return'] as const).map(zone => {
               const count = locations.filter(l => l.zone === zone).length;
               return (
@@ -737,7 +737,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 <p>{tr ? 'Konum bulunamadı.' : 'No locations found.'}</p>
               </div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto"><table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Kod' : 'Code'}</th>
@@ -785,7 +785,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                             </span>
                           ) : (
                             <div className="flex items-center gap-1 justify-end">
-                              <button onClick={() => openEditLocation(l)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
+                              <button onClick={() => openEditLocation(l)} className="p-2.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button onClick={() => { void confirmDeleteLocation(l.id); }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
@@ -798,7 +798,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         </div>
@@ -807,7 +807,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       {/* LOCATION FORM MODAL */}
       {showLocForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{editingLocId ? (tr ? 'Konumu Düzenle' : 'Edit Location') : (tr ? 'Yeni Konum' : 'New Location')}</h2>
               <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }}><X className="w-5 h-5 text-gray-400" /></button>

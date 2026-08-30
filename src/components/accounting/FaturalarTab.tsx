@@ -129,8 +129,8 @@ export default function FaturalarTab({
       )}
 
       {/* KPI + header */}
-      <div className="flex items-center justify-between">
-        <div className="grid grid-cols-3 gap-3 flex-1 mr-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 sm:mr-4">
           {/* KPI'lar KAYNAK FİLTRESİNE UYAR — 320 Mikro faturası varken
               "Toplam Fatura 0" göstermek yanlıştı (2026-08-01).
               Cetpa sayıları invoices'tan, Mikro sayısı mikroSatisSatirlari'ndan. */}
@@ -188,8 +188,8 @@ export default function FaturalarTab({
       </div>
 
       {/* Filter + Search */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:flex-1 sm:w-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"/>
           <input className="pl-9 w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-[#ff4000]"
             placeholder={currentLanguage==='tr'?'Fatura ara...':'Search invoices...'}

@@ -78,7 +78,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
     <div className="min-h-screen bg-gray-50 flex flex-col">
 
       {/* ── Brand header ── */}
-      <header className="bg-[#1a3a5c] text-white px-6 py-4 flex items-center justify-between">
+      <header className="bg-brand text-white px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
             <Package className="w-4 h-4" />
@@ -89,7 +89,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
           </div>
         </div>
         {onBack && (
-          <button onClick={onBack} className="text-white/70 hover:text-white text-xs font-medium flex items-center gap-1">
+          <button onClick={onBack} className="py-2.5 -my-2.5 px-2 -mx-2 text-white/70 hover:text-white text-xs font-medium flex items-center gap-1">
             <ExternalLink className="w-3.5 h-3.5" />
             {tr ? 'Kapat' : 'Close'}
           </button>
@@ -100,7 +100,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
 
         {loading && (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <RefreshCw className="w-8 h-8 text-[#1a3a5c] animate-spin" />
+            <RefreshCw className="w-8 h-8 text-brand animate-spin" />
             <p className="text-sm text-gray-500">{tr ? 'Sipariş bilgileri yükleniyor…' : 'Loading order…'}</p>
           </div>
         )}
@@ -110,7 +110,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
             <AlertCircle className="w-10 h-10 text-red-400" />
             <p className="font-bold text-red-700">{tr ? 'Sipariş bulunamadı' : 'Order not found'}</p>
             <p className="text-xs text-red-500">{error}</p>
-            <button onClick={load} className="mt-2 text-xs font-bold text-[#1a3a5c] hover:underline">
+            <button onClick={load} className="mt-2 text-xs font-bold text-brand hover:underline">
               {tr ? 'Tekrar dene' : 'Retry'}
             </button>
           </div>
@@ -123,7 +123,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Sipariş No' : 'Order No'}</p>
-                  <p className="font-bold text-lg text-[#1a3a5c]">#{order.orderNo}</p>
+                  <p className="font-bold text-lg text-brand">#{order.orderNo}</p>
                 </div>
                 <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
                   isCancelled           ? 'bg-gray-100 text-gray-500' :
@@ -187,7 +187,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
                         {/* Icon + connector */}
                         <div className="flex flex-col items-center">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                            active ? 'bg-[#1a3a5c] text-white shadow-lg ring-4 ring-[#1a3a5c]/10' :
+                            active ? 'bg-brand text-white shadow-lg ring-4 ring-brand/10' :
                             done   ? 'bg-emerald-500 text-white' :
                                      'bg-gray-100 text-gray-400'
                           }`}>
@@ -199,7 +199,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
                         </div>
                         {/* Label */}
                         <div className="pb-8 pt-1.5">
-                          <p className={`text-sm font-bold ${active ? 'text-[#1a3a5c]' : done ? 'text-gray-700' : 'text-gray-300'}`}>
+                          <p className={`text-sm font-bold ${active ? 'text-brand' : done ? 'text-gray-700' : 'text-gray-300'}`}>
                             {tr ? step.labelTR : step.labelEN}
                           </p>
                           {active && (

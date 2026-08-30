@@ -551,7 +551,7 @@ export default function MuhasebePage(props: Props) {
                                 ))}
                               </div>
                             </div>
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Kritik':'Critical'}</p><p className="text-xl font-black text-red-600">{criticalCount}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Açık Fatura':'Unpaid'}</p><p className="text-xl font-black text-amber-600">{withDays.length}</p></div>
                               <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Toplam Bakiye':'Total O/S'}</p><p className="text-lg font-black text-orange-600">₺{Math.round(totalUnpaid).toLocaleString('tr-TR')}</p></div>
@@ -673,7 +673,7 @@ export default function MuhasebePage(props: Props) {
                                     const barW = Math.round((amt / maxAmt110) * 100);
                                     return (
                                       <div key={bi} className="px-5 py-3.5 flex items-center gap-4">
-                                        <div className="flex items-center gap-2 w-52 flex-shrink-0">
+                                        <div className="flex items-center gap-2 w-32 sm:w-52 flex-shrink-0">
                                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${b.dot}`} />
                                           <span className="text-xs font-semibold text-gray-700 truncate">{b.label}</span>
                                         </div>
@@ -1035,7 +1035,7 @@ export default function MuhasebePage(props: Props) {
                               <button onClick={()=>setP623ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr623?'L/C Ekle':'Add L/C'}</button>
                             </div>
                             {expiringSoon>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">⚠️ {expiringSoon} {tr623?'L/C 30 gün içinde sona eriyor':'L/C expiring within 30 days'}</div>}
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Açık L/C':'Open L/C'}</p><p className="text-xl font-black text-emerald-600">{openLCs.length}</p></div>
                               <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Toplam Değer':'Total Value'}</p><p className="text-base font-black text-blue-600">${totalValue623.toLocaleString('tr-TR')}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Sona Yakın':'Expiring Soon'}</p><p className="text-xl font-black text-amber-600">{expiringSoon}</p></div>
@@ -1117,7 +1117,7 @@ export default function MuhasebePage(props: Props) {
                             </div>
                             {p638MatchResults.length > 0 && (
                               <>
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                   <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Tam Eşleşme':'Full Match'}</p><p className="text-xl font-black text-emerald-600">{totalMatched}</p></div>
                                   <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Kısmi':'Partial'}</p><p className="text-xl font-black text-amber-600">{p638MatchResults.filter(r=>r.status==='Kısmi').length}</p></div>
                                   <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Eşleşmedi':'Unmatched'}</p><p className="text-xl font-black text-red-600">{totalUnmatched}</p></div>
@@ -1523,9 +1523,9 @@ export default function MuhasebePage(props: Props) {
                                   <h3 className="font-bold text-gray-800">{trFk ? 'İşlem Detayı' : 'Transaction Detail'}</h3>
                                   <p className="text-xs text-gray-500 mt-0.5 font-mono">{fkDetaySku}</p>
                                 </div>
-                                <button onClick={() => setFkDetaySku(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+                                <button onClick={() => setFkDetaySku(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
                               </div>
-                              <div className="overflow-y-auto flex-1 p-4">
+                              <div className="overflow-auto flex-1 p-4">
                                 {fkDetayLoading && <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Yükleniyor…' : 'Loading…'}</p>}
                                 {!fkDetayLoading && fkDetaySatirlari.length === 0 && (
                                   <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Hareket bulunamadı.' : 'No movements found.'}</p>
@@ -1679,7 +1679,7 @@ export default function MuhasebePage(props: Props) {
                         )}
 
                         {/* Summary KPIs */}
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
                             { label: currentLanguage==='tr'?'Toplam Gelir':'Total Revenue', value: fmtPnl(ytdRevenue), color: 'text-blue-600', bg: 'bg-blue-50' },
                             { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${grossMargin143.toFixed(1)}`, color: grossMargin143 >= 30 ? 'text-emerald-600' : 'text-amber-600', bg: grossMargin143 >= 30 ? 'bg-emerald-50' : 'bg-amber-50' },
@@ -1865,7 +1865,7 @@ export default function MuhasebePage(props: Props) {
                           icon={Wallet}
                         />
                         {/* Summary KPIs */}
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
                             { label: currentLanguage === 'tr' ? 'Toplam Giriş' : 'Total Inflow', val: totalInflow, color: 'text-emerald-600', bg: 'bg-emerald-50', prefix: '+' },
                             { label: currentLanguage === 'tr' ? 'Toplam Çıkış' : 'Total Outflow', val: totalOutflow, color: 'text-red-600', bg: 'bg-red-50', prefix: '-' },
@@ -2434,7 +2434,7 @@ export default function MuhasebePage(props: Props) {
                           ))}
                         </div>
                         {/* 12-month KPIs */}
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
                             { label:tr557?'12 Ay Ciro':'12-Mo Revenue', v:totalRev12, color:'text-blue-700',  bg:'bg-blue-50' },
                             { label:tr557?'12 Ay Gider':'12-Mo Expense', v:totalExp12, color:'text-red-600',   bg:'bg-red-50' },
@@ -2546,7 +2546,7 @@ export default function MuhasebePage(props: Props) {
                         )}
 
                         {/* KPI bar */}
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
                             { label: tr558?'Tahsil Edilen KDV':'KDV Collected', val: totCol, color:'text-emerald-700', bg:'bg-emerald-50' },
                             { label: tr558?'Ödenen KDV':'KDV Paid', val: totPaid, color:'text-red-600', bg:'bg-red-50' },
@@ -3354,8 +3354,8 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-gray-300 text-xs mt-1">{tr573?'"Kural Ekle" ile toplu alım, segment veya promosyon kuralları tanımlayın.':'Add bulk, tier or promo discount rules.'}</p>
                           </div>
                         ) : (
-                          <div className="apple-card overflow-hidden">
-                            <table className="w-full text-sm">
+                          <div className="apple-card overflow-hidden"><div className="overflow-x-auto">
+                            <table className="w-full text-sm min-w-[560px]">
                               <thead><tr className="border-b border-gray-100 bg-gray-50">
                                 {[tr573?'Kural Adı':'Rule Name', tr573?'Tür':'Type', tr573?'İndirim':'Discount', tr573?'Koşul':'Condition', tr573?'Durum':'Status', ''].map(h=>(
                                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -3381,7 +3381,7 @@ export default function MuhasebePage(props: Props) {
                                   </tr>
                                 ))}
                               </tbody>
-                            </table>
+                            </table></div>
                             {p573Rules.filter(r=>r.active).length > 0 && (
                               <div className="px-4 py-3 bg-emerald-50 border-t border-emerald-100">
                                 <p className="text-xs text-emerald-700 font-semibold">{p573Rules.filter(r=>r.active).length} {tr573?'aktif kural — toplam etkin indirim:':'active rules — total potential discount:'} %{p573Rules.filter(r=>r.active).reduce((s,r)=>s+r.discountPct,0).toFixed(0)}</p>
@@ -3558,8 +3558,8 @@ export default function MuhasebePage(props: Props) {
                         {p591Schedules.length===0 ? (
                           <div className="apple-card p-12 text-center"><Calendar className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr591?'Henüz otomatik fatura takvimi yok.':'No auto-invoice schedules yet.'}</p></div>
                         ) : (
-                          <div className="apple-card overflow-hidden">
-                            <table className="w-full text-xs">
+                          <div className="apple-card overflow-hidden"><div className="overflow-x-auto">
+                            <table className="w-full text-xs min-w-[560px]">
                               <thead><tr className="border-b border-gray-100 bg-gray-50">
                                 {[tr591?'Müşteri':'Customer',tr591?'Tutar':'Amount',tr591?'Sıklık':'Freq.',tr591?'Sonraki Tarih':'Next Date',tr591?'Açıklama':'Desc.',tr591?'Aktif':'Active'].map(h=>(
                                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -3587,7 +3587,7 @@ export default function MuhasebePage(props: Props) {
                                   );
                                 })}
                               </tbody>
-                            </table>
+                            </table></div>
                           </div>
                         )}
                       </motion.div>
@@ -3727,7 +3727,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50"><h3 className="font-bold text-gray-800 text-sm">{tr617?'KDV Dilimi Analizi':'VAT Band Analysis'}</h3></div>
                           <div className="divide-y divide-gray-50">
                             {oranRows.map(row=>(
-                              <div key={row.oranKarma ? 'karma' : String(row.oran)} className="grid grid-cols-4 px-4 py-3 text-xs">
+                              <div key={row.oranKarma ? 'karma' : String(row.oran)} className="grid grid-cols-2 sm:grid-cols-4 gap-y-1 px-4 py-3 text-xs">
                                 <span className={`font-bold ${bandColor(row.oran)}`}>{row.oranKarma ? (tr617?'Karma oran':'Mixed rate') : row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
                                 <span className="tabular-nums text-gray-600">₺{Math.round(row.matrah).toLocaleString('tr-TR')}</span>
                                 <span className="tabular-nums font-bold text-gray-800">₺{Math.round(row.kdv).toLocaleString('tr-TR')}</span>

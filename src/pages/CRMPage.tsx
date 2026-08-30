@@ -552,7 +552,10 @@ export default function CRMPage({
                       </div>
                     }
                   />
-                  <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  {/* "hidden md:block" idi ve mobil alternatifi YOKTU — <768px'te Siparişler
+              sekmesi tamamen içeriksiz kalıyordu (2026-08-29 duyarlılık taraması).
+              Tablo artık mobilde de görünür; genişlik overflow-x-auto ile kayar. */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">
                         <thead className="bg-gray-50 border-b border-gray-200">
@@ -636,7 +639,7 @@ export default function CRMPage({
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleDeleteOrder(order.id)} className="text-gray-400 hover:text-red-600 transition-colors p-1">
+                                  <button onClick={() => handleDeleteOrder(order.id)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors p-1">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </td>
@@ -1062,7 +1065,7 @@ export default function CRMPage({
                                     <td className="px-3 py-2.5 font-bold text-purple-600">{c.conversions}</td>
                                     <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
                                       <button type="button" onClick={()=>{setP606Draft({name:c.name,sentDate:c.sentDate,recipients:String(c.recipients),opens:String(c.opens),clicks:String(c.clicks),conversions:String(c.conversions)});setP606EditId(c.id);setP606ShowForm(true);}} title={tr606?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'campaignMetrics',c.id));}catch(e){toast((tr606?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'campaignMetrics',c.id));}catch(e){toast((tr606?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="p-2 -m-2 text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div></td>
                                   </tr>
                                 );
@@ -1402,7 +1405,7 @@ export default function CRMPage({
                       </div>
                     </div>
                     {/* KPI strip */}
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {stages.map(s => {
                         const stageleads = grouped[s.key] || [];
                         const totalValue = stageleads.reduce((sum, l) => sum + (l.creditLimit || 0), 0);
@@ -1967,7 +1970,7 @@ export default function CRMPage({
                       {currentLanguage === 'tr' ? 'Satış Hunisi' : 'Pipeline Funnel'}
                       <span className="ml-2 text-gray-300 font-normal">{total} {currentLanguage === 'tr' ? 'aday' : 'leads'}</span>
                     </p>
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {counts.map((s) => {
                         const pct = Math.round((s.count / total) * 100);
                         const barH = Math.round((s.count / maxCount) * 48);
@@ -3426,7 +3429,7 @@ export default function CRMPage({
                               <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-2">
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="text-gray-400 hover:text-red-600 transition-colors">
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                               <div>

@@ -156,16 +156,16 @@ export default function MusterilerTab({
                             <button
                               onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: c.balance || 0, id: c.id })}
                               title="Mikro'ya dekont/masraf gir"
-                              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 flex flex-col items-center"
+                              className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 flex flex-col items-center"
                             >
                               <Upload size={13} />
                               <span className="text-[8px] font-semibold leading-none mt-0.5">Mikro</span>
                             </button>
                           );
                         })()}
-                        <button onClick={() => setEkstreMusteri(c)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
-                        <button onClick={() => deleteCustomer(c.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
+                        <button onClick={() => setEkstreMusteri(c)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-2.5 -m-1 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'} className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        <button onClick={() => deleteCustomer(c.id)} className="p-2.5 -m-1 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>

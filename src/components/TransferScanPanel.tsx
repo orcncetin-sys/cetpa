@@ -110,7 +110,7 @@ export default function TransferScanPanel({
             {loc.type === 'warehouse' ? <WarehouseIcon className="w-4 h-4 text-brand shrink-0" /> : <Truck className="w-4 h-4 text-brand shrink-0" />}
             <span className="font-bold text-gray-900 truncate">{loc.name}</span>
           </div>
-          <button onClick={() => target === 'source' ? setSource(null) : setDest(null)} className="p-1 rounded-lg text-gray-300 hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
+          <button onClick={() => target === 'source' ? setSource(null) : setDest(null)} className="p-2.5 -m-1.5 rounded-lg text-gray-300 hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
         </div>
       ) : (
         <button onClick={() => setScanTarget(target)} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-gray-200 text-sm font-semibold text-gray-500 hover:border-brand hover:text-brand transition-colors">
@@ -145,7 +145,7 @@ export default function TransferScanPanel({
                 <p className="text-[10px] text-gray-400">{product.sku}{source ? ` · ${tr ? 'kaynak stok' : 'source qty'}: ${sourceQty}` : ''}</p>
               </div>
             </div>
-            <button onClick={() => setProduct(null)} className="p-1 rounded-lg text-gray-300 hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
+            <button onClick={() => setProduct(null)} className="p-2.5 -m-1.5 rounded-lg text-gray-300 hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
           </div>
         ) : (
           <div className="space-y-2">
