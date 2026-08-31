@@ -203,7 +203,10 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
     try {
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(cid)}`);
       if (res.ok) setDetail(await res.json() as TenantDetail);
-    } catch { /* sessiz */ }
+      // Sessiz-başarısızlık taraması (2026-08-31): tazeleme başarısızsa ekranda
+      // BAYAT veri kalıyordu, kullanıcı işlemin yansıdığını sanabilirdi.
+      else toast(tr ? 'Detay tazelenemedi — görünen veriler eski olabilir.' : 'Refresh failed — data may be stale.', 'error');
+    } catch { toast(tr ? 'Detay tazelenemedi — görünen veriler eski olabilir.' : 'Refresh failed — data may be stale.', 'error'); }
   };
 
   const saveBilling = async () => {

@@ -64,6 +64,9 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
   /** Evrak numarasına basınca açılan fatura (2026-08-28 kullanıcı isteği). */
   const [fkFatura, setFkFatura] = useState<MikroFaturaDetayVerisi | null>(null);
   const [fkDetayLoading, setFkDetayLoading] = useState(false);
+  /** Sessiz-başarısızlık taraması (2026-08-31): success:false gelince modal
+   *  "Hareket bulunamadı" diyordu — hata ile boş liste ayrışmıyordu. */
+  const [fkDetayHata, setFkDetayHata] = useState<string | null>(null);
 
   useEffect(() => {
     // Panel yalnız sekme açıkken mount olur — sekme kapısı yerine mount yeter.
@@ -92,13 +95,15 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
   const fkDetayIstekRef = useRef(0);
   const fkAcDetay = (sku: string) => {
     const istekNo = ++fkDetayIstekRef.current;
-    setFkDetaySku(sku); setFkDetayLoading(true); setFkDetaySatirlari([]);
+    setFkDetaySku(sku); setFkDetayLoading(true); setFkDetaySatirlari([]); setFkDetayHata(null);
     authFetch(`/api/reports/stok-fiyat-karsilastirma/${encodeURIComponent(sku)}/detay`)
       .then(r => r.json())
       .then(json => {
         if (istekNo !== fkDetayIstekRef.current) return;   // bayat yanit - yok say
         if (json.success) setFkDetaySatirlari(json.satirlar);
+        else setFkDetayHata(json.error || (trFk ? 'Detay alınamadı.' : 'Failed to load detail.'));
       })
+      .catch(() => { if (istekNo === fkDetayIstekRef.current) setFkDetayHata(trFk ? 'Detay alınamadı.' : 'Failed to load detail.'); })
       .finally(() => { if (istekNo === fkDetayIstekRef.current) setFkDetayLoading(false); });
   };
 
@@ -205,7 +210,10 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
             </div>
             <div className="overflow-auto flex-1 p-4">
               {fkDetayLoading && <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Yükleniyor…' : 'Loading…'}</p>}
-              {!fkDetayLoading && fkDetaySatirlari.length === 0 && (
+              {!fkDetayLoading && fkDetayHata && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm text-red-700">{fkDetayHata}</div>
+              )}
+              {!fkDetayLoading && !fkDetayHata && fkDetaySatirlari.length === 0 && (
                 <p className="text-center text-gray-400 text-sm py-8">{trFk ? 'Hareket bulunamadı.' : 'No movements found.'}</p>
               )}
               {!fkDetayLoading && fkDetaySatirlari.length > 0 && (

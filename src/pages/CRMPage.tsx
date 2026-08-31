@@ -275,7 +275,8 @@ export default function CRMPage({
     const updated = { ...monthlyTargets, [monthKey]: value };
     if (value === 0) delete updated[monthKey];
     setMonthlyTargets(updated);
-    setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
+    setDoc(doc(db, 'settings', 'targets'), updated, { merge: true })
+      .catch(() => toast(currentLanguage === 'tr' ? 'Hedef kaydedilemedi.' : 'Failed to save target.', 'error'));
   };
 
   const createNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' = 'info') => {
@@ -2272,7 +2273,12 @@ export default function CRMPage({
                                               currentLanguage === 'tr' ? `Durum "${durumEtiketi(s, true)}" olarak güncellendi` : `Status updated to "${s}"`,
                                               'success'
                                             );
-                                          } catch {}
+                                          } catch {
+                                            // Sessiz-başarısızlık taraması (2026-08-31): yazma
+                                            // (ör. RBAC 403) sessizce yutuluyordu — kullanıcı
+                                            // durumu değişti sanıyordu.
+                                            toast(currentLanguage === 'tr' ? 'Durum güncellenemedi (yetki?).' : 'Status update failed.', 'error');
+                                          }
                                           setP544QuickStatus(null);
                                         }}
                                         className={cn(

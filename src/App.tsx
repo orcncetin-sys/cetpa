@@ -5628,12 +5628,14 @@ function AppContent() {
                         <div className="space-y-2 mb-4">
                           {p587Checks.map(c=>(
                             <div key={c.id} className={`flex items-center gap-3 p-3 rounded-xl ${c.checked?'bg-green-50/50':'bg-gray-50'}`}>
-                              <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>{});}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
+                              {/* Sessiz-başarısızlık taraması (2026-08-31): çeklist yazmaları
+                                  RBAC 403'te sessizce yutuluyordu — toast eklendi (4 nokta). */}
+                              <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
                                 {c.checked&&<svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
                               </button>
                               <span className={`flex-1 text-sm ${c.checked?'line-through text-gray-400':'text-gray-700'}`}>{c.item}</span>
                               <span className={`text-[10px] font-bold shrink-0 ${sevColors[c.severity]}`}>{c.severity}</span>
-                              <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>{});}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                              <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>toast(tr587?'Silinemedi (yetki?).':'Delete failed.','error'));}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                             </div>
                           ))}
                         </div>
@@ -5641,17 +5643,17 @@ function AppContent() {
                           <div className="flex gap-2">
                             <input className="flex-1 apple-input px-3 py-2 text-sm" placeholder={tr587?'Yeni kontrol maddesi...':'New check item...'} value={p587NewItem} onChange={e=>setP587NewItem(e.target.value)} onKeyDown={e=>{
                               if(e.key==='Enter'&&p587NewItem.trim()){
-                                void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>{});
+                                void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
                                 setP587NewItem('');
                               }
                             }} />
                             <button onClick={()=>{
                               if(!p587NewItem.trim()) return;
-                              void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>{});
+                              void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
                               setP587NewItem('');
                             }} className="apple-button-primary px-3 py-2 text-sm">{tr587?'Ekle':'Add'}</button>
                             {p587Checks.length>0&&(
-                              <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>{});});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
+                              <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
                             )}
                           </div>
                         )}

@@ -1825,7 +1825,7 @@ export default function OrdersPage({
                           const url = `${window.location.origin}/?track=${selectedOrder.id}`;
                           navigator.clipboard.writeText(url).then(() =>
                             toast(currentLanguage === 'tr' ? 'Takip linki kopyalandı ✓' : 'Tracking link copied ✓', 'success')
-                          ).catch(() => {});
+                          ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'Müşteri takip linkini kopyala' : 'Copy customer tracking link'}
@@ -1854,7 +1854,7 @@ export default function OrdersPage({
                             : `📦 *Order Summary*\nOrder: #${o.shopifyOrderId || o.id.slice(-6)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
                           navigator.clipboard.writeText(summary).then(() =>
                             toast(currentLanguage === 'tr' ? 'Sipariş özeti kopyalandı ✓' : 'Order summary copied ✓', 'success')
-                          ).catch(() => {});
+                          ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
                         }}
                         className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'WhatsApp özeti kopyala' : 'Copy summary (WhatsApp-ready)'}
@@ -1883,7 +1883,7 @@ export default function OrdersPage({
                               : `Dear ${o.customerName},\n\nPayment of ${amt} for Order #${o.shopifyOrderId || o.id.slice(-6)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
                             navigator.clipboard.writeText(msg).then(() =>
                               toast(currentLanguage === 'tr' ? 'Ödeme hatırlatması kopyalandı ✓' : 'Payment reminder copied ✓', 'success')
-                            ).catch(() => {});
+                            ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
                           }}
                           className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-amber-200 transition-colors"
                           title={currentLanguage === 'tr' ? 'Ödeme hatırlatma mesajını kopyala' : 'Copy payment reminder message'}
