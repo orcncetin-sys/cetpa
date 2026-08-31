@@ -205,6 +205,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                     <tr className="text-gray-400 border-b border-gray-100">
                       <th className="text-left font-semibold py-1.5 px-1">{tr ? 'Ürün' : 'Product'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Miktar' : 'Qty'}</th>
+                      <th className="text-left font-semibold py-1.5 px-1">{tr ? 'Birim' : 'Unit'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Tutar' : 'Amount'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{tr ? 'KDV' : 'VAT'}</th>
                     </tr>
@@ -225,6 +226,9 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-600">
                             {miktar.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                           </td>
+                          {/* Birim sunucuda sto_birimX_ad'dan çözülür (2026-08-31);
+                              şemada yoksa '—' — uydurma 'ADET' yazılmaz. */}
+                          <td className="py-1.5 px-1 text-left text-gray-500">{String(k.birim ?? '') || '—'}</td>
                           <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-[#1D1D1F]">{tl(tutar)}</td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{tl(kdv)}</td>
                         </tr>

@@ -1575,11 +1575,18 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const stoCols  = await mikroKolonlar('STOKLAR');
     const stoSet   = new Set(stoCols.map(c => c.toLowerCase()));
     const adVar    = stoSet.has('sto_isim') && stoSet.has('sto_kod');
+    // Birim ADI (2026-08-31 kullanıcı isteği: "BİRİM'i de ekle"): sth_birim_pntr
+    // 1-3 arası bir işaretçidir, adı STOKLAR'daki sto_birimX_ad kolonundadır.
+    // Kolonlar şemadan doğrulanır — yoksa birim alanı hiç üretilmez (tahmin yok).
+    const birimKolonlari = adVar
+      ? ['sto_birim1_ad', 'sto_birim2_ad', 'sto_birim3_ad'].filter(c => stoSet.has(c))
+      : [];
 
     try {
       const { rows, hata } = await mikroSql(
         `SELECT ${secim.map(c => `sth.${c}`).join(', ')}` +
-        (adVar ? ', sto.sto_isim AS urunAdi' : '') + ' ' +
+        (adVar ? ', sto.sto_isim AS urunAdi' : '') +
+        birimKolonlari.map(c => `, sto.${c}`).join('') + ' ' +
         'FROM STOK_HAREKETLERI sth ' +
         (adVar ? 'LEFT JOIN STOKLAR sto ON sto.sto_kod = sth.sth_stok_kod ' : '') +
         `WHERE sth.sth_evraktip = ${evrakTip} AND sth.sth_evrakno_sira = ${sira} ` +
@@ -1587,7 +1594,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         `ORDER BY ${siralama}`,
       );
       if (hata) return res.status(502).json({ success: false, error: hata });
-      res.json({ success: true, kalemler: rows, total: rows.length });
+      // Birimi sunucuda çöz — istemci işaretçi aritmetiği bilmesin.
+      const birimli = rows.map(r => {
+        const rec = r as Record<string, unknown>;
+        const p = Number(rec.sth_birim_pntr);
+        const ad = p >= 1 && p <= 3 ? rec[`sto_birim${p}_ad`] : undefined;
+        return { ...rec, birim: typeof ad === 'string' && ad.trim() ? ad.trim() : undefined };
+      });
+      res.json({ success: true, kalemler: birimli, total: birimli.length });
     } catch (err) {
       console.error('[fatura/kalemler]', err);
       res.status(500).json({ success: false, error: 'Fatura kalemleri alınamadı.' });
