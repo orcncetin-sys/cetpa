@@ -429,7 +429,10 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
         }
       />
 
-      {/* Tabs */}
+      {/* Tabs — dış sarmalayıcı kaydırır: w-max bar mobilde 626px'e uzuyor,
+          Kaynaklar/Takvim düğmeleri ekran dışında ERİŞİLEMEZ kalıyordu
+          (2026-08-31 canlı mobil turu, 390px iframe ölçümü). */}
+      <div className="overflow-x-auto scrollbar-none -mx-1 px-1">
       <div className="flex gap-1 p-1 bg-gray-100 rounded-2xl w-max">
         {[
           { id: 'projects', label: t.projects, icon: LayoutDashboard },
@@ -447,6 +450,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
             {tab.label}
           </button>
         ))}
+      </div>
       </div>
 
       {/* Content */}
