@@ -459,7 +459,7 @@ export interface JournalEntry {
 }
 
 export interface Customer { id: string; name: string; company?: string; email?: string; phone?: string; address?: string; taxNo?: string; taxOffice?: string; notes?: string; createdAt?: unknown; creditLimit?: number; balance?: number; riskGroup?: 'Düşük' | 'Orta' | 'Yüksek'; /** Mikro cari kodu — fatura satırlarında müşteri adını çözmek için. */ mikroCariKod?: string; }
-export interface Supplier { id: string; name: string; company?: string; email?: string; phone?: string; address?: string; taxNo?: string; taxOffice?: string; notes?: string; createdAt?: unknown; mikroCariKod?: string; balance?: number; riskGroup?: 'Düşük' | 'Orta' | 'Yüksek'; }
+export interface Supplier { id: string; name: string; company?: string; email?: string; phone?: string; address?: string; taxNo?: string; taxOffice?: string; notes?: string; createdAt?: unknown; mikroCariKod?: string; balance?: number; riskGroup?: 'Düşük' | 'Orta' | 'Yüksek'; /** Son cari hareket tarihi (ISO, Mikro faturalarından türetilir — 2026-08-31). */ sonIslem?: string; }
 export interface Service { id: string; code: string; name: string; type: 'Ürün' | 'Hizmet'; unitPrice: number; vatRate: number; unit: string; notes?: string; createdAt?: unknown; }
 export interface WarehouseItem { id: string; productName: string; sku?: string; quantity: number; warehouseId?: string; location?: string; category?: string; notes?: string; updatedAt?: unknown; }
 export interface Transfer { id: string; fromWarehouse: string; toWarehouse: string; productName: string; quantity: number; date: string; notes?: string; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; createdAt?: unknown; }

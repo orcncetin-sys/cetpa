@@ -564,10 +564,18 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         message?: string; error?: string; items?: string[];
       };
       if (d.success) {
-        const msg = d.created === 0
+        // Sunucu artık dedup/özet mesajı gönderiyor (2026-08-31) — varsa onu göster;
+        // yoksa eski yerel biçim.
+        const msg = d.message ?? (d.created === 0
           ? (currentLanguage === 'tr' ? 'Tüm stoklar limitin üzerinde.' : 'All stock levels are above threshold.')
-          : `${d.created} ${currentLanguage === 'tr' ? 'taslak SAS oluşturuldu' : 'draft POs created'} (${d.items?.slice(0, 3).join(', ')}${(d.items?.length ?? 0) > 3 ? '…' : ''})`;
+          : `${d.created} ${currentLanguage === 'tr' ? 'taslak SAS oluşturuldu' : 'draft POs created'} (${d.items?.slice(0, 3).join(', ')}${(d.items?.length ?? 0) > 3 ? '…' : ''})`);
         setAutoReorderResult(msg);
+      } else {
+        // "Çalışmıyor sanırım" arızasının kökü (2026-08-31): başarısızlıkta hiçbir
+        // şey gösterilmiyordu — MFA/yetki/500 hataları sessizce yutuluyordu.
+        setAutoReorderResult(
+          (currentLanguage === 'tr' ? 'Hata: ' : 'Error: ') + (d.error ?? `HTTP ${r.status}`),
+        );
       }
     } catch (e) {
       setAutoReorderResult(e instanceof Error ? e.message : 'Hata');

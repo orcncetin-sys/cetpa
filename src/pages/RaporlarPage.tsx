@@ -41,6 +41,8 @@ interface Props {
   appReportsTab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler';
   setAppReportsTab: (tab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler') => void;
   onNavigate: (tab: string) => void;
+  /** Rapor kartından CRM→Müşteriler'e in (ada filtreli) — 2026-08-31. */
+  onMusteriAc: (ad: string) => void;
   p570Targets: P570Targets;
   setP570Targets: React.Dispatch<React.SetStateAction<P570Targets>>;
   fmtKpi: (v: number, fmt?: 'full' | 'K', decimals?: number) => string;
@@ -50,7 +52,7 @@ export default function RaporlarPage({
   canAccess = () => true, hasFullAccess = () => false, currentLanguage, currentT,
   orders: ordersProp = [], leads = [], inventory = [], userRole, employees = [],
   appQuotations = [], inventoryMovements = [], recurringOrders = [], exchangeRates,
-  appReportsTab, setAppReportsTab, onNavigate,
+  appReportsTab, setAppReportsTab, onNavigate, onMusteriAc,
   p570Targets, setP570Targets, fmtKpi,
 }: Props) {
   const [p603TrendMetric, setP603TrendMetric] = useState<'revenue' | 'orders' | 'leads' | 'inventory'>('revenue');
@@ -244,7 +246,7 @@ export default function RaporlarPage({
       <ReportsDashboard
         orders={orders} inventory={inventory} exchangeRates={exchangeRates}
         currentT={currentT} currentLanguage={currentLanguage} userRole={userRole}
-        onNavigate={onNavigate} employees={employees} quotations={appQuotations}
+        onNavigate={onNavigate} onMusteriAc={onMusteriAc} employees={employees} quotations={appQuotations}
         inventoryMovements={inventoryMovements} recurringOrders={recurringOrders}
         externalTab={appReportsTab} setExternalTab={setAppReportsTab}
       />

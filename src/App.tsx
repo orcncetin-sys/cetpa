@@ -721,6 +721,8 @@ function AppContent() {
 
   const [lojistikTab, setLojistikTab] = useState('sevkiyat');
   const [crmTab, setCrmTab] = useState('leads');
+  // Rapor kartından Müşteriler'e inerken ada filtre taşı (2026-08-31).
+  const [raporMusteriAra, setRaporMusteriAra] = useState('');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'|'tenants'>('overview');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'|'fiyat-karsilastirma'>('genel');
@@ -4921,6 +4923,7 @@ function AppContent() {
                   appQuotations={appQuotations} inventoryMovements={inventoryMovements}
                   recurringOrders={recurringOrders} appReportsTab={appReportsTab}
                   setAppReportsTab={setAppReportsTab} onNavigate={setActiveTab}
+                  onMusteriAc={(ad: string) => { setRaporMusteriAra(ad); setCrmTab('musteriler'); setActiveTab('crm'); }}
                   p570Targets={p570Targets} setP570Targets={setP570Targets}
                   fmtKpi={fmtKpi}
                 />
@@ -6498,6 +6501,7 @@ function AppContent() {
                 p549Iadeler={p549Iadeler}
                 crmTab={crmTab}
                 setCrmTab={setCrmTab}
+                musteriAra={raporMusteriAra}
                 selectedLead={selectedLead}
                 setSelectedLead={setSelectedLead}
                 hasFullAccess={hasFullAccess}

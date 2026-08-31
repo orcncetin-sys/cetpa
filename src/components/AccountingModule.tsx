@@ -122,6 +122,8 @@ interface AccountingModuleProps {
   exchangeRates?: Record<string, number>;
   initialTab?: string;
   allowedTabs?: string[];
+  /** Müşteriler sekmesi arama kutusunu dışarıdan tohumla (rapor kartından iniş, 2026-08-31). */
+  initialCustomerSearch?: string;
   createNotification?: (title: string, message: string, type?: 'info' | 'warning' | 'success') => Promise<void>;
   warehouses?: Warehouse[];
   employees?: Employee[];
@@ -318,7 +320,7 @@ export const AT = {
 
 export type AccountingT = typeof AT[keyof typeof AT];
 
-export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange, hideTabBar }: AccountingModuleProps) {
+export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, initialCustomerSearch, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange, hideTabBar }: AccountingModuleProps) {
   const t = AT[currentLanguage];
   const MONTHS = currentLanguage === 'en' ? MONTHS_EN : MONTHS_TR;
   const resolvedInitialTab = (() => {
@@ -576,7 +578,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [erpConfigSaving, setErpConfigSaving] = useState<'mikro' | 'luca' | null>(null);
 
   // Search states
-  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearch, setCustomerSearch] = useState(initialCustomerSearch ?? '');
+  // Rapor kartından ikinci kez (farklı adla) inildiğinde de filtre güncellensin.
+  useEffect(() => {
+    if (initialCustomerSearch !== undefined) setCustomerSearch(initialCustomerSearch);
+  }, [initialCustomerSearch]);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [serviceSearch, setServiceSearch] = useState('');
   const [warehouseSearch, setWarehouseSearch] = useState('');

@@ -46,6 +46,8 @@ export interface SuperadminRouteCtx {
   APP_ROLES: readonly string[];
   escapeHtml: (s: string) => string;
   isValidEmail: (s: string) => boolean;
+  /** Toplu temizlik SQL'i için (2026-08-31, auto-reorder taslak çöpü). */
+  getPgPool: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> } | null;
 }
 
 export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
@@ -56,6 +58,32 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
   app.get('/api/superadmin/me', C.requireAuth, (req: Request, res: Response) => {
     res.json({ isSuperAdmin: C.isSuperAdmin(req), email: C.reqActor(req).email });
   });
+
+  /** Otomatik SAS çöp temizliği (2026-08-31 canlı bulgu: dedup'sız auto-reorder
+   *  2218 numarasız/tedarikçisiz taslak yazmıştı). YALNIZ makine imzalı kayıtları
+   *  siler: source='auto-reorder' AND status='Taslak'. Elle açılan taslaklar
+   *  source taşımadığından kapsam DIŞI. Varsayılan dry-run — silme için gövdede
+   *  { dryRun: false } gönderilmeli. Kayıtlar yeniden üretilebilir (Otomatik SAS
+   *  düğmesi, artık dedup'lı) — geri dönüşü olan bir temizliktir. */
+  app.post('/api/superadmin/temizlik/auto-reorder-taslak',
+    C.requireAuth, C.requireMfaVerified, C.requireSuperAdmin,
+    async (req: Request, res: Response) => {
+      const pool = C.getPgPool();
+      if (!pool) return res.status(503).json({ success: false, error: 'PG yok (Firestore fallback) — bu temizlik yalnız PG üzerinde çalışır.' });
+      const dryRun = (req.body as { dryRun?: boolean } | undefined)?.dryRun !== false;
+      const KOSUL = `coll = 'purchaseOrders' AND data->>'source' = 'auto-reorder' AND data->>'status' = 'Taslak'`;
+      try {
+        if (dryRun) {
+          const r = await pool.query(`SELECT COUNT(*)::int AS n FROM docs WHERE ${KOSUL}`);
+          return res.json({ success: true, dryRun: true, silinecek: r.rows[0]?.n ?? 0 });
+        }
+        const r = await pool.query(`DELETE FROM docs WHERE ${KOSUL}`);
+        await C.writeAuditLog(C.reqActor(req), 'Temizlik', `auto-reorder Taslak SAS temizliği: ${r.rowCount ?? 0} kayıt silindi`);
+        return res.json({ success: true, silinen: r.rowCount ?? 0 });
+      } catch (e) {
+        return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    });
 
   /** Tüm kiracı firmaları istatistikleriyle listeler. */
   // Kiracinin KENDI yedek hedefini kaydet (super-admin onboarding adimi).

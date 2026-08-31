@@ -3,8 +3,9 @@ const CariEkstrePanel = React.lazy(() => import('../components/CariEkstrePanel')
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Building2, Plus, Award, ShoppingCart, AlertTriangle, Search, Calendar,
-  X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3,
+  X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3, Eye, Wallet, Clock,
 } from 'lucide-react';
+import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
 import { db } from '../firebase';
 import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, query, where, onSnapshot } from '../lib/dbClient';
 import { cn } from '../lib/utils';
@@ -148,6 +149,9 @@ export default function SatinAlmaPage(props: Props) {
   /** Karta tıklanınca açılan tedarikçi cari ekstresi (2026-08-28 isteği:
    *  "tedarikçilerde detaya gidemiyorum karta basınca"). */
   const [acikTedarikci, setAcikTedarikci] = useState<{ ad: string; cariKod?: string } | null>(null);
+  // Ekstre modalı ESC + fokus döngüsü + X ile kapanabilsin (2026-08-31 kullanıcı
+  // bildirimi: "popup'ta X ile kapama yok").
+  const ekstreModalRef = useModalErisilebilirlik(!!acikTedarikci, () => setAcikTedarikci(null));
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -338,22 +342,44 @@ export default function SatinAlmaPage(props: Props) {
                                 <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
                                   <Building2 className="w-5 h-5 text-emerald-600" />
                                 </div>
-                                {isNative ? (
-                                  hasFullAccess('satin-alma') && (
-                                    <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                                      <button onClick={e => { e.stopPropagation(); setEditingSupplier(s); setNewSupplier({ ...s }); setAddingSupplier(true); }}
+                                <div className="flex items-center gap-1">
+                                  {!isNative && (
+                                    <span title={currentLanguage==='tr'?'Mikro alış faturalarından/carilerinden türetildi':'Derived from Mikro purchase invoices/accounts'} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-500 mr-1">Mikro</span>
+                                  )}
+                                  {/* Eylemler her kartta GÖRÜNÜR (2026-08-31 kullanıcı bildirimi:
+                                      "düzenle-sil-göster yok" — eskiden yalnız elle girilenlerde ve
+                                      lg'de hover'da çıkıyordu). Göster: cari ekstre. Düzenle: Mikro
+                                      türevinde kaydı `suppliers`a KOPYALAYARAK açar (kaydedilince
+                                      hook'taki dedup Mikro kopyasını bastırır). Sil: yalnız elle
+                                      girilenlerde — türetilmiş kayıt silinse de faturadan yeniden
+                                      türerdi, yanıltıcı olurdu. */}
+                                  <button onClick={e => { e.stopPropagation(); setAcikTedarikci({ ad: s.name, cariKod: s.mikroCariKod }); }}
+                                    title={currentLanguage==='tr'?'Göster (cari ekstre)':'View (statement)'}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  {hasFullAccess('satin-alma') && (
+                                    <>
+                                      <button onClick={e => {
+                                          e.stopPropagation();
+                                          if (isNative) { setEditingSupplier(s); setNewSupplier({ ...s }); }
+                                          else { const { id: _atla, ...kopya } = s; void _atla; setEditingSupplier(null); setNewSupplier(kopya); }
+                                          setAddingSupplier(true);
+                                        }}
+                                        title={currentLanguage==='tr' ? (isNative?'Düzenle':'Düzenle (Cetpa kaydına kopyalar)') : 'Edit'}
                                         className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
                                         <Edit2 className="w-3.5 h-3.5" />
                                       </button>
-                                      <button onClick={e => { e.stopPropagation(); void handleDeleteSupplier(s.id); }}
-                                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  )
-                                ) : (
-                                  <span title={currentLanguage==='tr'?'Mikro alış faturalarından/carilerinden türetildi':'Derived from Mikro purchase invoices/accounts'} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-500">Mikro</span>
-                                )}
+                                      {isNative && (
+                                        <button onClick={e => { e.stopPropagation(); void handleDeleteSupplier(s.id); }}
+                                          title={currentLanguage==='tr'?'Sil':'Delete'}
+                                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
                               </div>
                               <div>
                                 <p className="font-bold text-gray-900 text-sm">{s.name}</p>
@@ -363,13 +389,34 @@ export default function SatinAlmaPage(props: Props) {
                                 {s.phone && <p className="flex items-center gap-1.5"><Phone className="w-3 h-3 flex-shrink-0" />{s.phone}</p>}
                                 {s.email && <p className="flex items-center gap-1.5 truncate"><Mail className="w-3 h-3 flex-shrink-0" />{s.email}</p>}
                                 {s.taxNo && <p className="flex items-center gap-1.5"><FileText className="w-3 h-3 flex-shrink-0" />VKN: {s.taxNo}</p>}
+                                {/* Bakiye + son işlem (2026-08-31 kullanıcı isteği). Bakiye yalnız
+                                    VERİDEN biliniyorsa gösterilir — yoksa sahte ₺0 yazmayız. */}
+                                {typeof s.balance === 'number' && (
+                                  <p className="flex items-center gap-1.5 font-semibold text-gray-700"
+                                     title={currentLanguage==='tr'?'Cari bakiye (eksi = borcumuz)':'Account balance (negative = we owe)'}>
+                                    <Wallet className="w-3 h-3 flex-shrink-0" />
+                                    ₺{s.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </p>
+                                )}
+                                {s.sonIslem && (
+                                  <p className="flex items-center gap-1.5"
+                                     title={currentLanguage==='tr'?'Son cari hareket tarihi':'Last transaction date'}>
+                                    <Clock className="w-3 h-3 flex-shrink-0" />
+                                    {currentLanguage==='tr'?'Son işlem: ':'Last: '}{s.sonIslem.split('-').reverse().join('.')}
+                                  </p>
+                                )}
                               </div>
                             </div>
                             );
                           })}
                         {acikTedarikci && (
                           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAcikTedarikci(null)}>
-                            <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-xl p-5" onClick={e => e.stopPropagation()}>
+                            <div ref={ekstreModalRef} role="dialog" aria-modal="true" aria-label={acikTedarikci.ad}
+                              className="relative bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-xl p-5 pt-12" onClick={e => e.stopPropagation()}>
+                              <button onClick={() => setAcikTedarikci(null)} aria-label={currentLanguage==='tr'?'Kapat':'Close'}
+                                className="absolute top-3 right-3 z-10 p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100">
+                                <X className="w-5 h-5" />
+                              </button>
                               {acikTedarikci.cariKod ? (
                                 <React.Suspense fallback={<p className="text-center text-gray-400 text-sm py-8">…</p>}>
                                   <CariEkstrePanel

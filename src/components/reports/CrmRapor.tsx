@@ -43,7 +43,7 @@ import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function CrmRapor(ctx: ReportsCtx) {
-  const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
+  const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, onMusteriAc, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
   void itemCostTRY; void itemPriceTRY; // sekmeye göre kullanılıyor olabilir
   // `exchangeRates` kur YOKKEN null gelir; formatInCurrency imzası `?: ExchangeRates`.
   // `?? undefined` yalnız TİP köprüsü — iki değerde de fonksiyon kuru bulamayıp '—'
@@ -104,9 +104,15 @@ export default function CrmRapor(ctx: ReportsCtx) {
             return (
               <KpiGrid>
                 {kartlar.map((k, i) => (
-                  <KpiCard key={i} index={i} label={k.label} value={k.value} hint={k.hint}
-                    icon={k.icon} accent={k.accent} accentBg={k.accentBg}
-                    action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
+                  // Kart tıklanınca CRM→Müşteriler'e inilir (2026-08-31 kullanıcı
+                  // bildirimi: "kartlara basınca detaya gidemiyoruz").
+                  <div key={i} onClick={() => onMusteriAc?.('')}
+                    className={onMusteriAc ? 'cursor-pointer transition-transform hover:-translate-y-0.5' : undefined}
+                    title={onMusteriAc ? (currentLanguage==='tr'?'Müşteri listesini aç':'Open customer list') : undefined}>
+                    <KpiCard index={i} label={k.label} value={k.value} hint={k.hint}
+                      icon={k.icon} accent={k.accent} accentBg={k.accentBg}
+                      action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
+                  </div>
                 ))}
               </KpiGrid>
             );
@@ -135,14 +141,18 @@ export default function CrmRapor(ctx: ReportsCtx) {
                 {topCustomers.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-8">{currentLanguage==='tr'?'Henüz sipariş yok.':'No orders yet.'}</p>
                 ) : topCustomers.map((c, i) => (
-                  <div key={i} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                  // Satır tıklanınca o müşteri CRM→Müşteriler'de ada filtreli açılır
+                  // (2026-08-31 kullanıcı bildirimi: "kartlara basınca detaya gidemiyoruz").
+                  <button key={i} type="button" onClick={() => onMusteriAc?.(c.name)}
+                    disabled={!onMusteriAc}
+                    className="w-full text-left flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 rounded-lg px-1 -mx-1 enabled:hover:bg-gray-50 enabled:cursor-pointer transition-colors">
                     <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand flex-shrink-0">{i+1}</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
                       <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
                     </div>
                     <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, fxKurlari)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

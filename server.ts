@@ -2598,6 +2598,43 @@ async function startServer() {
     }
   });
 
+  /** SKU → son ALIŞ (giriş) hareketinin carisi (2026-08-31 kullanıcı isteği:
+   *  "tedarikçiyi elle girmeyelim, datadan çekelim"). Kaynak: mikro_stok_hareketleri
+   *  aynası; sth_tip=0 GİRİŞ konvansiyonu ÖLÇÜLMÜŞ (mikroRoutes depo-import
+   *  sorguları aynı ayrımı kullanır), iptaller dışarıda. sth_tarih ISO metin —
+   *  string DESC sıralaması doğru. PG yoksa (lokal dev) boş harita döner. */
+  const sonAlisTedarikcileri = async (skular: string[]): Promise<Map<string, { kod: string; unvan: string; tarih: string }>> => {
+    const harita = new Map<string, { kod: string; unvan: string; tarih: string }>();
+    if (!pgPool || skular.length === 0) return harita;
+    const r = await pgPool.query(
+      `SELECT DISTINCT ON (h.sth_stok_kod)
+              h.sth_stok_kod AS sku, h.sth_cari_kodu AS kod,
+              COALESCE(h.sth_tarih, '') AS tarih, COALESCE(c.cari_unvan1, '') AS unvan
+         FROM mikro_stok_hareketleri h
+         LEFT JOIN mikro_cari_hesaplar c ON c.cari_kod = h.sth_cari_kodu
+        WHERE COALESCE((h.veri->>'sth_tip')::int, -1) = 0
+          AND COALESCE((h.veri->>'sth_iptal')::int, 0) = 0
+          AND COALESCE(h.sth_cari_kodu, '') <> ''
+          AND h.sth_stok_kod = ANY($1)
+        ORDER BY h.sth_stok_kod, h.sth_tarih DESC`,
+      [skular],
+    );
+    for (const row of r.rows) harita.set(String(row.sku), { kod: String(row.kod), unvan: String(row.unvan), tarih: String(row.tarih).slice(0, 10) });
+    return harita;
+  };
+
+  /** Ürün kartındaki "Tedarikçi: Belirtilmemiş" boşluğunu veriden doldurur. */
+  app.get('/api/inventory/son-alis-tedarikci', requireAuth, async (req: Request, res: Response) => {
+    const stokKod = String(req.query.stokKod ?? '').trim();
+    if (!stokKod) return res.status(400).json({ success: false, error: 'stokKod gerekli' });
+    try {
+      const harita = await sonAlisTedarikcileri([stokKod]);
+      res.json({ success: true, tedarikci: harita.get(stokKod) ?? null, pg: !!pgPool });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.post('/api/inventory/auto-reorder', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
@@ -2625,21 +2662,46 @@ async function startServer() {
         return res.json({ success: true, created: 0, message: 'Tüm ürünler stok limitinin üzerinde.' });
       }
 
+      // TEKRARLAMA KORUMASI (2026-08-31 canlı bulgu): ilk çalıştırma 2218 kritik
+      // ürün için 2218 taslak yazdı; dedup olmadığından ikinci tıklama bunu
+      // İKİYE katlardı. Aynı ürün için AÇIK (Taslak) bir otomatik SAS varken
+      // yenisi üretilmez. Ayrıca her taslağa artık bir sipariş numarası verilir —
+      // numarasız kayıtlar listede '#' + '??' olarak görünüyordu.
+      const mevcutPOlar = await loadCompanyDocs('purchaseOrders', cid);
+      const acikOtoUrunler = new Set(
+        mevcutPOlar
+          .filter(p => p.source === 'auto-reorder' && p.status === 'Taslak')
+          .map(p => String(p.inventoryId ?? '')),
+      );
+      const yeniler = lowStock.filter(i => !acikOtoUrunler.has(i.id));
+      if (yeniler.length === 0) {
+        return res.json({
+          success: true, created: 0, lowStockCount: lowStock.length,
+          message: `${lowStock.length} kritik ürünün tamamı için zaten açık taslak SAS var — yeni taslak üretilmedi.`,
+        });
+      }
+
+      const gunDamgasi = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul' })
+        .format(new Date()).replace(/-/g, '');
+      // Tedarikçi VERİDEN: envanter kartında elle girilmemişse son alış (giriş)
+      // hareketinin carisi kullanılır (2026-08-31 kullanıcı isteği).
+      const alisTedarikci = await sonAlisTedarikcileri(yeniler.map(i => i.sku).filter(Boolean));
       const batch = adminDb.batch();
       const poRef = adminDb.collection('purchaseOrders');
       const created: string[] = [];
 
-      for (const item of lowStock) {
+      for (const [sira, item] of yeniler.entries()) {
         const reorderQty = Math.max(item.lowStockThreshold * 3, 10);
         const newRef = poRef.doc();
         batch.set(newRef, {
           status:      'Taslak',
           source:      'auto-reorder',
+          orderNumber: `SAS-${gunDamgasi}-${String(sira + 1).padStart(4, '0')}`,
           companyId:   cid, // sunucu-tarafı yazım /api/db injectTenant'ı atlar; elle etiketle
           inventoryId: item.id,
           productName: item.name,
           sku:         item.sku,
-          supplier:    item.supplier ?? '',
+          supplier:    item.supplier || alisTedarikci.get(item.sku)?.unvan || '',
           quantity:    reorderQty,
           currentStock: item.stockLevel,
           threshold:   item.lowStockThreshold,
@@ -3900,6 +3962,7 @@ async function startServer() {
   // bozulur - mikroRoutes'ta tam bu hata canliyi kirmisti.
   superadminRoutes(app, {
     getAdminDb: adminDbZorunlu, pgServerTimestamp, reqActor, writeAuditLog,
+    getPgPool: () => pgPool,
     requireAuth, requireSuperAdmin, requireMfaVerified, isSuperAdmin,
     sendEmail, iyzicoAuth, PLAN_PRICES_TRY,
     getIyzicoCreds, randStr, toPkiString,

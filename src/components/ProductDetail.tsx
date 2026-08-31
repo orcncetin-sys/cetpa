@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { authFetch } from '../services/authFetch';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Edit2, Package, Tag, Layers, DollarSign, History, TrendingUp, AlertCircle } from 'lucide-react';
@@ -48,6 +49,22 @@ function toDate(ts: unknown): Date | null {
 
 export default function ProductDetail({ product, onClose, movements = [], warehouses }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
+  /** Tedarikçi elle girilmemişse son ALIŞ hareketinden türet (2026-08-31 isteği).
+   *  Sunucu, Mikro aynasından SKU'nun son giriş carisini döner; PG yoksa null. */
+  const [turetilenTedarikci, setTuretilenTedarikci] = useState<{ unvan: string; tarih: string } | null>(null);
+  useEffect(() => {
+    if (product.supplier || !product.sku) return;
+    let iptal = false;
+    authFetch(`/api/inventory/son-alis-tedarikci?stokKod=${encodeURIComponent(product.sku)}`)
+      .then(r => r.json())
+      .then((d: { success?: boolean; tedarikci?: { unvan?: string; tarih?: string } | null }) => {
+        if (!iptal && d?.success && d.tedarikci?.unvan) {
+          setTuretilenTedarikci({ unvan: d.tedarikci.unvan, tarih: d.tedarikci.tarih ?? '' });
+        }
+      })
+      .catch(() => { /* türetme opsiyonel — hata kartı bozmasın */ });
+    return () => { iptal = true; };
+  }, [product.sku, product.supplier]);
   /** Son Hareketler'de tıklanan satır — detay modalı (2026-08-28 isteği:
    *  "hareketlere tıklayınca detaya giremiyorum"). */
   const [seciliHareket, setSeciliHareket] = useState<InventoryMovement | null>(null);
@@ -140,12 +157,20 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                   { label: 'Konum', value: product.location || (product.warehouseId ? product.warehouseId : '—') },
                   { label: 'Son Satış Fiyatı', value: sonSatisFiyati > 0 ? `${tl(sonSatisFiyati)} (KDV hariç)` : '—' },
                   { label: 'Ort. Satış Fiyatı', value: ortSatisFiyati > 0 ? `${tl(ortSatisFiyati)} (KDV hariç)` : '—' },
-                  { label: 'Tedarikçi', value: product.supplier || 'Belirtilmemiş' },
+                  // Elle girilmemişse VERİDEN: son alış (giriş) hareketinin carisi
+                  // (2026-08-31 kullanıcı isteği — "otomatik çekemez miyiz datadan?").
+                  { label: 'Tedarikçi', value: product.supplier
+                      || (turetilenTedarikci ? `${turetilenTedarikci.unvan}` : 'Belirtilmemiş'),
+                    note: !product.supplier && turetilenTedarikci
+                      ? `son alış: ${turetilenTedarikci.tarih.split('-').reverse().join('.')}` : undefined },
                   { label: 'Tedarikçi SKU', value: product.supplierSku || '-' },
-                ].map((item, i) => (
+                ].map((item: { label: string; value: string; note?: string }, i) => (
                   <div key={i} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
                     <span className="text-sm text-gray-500">{item.label}</span>
-                    <span className="text-sm font-bold text-gray-900">{item.value}</span>
+                    <span className="text-sm font-bold text-gray-900 text-right">
+                      {item.value}
+                      {item.note && <span className="block text-[10px] text-gray-400 font-normal">{item.note}</span>}
+                    </span>
                   </div>
                 ))}
               </div>

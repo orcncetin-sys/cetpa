@@ -54,6 +54,8 @@ interface SupportTicket { id: string; title: string; customerName: string; descr
 interface Props {
   crmTab: string;
   setCrmTab: (tab: string) => void;
+  /** Rapor kartından gelen müşteri-adı filtresi (2026-08-31) — Müşteriler alt sekmesine iletilir. */
+  musteriAra?: string;
   selectedLead: Lead | null;
   setSelectedLead: React.Dispatch<React.SetStateAction<Lead | null>>;
   hasFullAccess: (tab: string) => boolean;
@@ -114,7 +116,7 @@ const DURUM_ETIKET_TR: Record<string, string> = {
 const durumEtiketi = (status: string, tr: boolean): string => (tr ? (DURUM_ETIKET_TR[status] ?? status) : status);
 
 export default function CRMPage({
-  crmTab, setCrmTab, selectedLead, setSelectedLead,
+  crmTab, setCrmTab, musteriAra, selectedLead, setSelectedLead,
   hasFullAccess = () => true, currentLanguage, currentT,
   orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
@@ -523,7 +525,7 @@ export default function CRMPage({
 
               {/* CRM sub-tab: Müşteriler */}
               {activeTab === 'crm' && crmTab === 'musteriler' && (
-                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="musteriler" allowedTabs={['musteriler']} createNotification={createNotification} warehouses={warehouses} employees={employees} />
+                <AccountingModule orders={orders} currentLanguage={currentLanguage} isAuthenticated={!!user} userRole={userRole} exchangeRates={exchangeRates ?? undefined} initialTab="musteriler" allowedTabs={['musteriler']} initialCustomerSearch={musteriAra} createNotification={createNotification} warehouses={warehouses} employees={employees} />
               )}
 
               {/* CRM sub-tab: Siparişler */}

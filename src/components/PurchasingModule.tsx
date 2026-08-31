@@ -713,7 +713,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 <tr key={order.id} className="hover:bg-gray-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-gray-900">#{order.orderNumber}</span>
+                      {/* Numarasız eski kayıtlar '#' basıyordu (2026-08-31) — SKU'ya düş. */}
+                      <span className="text-sm font-bold text-gray-900">#{order.orderNumber || (order as unknown as { sku?: string }).sku || '—'}</span>
                       <MikroPushButton
                         compact
                         method="SatinAlmaTalepKaydetV2"
@@ -734,10 +735,19 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      {/* Tedarikçisiz satırda '??' yerine ürün adı göster (2026-08-31):
+                          auto-reorder taslakları ürün bazlı, tedarikçi veriden sonradan
+                          doldurulur — boşken satırın NE olduğu yine de anlaşılmalı. */}
                       <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">
-                        {(order.supplier || '??').substring(0, 2).toUpperCase()}
+                        {(order.supplier || (order as unknown as { productName?: string }).productName || '—').substring(0, 2).toUpperCase()}
                       </div>
-                      <span className="text-sm font-medium text-gray-700">{order.supplier}</span>
+                      <span className="text-sm font-medium text-gray-700">
+                        {order.supplier || (
+                          <span className="text-gray-400 italic">
+                            {(order as unknown as { productName?: string }).productName || '—'}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
