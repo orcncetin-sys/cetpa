@@ -6,6 +6,8 @@ import {
   X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3, Eye, Wallet, Clock,
 } from 'lucide-react';
 import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
+import { Coins } from 'lucide-react';
+const FiyatKarsilastirmaPanel = React.lazy(() => import('../components/FiyatKarsilastirmaPanel'));
 import { db } from '../firebase';
 import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, query, where, onSnapshot } from '../lib/dbClient';
 import { cn } from '../lib/utils';
@@ -21,7 +23,7 @@ import { eslesir } from '../utils/arama';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
-type PurchasingSubTab = 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk';
+type PurchasingSubTab = 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk' | 'fiyat-karsilastirma';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -166,7 +168,8 @@ export default function SatinAlmaPage(props: Props) {
                       { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
                       { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
                       { key: 'odeme-takvimi',  label: currentLanguage === 'tr' ? 'Ödeme Takvimi' : 'Payment Schedule',    icon: Calendar },
-                    ] as { key: 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi'; label: string; icon: React.ElementType }[]).map(t => (
+                      { key: 'fiyat-karsilastirma', label: currentLanguage === 'tr' ? 'Fiyat Karşılaştırma' : 'Price Comparison', icon: Coins },
+                    ] as { key: PurchasingSubTab; label: string; icon: React.ElementType }[]).map(t => (
                       <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
                         className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
                           purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
@@ -1170,6 +1173,19 @@ export default function SatinAlmaPage(props: Props) {
                   })()}
 
                   {/* ── Phase 627: Tedarik Zinciri Riski ────────────────────────── */}
+                  {/* Muhasebe'den taşındı (2026-08-31 kullanıcı isteği: "fiyat
+                      karşılaştırma bence Satın Alma'da olmalı"). */}
+                  {purchasingSubTab === 'fiyat-karsilastirma' && (
+                    <React.Suspense fallback={<p className="text-center text-gray-400 text-sm py-8">…</p>}>
+                      <FiyatKarsilastirmaPanel
+                        currentLanguage={currentLanguage}
+                        userRole={userRole}
+                        fmtKpi={fmtKpi}
+                        mikroFaturalar={mikroFaturalarSA}
+                      />
+                    </React.Suspense>
+                  )}
+
                   {purchasingSubTab === 'tedarik-risk' && (() => {
                     const tr627 = currentLanguage === 'tr';
                     const criticalRisks = p627Risks.filter(r=>r.severity==='Kritik'&&r.status==='Aktif').length;

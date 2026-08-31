@@ -86,7 +86,6 @@ export const MUHASEBE_MENU: MuhasebeMenuItem[] = [
   { id: 'babs',             tr: 'Ba/Bs Formu',         en: 'Ba/Bs Form',      icon: FileCheck2,    target: M('babs') },
   { id: 'fatura-takip',     tr: 'e-Fatura Takip',      en: 'e-Invoice Track', icon: LinkIcon,      target: M('fatura-takip') },
   { id: 'finansal-oranlar', tr: 'Finansal Oranlar',    en: 'Fin. Ratios',     icon: Activity,      target: M('finansal-oranlar') },
-  { id: 'fiyat-karsilastirma', tr: 'Fiyat Karşılaştırma', en: 'Price Comparison', icon: Coins,      target: M('fiyat-karsilastirma') },
   { id: 'fiyat-kural',      tr: 'Fiyat Kuralları',     en: 'Pricing Rules',   icon: Percent,       target: M('fiyat-kural') },
   { id: 'butce-gercek',     tr: 'Bütçe vs Gerçekleşen',en: 'Budget vs Actual',icon: BarChart3,     target: M('butce-gercek') },
   { id: 'oto-fatura',       tr: 'Oto. Fatura',         en: 'Auto-Invoice',    icon: Repeat,        target: M('oto-fatura') },

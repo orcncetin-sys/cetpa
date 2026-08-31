@@ -725,7 +725,7 @@ function AppContent() {
   const [raporMusteriAra, setRaporMusteriAra] = useState('');
   const [adminTab, setAdminTab] = useState<'overview'|'users'|'access'|'auditlog'|'system'|'company'|'evrak'|'tenants'>('overview');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'|'fiyat-karsilastirma'>('genel');
+  const [muhasebeTab, setMuhasebeTab] = useState<'genel'|'sabit-kiymet'|'maliyet'|'tahsilat'|'ap'|'butce'|'nakit-akis'|'banka'|'ar-aging'|'finansal-oranlar'|'pnl'|'kasa'|'bilanco'|'mutabakat'|'masraf'|'babs'|'kdv'|'cari'|'fatura-takip'|'fiyat-kural'|'butce-gercek'|'oto-fatura'|'gelir-tanima'|'kdv-mutabakat'|'gelir-gider-butce'|'varyans-analiz'|'kur-degerleme'|'tekrar-fatura'|'sirket-arasi'>('genel');
   // Birleşik Muhasebe menüsü (2026-07-21): AccountingModule'ün hangi iç sekmesinde
   // olduğu App seviyesinde tutulur ki sidebar'dan doğrudan bir ERP sekmesi açılabilsin.
   const [muhasebeAccountingTab, setMuhasebeAccountingTab] = useState<string>('faturalar');
@@ -979,7 +979,7 @@ function AppContent() {
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
 
-  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk'>('pos');
+  const [purchasingSubTab, setPurchasingSubTab] = useState<'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk' | 'fiyat-karsilastirma'>('pos');
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -4451,6 +4451,8 @@ function AppContent() {
                 { label: tr ? 'Tedarikçi Portalı' : 'Supplier Portal',      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
                 { label: tr ? 'Satın Alma Bütçesi' : 'Purchase Budget',     subId: 'satin-butce',      action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('satin-butce'); } }, // Phase 612
                 { label: tr ? 'Tedarik Zinciri Riski' : 'Supply Chain Risk', subId: 'tedarik-risk',   action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarik-risk'); } }, // Phase 627
+                // Muhasebe'den taşındı (2026-08-31 kullanıcı isteği).
+                { label: tr ? 'Fiyat Karşılaştırma' : 'Price Comparison',    subId: 'fiyat-karsilastirma', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('fiyat-karsilastirma'); } },
               ],
             },
             {
