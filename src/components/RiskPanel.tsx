@@ -373,7 +373,10 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
             </button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* 480: lg:col-span-2 kolonu 1024px viewport'ta ~490px — 560
+                masaüstünde gereksiz yatay scroll üretip İşlem kolonunu
+                gizliyordu (macOS overlay scrollbar görünmez; code-review). */}
+            <table className="min-w-[480px] w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <SortTh k="customerName" label={tr ? 'Müşteri' : 'Customer'} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
@@ -433,7 +436,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-[560px] w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
                 <SortTh k="shopifyOrderId" label={tr?'Sipariş ID':'Order ID'} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />

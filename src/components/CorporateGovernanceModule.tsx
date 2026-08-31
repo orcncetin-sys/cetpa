@@ -452,7 +452,8 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               );
             })()}
             <div className="apple-card overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <SortHeader label={currentLanguage === 'tr' ? 'Ad Soyad / Ünvan' : 'Name / Title'} sortKey="name" />
@@ -551,6 +552,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               </tbody>
             </table>
             </div>
+            </div>
           </motion.div>
         )}
 
@@ -628,7 +630,8 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               </div>
             ) : (
               <div className="apple-card overflow-hidden">
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
                       <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Sözleşme' : 'Contract'}</th>
@@ -684,6 +687,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
           </motion.div>

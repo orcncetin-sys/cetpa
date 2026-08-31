@@ -416,7 +416,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
 
           <div className="apple-card p-0 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="apple-table">
+              <table className="min-w-[560px] apple-table">
                 <thead><tr>
                   <SortHeader label={currentLanguage === 'tr' ? 'Bayi / Firma' : 'Dealer / Company'} sortKey="name" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
                   <SortHeader label="E-posta" sortKey="email" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
@@ -464,7 +464,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
       {b2bTab === 'pricelists' && (
         <div className="apple-card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="apple-table">
+            <table className="min-w-[560px] apple-table">
               <thead><tr>
                 <SortHeader label={currentT.product} sortKey="productName" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
                 <SortHeader label="Retail" sortKey="prices.Retail" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right" />
@@ -518,7 +518,9 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 <span className="text-xs text-[#86868B] font-medium">{filteredQuotations.length} {currentT.items || 'kayıt'}</span>
               </div>
               <div className="overflow-x-auto -mx-2">
-                <table className="w-full text-sm">
+                {/* 520: lg'de dar kolonda (≈440px) 560 fazla scroll üretiyordu;
+                    6 kolonlu tablo için 520 alt sınır (code-review dengesi). */}
+                <table className="min-w-[520px] w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
                     <SortHeader label={currentT.customer || 'Müşteri'} sortKey="customerName" currentSort={sortConfig} onSort={(key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="py-2 px-2" />
                     <SortHeader label="Ref No" sortKey="id" currentSort={sortConfig} onSort={(key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="py-2 px-2 hidden md:table-cell" />

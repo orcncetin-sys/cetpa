@@ -229,7 +229,7 @@ export default function IKPage(props: Props) {
                           </div>
                         ) : (
                           <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
+                            <table className="min-w-[560px] w-full text-xs">
                               <thead>
                                 <tr className="bg-gray-50 border-b border-gray-100">
                                   {[
@@ -684,7 +684,7 @@ export default function IKPage(props: Props) {
 
                         {/* Detail table */}
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
+                          <table className="min-w-[560px] w-full text-xs">
                             <thead>
                               <tr className="bg-gray-50 border-b border-gray-100">
                                 {[
@@ -878,7 +878,7 @@ export default function IKPage(props: Props) {
                           </div>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
+                          <table className="min-w-[560px] w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
                               {['#',tr629?'Çalışan':'Employee',tr629?'Departman':'Dept',tr629?'Sipariş':'Orders',tr629?'Ciro':'Revenue'].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -944,7 +944,7 @@ export default function IKPage(props: Props) {
                               <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Toplam Maliyet':'Total Cost'}</p><p className="text-lg font-black text-red-600">₺{totalCost.toLocaleString('tr-TR')}</p></div>
                             </div>
                             <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
+                              <table className="min-w-[560px] w-full text-xs">
                                 <thead><tr className="border-b border-gray-100 bg-gray-50">
                                   {[tr636?'Çalışan':'Employee',tr636?'Pozisyon':'Position',tr636?'Brüt':'Gross',tr636?'SGK İşçi':'SGK Emp.',tr636?'Gelir Vergisi':'Inc. Tax',tr636?'Damga':'Stamp',tr636?'Net':'Net'].map(h=>(
                                     <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>

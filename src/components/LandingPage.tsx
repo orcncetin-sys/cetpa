@@ -15,6 +15,12 @@ import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { db } from '../firebase';
 import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from '../lib/dbClient';
 import { byField } from '../utils/fsSort';
+import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
+
+// Pazarlama rakamı SABİT YAZILMAZ — 2026-08-31 code-review: '26' sabiti, seti
+// genişleten diff'te güncellenmeyi unutup bayatladı (set 41 olmuştu). Artık
+// tek kaynaktan türetilir; set değişince landing kendiliğinden doğru kalır.
+const MODUL_SAYISI = TOP_LEVEL_TABS.size;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1276,6 +1282,12 @@ export default function LandingPage({
           background-clip: text;
           animation: cetpa-gradient-x 4s ease infinite;
         }
+        @keyframes cetpa-hero-fade {
+          0%, 28% { opacity: 0; }
+          33%, 61% { opacity: 1; }
+          66%, 100% { opacity: 0; }
+        }
+        .cetpa-hero-slayt { opacity: 0; animation: cetpa-hero-fade 21s ease-in-out infinite; }
         .cetpa-float { animation: cetpa-float 6s ease-in-out infinite; }
         .cetpa-marquee-track { animation: cetpa-marquee 28s linear infinite; }
         /* WCAG 2.2.2: 5 sn'den uzun otomatik hareket durdurulabilir olmali. */
@@ -1288,7 +1300,7 @@ export default function LandingPage({
            iken bile opacity:0'da kilitledi (152 eleman, 2026-08-29 olcumu) —
            regresyon oldugu icin geri alindi. */
         @media (prefers-reduced-motion: reduce) {
-          .cetpa-float, .cetpa-marquee-track, .cetpa-gradient-text,
+          .cetpa-float, .cetpa-marquee-track, .cetpa-gradient-text, .cetpa-hero-slayt,
           [class*='cetpa-spin'], [class*='cetpa-pulse'], [class*='cetpa-sparkle'] {
             animation: none !important;
           }
@@ -1508,7 +1520,18 @@ export default function LandingPage({
                         {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: d('rgba(255,255,255,0.15)', 'rgba(0,0,0,0.15)') }} />)}
                       </div>
                     </div>
-                    <img src={heroImageUrl} alt="CETPA Dashboard" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} width={1024} height={480} fetchPriority="high" loading="eager" />
+                    <div className="relative w-full" style={{ maxHeight: '480px', overflow: 'hidden' }}>
+                      {/* 3 gerçek uygulama ekranı — maskeli SS'ler (2026-08-30).
+                          Saf CSS fade döngüsü; reduced-motion'da ilk kare sabit. */}
+                      <img src={heroImageUrl} alt="CETPA Panel" className="w-full block" style={{ display: 'block', maxHeight: '480px', objectFit: 'cover', objectPosition: 'top' }} width={1024} height={480} fetchPriority="high" loading="eager" />
+                      {/* Gecikme matematiği (2026-08-31 code-review düzeltmesi): döngü 21s,
+                          opak pencere %33-61 ≈ 6.9-12.8s. Envanter delay 0 → 6.9-12.8s'de
+                          görünür; CRM delay -14s → progress t+14 → 13.9-19.8s'de görünür.
+                          Önceki -14/-7 ikilisi CRM'i t=0'da opak yapıp eager panel
+                          görselinin (LCP) üstüne bindiriyordu. */}
+                      <img src="/ss-envanter.webp" alt="CETPA Envanter" aria-hidden="true" className="cetpa-hero-slayt w-full block absolute inset-0" style={{ maxHeight: '480px', objectFit: 'cover', objectPosition: 'top', animationDelay: '0s' }} width={1024} height={480} loading="lazy" />
+                      <img src="/ss-crm.webp" alt="CETPA CRM" aria-hidden="true" className="cetpa-hero-slayt w-full block absolute inset-0" style={{ maxHeight: '480px', objectFit: 'cover', objectPosition: 'top', animationDelay: '-14s' }} width={1024} height={480} loading="lazy" />
+                    </div>
                   </div>
                 </div>
                 {/* Klavye/trackpad gövdesi sabit piksel yükseklikte (52px tuş satırı + 60px
@@ -1580,8 +1603,9 @@ export default function LandingPage({
                   // Önceki hâli uydurmaydı (200+ müşteri, ₺2B+ ciro, 50K+ sipariş,
                   // 99.9% uptime, 4.9★, 15+ entegrasyon) — hiçbiri bir ölçümden
                   // gelmiyordu ve "15+ entegrasyon" gerçek sayının (12) üstündeydi.
-                  // 26 = useRouteSync TOP_LEVEL_TABS · 12 = /api altındaki entegrasyon önekleri.
-                  { label: isTR ? 'modül' : 'modules', val: '26' },
+                  // modül = TOP_LEVEL_TABS.size (türetilir, sabit değil) ·
+                  // 12 = /api altındaki entegrasyon önekleri.
+                  { label: isTR ? 'modül' : 'modules', val: String(MODUL_SAYISI) },
                   { label: isTR ? 'entegrasyon' : 'integrations', val: '12' },
                   { label: 'Logo · SAP · Dynamics', val: 'Mikro' },
                   { label: isTR ? 'GİB entegrasyonu' : 'GİB integration', val: 'e-Fatura' },
@@ -1991,7 +2015,7 @@ export default function LandingPage({
           <div className="text-center mb-14">
             <p className="text-xs font-black uppercase tracking-widest text-brand mb-3">{isTR ? 'Modüller' : "What's Inside"}</p>
             <h2 className={cn('text-3xl md:text-5xl font-black tracking-tight', d('text-white','text-[#111]'))}>
-              {isTR ? '26 entegre modül, sıfır silo' : '26 integrated modules. Zero silos.'}
+              {isTR ? `${MODUL_SAYISI} entegre modül, sıfır silo` : `${MODUL_SAYISI} integrated modules. Zero silos.`}
             </h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

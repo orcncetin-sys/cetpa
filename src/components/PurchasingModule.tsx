@@ -11,6 +11,7 @@ import { tr } from 'date-fns/locale';
 import { confirmAction } from '../lib/confirm';
 import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { eslesir } from '../utils/arama';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
@@ -123,11 +124,21 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     return () => unsub();
   }, []);
 
-  const supplierQuery = newOrder.supplier.trim().toLowerCase();
+  // `s.name` null-korumalı (2026-08-30 canlı çökme): Mikro'dan gelen adsız bir
+  // tedarikçi kaydı `undefined.toLowerCase()` ile TÜM Satın Alma modülünü
+  // ErrorBoundary'ye düşürüyordu — bu find mount'ta koşulsuz çalışır.
+  const supplierQuery = (newOrder.supplier ?? '').trim().toLowerCase();
+  // Öneri listesi Türkçe-duyarlı arar (utils/arama.eslesir): "istanbul" yazan
+  // "İSTANBUL YAPI"yı bulmalı — düz toLowerCase 'İ'yi i+U+0307'ye çevirip
+  // eşleşmeyi kaçırıyor, kullanıcı tedarikçiyi mükerrer açıyordu (code-review).
+  // exactSupplierMatch/dedup EŞİTLİK kıyasları bilerek toLowerCase kaldı:
+  // katla ASCII'ye indirger, 'Şişli'yle 'SISLI'yı AYNI kayıt sayardı.
   const matchingSuppliers = supplierQuery
-    ? suppliers.filter(s => s.name.toLowerCase().includes(supplierQuery))
+    ? suppliers.filter(s => eslesir(newOrder.supplier ?? '', s.name))
     : [];
-  const exactSupplierMatch = suppliers.find(s => s.name.toLowerCase() === supplierQuery);
+  const exactSupplierMatch = supplierQuery
+    ? suppliers.find(s => (s.name ?? '').toLowerCase() === supplierQuery)
+    : undefined;
 
   const handleSelectSupplier = (s: Supplier) => {
     setNewOrder(prev => ({ ...prev, supplier: s.name }));
@@ -161,7 +172,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       const existing = suppliers.find(s =>
         (vkn && normalizeVkn(s.taxNo) === vkn) ||
         s.mikroCariKod === c.cari_kod ||
-        s.name.toLowerCase() === c.cari_unvan1.toLowerCase()
+        (!!s.name && !!c.cari_unvan1 && s.name.toLowerCase() === c.cari_unvan1.toLowerCase())
       );
 
       let targetId: string;
@@ -200,7 +211,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     setSupplierActionLoading(true);
     try {
       // Isim zaten kayitliysa yeni kopya acma - mevcut olani sec.
-      const existing = suppliers.find(s => s.name.toLowerCase() === supplierQuery);
+      const existing = suppliers.find(s => (s.name ?? '').toLowerCase() === supplierQuery);
       if (existing) {
         handleSelectSupplier(existing);
         return;
@@ -270,7 +281,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     // İki ayrı, spesifik mesaj: "tedarikçi + ürün" birleşik hatası kullanıcıyı
     // yanlış alana yönlendiriyordu (ürün seçili olsa da tedarikçi boşsa mesaj
     // "ürün seçin" gibi okunuyordu). Önce tedarikçiyi kontrol et.
-    if (!newOrder.supplier.trim()) {
+    if (!(newOrder.supplier ?? '').trim()) {
       showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
       return;
     }
@@ -347,7 +358,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
   const handleUpdateOrder = async () => {
     if (!editingOrder) return;
-    if (!newOrder.supplier.trim()) {
+    if (!(newOrder.supplier ?? '').trim()) {
       showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
       return;
     }
@@ -450,8 +461,10 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   };
 
   const filteredOrders = activePurchaseOrders.filter(order => {
-    const matchesSearch = order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          order.supplier.toLowerCase().includes(searchTerm.toLowerCase());
+    // Türkçe-duyarlı + null-korumalı arama (2026-08-30 canlı çökme +
+    // 2026-08-31 code-review): eksik alan modülü düşürmesin, "istanbul"
+    // sorgusu "İSTANBUL"u bulsun.
+    const matchesSearch = eslesir(searchTerm, order.orderNumber, order.supplier);
     const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -791,13 +804,13 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                       <button 
                         onClick={() => {
                           setNewOrder({
-                            supplier: order.supplier,
+                            supplier: order.supplier ?? '',
                             items: order.items,
                             notes: order.notes || '',
                             expectedDate: typeof order.expectedDate === 'string' ? order.expectedDate : (order.expectedDate && typeof order.expectedDate === 'object' && 'toDate' in order.expectedDate && typeof order.expectedDate.toDate === 'function' ? format(order.expectedDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'))
                           });
                           setEditingOrder(order);
-                          const match = suppliers.find(s => s.name.toLowerCase() === order.supplier.trim().toLowerCase());
+                          const match = suppliers.find(s => (s.name ?? '').toLowerCase() === (order.supplier ?? '').trim().toLowerCase());
                           setSelectedSupplierId(match?.id ?? null);
                           setMikroSearchResults(null);
                         }}
@@ -897,7 +910,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                         disabled={!!viewingOrder}
                         className={cn(
                           "apple-input w-full",
-                          !!validationError && !newOrder.supplier.trim() && "ring-2 ring-red-400"
+                          !!validationError && !(newOrder.supplier ?? '').trim() && "ring-2 ring-red-400"
                         )}
                       />
                       {!viewingOrder && selectedSupplierId && (
@@ -1000,7 +1013,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-48 overflow-y-auto p-1 overflow-x-hidden">
-                      {inventory.filter(p => !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase())).map(product => (
+                      {inventory.filter(p => eslesir(productSearch, p.name, p.sku)).map(product => (
                         <button
                           key={product.id}
                           onClick={() => handleAddOrderItem(product as any)}

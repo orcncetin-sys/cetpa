@@ -1956,7 +1956,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
                 <p className="text-xs text-gray-500">300 analytics phases deployed — your live business intelligence dashboard</p>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               {[
                 { label: 'Total Orders', value: totalOrders.toLocaleString(), icon: '📦' },
                 { label: 'Total Revenue', value: `₺${(totalRevenue/1000).toFixed(0)}k`, icon: '💰' },

@@ -1944,7 +1944,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-3">{currentLanguage === 'tr' ? 'Müşteri Kademesi Ciro Matrisi' : 'Customer Tier Revenue Matrix'}</h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="min-w-[560px] w-full text-xs">
                 <thead>
                   <tr className="text-gray-500 border-b border-gray-100">
                     <th className="text-left pb-2">Tier</th>
@@ -2041,7 +2041,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
                     <span className="font-bold text-gray-800">{d.seg}</span>
                     <span className="text-sm font-black" style={{ color: d.marginPct >= 25 ? '#10b981' : d.marginPct >= 10 ? '#f59e0b' : '#ef4444' }}>{d.marginPct.toFixed(1)}% margin</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-xs text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-center">
                     <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{fmtAna(d.revenue,'K',0)}</div><div className="text-gray-400">Revenue</div></div>
                     <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{fmtAna(d.margin,'K',0)}</div><div className="text-gray-400">Margin</div></div>
                     <div className="bg-gray-50 rounded-lg p-2"><div className="font-bold text-gray-800">{d.customers}</div><div className="text-gray-400">Customers</div></div>
@@ -2511,7 +2511,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-3">Sales Rep Activity Heatmap — 6 Months</h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="min-w-[560px] w-full text-xs">
                 <thead>
                   <tr className="text-gray-400">
                     <th className="text-left pb-2 w-24">Rep</th>
@@ -3850,6 +3850,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'En İyi Müşteri Sipariş Sıklığı' : 'Top Customer Order Frequency'}</h3>
+            <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr>
@@ -3870,6 +3871,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         );
       })()}

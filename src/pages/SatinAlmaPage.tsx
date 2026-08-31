@@ -16,6 +16,7 @@ import type { Order, InventoryItem, Supplier, Lead } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
 import { kurCevir } from '../utils/currency';
+import { eslesir } from '../utils/arama';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
@@ -324,7 +325,7 @@ export default function SatinAlmaPage(props: Props) {
                       {/* Supplier Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {allSuppliers
-                          .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company ?? '').toLowerCase().includes(supplierSearch.toLowerCase()))
+                          .filter(s => eslesir(supplierSearch, s.name, s.company))
                           .map(s => {
                             // Mikro'dan türetilen kayıtlar `suppliers` koleksiyonunda yok —
                             // düzenle/sil elle girilenler dışına gösterilmez (id gerçek bir

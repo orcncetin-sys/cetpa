@@ -427,7 +427,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
             {/* Table */}
             <div className="apple-card overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="min-w-[560px] w-full text-sm text-left">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <SortHeader label={currentLanguage === 'tr' ? 'No' : 'No'} sortKey="no" currentSort={sortConfig} onSort={handleSort} />
@@ -529,7 +529,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
 
             <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="min-w-[560px] w-full text-sm text-left">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <SortHeader label="No" sortKey="no" currentSort={sortConfig} onSort={handleSort} />
@@ -700,7 +700,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
 
             <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="min-w-[560px] w-full text-sm text-left">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <SortHeader label={currentLanguage === 'tr' ? 'Başlık' : 'Title'} sortKey="title" currentSort={sortConfig} onSort={handleSort} />

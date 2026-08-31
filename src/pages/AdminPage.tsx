@@ -285,6 +285,8 @@ export default function AdminPage({
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Son Siparişler':'Recent Orders'}</h3>
           <div className="overflow-x-auto">
+            {/* min-w YOK (bilinçli): mobilde 2 görünür kolon — 560 zorlamak
+                dar tabloya boş alanlı yatay scroll ekliyordu (code-review). */}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -321,7 +323,7 @@ export default function AdminPage({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Kullanıcı':'User'}</th>
@@ -596,7 +598,7 @@ export default function AdminPage({
           <h3 className="font-bold text-gray-800 mb-2">{currentLanguage==='tr'?'Departman Erişim Matrisi':'Department Access Matrix'}</h3>
           <p className="text-xs text-gray-500 mb-4">{currentLanguage==='tr'?'Her rolün hangi bölümlere erişebileceğini görün':'See which sections each role can access'}</p>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="min-w-[560px] w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-2 px-3 text-gray-600 font-bold min-w-[140px]">{currentLanguage==='tr'?'Bölüm':'Section'}</th>
@@ -676,7 +678,7 @@ export default function AdminPage({
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
                     <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase">{tr571?'Zaman':'Time'}</th>

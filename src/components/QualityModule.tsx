@@ -634,7 +634,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
             {/* Table */}
             <div className="apple-card overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
                       <SortHeader label={currentLanguage === 'tr' ? 'Tarih' : 'Date'} sortKey="date" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
@@ -945,7 +945,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Süreç' : 'Process'} sortKey="process" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} />
@@ -978,6 +979,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -1036,7 +1038,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Süreç' : 'Process'} sortKey="process" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} />
@@ -1076,6 +1079,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -1134,7 +1138,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Kontrol Noktası' : 'Control Point'} sortKey="point" currentSort={ctpatSort} onSort={(k) => toggleSort(ctpatSort, k, setCtpatSort)} />
@@ -1172,6 +1177,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -1227,7 +1233,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Problem' : 'Problem'} sortKey="problem" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} />
@@ -1265,6 +1272,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -1320,7 +1328,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Alan' : 'Area'} sortKey="area" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} />
@@ -1352,6 +1361,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -1410,7 +1420,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               )}
             </div>
             <div className="apple-card overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Problem' : 'Problem'} sortKey="problem" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} />
@@ -1450,6 +1461,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </motion.div>
         )}

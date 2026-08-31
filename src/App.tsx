@@ -81,7 +81,6 @@ import {
   Trash2,
   Edit2,
   List,
-  Phone,
   Mail,
   Upload,
   Shield,
@@ -399,14 +398,27 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 
 // ── TabErrorBoundary: per-module crash isolation (Red-team Fix 1) ────────────
 class TabErrorBoundary extends React.Component<
-  { children: React.ReactNode; tabName: string; lang?: string },
+  { children: React.ReactNode; tabName: string; resetKey: string; lang?: string },
   { hasError: boolean; errorMsg: string }
 > {
-  constructor(props: { children: React.ReactNode; tabName: string; lang?: string }) {
+  constructor(props: { children: React.ReactNode; tabName: string; resetKey: string; lang?: string }) {
     super(props);
     this.state = { hasError: false, errorMsg: '' };
   }
   static getDerivedStateFromError(error: Error) { return { hasError: true, errorMsg: error.message }; }
+  // Navigasyon değişince hata durumunu SIFIRLA (2026-08-30 canlı bulgu): tek
+  // boundary tüm sekmeleri sardığından, bir modül çökünce diğer sekmeler de
+  // o sekmenin adıyla "hayalet çökme" ekranı gösteriyordu (Satın Alma çöktü →
+  // İK ve Hukuk da çökmüş SANILDI). Tetik `resetKey` (sekme id'si + sidebar'ın
+  // sürdüğü alt-sekmeler) — yerelleştirilmiş tabName DEĞİL: etikete bağlamak
+  // hem dil değişiminde niyetlenmemiş reset tetikliyordu hem de Muhasebe'nin
+  // 29 alt sekmesi gibi modül-İÇİ geçişleri görmüyordu (2026-08-31 code-review:
+  // Banka çökünce Kasa'ya geçiş de hata ekranında kalıyordu).
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, errorMsg: '' });
+    }
+  }
   componentDidCatch(error: Error) {
     console.error(`[TabErrorBoundary:${this.props.tabName}]`, error);
     // Stale chunk / deploy cache hatası → sayfayı bir kez otomatik yenile (döngü koruması).
@@ -481,6 +493,20 @@ const InventoryView = InventoryViewComponent;
 import UnauthorizedView from './components/UnauthorizedView';
 import ReadOnlyBanner from './components/ReadOnlyBanner';
 
+// ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
+// Path yönlendirmesine geçmeden önceki linkler/yer imleri `/#crm` biçimindeydi
+// (eski `window.location.hash = activeTab` efekti; 2026-08-30'da söküldü).
+// Göç BURADA, modül yüklenirken yapılmak ZORUNDA: efekt/initializer içinde
+// yapılan önceki deneme, BrowserRouter URL'yi ondan önce okuduğu için
+// useRouteSync'in mount efektince eziliyordu (pathToTab('/')='dashboard' →
+// hash'ten okunan sekme kayboluyordu — 2026-08-31 code-review bulgusu).
+// Landing çapaları (#fiyatlar vb.) sekme adı olmadığından dokunulmaz.
+(() => {
+  const h = window.location.hash.replace(/^#/, '').split('/')[0];
+  if (!h || !TOP_LEVEL_TABS.has(h)) return;
+  const yol = window.location.pathname === '/' ? `/${h}` : window.location.pathname;
+  history.replaceState(null, '', yol + window.location.search);
+})();
 
 // ── Back to Top — sol altta, sayfa kaydırılınca görünür ───────────────────────
 const BackToTopButton: React.FC = () => {
@@ -676,6 +702,8 @@ function AppContent() {
   // ⚠ Bu hook BURADA olmak zorunda: koşullu return'lerden (trackOrderId,
   // isAuthReady) sonra çağrılınca React #310 (hook sırası) ile TÜM uygulama
   // ErrorBoundary'ye düştü (2026-08-30 canlı hata — 10 dk içinde geri alındı).
+  // Eski `/#sekme` biçimi modül yüklenirken path'e göçürüldü (dosya başındaki
+  // IIFE) — burada yalnız pathname okumak yeterli.
   const [ilkYol] = useState(() => window.location.pathname);
   // <html lang> dil secimini izlesin: EN icerik acikken lang="tr" kalirsa
   // ekran okuyucu Ingilizceyi Turkce fonetikle okur (WCAG 3.1.1, a11y teshisi).
@@ -1268,10 +1296,11 @@ function AppContent() {
     });
   });
 
-  // Keep URL hash in sync with active tab
-  useEffect(() => {
-    window.location.hash = activeTab;
-  }, [activeTab]);
+  // Eski hash yönlendirmesinin kalıntısı KALDIRILDI (2026-08-30): burada her
+  // sekme değişiminde `window.location.hash = activeTab` yazılıyordu — path
+  // senkronuna (useRouteSync) geçtiğimiz hâlde URL'ye `#dashboard` eklemeye
+  // devam ediyordu; çıkış/paylaşım sonrası landing `/#dashboard` ile açılıyordu.
+  // Eski yer imlerinin göçü dosya başındaki modül-düzeyi IIFE'de (Router'dan önce).
 
   // Erişilemeyen sekmeden panoya yönlendir.
   //
@@ -1281,11 +1310,20 @@ function AppContent() {
   // geri/ileri (useRouteSync) ve programatik setActiveTab. HR rolündeki bir
   // kullanıcı 'c' tuşuna basınca crm'e geçiyor, yetkisi olmadığı halde panoya
   // atılmıyor ve UnauthorizedView ekranında TAKILI kalıyordu.
+  //
+  // `isAuthReady` GUARD'I EKLENDİ (2026-08-31 code-review bulgusu): rol auth
+  // listener'da ASENKRON gelir ve o ana dek varsayılan 'Sales'tir. Guard'sız
+  // hâli, kısıtlı sekmeye derin bağlantıyı (ör. Admin'in /admin yer imi) daha
+  // gerçek rol yüklenmeden panoya çevirip URL'yi siliyordu — yetkili kullanıcı
+  // için bile. setIsAuthReady(true) rol çözümünden SONRA aynı handler'da
+  // çağrıldığından, isAuthReady=true iken rol artık gerçek roldür. `user`
+  // yokken de dokunma: landing/login görünür, sekme kararı girişten sonraya kalır.
   useEffect(() => {
+    if (!isAuthReady || !user) return;
     if (!canAccess(activeTab)) {
       setActiveTab('dashboard');
     }
-  }, [userRole, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userRole, activeTab, isAuthReady, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Try local Express server first (dev), then fall back to Frankfurter public API
@@ -3466,7 +3504,7 @@ function AppContent() {
               else setShowDemoForm(true);
             }}
             onDashboardClick={() => setEnteredApp(true)}
-            heroImageUrl="/erp_hero.webp"
+            heroImageUrl="/ss-panel.webp"
             isLoggedIn={!!user}
             onLanguageToggle={() => setCurrentLanguage(currentLanguage === 'tr' ? 'en' : 'tr')}
             darkMode={darkMode}
@@ -3929,16 +3967,19 @@ function AppContent() {
             </button>
 
             {/* Logo */}
-            <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
-              <div className="relative group">
-                <img src={logoUrl || '/cetpalogo.avif'} alt="Logo" className="h-8 w-auto max-w-[160px] object-contain" />
+            {/* Mobil (2026-08-30 SS denetimi): logo shrink edebilmeli (flex-shrink-0
+                dar ekranda sağ kümeyle çakıştırıyordu) ve yükleme rozeti mobilde
+                logonun üstüne biniyordu — rozet artık yalnız sm+ hover'da. */}
+            <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-2 hover:opacity-80 transition-opacity min-w-0">
+              <div className="relative group min-w-0">
+                <img src={logoUrl || '/cetpalogo.avif'} alt="Logo" className="h-8 w-auto max-w-[104px] sm:max-w-[160px] object-contain" />
                 {isUploadingLogo && (
                   <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded">
                     <Clock className="w-4 h-4 animate-spin text-brand" />
                   </div>
                 )}
                 {userRole === 'Admin' && (
-                  <label className="absolute -bottom-1.5 -right-1.5 bg-brand rounded-full p-1 shadow-md ring-2 ring-white cursor-pointer opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
+                  <label className="hidden sm:block absolute -bottom-1.5 -right-1.5 bg-brand rounded-full p-1 shadow-md ring-2 ring-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()} title={currentLanguage === 'tr' ? 'Şirket logosunu yükle' : 'Upload company logo'}>
                     <Upload className="w-3 h-3 text-white" />
                     <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/avif,image/webp" className="hidden" onChange={handleLogoUpload} />
                   </label>
@@ -3952,7 +3993,7 @@ function AppContent() {
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
 
             {/* Language toggle — icon only on mobile, icon+text on sm+ */}
             <button
@@ -4145,7 +4186,7 @@ function AppContent() {
               </button>
               {user && (
                 <button onClick={() => setShowMfaSettings(true)} title={currentLanguage === 'tr' ? 'Güvenlik (2FA)' : 'Security (2FA)'}
-                  className={cn("p-2.5 -m-1 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
+                  className={cn("hidden sm:block p-2.5 -m-1 transition-colors flex-shrink-0 rounded-xl", darkMode ? "text-white/65 hover:text-emerald-400 hover:bg-white/10" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50")}>
                   <ShieldCheck className="w-4 h-4" />
                 </button>
               )}
@@ -4258,12 +4299,36 @@ function AppContent() {
                   <Globe className="w-3.5 h-3.5 text-brand" />
                   {currentLanguage === 'tr' ? 'EN' : 'TR'}
                 </button>
+                {/* Logo yükleme mobilde BURADAN (2026-08-31 code-review): header
+                    rozeti mobilde logoya bindiği için gizlendi; bu label
+                    handleLogoUpload'ın mobildeki tek erişim yolu. */}
+                {userRole === 'Admin' && (
+                  <label className={cn("sm:hidden flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer",
+                    darkMode ? "bg-white/[0.08] border-white/10 text-white/60 hover:text-white hover:bg-white/15"
+                              : "bg-black/[0.05] border-black/10 text-gray-500 hover:text-gray-900 hover:bg-black/10")}>
+                    {isUploadingLogo
+                      ? <Clock className="w-3.5 h-3.5 animate-spin text-brand" />
+                      : <Upload className="w-3.5 h-3.5 text-brand" />}
+                    Logo
+                    <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/avif,image/webp" className="hidden" onChange={handleLogoUpload} />
+                  </label>
+                )}
+                {/* 2FA ayarı mobil header'dan menüye taşındı (2026-08-30) —
+                    header dar ekrana sığmıyordu; kalkan sm+ header'da kalır. */}
+                {user && (
+                  <button
+                    onClick={() => { setShowMfaSettings(true); setIsMobileMenuOpen(false); }}
+                    className={cn("sm:hidden flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                      darkMode ? "bg-white/[0.08] border-white/10 text-white/60 hover:text-white hover:bg-white/15"
+                                : "bg-black/[0.05] border-black/10 text-gray-500 hover:text-gray-900 hover:bg-black/10")}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-brand" />
+                    {currentLanguage === 'tr' ? 'Güvenlik' : 'Security'}
+                  </button>
+                )}
                 <div className={cn("flex-1 flex items-center justify-end gap-3 text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>
-                  <a href="mailto:info@cetpa.com" className={cn("flex items-center gap-1 transition-all", darkMode ? "hover:text-white/60" : "hover:text-gray-700")}>
-                    <Mail className="w-3 h-3 text-brand" /> info@cetpa.com
-                  </a>
-                  <a href="tel:+902121234567" className={cn("flex items-center gap-1 transition-all hidden sm:flex", darkMode ? "hover:text-white/60" : "hover:text-gray-700")}>
-                    <Phone className="w-3 h-3 text-brand" /> +90 212 123 45 67
+                  <a href="mailto:info@cetpa.com.tr" className={cn("flex items-center gap-1 transition-all", darkMode ? "hover:text-white/60" : "hover:text-gray-700")}>
+                    <Mail className="w-3 h-3 text-brand" /> info@cetpa.com.tr
                   </a>
                   <span>© 2026 CETPA</span>
                 </div>
@@ -4526,7 +4591,10 @@ function AppContent() {
           );
         })()}
 
-        <main className="flex-1 min-w-0 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 overflow-x-hidden">
+        {/* pb-28: mobilde yüzen butonlar (sohbet + onboarding) sayfa sonunu
+            örtüyordu (2026-08-30 SS denetimi) — içerik dibi butonların üstüne
+            kadar kaydırılabilir olmalı. sm+'da eski dolgu korunur. */}
+        <main className="flex-1 min-w-0 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 pb-28 sm:pb-6 overflow-x-hidden">
 
           {/* ── Red-team Fix: Integration Staleness Banner ────────────── */}
           {staleIntegrations.length > 0 && !staleAlertDismissed && (
@@ -4770,7 +4838,11 @@ function AppContent() {
             </div>
           )}
 
-        <TabErrorBoundary tabName={tabLabelOf(activeTab)} lang={currentLanguage}>
+        <TabErrorBoundary
+          tabName={tabLabelOf(activeTab)}
+          resetKey={`${activeTab}:${lojistikTab}:${crmTab}:${adminTab}:${muhasebeTab}`}
+          lang={currentLanguage}
+        >
         <React.Suspense fallback={
           <div className="flex flex-col items-center justify-center min-h-[320px] gap-4">
             <div className="w-8 h-8 rounded-full border-2 border-brand border-t-transparent animate-spin" />

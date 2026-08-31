@@ -476,7 +476,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
             {/* Project Table */}
             <div className="apple-card overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
                       <SortHeader label={currentLanguage === 'tr' ? 'Proje Adı' : 'Project Name'} sortKey="name" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} />
@@ -648,7 +648,8 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
 
         {activeTab === 'resources' && (
           <motion.div key="resources" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="apple-card p-6">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="py-3 px-6 text-left text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İsim' : 'Name'}</th>
@@ -682,6 +683,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 ))}
               </tbody>
             </table>
+            </div>
           </motion.div>
         )}
 

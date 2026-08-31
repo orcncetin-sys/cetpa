@@ -4,7 +4,7 @@ import { huniAsamasi } from '../lib/huni';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Plus, Search, X, ChevronDown,
+  Plus, Search, X, ChevronDown, ChevronRight,
   ArrowLeft, BarChart3, BarChart2, Users, TrendingUp, CheckCircle2, AlertTriangle,
   Mail, Phone, MessageSquare, FileText, Download, Edit2, Trash2, RefreshCw, Package, Tag, Globe,
   Target as TargetIcon,
@@ -557,7 +557,7 @@ export default function CRMPage({
               Tablo artık mobilde de görünür; genişlik overflow-x-auto ile kayar. */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
+                      <table className="w-full text-left text-sm min-w-[560px]">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-6 py-4 font-bold text-gray-500 uppercase text-[10px] tracking-wider">{currentT.order_id}</th>
@@ -1044,7 +1044,7 @@ export default function CRMPage({
                           ))}
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
+                          <table className="w-full text-xs min-w-[560px]">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
                               {[tr606?'Kampanya':'Campaign',tr606?'Tarih':'Date',tr606?'Alıcı':'Recip.',tr606?'Açma %':'Open %',tr606?'Tıklama %':'Click %',tr606?'Dönüşüm':'Conv.'].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -1651,7 +1651,7 @@ export default function CRMPage({
                         </div>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
+                        <table className="w-full text-xs min-w-[560px]">
                           <thead>
                             <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider">
                               <th className="text-left px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Ay' : 'Month'}</th>
@@ -2346,7 +2346,13 @@ export default function CRMPage({
                               })()}
                               <p className="text-[10px] text-gray-400 mt-1">{lead.phone}</p>
                             </div>
-                            <button onClick={() => { setSelectedLead(lead); trackView({ type: 'lead', id: lead.id, label: lead.name, tab: 'crm' }); }} className="text-brand text-sm font-bold hover:underline">{currentT.view}</button>
+                            {/* Mobilde metin yerine ok: "Görüntüle" yazısı dar
+                                ekranda ad sütununu eziyordu (2026-08-30 SS
+                                denetimi); satırın tamamı zaten tıklanabilir. */}
+                            <button onClick={() => { setSelectedLead(lead); trackView({ type: 'lead', id: lead.id, label: lead.name, tab: 'crm' }); }} className="text-brand text-sm font-bold hover:underline p-2 -m-2 sm:p-0 sm:m-0" aria-label={currentT.view}>
+                              <span className="hidden sm:inline">{currentT.view}</span>
+                              <ChevronRight className="w-5 h-5 sm:hidden" />
+                            </button>
                           </div>
                         </div>
                       )));
@@ -2617,7 +2623,7 @@ export default function CRMPage({
                       </div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
+                      <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
                           {[tr581?'Temsilci':'Rep', tr581?'Lead':'Leads', tr581?'Kapatılan':'Won', tr581?'Dönüşüm':'Conv.', tr581?'Gelir':'Revenue'].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -2859,7 +2865,7 @@ export default function CRMPage({
                       <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">Pareto 80/20</p><p className="text-xl font-black text-amber-600">%{paretoShare.toFixed(0)}</p></div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
+                      <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
                           {['#',tr613?'Müşteri':'Customer',tr613?'Tip':'Type',tr613?'Ciro':'Revenue',tr613?'Sipariş':'Orders',tr613?'Pay':'Share'].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -2971,7 +2977,7 @@ export default function CRMPage({
                       </div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
+                      <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
                           {[tr604?'Temsilci':'Rep', tr604?'Ciro':'Revenue', tr604?'Komisyon':'Commission'].map(h=>(
                             <th key={h} className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -3037,7 +3043,7 @@ export default function CRMPage({
                     </div>
                     {filtered633.length > 0 ? (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
+                        <table className="w-full text-xs min-w-[560px]">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
                             {[tr633?'Müşteri':'Customer','R','F','M',tr633?'Toplam':'Total',tr633?'Segment':'Segment'].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
@@ -3758,7 +3764,7 @@ export default function CRMPage({
                 {/* RMA list */}
                 <div className="apple-card overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[560px]">
                       <thead><tr className="border-b border-gray-100 bg-gray-50/60">
                         <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr549?'Müşteri':'Customer'}</th>
                         <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{tr549?'Ürünler':'Items'}</th>

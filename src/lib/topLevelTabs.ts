@@ -14,10 +14,20 @@
 // tab group (dunning/gelirtanima/finance/ebelge/vergi all missing too), which
 // is why switching those tabs left the URL path stuck on '/holding' with only
 // the unrelated hash changing (2026-08-13 kullanıcı bulgusu, app.cetpa.com.tr/holding#finance).
+// 2026-08-30 tamamlama (kullanıcı isteği: "her sayfaya link"): listede DÖRT ölü
+// girdi daha vardı — 'uretim', 'raporlar', 'ayarlar', 'entegrasyonlar' hiçbir
+// activeTab ile eşleşmiyordu (gerçek id'ler 'production', 'reports',
+// 'settings'; entegrasyonlar diye sekme yok) — 'finans' yazım hatasıyla AYNI
+// arıza sınıfı. Ölüler silindi, navigasyonda GERÇEKTEN kullanılan tüm sekme
+// id'leri eklendi; artık her üst düzey sayfa derin-bağlantılı.
+// Kaynak doğrulama: grep handleTabClick/setActiveTab + sidebar/mobil menü id'leri.
 export const TOP_LEVEL_TABS = new Set([
   'dashboard', 'crm', 'orders', 'inventory', 'lojistik', 'muhasebe',
-  'satin-alma', 'ik', 'hukuk', 'uretim', 'kalite', 'proje', 'servis',
-  'bakim', 'raporlar', 'finance', 'ayarlar', 'entegrasyonlar', 'b2b',
+  'satin-alma', 'ik', 'hukuk', 'kalite', 'proje', 'servis',
+  'bakim', 'finance', 'b2b',
   'holding', 'ihracat', 'sube', 'performans',
   'dunning', 'gelirtanima', 'ebelge', 'vergi',
+  'production', 'reports', 'settings', 'admin', 'risk', 'onaylar',
+  'kurumsal', 'analytics', 'mobilewms', 'mrp', 'iade', 'mesai',
+  'selfservis', 'territory', 'cpq', 'muhtasar', 'lotseri', 'fiyat-istihbarat',
 ]);
