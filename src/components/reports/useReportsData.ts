@@ -26,9 +26,8 @@ import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
 import { cn } from '../../lib/utils';
 import { motion } from 'motion/react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { registerTurkishFont } from '../../utils/pdfFont';
+// jspdf + Türkçe font TIKLAMA ANINDA dinamik yüklenir (2026-08-31 performans):
+// statik import, Raporlar sekmesi açılır açılmaz 1.5 MB indiriyordu.
 import {
   collection, onSnapshot, query, where,
 } from '../../lib/dbClient';
@@ -247,6 +246,9 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   const COLORS = ['#ff4000', '#007AFF', '#34C759', '#FF9500', '#AF52DE', '#00C7BE', '#FF2D55'];
 
   const exportPDF = async () => {
+    const [{ jsPDF }, { default: autoTable }, { registerTurkishFont }] = await Promise.all([
+      import('jspdf'), import('jspdf-autotable'), import('../../utils/pdfFont'),
+    ]);
     const doc = new jsPDF();
     await registerTurkishFont(doc);
     // Marka basligi + tablo stili ORTAK temadan (src/utils/pdfTheme.ts).

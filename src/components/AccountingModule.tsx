@@ -39,9 +39,9 @@ import TahsilatModule from './TahsilatModule';
 import KasaModule from './KasaModule';
 import MaliyetMerkeziModule from './MaliyetMerkeziModule';
 import SabitKiymetModule from './SabitKiymetModule';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { registerTurkishFont } from '../utils/pdfFont';
+// jspdf + Türkçe font (1.5 MB'lık iki vendor chunk) TIKLAMA ANINDA dinamik
+// yüklenir (2026-08-31 performans): statik import, Muhasebe sekmesi AÇILIR
+// AÇILMAZ indiriyordu — PDF düğmesine hiç basılmasa bile.
 import DocumentDesigner from './DocumentDesigner';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { db, auth } from '../firebase';
@@ -659,6 +659,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // GERÇEK PDF (buton "Beyanname PDF" diyor ama eskiden .txt indiriyordu).
   const downloadVatDeclaration = async () => {
+    const [{ jsPDF }, { default: autoTable }, { registerTurkishFont }] = await Promise.all([
+      import('jspdf'), import('jspdf-autotable'), import('../utils/pdfFont'),
+    ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     await registerTurkishFont(doc);
     const W = doc.internal.pageSize.getWidth();

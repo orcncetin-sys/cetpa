@@ -6,9 +6,13 @@ import { analyzeDashboard } from '../services/geminiService';
 
 interface DashboardAnalysisProps {
   data: Record<string, unknown>;
+  /** EN modunda düğme/modal Türkçe kalıyordu (2026-08-31 kullanıcı bildirimi:
+   *  "gemini translate forgot") — bileşen dile bağlandı. */
+  currentLanguage?: string;
 }
 
-export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
+export default function DashboardAnalysis({ data, currentLanguage = 'tr' }: DashboardAnalysisProps) {
+  const tr = currentLanguage === 'tr';
   const [isOpen, setIsOpen] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -21,7 +25,7 @@ export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
       setAnalysis(result);
     } catch (error) {
       console.error(error);
-      setAnalysis("Analiz sırasında bir hata oluştu.");
+      setAnalysis(tr ? 'Analiz sırasında bir hata oluştu.' : 'An error occurred during analysis.');
     } finally {
       setIsLoading(false);
     }
@@ -34,7 +38,7 @@ export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
         className="apple-button-primary flex items-center gap-2 bg-gradient-to-r from-purple-600 to-[#ff4000] hover:from-purple-700 hover:to-[#e63900] shadow-lg shadow-purple-500/20"
       >
         <Sparkles className="w-4 h-4" />
-        Gemini ile Analiz Et
+        {tr ? 'Gemini ile Analiz Et' : 'Analyze with Gemini'}
       </button>
 
       <AnimatePresence>
@@ -52,8 +56,8 @@ export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
                     <Brain className="w-6 h-6 text-purple-600" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">Stratejik Dashboard Analizi</h2>
-                    <p className="text-sm text-gray-500">Gemini 3.1 Pro tarafından hazırlanan derinlemesine rapor.</p>
+                    <h2 className="text-xl font-bold text-gray-900">{tr ? 'Stratejik Dashboard Analizi' : 'Strategic Dashboard Analysis'}</h2>
+                    <p className="text-sm text-gray-500">{tr ? 'Gemini 3.1 Pro tarafından hazırlanan derinlemesine rapor.' : 'In-depth report prepared by Gemini 3.1 Pro.'}</p>
                   </div>
                 </div>
                 <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
@@ -66,8 +70,8 @@ export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
                   <div className="flex flex-col items-center justify-center h-64 space-y-4">
                     <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
                     <div className="text-center">
-                      <p className="text-lg font-medium text-gray-900">Veriler Analiz Ediliyor...</p>
-                      <p className="text-sm text-gray-500">Yüksek düşünme modu aktif. Bu işlem biraz zaman alabilir.</p>
+                      <p className="text-lg font-medium text-gray-900">{tr ? 'Veriler Analiz Ediliyor...' : 'Analyzing data…'}</p>
+                      <p className="text-sm text-gray-500">{tr ? 'Yüksek düşünme modu aktif. Bu işlem biraz zaman alabilir.' : 'High-reasoning mode active. This may take a moment.'}</p>
                     </div>
                   </div>
                 ) : (
@@ -82,17 +86,17 @@ export default function DashboardAnalysis({ data }: DashboardAnalysisProps) {
               <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex justify-between items-center">
                 <div className="flex items-center gap-4 text-xs text-gray-400">
                   <div className="flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3" /> Canlı Veri
+                    <TrendingUp className="w-3 h-3" /> {tr ? 'Canlı Veri' : 'Live Data'}
                   </div>
                   <div className="flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> Stratejik Öneriler
+                    <AlertCircle className="w-3 h-3" /> {tr ? 'Stratejik Öneriler' : 'Strategic Insights'}
                   </div>
                 </div>
                 <button
                   onClick={() => setIsOpen(false)}
                   className="apple-button-secondary px-8"
                 >
-                  Kapat
+                  {tr ? 'Kapat' : 'Close'}
                 </button>
               </div>
             </motion.div>

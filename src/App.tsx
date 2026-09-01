@@ -10,6 +10,9 @@ const RaporlarPage            = React.lazy(() => import('./pages/RaporlarPage'))
 const SettingsPage            = React.lazy(() => import('./pages/SettingsPage'));
 const AdminPage               = React.lazy(() => import('./pages/AdminPage'));
 const CRMPage                 = React.lazy(() => import('./pages/CRMPage'));
+const UretimPage              = React.lazy(() => import('./pages/UretimPage'));
+const ProjePage               = React.lazy(() => import('./pages/ProjePage'));
+const KalitePage              = React.lazy(() => import('./pages/KalitePage'));
 const OrdersPage              = React.lazy(() => import('./pages/OrdersPage'));
 const MuhasebePage            = React.lazy(() => import('./pages/MuhasebePage'));
 const SatinAlmaPage           = React.lazy(() => import('./pages/SatinAlmaPage'));
@@ -152,8 +155,11 @@ import { scoreLead } from './services/geminiService';
 import { createShopifyDraftOrder } from './services/shopifyService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area
-} from 'recharts';
+// recharts importu KALDIRILDI (2026-08-31 performans ölçümü): 10 sembolün
+// HİÇBİRİ App.tsx'te kullanılmıyordu ama 272 KB'lık vendor-charts chunk'ını
+// AÇILIŞ grafiğine sokuyordu — grafikler zaten lazy sayfa/panel chunk'larından
+// yükleniyor. Buraya recharts importu GERİ EKLEME; grafik gerekiyorsa ilgili
+// lazy sayfada kullan.
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 // ── Lazy auth/marketing pages (not needed on initial render) ─────────────────
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
@@ -4398,7 +4404,7 @@ function AppContent() {
               id: 'inventory', label: tr ? 'Envanter' : 'Inventory', icon: List,
               childIds: ['lotseri', 'bakim', 'mrp', 'fiyat-istihbarat'],
               children: [
-                { label: tr ? 'Stok Yönetimi' : 'Stock Mgmt',     subId: 'inventory', action: () => setActiveTab('inventory') },
+                { label: tr ? 'Stok Yönetimi' : 'Stock Management', subId: 'inventory', action: () => setActiveTab('inventory') },
                 { label: tr ? 'Lot / Seri Takip' : 'Lot/Serial',  subId: 'lotseri',   action: () => setActiveTab('lotseri') },
                 { label: tr ? 'Bakım-Onarım' : 'Maintenance',     subId: 'bakim',     action: () => setActiveTab('bakim') },
                 { label: tr ? 'MRP II / Kapasite' : 'MRP II',     subId: 'mrp',       action: () => setActiveTab('mrp') },
@@ -5444,521 +5450,47 @@ function AppContent() {
 
           {/* ── Proje Yönetimi ── */}
           {activeTab === 'proje' && (
-            <motion.div key="proje" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('proje') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Proje Yönetimi':'Project Management'} /> : (
-                <>
-                  {!hasFullAccess('proje') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  {/* ── Phase 582: Proje Maliyet Takibi ─────────────────────────── */}
-                  {(() => {
-                    const tr582 = currentLanguage === 'tr';
-                    const statusColors582: Record<string,string> = {'Aktif':'bg-green-100 text-green-700','Tamamlandı':'bg-blue-100 text-blue-700','Beklemede':'bg-gray-100 text-gray-500'};
-                    return (
-                      <div className="apple-card p-5">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="font-bold text-gray-900 text-sm">{tr582?'💼 Proje Maliyet Takibi':'💼 Project Cost Tracking'}</h3>
-                          {hasFullAccess('proje') && (
-                            <button onClick={()=>setP582ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
-                              <Plus className="w-4 h-4"/>{tr582?'Proje Ekle':'Add Project'}
-                            </button>
-                          )}
-                        </div>
-                        {p582ShowForm && (
-                          <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr582?'Proje Adı':'Project Name'} value={p582Draft.name} onChange={e=>setP582Draft(d=>({...d,name:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Bütçe (₺)':'Budget (₺)'} value={p582Draft.budget} onChange={e=>setP582Draft(d=>({...d,budget:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Harcanan (₺)':'Spent (₺)'} value={p582Draft.spent} onChange={e=>setP582Draft(d=>({...d,spent:e.target.value}))} />
-                              <select className="apple-input px-3 py-2 text-sm" value={p582Draft.status} onChange={e=>setP582Draft(d=>({...d,status:e.target.value as typeof d.status}))}>
-                                <option value="Aktif">{tr582?'Aktif':'Active'}</option>
-                                <option value="Tamamlandı">{tr582?'Tamamlandı':'Completed'}</option>
-                                <option value="Beklemede">{tr582?'Beklemede':'On Hold'}</option>
-                              </select>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={async ()=>{
-                                if(!p582Draft.name) return;
-                                try { const payload582={name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}; if(p582EditId){ await updateDoc(doc(db,'projectCosts',p582EditId),payload582); setP582EditId(null); } else { await addDoc(collection(db,'projectCosts'),{...payload582,createdAt:serverTimestamp()}); } toast(currentLanguage === 'tr' ? 'Proje maliyeti eklendi ✓' : 'Project cost added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Maliyet eklenemedi.' : 'Failed to add cost.', 'error');}
-                                setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
-                                setP582ShowForm(false);
-                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP582ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr582?'İptal':'Cancel'}</button>
-                            </div>
-                          </div>
-                        )}
-                        {p582Projects.length === 0 ? (
-                          <p className="text-center py-8 text-gray-400 text-sm">{tr582?'"Proje Ekle" ile bütçe takibi başlatın.':'Click "Add Project" to start tracking project costs.'}</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {p582Projects.map(p=>{
-                              const pct = p.budget>0?Math.min(100,(p.spent/p.budget)*100):0;
-                              const isOver = p.spent>p.budget && p.budget>0;
-                              return (
-                                <div key={p.id} className={`p-4 rounded-xl border ${isOver?'border-red-200 bg-red-50/20':'border-gray-100'}`}>
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                      <p className="font-semibold text-gray-800">{p.name}</p>
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors582[p.status]}`}>{p.status}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
-                                      <button onClick={()=>{setP582Draft({name:p.name,budget:String(p.budget),spent:String(p.spent),status:p.status});setP582EditId(p.id);setP582ShowForm(true);}} title={tr582?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 ml-2"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e);}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
-                                    </div>
-                                  </div>
-                                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all ${isOver?'bg-red-500':pct>80?'bg-amber-500':'bg-emerald-400'}`} style={{width:`${pct}%`}} />
-                                  </div>
-                                  <p className="text-xs text-gray-400 mt-1">{pct.toFixed(0)}% {tr582?'harcandı':'spent'}{isOver?` • ⚠️ ${tr582?'Bütçe aşıldı!':'Over budget!'}`:''}</p>
-                                </div>
-                              );
-                            })}
-                            <div className="border-t border-gray-100 pt-3 flex justify-between text-xs font-semibold text-gray-600">
-                              <span>{tr582?'Toplam Bütçe:':'Total Budget:'} ₺{p582Projects.reduce((s,p)=>s+p.budget,0).toLocaleString()}</span>
-                              <span>{tr582?'Toplam Harcama:':'Total Spent:'} ₺{p582Projects.reduce((s,p)=>s+p.spent,0).toLocaleString()}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <ProjectModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('proje')} userRole={userRole} />
-
-                  {/* ── Phase 618: Proje Zaman Çizelgesi (Gantt-lite) ───────────── */}
-                  {(() => {
-                    const tr618 = currentLanguage === 'tr';
-                    const today618 = new Date().toISOString().slice(0,10);
-                    const overdue618 = p618Projects.filter(p=>p.end<today618&&p.status!=='Tamamlandı').length;
-                    return (
-                      <div className="apple-card p-5 space-y-4">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <h3 className="font-bold text-gray-900 text-sm">📐 {tr618?'Proje Zaman Çizelgesi':'Project Timeline'}</h3>
-                          <button onClick={()=>setP618ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr618?'Proje Ekle':'Add Project'}</button>
-                        </div>
-                        {overdue618>0&&<div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-red-700">⚠️ {overdue618} {tr618?'proje gecikmiş':'project(s) overdue'}</div>}
-                        {p618ShowForm && (
-                          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                              <input className="apple-input col-span-2 md:col-span-1" placeholder={tr618?'Proje adı':'Project name'} value={p618Draft.name} onChange={e=>setP618Draft(d=>({...d,name:e.target.value}))}/>
-                              <input className="apple-input" placeholder={tr618?'Sorumlu':'Owner'} value={p618Draft.owner} onChange={e=>setP618Draft(d=>({...d,owner:e.target.value}))}/>
-                              <select value={p618Draft.status} onChange={e=>setP618Draft(d=>({...d,status:e.target.value as typeof d.status}))} className="apple-input">
-                                {['Aktif','Beklemede','Gecikmiş','Tamamlandı'].map(s=><option key={s}>{s}</option>)}
-                              </select>
-                              <input type="date" className="apple-input" value={p618Draft.start} onChange={e=>setP618Draft(d=>({...d,start:e.target.value}))}/>
-                              <input type="date" className="apple-input" value={p618Draft.end} onChange={e=>setP618Draft(d=>({...d,end:e.target.value}))}/>
-                              <input type="number" min="0" max="100" className="apple-input" placeholder="% İlerleme" value={p618Draft.progress} onChange={e=>setP618Draft(d=>({...d,progress:e.target.value}))}/>
-                            </div>
-                            <button onClick={async ()=>{
-                              if(!p618Draft.name||!p618Draft.start||!p618Draft.end) return;
-                              try { const payload618={name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}; if(p618EditId){ await updateDoc(doc(db,'projectTimelines',p618EditId),payload618); setP618EditId(null); } else { await addDoc(collection(db,'projectTimelines'),{...payload618,createdAt:serverTimestamp()}); } toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklendi ✓' : 'Timeline added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Zaman çizelgesi eklenemedi.' : 'Failed to add timeline.', 'error');}
-                              setP618Draft({name:'',start:'',end:'',progress:'0',status:'Aktif',owner:''});
-                              setP618ShowForm(false);
-                              toast(tr618?'Proje eklendi.':'Project added.','success');
-                            }} className="apple-button-primary text-xs px-6">{tr618?'Kaydet':'Save'}</button>
-                          </div>
-                        )}
-                        {p618Projects.length > 0 && (
-                          <div className="space-y-3">
-                            {[...p618Projects].sort((a,b)=>a.start.localeCompare(b.start)).map(p=>{
-                              const statusCls:{[k:string]:string} = {Aktif:'text-blue-600 bg-blue-50',Tamamlandı:'text-emerald-600 bg-emerald-50',Gecikmiş:'text-red-600 bg-red-50',Beklemede:'text-gray-500 bg-gray-100'};
-                              const cls = statusCls[p.status]||'text-gray-500 bg-gray-100';
-                              const isLate = p.end<today618&&p.status!=='Tamamlandı';
-                              return (
-                                <div key={p.id} className={`border rounded-xl px-4 py-3 ${isLate?'border-red-200 bg-red-50/20':'border-gray-100'}`}>
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <p className="font-semibold text-gray-800 text-sm truncate">{p.name}</p>
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${cls}`}>{p.status}</span>
-                                    </div>
-                                    <div className="flex items-center gap-3 shrink-0 text-xs text-gray-400">
-                                      <span>{p.owner}</span>
-                                      <input type="range" min="0" max="100" value={p.progress} onChange={async e=>{try{await updateDoc(doc(db,'projectTimelines',p.id),{progress:Number(e.target.value)});}catch(err){console.error(err);}}} className="w-20"/>
-                                      <span className="font-bold text-gray-700 w-8 text-right">%{p.progress}</span>
-                                      <button onClick={()=>{setP618Draft({name:p.name,start:p.start,end:p.end,progress:String(p.progress),status:p.status,owner:p.owner});setP618EditId(p.id);setP618ShowForm(true);}} title={tr618?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectTimelines',p.id));}catch(e){console.error("[firestore]", e);}}} title={tr618?'Sil':'Delete'} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-[10px] text-gray-400 mb-2">
-                                    <span>{new Date(p.start).toLocaleDateString('tr-TR')}</span>
-                                    <span>→</span>
-                                    <span className={isLate?'text-red-500 font-bold':''}>{new Date(p.end).toLocaleDateString('tr-TR')}</span>
-                                  </div>
-                                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all ${p.status==='Tamamlandı'?'bg-emerald-400':isLate?'bg-red-400':'bg-blue-400'}`} style={{width:`${p.progress}%`}}/>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {p618Projects.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr618?'Zaman çizelgesi için proje ekleyin.':'Add projects to track on the timeline.'}</p>}
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </motion.div>
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Proje bloğu ProjePage'e çıkarıldı (2026-08-31, App.tsx bölme). */}
+              <ProjePage
+                currentLanguage={currentLanguage} isModuleAuthenticated={!!user && hasFullAccess('proje')} userRole={userRole}
+                canAccess={canAccess} hasFullAccess={hasFullAccess} toast={toast}
+                p582Projects={p582Projects} p582ShowForm={p582ShowForm} setP582ShowForm={setP582ShowForm}
+                p582Draft={p582Draft} setP582Draft={setP582Draft} p582EditId={p582EditId} setP582EditId={setP582EditId}
+                p618Projects={p618Projects} p618ShowForm={p618ShowForm} setP618ShowForm={setP618ShowForm}
+                p618Draft={p618Draft} setP618Draft={setP618Draft} p618EditId={p618EditId} setP618EditId={setP618EditId}
+              />
+            </React.Suspense>
           )}
 
           {activeTab === 'kalite' && (
-            <motion.div key="kalite" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('kalite') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Kalite Yönetimi':'Quality Management'} /> : (
-                <>
-                  {!hasFullAccess('kalite') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  {/* ── Phase 587: Kalite Kontrol Çeklisti ─────────────────────── */}
-                  {(() => {
-                    const tr587 = currentLanguage === 'tr';
-                    const sevColors: Record<string,string> = {'Kritik':'text-red-600','Uyarı':'text-amber-600','Bilgi':'text-blue-600'};
-                    const criticalFailed = p587Checks.filter(c=>c.severity==='Kritik'&&!c.checked).length;
-                    return (
-                      <div className="apple-card p-5">
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <h3 className="font-bold text-gray-900 text-sm">{tr587?'✅ Kalite Kontrol Çeklisti':'✅ Quality Inspection Checklist'}</h3>
-                            {criticalFailed>0&&<p className="text-xs text-red-600 font-semibold mt-0.5">⚠️ {criticalFailed} {tr587?'kritik madde tamamlanmadı':'critical item(s) incomplete'}</p>}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-emerald-600">{p587Checks.filter(c=>c.checked).length}/{p587Checks.length}</span>
-                          </div>
-                        </div>
-                        {p587Checks.length>0 && (
-                          <div className="w-full bg-gray-200 rounded-full h-2 mb-4 overflow-hidden">
-                            <div className="h-full bg-emerald-400 rounded-full transition-all" style={{width:`${p587Checks.length>0?(p587Checks.filter(c=>c.checked).length/p587Checks.length)*100:0}%`}}/>
-                          </div>
-                        )}
-                        <div className="space-y-2 mb-4">
-                          {p587Checks.map(c=>(
-                            <div key={c.id} className={`flex items-center gap-3 p-3 rounded-xl ${c.checked?'bg-green-50/50':'bg-gray-50'}`}>
-                              {/* Sessiz-başarısızlık taraması (2026-08-31): çeklist yazmaları
-                                  RBAC 403'te sessizce yutuluyordu — toast eklendi (4 nokta). */}
-                              <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
-                                {c.checked&&<svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
-                              </button>
-                              <span className={`flex-1 text-sm ${c.checked?'line-through text-gray-400':'text-gray-700'}`}>{c.item}</span>
-                              <span className={`text-[10px] font-bold shrink-0 ${sevColors[c.severity]}`}>{c.severity}</span>
-                              <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>toast(tr587?'Silinemedi (yetki?).':'Delete failed.','error'));}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
-                            </div>
-                          ))}
-                        </div>
-                        {hasFullAccess('kalite') && (
-                          <div className="flex gap-2">
-                            <input className="flex-1 apple-input px-3 py-2 text-sm" placeholder={tr587?'Yeni kontrol maddesi...':'New check item...'} value={p587NewItem} onChange={e=>setP587NewItem(e.target.value)} onKeyDown={e=>{
-                              if(e.key==='Enter'&&p587NewItem.trim()){
-                                void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
-                                setP587NewItem('');
-                              }
-                            }} />
-                            <button onClick={()=>{
-                              if(!p587NewItem.trim()) return;
-                              void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
-                              setP587NewItem('');
-                            }} className="apple-button-primary px-3 py-2 text-sm">{tr587?'Ekle':'Add'}</button>
-                            {p587Checks.length>0&&(
-                              <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <QualityModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kalite')} onTabChange={setQualityActiveTab} />
-
-                  {/* ── Phase 615: Üretim Kalite Metrikleri (yalnız KPI sekmesinde) ── */}
-                  {hasFullAccess('kalite') && qualityActiveTab === 'kpi' && (() => {
-                    const tr615 = currentLanguage === 'tr';
-                    const totalProduced = p615Metrics.reduce((s,m)=>s+m.total,0);
-                    const totalDefects  = p615Metrics.reduce((s,m)=>s+m.defects,0);
-                    const totalRework   = p615Metrics.reduce((s,m)=>s+m.rework,0);
-                    const defectRate = totalProduced>0?(totalDefects/totalProduced*100):0;
-                    const firstPassYield = totalProduced>0?((totalProduced-totalDefects-totalRework)/totalProduced*100):0;
-                    return (
-                      <div className="apple-card p-5 space-y-4">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <h3 className="font-bold text-gray-900 text-sm">📊 {tr615?'Üretim Kalite Metrikleri':'Production Quality Metrics'}</h3>
-                          <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
-                        </div>
-                        {p615ShowForm && (
-                          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                              <input type="date" className="apple-input" value={p615Draft.date} onChange={e=>setP615Draft(d=>({...d,date:e.target.value}))}/>
-                              <input className="apple-input" placeholder={tr615?'Hat':'Line'} value={p615Draft.line} onChange={e=>setP615Draft(d=>({...d,line:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr615?'Toplam':'Total'} value={p615Draft.total} onChange={e=>setP615Draft(d=>({...d,total:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr615?'Hatalı':'Defects'} value={p615Draft.defects} onChange={e=>setP615Draft(d=>({...d,defects:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr615?'Yeniden İşlem':'Rework'} value={p615Draft.rework} onChange={e=>setP615Draft(d=>({...d,rework:e.target.value}))}/>
-                            </div>
-                            <button onClick={async ()=>{
-                              if(!p615Draft.line||!p615Draft.total) return;
-                              const payload={date:p615Draft.date,line:p615Draft.line,total:Number(p615Draft.total),defects:Number(p615Draft.defects)||0,rework:Number(p615Draft.rework)||0};
-                              try {
-                                if(p615EditId){ await updateDoc(doc(db,'productionMetrics',p615EditId),payload); }
-                                else { await addDoc(collection(db,'productionMetrics'),payload); }
-                                setP615Draft(d=>({...d,line:'',total:'',defects:'',rework:''}));
-                                setP615ShowForm(false); setP615EditId(null);
-                                toast(tr615?(p615EditId?'Kayıt güncellendi.':'Kayıt eklendi.'):(p615EditId?'Record updated.':'Record added.'),'success');
-                              } catch(e){ toast((tr615?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                            }} className="apple-button-primary text-xs px-6">{tr615?'Kaydet':'Save'}</button>
-                          </div>
-                        )}
-                        {p615Metrics.length > 0 && (
-                          <>
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'Toplam Üretim':'Total Produced'}</p><p className="text-xl font-black text-blue-600">{totalProduced.toLocaleString()}</p></div>
-                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'Hata Oranı':'Defect Rate'}</p><p className="text-xl font-black text-red-600">%{defectRate.toFixed(2)}</p></div>
-                              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'İlk Geçiş Verimi':'First Pass Yield'}</p><p className="text-xl font-black text-emerald-600">%{firstPassYield.toFixed(1)}</p></div>
-                            </div>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
-                                <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                  {[tr615?'Tarih':'Date',tr615?'Hat':'Line',tr615?'Toplam':'Total',tr615?'Hatalı':'Defects',tr615?'Yeniden İşlem':'Rework',tr615?'Hata %':'Defect %'].map(h=>(
-                                    <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
-                                  ))}
-                                  <th className="px-3 py-2 w-8"></th>
-                                </tr></thead>
-                                <tbody className="divide-y divide-gray-50">
-                                  {[...p615Metrics].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
-                                    const dr = m.total>0?(m.defects/m.total*100):0;
-                                    return (
-                                      <tr key={m.id} className="hover:bg-gray-50/50">
-                                        <td className="px-3 py-2 text-gray-500">{new Date(m.date).toLocaleDateString('tr-TR')}</td>
-                                        <td className="px-3 py-2 font-medium text-gray-800">{m.line}</td>
-                                        <td className="px-3 py-2 tabular-nums text-gray-600">{m.total}</td>
-                                        <td className="px-3 py-2 tabular-nums text-red-600 font-bold">{m.defects}</td>
-                                        <td className="px-3 py-2 tabular-nums text-amber-600">{m.rework}</td>
-                                        <td className={`px-3 py-2 font-bold ${dr>5?'text-red-600':dr>2?'text-amber-600':'text-emerald-600'}`}>%{dr.toFixed(2)}</td>
-                                        <td className="px-3 py-2 text-right"><div className="flex items-center justify-end gap-2">
-                                          <button type="button" onClick={()=>{setP615Draft({date:m.date,line:m.line,total:String(m.total),defects:String(m.defects),rework:String(m.rework)});setP615EditId(m.id);setP615ShowForm(true);}} title={tr615?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'productionMetrics',m.id));}catch(e){toast((tr615?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr615?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                                        </div></td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </>
-                        )}
-                        {p615Metrics.length === 0 && <p className="text-center text-gray-400 text-xs py-4">{tr615?'Üretim kalite verisi ekleyin.':'Add production quality records.'}</p>}
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </motion.div>
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Kalite bloğu KalitePage'e çıkarıldı (2026-08-31, App.tsx bölme). */}
+              <KalitePage
+                currentLanguage={currentLanguage} isModuleAuthenticated={!!user && hasFullAccess('kalite')}
+                canAccess={canAccess} hasFullAccess={hasFullAccess} toast={toast}
+                p587Checks={p587Checks} p587NewItem={p587NewItem} setP587NewItem={setP587NewItem}
+                qualityActiveTab={qualityActiveTab} setQualityActiveTab={setQualityActiveTab}
+                p615Metrics={p615Metrics} p615ShowForm={p615ShowForm} setP615ShowForm={setP615ShowForm}
+                p615Draft={p615Draft} setP615Draft={setP615Draft} p615EditId={p615EditId} setP615EditId={setP615EditId}
+              />
+            </React.Suspense>
           )}
 
           {activeTab === 'production' && (
-            <motion.div key="production" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
-              {!canAccess('production') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Üretim Yönetimi':'Production Management'} /> : (
-                <>
-                  {!hasFullAccess('production') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  {/* ── Üretim Group Nav ── */}
-                  <div className="overflow-x-auto scrollbar-none">
-                    <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
-                      <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
-                        <Factory className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
-                      </button>
-                      <button onClick={() => setActiveTab('lotseri')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <Hash className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
-                      </button>
-                      <button onClick={() => setActiveTab('bakim')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
-                        <Wrench className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
-                      </button>
-                    </div>
-                  </div>
-                  {/* ── Phase 605: Üretim Kapasitesi Planlama ────────────────────── */}
-                  {(() => {
-                    const tr605 = currentLanguage === 'tr';
-                    const totalUtil = p605Capacity.length > 0
-                      ? p605Capacity.reduce((s,l)=>s+(l.maxCap>0?(l.planned/l.maxCap)*100:0),0)/p605Capacity.length : 0;
-                    return (
-                      <div className="apple-card p-5">
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <h3 className="font-bold text-gray-900 text-sm">{tr605?'🏭 Üretim Kapasitesi Planlama':'🏭 Production Capacity Planning'}</h3>
-                            {p605Capacity.length>0&&<p className="text-xs text-gray-400 mt-0.5">{tr605?'Ort. Kapasite Kullanımı:':'Avg Utilization:'} <span className={`font-bold ${totalUtil>90?'text-red-600':totalUtil>70?'text-amber-600':'text-emerald-600'}`}>{totalUtil.toFixed(0)}%</span></p>}
-                          </div>
-                          {hasFullAccess('production')&&(<button onClick={()=>setP605ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr605?'Hat Ekle':'Add Line'}</button>)}
-                        </div>
-                        {p605ShowForm&&(
-                          <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Hat Adı':'Line Name'} value={p605Draft.line} onChange={e=>setP605Draft(d=>({...d,line:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Max Kapasite':'Max Capacity'} value={p605Draft.maxCap} onChange={e=>setP605Draft(d=>({...d,maxCap:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Planlanan':'Planned'} value={p605Draft.planned} onChange={e=>setP605Draft(d=>({...d,planned:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr605?'Gerçekleşen':'Actual'} value={p605Draft.actual} onChange={e=>setP605Draft(d=>({...d,actual:e.target.value}))} />
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={async ()=>{if(!p605Draft.line) return; try{const payload605={line:p605Draft.line,maxCap:Number(p605Draft.maxCap)||0,planned:Number(p605Draft.planned)||0,actual:Number(p605Draft.actual)||0}; if(p605EditId){ await updateDoc(doc(db,'capacityLines',p605EditId),payload605); setP605EditId(null); } else { await addDoc(collection(db,'capacityLines'),{...payload605,createdAt:serverTimestamp()}); }}catch(e){console.error("[firestore]", e);} setP605Draft({line:'',maxCap:'',planned:'',actual:''}); setP605ShowForm(false);}} className="apple-button-primary text-sm px-4 py-1.5">{tr605?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP605ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr605?'İptal':'Cancel'}</button>
-                            </div>
-                          </div>
-                        )}
-                        {p605Capacity.length===0?(
-                          <p className="text-center py-6 text-gray-400 text-sm">{tr605?'"Hat Ekle" ile üretim hatlarını ve kapasitelerini tanımlayın.':'Click "Add Line" to define production lines and their capacities.'}</p>
-                        ):(
-                          <div className="space-y-3">
-                            {p605Capacity.map((l,i)=>{
-                              const planPct = l.maxCap>0?Math.min(100,(l.planned/l.maxCap)*100):0;
-                              const actPct = l.maxCap>0?Math.min(100,(l.actual/l.maxCap)*100):0;
-                              return (
-                                <div key={i} className="space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="font-semibold text-gray-800">{l.line}</span>
-                                    <div className="flex items-center gap-2">
-                                    <span className="text-gray-500">{l.actual}/{l.maxCap} {tr605?'birim':'units'} ({actPct.toFixed(0)}%)</span>
-                                    {l.id&&<button onClick={()=>{setP605Draft({line:l.line,maxCap:String(l.maxCap),planned:String(l.planned),actual:String(l.actual)});setP605EditId(l.id!);setP605ShowForm(true);}} title={tr605?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>}
-                                    {l.id&&<button onClick={async ()=>{try{await deleteDoc(doc(db,'capacityLines',l.id!));}catch(e){console.error("[firestore]", e);}}} title={tr605?'Sil':'Delete'} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>}
-                                    </div>
-                                  </div>
-                                  <div className="relative w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                                    <div className="absolute h-full bg-blue-200 rounded-full" style={{width:`${planPct}%`}}/>
-                                    <div className={`absolute h-full rounded-full ${actPct>90?'bg-red-500':actPct>70?'bg-amber-400':'bg-emerald-400'}`} style={{width:`${actPct}%`}}/>
-                                  </div>
-                                  <p className="text-[10px] text-gray-400">{tr605?'Planlanan:':'Planned:'} {planPct.toFixed(0)}% · {tr605?'Gerçekleşen:':'Actual:'} {actPct.toFixed(0)}%</p>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <ProductionModule currentLanguage={currentLanguage} isAuthenticated={!!user} />
-                  {/* ── BOM / MRP ── */}
-                  <div className="bg-white rounded-2xl border border-gray-100 p-6">
-                    <BOMPanel currentLanguage={currentLanguage} />
-                  </div>
-                  {/* ── Phase 624: Üretim Emri Yönetimi ──────────────────────────── */}
-                  {(() => {
-                    const tr624 = currentLanguage === 'tr';
-                    const statusCls:{[k:string]:string}={Planlandı:'bg-gray-100 text-gray-600',Üretimde:'bg-blue-100 text-blue-700',Tamamlandı:'bg-emerald-100 text-emerald-700',İptal:'bg-red-100 text-red-700'};
-                    const inProd = p624Orders.filter(o=>o.status==='Üretimde').length;
-                    const urgent = p624Orders.filter(o=>o.priority==='Acil'&&o.status!=='Tamamlandı'&&o.status!=='İptal').length;
-                    return (
-                      <div className="apple-card p-5 space-y-4">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <h3 className="font-bold text-gray-900 text-sm">⚙️ {tr624?'Üretim Emri Yönetimi':'Production Order Management'}</h3>
-                          <button onClick={()=>setP624ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr624?'Üretim Emri':'New Order'}</button>
-                        </div>
-                        {urgent>0&&<div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-xs font-bold text-red-700">🔴 {urgent} {tr624?'acil üretim emri':'urgent production order(s)'}</div>}
-                        {p624ShowForm && (
-                          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                              <input className="apple-input col-span-2 md:col-span-1" placeholder={tr624?'Ürün':'Product'} value={p624Draft.productName} onChange={e=>setP624Draft(d=>({...d,productName:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr624?'Miktar':'Qty'} value={p624Draft.qty} onChange={e=>setP624Draft(d=>({...d,qty:e.target.value}))}/>
-                              <input className="apple-input" placeholder={tr624?'İş Merkezi':'Work Center'} value={p624Draft.workCenter} onChange={e=>setP624Draft(d=>({...d,workCenter:e.target.value}))}/>
-                              <input type="date" className="apple-input" value={p624Draft.plannedStart} onChange={e=>setP624Draft(d=>({...d,plannedStart:e.target.value}))}/>
-                              <input type="date" className="apple-input" value={p624Draft.plannedEnd} onChange={e=>setP624Draft(d=>({...d,plannedEnd:e.target.value}))}/>
-                              <select value={p624Draft.priority} onChange={e=>setP624Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
-                                {['Normal','Acil'].map(p=><option key={p}>{p}</option>)}
-                              </select>
-                            </div>
-                            <button onClick={async ()=>{
-                              if(!p624Draft.productName||!p624Draft.qty) return;
-                              try { await addDoc(collection(db,'productionOrders'),{productName:p624Draft.productName,qty:Number(p624Draft.qty),plannedStart:p624Draft.plannedStart,plannedEnd:p624Draft.plannedEnd,status:'Planlandı',priority:p624Draft.priority,workCenter:p624Draft.workCenter,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Üretim emri oluşturuldu ✓' : 'Production order created ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Üretim emri oluşturulamadı.' : 'Failed to create order.', 'error');}
-                              setP624Draft(d=>({...d,productName:'',qty:'',workCenter:'',plannedStart:'',plannedEnd:''}));
-                              setP624ShowForm(false);
-                              toast(tr624?'Üretim emri oluşturuldu.':'Production order created.','success');
-                            }} className="apple-button-primary text-xs px-6">{tr624?'Oluştur':'Create'}</button>
-                          </div>
-                        )}
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Üretimde':'In Prod.'}</p><p className="text-xl font-black text-blue-600">{inProd}</p></div>
-                          <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Planlandı':'Planned'}</p><p className="text-xl font-black text-amber-600">{p624Orders.filter(o=>o.status==='Planlandı').length}</p></div>
-                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr624?'Tamamlanan':'Done'}</p><p className="text-xl font-black text-emerald-600">{p624Orders.filter(o=>o.status==='Tamamlandı').length}</p></div>
-                        </div>
-                        {p624Orders.length > 0 && (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                {[tr624?'Ürün':'Product',tr624?'Miktar':'Qty',tr624?'İş Merkezi':'Work Center',tr624?'Başlangıç':'Start',tr624?'Bitiş':'End',tr624?'Durum':'Status',tr624?'Öncelik':'Priority'].map(h=>(
-                                  <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
-                                ))}
-                              </tr></thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {[...p624Orders].sort((a,b)=>a.plannedStart.localeCompare(b.plannedStart)).map(o=>(
-                                  <tr key={o.id} className={`hover:bg-gray-50/50 ${o.priority==='Acil'?'bg-red-50/20':''}`}>
-                                    <td className="px-3 py-2.5 font-medium text-gray-800">{o.productName}</td>
-                                    <td className="px-3 py-2.5 text-gray-600">{o.qty}</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{o.workCenter||'—'}</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{o.plannedStart?new Date(o.plannedStart).toLocaleDateString('tr-TR'):'—'}</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{o.plannedEnd?new Date(o.plannedEnd).toLocaleDateString('tr-TR'):'—'}</td>
-                                    <td className="px-3 py-2.5">
-                                      <select value={o.status} onChange={async e=>{try{await updateDoc(doc(db,'productionOrders',o.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[o.status]}`}>
-                                        {['Planlandı','Üretimde','Tamamlandı','İptal'].map(s=><option key={s}>{s}</option>)}
-                                      </select>
-                                    </td>
-                                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold ${o.priority==='Acil'?'text-red-600':'text-gray-400'}`}>{o.priority}</span></td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                        {p624Orders.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr624?'Üretim emri ekleyin.':'Create production orders to track manufacturing.'}</p>}
-                      </div>
-                    );
-                  })()}
-
-                  {/* ── Phase 637: Kapasite Planlama ──────────────────────────────── */}
-                  {(() => {
-                    const tr637 = currentLanguage === 'tr';
-                    const horizonDays = p637Horizon==='7d'?7:p637Horizon==='30d'?30:90;
-                    const cutoff637 = new Date(Date.now()+horizonDays*86400000).toISOString().slice(0,10);
-                    const upcoming637 = p624Orders.filter(o=>o.status!=='Tamamlandı'&&o.status!=='İptal'&&o.plannedEnd&&o.plannedEnd<=cutoff637);
-                    const workCenterLoad:{[wc:string]:{orders:number;totalQty:number}} = {};
-                    upcoming637.forEach(o=>{
-                      const wc = o.workCenter||tr637?'Genel Hat':'General Line';
-                      if(!workCenterLoad[wc]) workCenterLoad[wc]={orders:0,totalQty:0};
-                      workCenterLoad[wc].orders++;
-                      workCenterLoad[wc].totalQty += o.qty||0;
-                    });
-                    const wcRows = Object.entries(workCenterLoad).map(([wc,d])=>({wc,...d})).sort((a,b)=>b.totalQty-a.totalQty);
-                    const maxQty = wcRows.length>0?Math.max(...wcRows.map(r=>r.totalQty),1):1;
-                    return (
-                      <div className="apple-card p-5 space-y-4">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div><h3 className="font-bold text-gray-900 text-sm">🏭 {tr637?'Kapasite Planlama':'Capacity Planning'}</h3>
-                          <p className="text-xs text-gray-400">{tr637?'İş merkezi bazında yük dağılımı':'Workload distribution by work center'}</p></div>
-                          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                            {([{k:'7d',l:'7G'},{k:'30d',l:'30G'},{k:'90d',l:'90G'}] as {k:'7d'|'30d'|'90d';l:string}[]).map(t=>(
-                              <button key={t.k} onClick={()=>setP637Horizon(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p637Horizon===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
-                            ))}
-                          </div>
-                        </div>
-                        {wcRows.length > 0 ? (
-                          <div className="space-y-3">
-                            {wcRows.map(r=>{
-                              const pct = maxQty>0?(r.totalQty/maxQty)*100:0;
-                              const overloaded = pct > 80;
-                              return (
-                                <div key={r.wc}>
-                                  <div className="flex items-center justify-between text-xs mb-1">
-                                    <span className="font-semibold text-gray-800">{r.wc}</span>
-                                    <span className="text-gray-500">{r.orders} {tr637?'emir':'orders'} · {r.totalQty} {tr637?'birim':'units'}</span>
-                                  </div>
-                                  <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all ${overloaded?'bg-red-500':pct>50?'bg-amber-400':'bg-emerald-400'}`} style={{width:`${pct}%`}} />
-                                  </div>
-                                  {overloaded&&<p className="text-[10px] text-red-500 mt-0.5">⚠️ {tr637?'Yüksek yük — kapasite aşımı riski':'High load — capacity overrun risk'}</p>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : <p className="text-center text-gray-400 text-xs py-4">{tr637?`Önümüzdeki ${horizonDays} gün içinde planlanmış üretim emri yok.`:`No production orders planned in the next ${horizonDays} days.`}</p>}
-                        <div className="grid grid-cols-3 gap-3 border-t border-gray-100 pt-3">
-                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'Bekleyen Emir':'Pending Orders'}</p><p className="text-xl font-black text-blue-600">{upcoming637.length}</p></div>
-                          <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'İş Merkezi':'Work Centers'}</p><p className="text-xl font-black text-amber-600">{wcRows.length}</p></div>
-                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr637?'Toplam Birim':'Total Units'}</p><p className="text-xl font-black text-emerald-600">{wcRows.reduce((s,r)=>s+r.totalQty,0)}</p></div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </motion.div>
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Üretim bloğu UretimPage'e çıkarıldı (2026-08-31, App.tsx bölme). */}
+              <UretimPage
+                currentLanguage={currentLanguage} isAuthenticated={!!user}
+                canAccess={canAccess} hasFullAccess={hasFullAccess}
+                setActiveTab={setActiveTab} toast={toast}
+                p605Capacity={p605Capacity} p605ShowForm={p605ShowForm} setP605ShowForm={setP605ShowForm}
+                p605Draft={p605Draft} setP605Draft={setP605Draft} p605EditId={p605EditId} setP605EditId={setP605EditId}
+                p624Orders={p624Orders} p624ShowForm={p624ShowForm} setP624ShowForm={setP624ShowForm}
+                p624Draft={p624Draft} setP624Draft={setP624Draft}
+                p637Horizon={p637Horizon} setP637Horizon={setP637Horizon}
+              />
+            </React.Suspense>
           )}
 
           {/* ── Kurumsal Yönetim ── */}

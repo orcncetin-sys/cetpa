@@ -33,14 +33,17 @@ export default function AIInlineNudge({
   data,
   onAction,
   className,
+  currentLanguage,
 }: AIInlineNudgeProps) {
+  // EN modunda çipler Türkçe kalıyordu (2026-09-01 kullanıcı bildirimi).
+  const trDil = currentLanguage === 'tr';
   const chips: NudgeChip[] = [];
 
   // Context-specific chips
   if (context === 'inventory' && (data.lowStockCount ?? 0) > 0) {
     chips.push({
       icon: '⚠️',
-      label: `${data.lowStockCount} ürün kritik stokta`,
+      label: trDil ? `${data.lowStockCount} ürün kritik stokta` : `${data.lowStockCount} products at critical stock`,
       actionId: 'go-low-stock',
     });
   }
@@ -48,7 +51,7 @@ export default function AIInlineNudge({
   if (context === 'orders' && (data.pendingOrderCount ?? 0) > 0) {
     chips.push({
       icon: '📦',
-      label: `${data.pendingOrderCount} sipariş bekliyor`,
+      label: trDil ? `${data.pendingOrderCount} sipariş bekliyor` : `${data.pendingOrderCount} orders pending`,
       actionId: 'go-pending',
     });
   }

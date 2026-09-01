@@ -41,6 +41,16 @@ import {
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
+// 2026-08-31 mekanik bölme: en büyük 8 blok ./crm/ altına bileşen olarak çıkarıldı
+// (davranış değişmedi; her bloğun render koşulu BU dosyada, ebeveynde durur).
+import CrmOzetBolumu from './crm/CrmOzetBolumu';
+import TeklifSiparisDonusumu from './crm/TeklifSiparisDonusumu';
+import MusteriChurnAnalizi from './crm/MusteriChurnAnalizi';
+import MusteriKarAnalizi from './crm/MusteriKarAnalizi';
+import IskontoSizintiAnalizi from './crm/IskontoSizintiAnalizi';
+import MusteriKademeTrendi from './crm/MusteriKademeTrendi';
+import IlkYenidenSiparisSuresi from './crm/IlkYenidenSiparisSuresi';
+import PipelineAsamaHizi from './crm/PipelineAsamaHizi';
 
 export default function CrmRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, onMusteriAc, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -52,163 +62,12 @@ export default function CrmRapor(ctx: ReportsCtx) {
   return (
     <>
       {reportsTab === 'crm' && (
-        <div className="space-y-6">
-          {/* KPIs — KONUYA UYGUN METRİKLER (2026-08-21).
-              Burada eskiden SİPARİŞ DURUMU sayıları vardı (Toplam Sipariş /
-              Teslim Edilen / Bekleyen / İptal). Bunlar bir CRM raporunun konusu
-              değil — sipariş hattı zaten Lojistik ve Genel raporlarında var.
-              Kullanıcı: "rapor çekerken gelen veriler o konuyla ilgili olmalı."
-              CRM'in konusu MÜŞTERİ; metrikler sipariş verisinden müşteri
-              bazında türetiliyor (ayrı veri kaynağı gerekmedi). */}
-          {(() => {
-            const musteriAdi = (o: typeof orders[number]) => (o.customerName || '—').trim();
-            const gecerli = orders.filter(o => o.status !== 'Cancelled');
-            const musteriler = new Map<string, { adet: number; ciro: number; ilk: number }>();
-            for (const o of gecerli) {
-              const ad = musteriAdi(o);
-              const ms = (() => {
-                const raw = o.createdAt as { toDate?: () => Date } | string | undefined;
-                try { const d = (raw as { toDate?: () => Date })?.toDate?.() ?? new Date(raw as string); return d.getTime(); }
-                catch { return NaN; }
-              })();
-              const m = musteriler.get(ad) ?? { adet: 0, ciro: 0, ilk: Number.POSITIVE_INFINITY };
-              m.adet += 1;
-              m.ciro += Number(o.totalPrice) || 0;
-              if (Number.isFinite(ms)) m.ilk = Math.min(m.ilk, ms);
-              musteriler.set(ad, m);
-            }
-            const toplamMusteri = musteriler.size;
-            const otuzGunOnce = Date.now() - 30 * 86_400_000;
-            // "Yeni" = İLK siparişi son 30 günde olan müşteri (yalnız sipariş
-            // vereni değil) — aksi halde 5 yıllık müşteri de "yeni" sayılırdı.
-            const yeni = [...musteriler.values()].filter(m => Number.isFinite(m.ilk) && m.ilk >= otuzGunOnce).length;
-            const tekrarEden = [...musteriler.values()].filter(m => m.adet > 1).length;
-            const toplamCiro = [...musteriler.values()].reduce((s, m) => s + m.ciro, 0);
-            const ortDeger = toplamMusteri ? toplamCiro / toplamMusteri : 0;
-            const sadakatYuzde = toplamMusteri ? Math.round((tekrarEden / toplamMusteri) * 100) : 0;
-
-            const kartlar = [
-              { label: currentLanguage==='tr'?'Toplam Müşteri':'Total Customers', value: String(toplamMusteri),
-                hint: currentLanguage==='tr'?'sipariş vermiş tekil müşteri':'unique customers with orders',
-                icon: Users, accent: 'text-brand', accentBg: 'bg-brand/10', money: false },
-              { label: currentLanguage==='tr'?'Yeni Müşteri (30g)':'New Customers (30d)', value: String(yeni),
-                hint: currentLanguage==='tr'?'ilk siparişi son 30 günde':'first order in last 30 days',
-                icon: UserCheck, accent: 'text-green-600', accentBg: 'bg-green-50', money: false },
-              { label: currentLanguage==='tr'?'Tekrar Eden':'Repeat Customers', value: `${tekrarEden} (%${sadakatYuzde})`,
-                hint: currentLanguage==='tr'?'birden fazla sipariş veren':'more than one order',
-                icon: CheckCircle2, accent: 'text-violet-600', accentBg: 'bg-violet-50', money: false },
-              { label: currentLanguage==='tr'?'Ort. Müşteri Değeri':'Avg Customer Value', value: formatInCurrency(ortDeger, revenueCurrency, fxKurlari),
-                hint: currentLanguage==='tr'?'iptaller hariç toplam ciro / müşteri':'revenue excl. cancelled / customer',
-                icon: CreditCard, accent: 'text-amber-600', accentBg: 'bg-amber-50', money: true },
-            ];
-            return (
-              <KpiGrid>
-                {kartlar.map((k, i) => (
-                  // Kart tıklanınca CRM→Müşteriler'e inilir (2026-08-31 kullanıcı
-                  // bildirimi: "kartlara basınca detaya gidemiyoruz").
-                  <div key={i} onClick={() => onMusteriAc?.('')}
-                    className={onMusteriAc ? 'cursor-pointer transition-transform hover:-translate-y-0.5' : undefined}
-                    title={onMusteriAc ? (currentLanguage==='tr'?'Müşteri listesini aç':'Open customer list') : undefined}>
-                    <KpiCard index={i} label={k.label} value={k.value} hint={k.hint}
-                      icon={k.icon} accent={k.accent} accentBg={k.accentBg}
-                      action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
-                  </div>
-                ))}
-              </KpiGrid>
-            );
-          })()}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Status Dağılımı */}
-            <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Sipariş Durumu Dağılımı':'Order Status Distribution'}</h3>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RePieChart>
-                    <Pie data={statusChartData} cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={4} dataKey="value" label={(props: { name?: string, percent?: number }) => `${props.name || ''} ${((props.percent||0)*100).toFixed(0)}%`} labelLine={false}>
-                      {statusChartData.map((_, i) => <Cell key={i} fill={COLORS[i%COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </RePieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Top Müşteriler */}
-            <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'En Çok Sipariş Veren Müşteriler':'Top Customers by Revenue'}</h3>
-              <div className="space-y-2 max-h-[280px] overflow-y-auto">
-                {topCustomers.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-8">{currentLanguage==='tr'?'Henüz sipariş yok.':'No orders yet.'}</p>
-                ) : topCustomers.map((c, i) => (
-                  // Satır tıklanınca o müşteri CRM→Müşteriler'de ada filtreli açılır
-                  // (2026-08-31 kullanıcı bildirimi: "kartlara basınca detaya gidemiyoruz").
-                  <button key={i} type="button" onClick={() => onMusteriAc?.(c.name)}
-                    disabled={!onMusteriAc}
-                    className="w-full text-left flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 rounded-lg px-1 -mx-1 enabled:hover:bg-gray-50 enabled:cursor-pointer transition-colors">
-                    <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand flex-shrink-0">{i+1}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
-                    </div>
-                    <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, fxKurlari)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Satış Trendi */}
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentT.sales_trend}</h3>
-            <div className="h-[280px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F5F5F7" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#86868B'}} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#86868B'}} />
-                  <Tooltip contentStyle={{borderRadius:'12px',border:'none',boxShadow:'0 10px 25px rgba(0,0,0,0.1)'}} />
-                  <Bar dataKey="value" fill="#ff4000" radius={[6,6,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* ── Phase 129: Sales Rep Leaderboard (by order assignee) ── */}
-          {orders.length > 0 && (() => {
-            type RepStat = { name: string; orderCount: number; revenue: number; delivered: number };
-            const repMap: Record<string, RepStat> = {};
-            for (const o of orders) {
-              if (o.status === 'Cancelled') continue;
-              const rep = (o.assignedTo as string | undefined) || o.customerName || '—';
-              const key = rep.length > 30 ? rep.slice(0, 15) + '…' : rep;
-              if (!repMap[key]) repMap[key] = { name: key, orderCount: 0, revenue: 0, delivered: 0 };
-              repMap[key].orderCount++;
-              repMap[key].revenue += o.totalPrice || 0;
-              if (o.status === 'Delivered') repMap[key].delivered++;
-            }
-            const reps = Object.values(repMap).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
-            if (reps.length === 0) return null;
-            const medals = ['🥇', '🥈', '🥉'];
-            return (
-              <div className="apple-card p-6">
-                <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🏆 En Çok Ciro Yapanlar' : '🏆 Sales Leaderboard'}</h3>
-                <div className="space-y-3">
-                  {reps.map((r, i) => (
-                    <div key={r.name} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                      <span className="text-base w-7 flex-shrink-0">{medals[i] || `#${i + 1}`}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-800 truncate">{r.name}</p>
-                        <p className="text-[10px] text-gray-400">{r.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {r.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</p>
-                      </div>
-                      <span className="text-sm font-bold text-brand">{formatInCurrency(r.revenue, revenueCurrency, fxKurlari)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
+        <CrmOzetBolumu
+          orders={orders} currentLanguage={currentLanguage} currentT={currentT}
+          revenueCurrency={revenueCurrency} setRevenueCurrency={setRevenueCurrency} onMusteriAc={onMusteriAc}
+          statusChartData={statusChartData} COLORS={COLORS} topCustomers={topCustomers}
+          trendData={trendData} fxKurlari={fxKurlari}
+        />
       )}
 
       {reportsTab === 'crm' && orders.length >= 3 && (() => {
@@ -319,75 +178,9 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && quotations.length > 0 && (() => {
-        const total145 = quotations.length;
-        const converted145 = quotations.filter(q => q.status === 'Converted to Order' || q.status === 'approved').length;
-        const pending145 = quotations.filter(q => q.status === 'pending').length;
-        const convRate = total145 > 0 ? Math.round((converted145 / total145) * 100) : 0;
-        // Monthly conversion last 6m
-        const now145 = new Date();
-        const months145 = Array.from({ length: 6 }, (_, i) => {
-          const d = new Date(now145.getFullYear(), now145.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
-          const mq = quotations.filter(q => {
-            if (!q.createdAt) return false;
-            try {
-              const qd = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-              return qd.getFullYear() === d.getFullYear() && qd.getMonth() === d.getMonth();
-            } catch { return false; }
-          });
-          return { label, total: mq.length, converted: mq.filter(q => q.status === 'Converted to Order' || q.status === 'approved').length };
-        });
-        const totalQuoteValue = quotations.reduce((s, q) => s + (q.totalAmount || 0), 0);
-        const convertedValue = quotations.filter(q => q.status === 'Converted to Order' || q.status === 'approved').reduce((s, q) => s + (q.totalAmount || 0), 0);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '📋 Teklif → Sipariş Dönüşümü' : '📋 Quote-to-Order Conversion'}</h3>
-            <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Tekliflerin siparişe dönüşüm analizi' : 'Analysis of quote-to-order pipeline'}</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-              {[
-                { label: currentLanguage==='tr'?'Toplam Teklif':'Total Quotes', value: String(total145), color: 'text-blue-600' },
-                { label: currentLanguage==='tr'?'Dönüştürülen':'Converted', value: String(converted145), color: 'text-emerald-600' },
-                { label: currentLanguage==='tr'?'Dönüşüm Oranı':'Conversion Rate', value: `%${convRate}`, color: convRate >= 40 ? 'text-emerald-600' : 'text-amber-600' },
-                { label: currentLanguage==='tr'?'Bekleyen':'Pending', value: String(pending145), color: 'text-amber-600' },
-              ].map(k => (
-                <div key={k.label} className="text-center">
-                  <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
-                </div>
-              ))}
-            </div>
-            {/* Value conversion */}
-            <div className="mb-5">
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="text-gray-600">{currentLanguage==='tr'?'Teklif Değeri Dönüşümü':'Quote Value Conversion'}</span>
-                <span className="font-semibold text-emerald-600">{fmtAna(convertedValue)} / {fmtAna(totalQuoteValue)}</span>
-              </div>
-              <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-400 rounded-full transition-all" style={{ width: `${totalQuoteValue > 0 ? Math.round((convertedValue/totalQuoteValue)*100) : 0}%` }} />
-              </div>
-            </div>
-            {/* Monthly mini chart */}
-            <div className="flex items-end gap-2 h-16">
-              {months145.map((m, i) => {
-                const maxM = Math.max(...months145.map(x => x.total), 1);
-                const h = Math.round((m.total / maxM) * 100);
-                const convH = m.total > 0 ? Math.round((m.converted / m.total) * 100) : 0;
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full flex flex-col justify-end overflow-hidden rounded-t-sm" style={{ height: '48px' }}>
-                      <div className="w-full bg-gray-100 rounded-t-sm overflow-hidden" style={{ height: `${h}%` }}>
-                        <div className="w-full bg-emerald-400 rounded-t-sm" style={{ height: `${convH}%` }} />
-                      </div>
-                    </div>
-                    <span className="text-[9px] text-gray-400">{m.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && quotations.length > 0 && (
+        <TeklifSiparisDonusumu quotations={quotations} currentLanguage={currentLanguage} fmtAna={fmtAna} />
+      )}
 
       {reportsTab === 'crm' && orders.length > 0 && inventory.length > 0 && (() => {
         // For each order, compare actualPrice vs list price to compute discount
@@ -593,71 +386,9 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 5 && (() => {
-        const now187 = new Date();
-        const prevMonthStart = new Date(now187.getFullYear(), now187.getMonth() - 1, 1);
-        const prevMonthEnd = new Date(now187.getFullYear(), now187.getMonth(), 0, 23, 59, 59);
-        const currMonthStart = new Date(now187.getFullYear(), now187.getMonth(), 1);
-        const getDate187 = (o: Order) => {
-          try { return (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); }
-          catch { return null; }
-        };
-        const prevCustomers = new Set<string>();
-        const currCustomers = new Set<string>();
-        const prevRevByCustomer: Record<string, number> = {};
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const d = getDate187(o);
-          if (!d) continue;
-          const name = o.customerName || '—';
-          if (d >= prevMonthStart && d <= prevMonthEnd) {
-            prevCustomers.add(name);
-            prevRevByCustomer[name] = (prevRevByCustomer[name] ?? 0) + (o.totalPrice || 0);
-          }
-          if (d >= currMonthStart) currCustomers.add(name);
-        }
-        const churned = [...prevCustomers].filter(c => !currCustomers.has(c));
-        const churnedRevLost = churned.reduce((s, c) => s + (prevRevByCustomer[c] ?? 0), 0);
-        const newCustomers = [...currCustomers].filter(c => !prevCustomers.has(c));
-        const churnRate = prevCustomers.size > 0 ? Math.round((churned.length / prevCustomers.size) * 100) : 0;
-        if (churned.length === 0 && newCustomers.length === 0) return null;
-        return (
-          <div className="apple-card p-6">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📤 Müşteri Churn Analizi' : '📤 Customer Churn Analysis'}</h3>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${churnRate >= 30 ? 'bg-red-100 text-red-700' : churnRate >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                %{churnRate} {currentLanguage === 'tr' ? 'churn' : 'churn rate'}
-              </span>
-            </div>
-            <p className="text-[10px] text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Önceki ay aktif → bu ay sipariş vermeyen müşteriler' : 'Active last month → no orders this month'}</p>
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {[
-                { label: currentLanguage === 'tr' ? 'Kaybedilen' : 'Churned', value: churned.length, color: 'text-red-600' },
-                { label: currentLanguage === 'tr' ? 'Kayıp Ciro' : 'Lost Revenue', value: `₺${(churnedRevLost/1000).toFixed(1)}K`, color: 'text-red-500' },
-                { label: currentLanguage === 'tr' ? 'Yeni Müşteri' : 'New Customers', value: newCustomers.length, color: 'text-emerald-600' },
-              ].map(k => (
-                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{k.label}</p>
-                </div>
-              ))}
-            </div>
-            {churned.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-700 mb-2">{currentLanguage === 'tr' ? 'Kaybedilen Müşteriler:' : 'Churned Customers:'}</p>
-                <div className="space-y-1">
-                  {churned.slice(0, 5).map(c => (
-                    <div key={c} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
-                      <span className="text-gray-700 truncate">{c}</span>
-                      <span className="text-red-500 font-medium shrink-0 ml-2">-{fmtAna((prevRevByCustomer[c] ?? 0),'full',0)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && orders.length >= 5 && (
+        <MusteriChurnAnalizi orders={orders} currentLanguage={currentLanguage} fmtAna={fmtAna} />
+      )}
 
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const now192 = new Date();
@@ -723,70 +454,9 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 3 && inventory.length > 0 && (() => {
-        // Ortalama alış fiyatı — gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI,
-        // sth_tip=0 alış) SKU bazında ağırlıklı ortalama. inventory.costPrice (itemCostTRY)
-        // birçok kalemde 0/boş çıkıyordu (2026-08-13 kullanıcı bildirimi — bu yüzden
-        // her müşteri "%100 kâr" gösteriyordu, maliyet hiç düşülmüyordu). Aynı hesap
-        // yöntemi server.ts'teki /api/reports/stok-fiyat-karsilastirma ile tutarlı.
-        const avgAlisFiyatMap = new Map<string, number>();
-        {
-          const tut = new Map<string, number>(), mik = new Map<string, number>();
-          for (const m0 of inventoryMovements) {
-            const m = m0 as unknown as Record<string, unknown>;
-            const sku = String(m.sth_stok_kod ?? '').trim();
-            if (!sku || Number(m.sth_tip) !== 0) continue; // yalnız alış
-            if (m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1) continue;
-            const miktar = Math.abs(Number(m.sth_miktar) || 0);
-            const tutar = Math.abs(Number(m.sth_tutar) || 0);
-            if (miktar <= 0) continue;
-            tut.set(sku, (tut.get(sku) ?? 0) + tutar);
-            mik.set(sku, (mik.get(sku) ?? 0) + miktar);
-          }
-          for (const [sku, m] of mik) if (m > 0) avgAlisFiyatMap.set(sku, tut.get(sku)! / m);
-        }
-        const custProfit: Record<string, { rev: number; cogs: number }> = {};
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const name = o.customerName || '—';
-          if (!custProfit[name]) custProfit[name] = { rev: 0, cogs: 0 };
-          custProfit[name].rev += o.totalPrice || 0;
-          for (const li of (o.lineItems ?? [])) {
-            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            const avgAlis = inv ? avgAlisFiyatMap.get(inv.sku) : undefined;
-            const storedCost = inv ? itemCostTRY(inv, exchangeRates) : 0;
-            const unitCost = avgAlis && avgAlis > 0 ? avgAlis : (storedCost > 0 ? storedCost : li.price * 0.6);
-            custProfit[name].cogs += unitCost * li.quantity;
-          }
-        }
-        const profitList = Object.entries(custProfit)
-          .map(([name, d]) => ({ name, rev: d.rev, cogs: d.cogs, profit: d.rev - d.cogs, margin: d.rev > 0 ? Math.round(((d.rev - d.cogs) / d.rev) * 100) : 0 }))
-          .sort((a, b) => b.profit - a.profit)
-          .slice(0, 8);
-        if (profitList.length < 2) return null;
-        const maxProfit = Math.max(...profitList.map(p => p.profit), 1);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💹 Müşteri Bazlı Kâr Analizi' : '💹 Profit by Customer'}</h3>
-            <div className="space-y-2.5">
-              {profitList.map(p => (
-                <div key={p.name}>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-medium text-gray-700 truncate">{p.name}</span>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : p.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>%{p.margin}</span>
-                      <span className="text-xs font-bold text-gray-700">{fmtAna(p.profit,'K',0)}</span>
-                    </div>
-                  </div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${p.margin >= 30 ? 'bg-emerald-400' : p.margin >= 15 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${Math.max(4, Math.round((p.profit / maxProfit) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && orders.length >= 3 && inventory.length > 0 && (
+        <MusteriKarAnalizi orders={orders} inventory={inventory} inventoryMovements={inventoryMovements} exchangeRates={exchangeRates} currentLanguage={currentLanguage} fmtAna={fmtAna} />
+      )}
 
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const repMap196: Record<string, { rev: number; orders: number }> = {};
@@ -1110,72 +780,9 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 5 && (() => {
-        // Orders where totalPrice < sum(lineItems at list price) indicates discount
-        let totalListPrice = 0;
-        let totalActualPrice = 0;
-        const discountByCustomer: Record<string, { discount: number; orders: number }> = {};
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const listPrice = (o.lineItems ?? []).reduce((s, li) => {
-            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            const retail = inv?.prices?.['Retail'] ?? li.price;
-            return s + retail * li.quantity;
-          }, 0);
-          const actual = o.totalPrice || 0;
-          totalListPrice += listPrice;
-          totalActualPrice += actual;
-          const discount = listPrice - actual;
-          if (discount > 0) {
-            const name = o.customerName || '—';
-            if (!discountByCustomer[name]) discountByCustomer[name] = { discount: 0, orders: 0 };
-            discountByCustomer[name].discount += discount;
-            discountByCustomer[name].orders++;
-          }
-        }
-        const totalDiscount = totalListPrice - totalActualPrice;
-        if (totalDiscount <= 0 || totalListPrice === 0) return null;
-        const discountRate = Math.round((totalDiscount / totalListPrice) * 100);
-        const topDiscountCusts = Object.entries(discountByCustomer)
-          .sort(([,a],[,b]) => b.discount - a.discount)
-          .slice(0, 5);
-        return (
-          <div className="apple-card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '💸 İskonto Sızıntı Analizi' : '💸 Discount Leakage Analysis'}</h3>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${discountRate >= 20 ? 'bg-red-100 text-red-700' : discountRate >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                %{discountRate} {currentLanguage === 'tr' ? 'ortalama iskonto' : 'avg discount'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className="bg-red-50 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-red-600">{fmtAna(totalDiscount,'K',0)}</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam İskonto' : 'Total Discount Given'}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-gray-700">{fmtAna(totalListPrice,'K',0)}</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Liste Fiyatı Toplamı' : 'Total List Price'}</p>
-              </div>
-            </div>
-            {topDiscountCusts.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-700 mb-2">{currentLanguage === 'tr' ? 'En Çok İskonto Alan Müşteriler:' : 'Top Discounted Customers:'}</p>
-                <div className="space-y-1.5">
-                  {topDiscountCusts.map(([name, d]) => (
-                    <div key={name} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-700 truncate">{name}</span>
-                      <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-gray-400">{d.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
-                        <span className="font-bold text-red-500">-{fmtAna(d.discount,'K',0)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && orders.length >= 5 && (
+        <IskontoSizintiAnalizi orders={orders} inventory={inventory} currentLanguage={currentLanguage} fmtAna={fmtAna} />
+      )}
 
       {reportsTab === 'crm' && quotations.length >= 3 && (() => {
         // Days from quotation creation to conversion
@@ -1239,75 +846,9 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 5 && (() => {
-        // Tier customers by total LTV: Platinum top 20%, Gold mid 60%, Silver bottom 20%
-        const custLTV228: Record<string, number> = {};
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const name = o.customerName || '—';
-          custLTV228[name] = (custLTV228[name] ?? 0) + (o.totalPrice || 0);
-        }
-        const sorted228 = Object.entries(custLTV228).sort(([,a],[,b]) => b - a);
-        const n228 = sorted228.length;
-        if (n228 < 3) return null;
-        const topN = Math.ceil(n228 * 0.2);
-        const botN = Math.ceil(n228 * 0.2);
-        const platinum = new Set(sorted228.slice(0, topN).map(([n]) => n));
-        const silver = new Set(sorted228.slice(n228 - botN).map(([n]) => n));
-        // Revenue this month by tier
-        const now228 = new Date();
-        const monthStart228 = new Date(now228.getFullYear(), now228.getMonth(), 1);
-        const prevMonthStart228 = new Date(now228.getFullYear(), now228.getMonth() - 1, 1);
-        const prevMonthEnd228 = new Date(now228.getFullYear(), now228.getMonth(), 0, 23, 59, 59);
-        const tierRevCurr: Record<string, number> = { Platinum: 0, Gold: 0, Silver: 0 };
-        const tierRevPrev: Record<string, number> = { Platinum: 0, Gold: 0, Silver: 0 };
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const name = o.customerName || '—';
-          const tier = platinum.has(name) ? 'Platinum' : silver.has(name) ? 'Silver' : 'Gold';
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od >= monthStart228) tierRevCurr[tier] += o.totalPrice || 0;
-            else if (od >= prevMonthStart228 && od <= prevMonthEnd228) tierRevPrev[tier] += o.totalPrice || 0;
-          } catch { /* skip */ }
-        }
-        const tierColors: Record<string, { bg: string; text: string; bar: string }> = {
-          Platinum: { bg: 'bg-purple-50', text: 'text-purple-700', bar: 'bg-purple-400' },
-          Gold: { bg: 'bg-amber-50', text: 'text-amber-700', bar: 'bg-amber-400' },
-          Silver: { bg: 'bg-gray-100', text: 'text-gray-600', bar: 'bg-gray-400' },
-        };
-        const maxTierRev = Math.max(...Object.values(tierRevCurr), 1);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '👑 Müşteri Kademesine Göre Satış Trendi' : '👑 Sales Trend by Customer Tier'}</h3>
-            <div className="space-y-3">
-              {(['Platinum', 'Gold', 'Silver'] as const).map(tier => {
-                const curr = tierRevCurr[tier];
-                const prev = tierRevPrev[tier];
-                const growth = prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
-                const cls = tierColors[tier];
-                return (
-                  <div key={tier} className={`${cls.bg} rounded-xl p-4`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className={`text-xs font-bold ${cls.text}`}>{tier === 'Platinum' ? '💎' : tier === 'Gold' ? '⭐' : '🥈'} {tier}</p>
-                        <p className="text-[10px] text-gray-400">{tier === 'Platinum' ? `Top ${topN}` : tier === 'Silver' ? `Bottom ${botN}` : `Mid ${n228 - topN - botN}`} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-lg font-black ${cls.text}`}>{fmtAna(curr,'K',0)}</p>
-                        {growth !== null && <p className={`text-[10px] font-bold ${growth >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{growth >= 0 ? '↑' : '↓'} %{Math.abs(growth)} MoM</p>}
-                      </div>
-                    </div>
-                    <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${cls.bar}`} style={{ width: `${Math.max(4, Math.round((curr / maxTierRev) * 100))}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && orders.length >= 5 && (
+        <MusteriKademeTrendi orders={orders} currentLanguage={currentLanguage} fmtAna={fmtAna} />
+      )}
 
       {reportsTab === 'crm' && orders.length >= 8 && (() => {
         const now230 = new Date();
@@ -1693,156 +1234,13 @@ export default function CrmRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 8 && (() => {
-        // For each customer, find gap between 1st and 2nd order
-        const custFirstTwo: Record<string, number[]> = {};
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const name = o.customerName || '—';
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (!custFirstTwo[name]) custFirstTwo[name] = [];
-            custFirstTwo[name].push(od.getTime());
-          } catch { /* skip */ }
-        }
-        const reorderDays: number[] = [];
-        for (const times of Object.values(custFirstTwo)) {
-          if (times.length < 2) continue;
-          times.sort((a, b) => a - b);
-          const gap = Math.round((times[1] - times[0]) / 86400000);
-          if (gap > 0 && gap < 365) reorderDays.push(gap);
-        }
-        if (reorderDays.length < 3) return null;
-        reorderDays.sort((a, b) => a - b);
-        const avgDays252 = Math.round(reorderDays.reduce((s, d) => s + d, 0) / reorderDays.length);
-        const medianDays252 = reorderDays[Math.floor(reorderDays.length / 2)];
-        const fast252 = reorderDays.filter(d => d <= 30).length;
-        const slow252 = reorderDays.filter(d => d > 90).length;
-        const buckets252 = [
-          { label: '≤7d', max: 7, count: 0 },
-          { label: '8-30d', max: 30, count: 0 },
-          { label: '31-60d', max: 60, count: 0 },
-          { label: '61-90d', max: 90, count: 0 },
-          { label: '90d+', max: Infinity, count: 0 },
-        ];
-        for (const d of reorderDays) {
-          const b = buckets252.find(b => d <= b.max);
-          if (b) b.count++;
-        }
-        const maxBkt252 = Math.max(...buckets252.map(b => b.count), 1);
-        return (
-          <div className="apple-card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔄 İlk Yeniden Sipariş Süresi' : '🔄 Days to First Reorder'}</h3>
-              <span className="text-xl font-black text-blue-600">{avgDays252}d {currentLanguage === 'tr' ? 'ort.' : 'avg'}</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {[
-                { label: currentLanguage === 'tr' ? 'Ortalama' : 'Average', value: `${avgDays252}d`, color: 'text-blue-600' },
-                { label: currentLanguage === 'tr' ? 'Medyan' : 'Median', value: `${medianDays252}d`, color: 'text-gray-700' },
-                { label: currentLanguage === 'tr' ? '≤30 gün tekrar' : '≤30d reorder', value: `${fast252}`, color: 'text-emerald-600' },
-              ].map(k => (
-                <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-end gap-2 h-14">
-              {buckets252.map(b => (
-                <div key={b.label} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="w-full flex items-end" style={{ height: '40px' }}>
-                    <div className="w-full bg-blue-300 rounded-t-md" style={{ height: `${Math.max(4, Math.round((b.count / maxBkt252) * 40))}px` }} />
-                  </div>
-                  <span className="text-[9px] text-gray-400 leading-none">{b.label}</span>
-                </div>
-              ))}
-            </div>
-            {slow252 > 0 && <p className="text-[10px] text-amber-600 mt-2 font-medium">⚠ {slow252} {currentLanguage === 'tr' ? 'müşteri 90+ günde tekrar sipariş verdi' : 'customers took 90+ days to reorder'}</p>}
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && orders.length >= 8 && (
+        <IlkYenidenSiparisSuresi orders={orders} currentLanguage={currentLanguage} />
+      )}
 
-      {reportsTab === 'crm' && quotations.length >= 5 && (() => {
-        // How long quotes sit at each status before moving
-        const now255 = new Date();
-        const stageGroups: Record<string, number[]> = { draft: [], sent: [], negotiation: [], pending: [] };
-        for (const q of quotations) {
-          const m = q as unknown as Record<string,unknown>;
-          const status = ((m.status as string) || '').toLowerCase();
-          try {
-            const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-            const age = Math.round((now255.getTime() - created.getTime()) / 86400000);
-            if (age < 0 || age > 365) continue;
-            if (status === 'draft' || status === 'taslak') stageGroups.draft.push(age);
-            else if (status === 'sent' || status === 'gönderildi') stageGroups.sent.push(age);
-            else if (status === 'negotiation' || status === 'müzakere') stageGroups.negotiation.push(age);
-            else if (status === 'pending' || status === 'beklemede') stageGroups.pending.push(age);
-          } catch { /* skip */ }
-        }
-        const stages255 = [
-          { key: 'draft', label: currentLanguage === 'tr' ? 'Taslak' : 'Draft', color: 'bg-gray-400' },
-          { key: 'sent', label: currentLanguage === 'tr' ? 'Gönderildi' : 'Sent', color: 'bg-blue-400' },
-          { key: 'negotiation', label: currentLanguage === 'tr' ? 'Müzakere' : 'Negotiation', color: 'bg-amber-400' },
-          { key: 'pending', label: currentLanguage === 'tr' ? 'Beklemede' : 'Pending', color: 'bg-purple-400' },
-        ].map(s => ({
-          ...s,
-          avg: stageGroups[s.key].length > 0 ? Math.round(stageGroups[s.key].reduce((a, b) => a + b, 0) / stageGroups[s.key].length) : 0,
-          count: stageGroups[s.key].length,
-        })).filter(s => s.count > 0);
-        if (stages255.length === 0) {
-          // Fallback: just show quote status distribution
-          const statusDist: Record<string, number> = {};
-          for (const q of quotations) {
-            const m = q as unknown as Record<string,unknown>;
-            const st = (m.status as string) || (currentLanguage === 'tr' ? 'Bilinmiyor' : 'Unknown');
-            statusDist[st] = (statusDist[st] ?? 0) + 1;
-          }
-          const items = Object.entries(statusDist).sort(([,a],[,b]) => b - a).slice(0, 5);
-          return (
-            <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📋 Teklif Durum Dağılımı' : '📋 Quote Status Distribution'}</h3>
-              <div className="space-y-2">
-                {items.map(([status, count]) => (
-                  <div key={status} className="flex items-center justify-between text-xs">
-                    <span className="text-gray-700 capitalize">{status}</span>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.round((count / quotations.length) * 100)}%` }} />
-                      </div>
-                      <span className="font-bold text-gray-700 w-6 text-right">{count}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        }
-        const maxAvg255 = Math.max(...stages255.map(s => s.avg), 1);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '⚡ Pipeline Aşama Hızı' : '⚡ Pipeline Stage Velocity'}</h3>
-            <div className="space-y-3">
-              {stages255.map(s => (
-                <div key={s.key}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${s.color}`} />
-                      <span className="text-xs font-medium text-gray-700">{s.label}</span>
-                      <span className="text-[10px] text-gray-400">({s.count})</span>
-                    </div>
-                    <span className={`text-sm font-bold ${s.avg > 14 ? 'text-red-500' : s.avg > 7 ? 'text-amber-500' : 'text-emerald-600'}`}>{s.avg}d {currentLanguage === 'tr' ? 'ort.' : 'avg'}</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${s.color}`} style={{ width: `${Math.max(4, Math.round((s.avg / maxAvg255) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Her aşamada tekliflerin ortalama bekleme süresi' : 'Avg time quotes spend at each pipeline stage'}</p>
-          </div>
-        );
-      })()}
+      {reportsTab === 'crm' && quotations.length >= 5 && (
+        <PipelineAsamaHizi quotations={quotations} currentLanguage={currentLanguage} />
+      )}
 
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const now258 = new Date();

@@ -182,7 +182,7 @@ export default function DashboardPage(props: Props) {
                     {/* Mikro verisinin tazeliği — gece senkronu sessizce durursa
                         burada görünür. Tıklayınca ERP Hub'a gider. */}
                     <SonSenkronRozeti currentLanguage={currentLanguage} onNavigate={() => setActiveTab('settings')} />
-                    <DashboardAnalysis data={{
+                    <DashboardAnalysis currentLanguage={currentLanguage} data={{
                       orders: filteredOrders, // Analiz modülü için native veriler yeterli olabilir, ancak gerekirse combinedOrders verilir.
                       leads: filteredLeads,
                       inventory: inventory,
