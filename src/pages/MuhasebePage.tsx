@@ -1263,7 +1263,10 @@ export default function MuhasebePage(props: Props) {
                       {(() => {
                         // Revenue = Mikro GİDEN (satış) bu yıl + Cetpa orders (additive).
                         const mikroRevenue = mikroFaturalarBuYil.filter(f => f.yon === 'giden').reduce((s, f) => s + f.tutar, 0);
-                        const cetpaRevenue = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        // Çift sayım koruması (2026-09-01): faturadan türetilen
+                        // siparişler (source:'mikro-fatura') dışlanır — mikroRevenue
+                        // aynı faturaları zaten sayıyor.
+                        const cetpaRevenue = orders.filter(o => o.status !== 'Cancelled' && (o as { source?: string }).source !== 'mikro-fatura').reduce((s, o) => s + (o.totalPrice || 0), 0);
                         const totalRevenue132 = mikroRevenue + cetpaRevenue;
                         // COGS: Mikro faturasında satır maliyeti YOK; yalnız Cetpa siparişi
                         // lineItems taşır. Mikro-only kurulumda COGS bilinmiyor (0 DEĞİL) —

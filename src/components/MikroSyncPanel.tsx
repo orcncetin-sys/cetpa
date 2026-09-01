@@ -413,6 +413,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const extraPullDefs: { key: string; route: string; title: string; desc: string }[] = [
     { key: 'siparis',      route: '/api/mikro/import/siparis',        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
     { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
+    // 2026-09-01 kullanıcı isteği: "faturası kesilen her şeyin siparişi olmalı".
+    // Önce Faturalar çekilmiş olmalı; idempotent (tekrar basmak kopya üretmez).
+    { key: 'faturadan-siparis', route: '/api/mikro/import/faturadan-siparis', title: t ? 'Faturadan Sipariş Türet' : 'Derive Orders from Invoices', desc: t ? 'Her SATIŞ faturası için fatura tarihli bir Cetpa siparişi oluştur (kalemleriyle). Ciro kartları çift saymaz.' : 'Create a Cetpa order (with line items) for each sales invoice, dated by the invoice.' },
     { key: 'cari-hareket', route: '/api/mikro/import/cari-hareket',   title: t ? 'Cari Hareketler (Tümü)' : 'Account Movements (All)', desc: t ? 'TÜM cari hareketleri çek (fatura + masraf + dekont + tahsilat + virman). Cari Ekstre bunu okur; fatura-olmayan hareketleri de gösterir.' : 'Pull ALL account movements (invoice + expense + note + collection + transfer). Feeds the Account Statement.' },
     { key: 'stok-hareket', route: '/api/mikro/import/stok-hareket',   title: t ? 'Stok Hareketleri' : 'Stock Movements', desc: t ? 'Stok giriş/çıkış hareketlerini çek.' : 'Pull stock in/out movements.' },
     { key: 'banka',        route: '/api/mikro/import/banka',          title: t ? 'Bankalar' : 'Banks',                   desc: t ? 'Banka hesap tanımlarını çek.' : 'Pull bank account definitions.' },

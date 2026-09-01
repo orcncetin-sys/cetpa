@@ -3326,6 +3326,106 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   //   e-irsaliye (iki yön) → EIrsaliyeListesiV2
   // Hepsi `eBelgeler` koleksiyonuna yazılır; `yon` ve `tur` alanlarıyla ayrışır.
 
+  /** POST /api/mikro/import/faturadan-siparis — SATIŞ faturalarından Cetpa
+   *  siparişi türetir (2026-09-01 kullanıcı isteği: "faturasını kestiğim her
+   *  şeyin siparişi olmalı; fatura tarihiyle işlensin").
+   *
+   *  KAYNAK: `mikroFaturalar` koleksiyonu (fatura-listesi importunun yazdığı
+   *  ham cha_* başlıkları; cha_tip 0 = GİDEN/satış — useMikroFaturalar ile
+   *  aynı konvansiyon). Kalemler: mikro_stok_hareketleri aynası,
+   *  sth_evraktip = 4 + seri/sıra anahtarı (2026-08-01'de canlıda doğrulanan
+   *  birleştirme — bkz. fatura-listesi başlığı).
+   *
+   *  ÇİFT SAYIM TASARIMI: türetilen sipariş `source:'mikro-fatura'` damgası
+   *  taşır; "native + Mikro" toplayan ciro kartları (Dashboard, Finans Paneli,
+   *  Finansal Oranlar) native tarafında bu damgayı DIŞLAR — aynı fatura iki
+   *  kez sayılmaz. Salt-native raporlar ise satışları artık görür; kapanan
+   *  boşluk tam olarak 2026-08-01 "Mikro↔Cetpa kopukluğu" bulgusuydu.
+   *
+   *  İDEMPOTENT: doc id `mikrofat__<cid>__<seri>-<sira>` (kiracı önekli —
+   *  eBelgeYaz dersi: evrak no küresel benzersiz DEĞİL); mevcut id atlanır,
+   *  tekrar çalıştırmak kopya üretmez. Mevcut NATIVE siparişlere dokunulmaz
+   *  (Mikro'ya bağlarken EKLE, YERİNE KOYMA). */
+  app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+    const t0 = Date.now();
+    try {
+      const cid = await C.reqCompanyId(req);
+      const pool = C.getPgPool();
+      const ham = await C.loadCompanyDocs('mikroFaturalar', cid);
+      const satisFaturalari = ham.filter(f => Number((f as Record<string, unknown>).cha_tip ?? 0) === 0);
+      if (!satisFaturalari.length) {
+        return res.json({ success: true, created: 0, skipped: 0, total: 0,
+          message: 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
+      }
+
+      const mevcutIdler = new Set((await C.loadCompanyDocs('orders', cid)).map(o => String(o.id ?? '')));
+
+      // Cari adları + kalemler: ikişer toplu sorgu (fatura başına sorgu YOK).
+      const cariAd = new Map<string, string>();
+      const kalemMap = new Map<string, Array<{ sku: string; name: string; quantity: number; total: number }>>();
+      if (pool) {
+        const cr = await pool.query(`SELECT cari_kod, COALESCE(cari_unvan1, '') AS unvan FROM mikro_cari_hesaplar`);
+        for (const row of cr.rows) cariAd.set(String(row.cari_kod), String(row.unvan));
+        const kr = await pool.query(
+          `SELECT COALESCE(h.sth_evrakno_seri, '') AS seri, CAST(h.sth_evrakno_sira AS text) AS sira,
+                  COALESCE(h.sth_stok_kod, '') AS sku, COALESCE(s.sto_isim, '') AS ad,
+                  COALESCE(h.sth_miktar, 0) AS miktar,
+                  (COALESCE(h.sth_tutar, 0) + COALESCE(h.sth_vergi, 0)) AS toplam
+             FROM mikro_stok_hareketleri h
+             LEFT JOIN mikro_stoklar s ON s.sto_kod = h.sth_stok_kod
+            WHERE h.sth_evraktip = 4`);
+        for (const row of kr.rows) {
+          const anahtar = `${String(row.seri).trim()}|${String(row.sira).trim()}`;
+          const liste = kalemMap.get(anahtar) ?? [];
+          liste.push({ sku: String(row.sku), name: String(row.ad) || String(row.sku),
+                       quantity: Number(row.miktar) || 0, total: Number(row.toplam) || 0 });
+          kalemMap.set(anahtar, liste);
+        }
+      }
+
+      let batch = C.getAdminDb().batch();
+      let ops = 0, created = 0, skipped = 0;
+      for (const f of satisFaturalari) {
+        const x = f as Record<string, unknown>;
+        const seri = String(x.cha_evrakno_seri ?? '').trim();
+        const sira = String(x.cha_evrakno_sira ?? '').trim();
+        if (!sira) { skipped++; continue; }
+        const id = `mikrofat__${cid}__${seri}-${sira}`.replace(/[/\\ ]/g, '_');
+        if (mevcutIdler.has(id)) { skipped++; continue; }
+        const tarih = String(x.cha_tarihi ?? '').slice(0, 10);
+        const cariKod = String(x.cha_kod ?? '').trim();
+        batch.set(C.getAdminDb().collection('orders').doc(id), {
+          orderNumber: `MF-${seri}${sira}`,
+          customerName: cariAd.get(cariKod) || cariKod || '—',
+          mikroCariKod: cariKod,
+          customerType: 'B2B',
+          status: 'Delivered', // faturası kesilmiş satış — tamamlanmış kabul
+          totalPrice: Number(x.cha_meblag ?? 0) || 0, // fatura toplamı (KDV dahil)
+          lineItems: kalemMap.get(`${seri}|${sira}`) ?? [],
+          orderDate: tarih || null,
+          // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
+          createdAt: tarih ? `${tarih}T12:00:00.000Z` : pgServerTimestamp(),
+          source: 'mikro-fatura',
+          mikroEvrak: { seri, sira },
+          companyId: cid,
+        });
+        created++;
+        if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+
+      await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş',
+        `${created} sipariş türetildi, ${skipped} atlandı (${satisFaturalari.length} satış faturası)`);
+      await C.writeSyncLog('faturadan-siparis', 'orders', String(created), true, null, null, Date.now() - t0, C.reqActor(req));
+      res.json({ success: true, created, skipped, total: satisFaturalari.length,
+        kalemsiz: pool ? undefined : 'PG yok — kalemler ve cari adları eklenemedi (lokal dev)',
+        duration: Date.now() - t0 });
+    } catch (err) {
+      console.error('[faturadan-siparis]', err);
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   /** Mikro'dan gelen e-belge satırını `eBelgeler` şemasına indirger.
    *  Alan adları sürüme göre değiştiği için regex ile aranır; bulunamayan alan
    *  BOŞ bırakılır, uydurulmaz. */

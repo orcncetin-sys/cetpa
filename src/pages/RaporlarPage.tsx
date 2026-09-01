@@ -83,6 +83,18 @@ export default function RaporlarPage({
     const cetpaEvrak = new Set(
       ordersProp.map(o => String((o as unknown as { mikroEvrakNo?: string }).mikroEvrakNo ?? '').trim()).filter(Boolean),
     );
+    // Faturadan TÜRETİLEN siparişler (source:'mikro-fatura', 2026-09-01) aynı
+    // faturanın kendisidir — sentetik mikroOrders kopyası eklenmesin diye
+    // evrak anahtarları (faturaNo = seri-sira) eleme setine girer. Türetilmiş
+    // sipariş kalemli/tarihli olduğundan sentetiğe tercih edilir.
+    for (const o of ordersProp) {
+      const ev = (o as unknown as { source?: string; mikroEvrak?: { seri?: string; sira?: string } });
+      if (ev.source === 'mikro-fatura' && ev.mikroEvrak) {
+        const k = [String(ev.mikroEvrak.seri ?? '').trim(), String(ev.mikroEvrak.sira ?? '').trim()]
+          .filter(v => v !== '').join('-');
+        if (k) cetpaEvrak.add(k);
+      }
+    }
     const mikroOrders = mikroFaturalar
       .filter(f => f.yon === 'giden' && f.tarih.startsWith(cariYil) && !cetpaEvrak.has(f.faturaNo))
       .map(f => ({

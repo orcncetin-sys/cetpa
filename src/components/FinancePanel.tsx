@@ -67,7 +67,11 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
 
   // Native orders (bu caride Mikro-ağırlıklı satışlar orders'a değil mikroFaturalar'a
   // düşüyor — orders tek başına kullanılınca panel hep ₺0 gösteriyordu, 2026-08-13).
-  const totalRevenue = orders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
+  // Çift sayım koruması (2026-09-01): faturadan türetilen siparişler dışlanır —
+  // aşağıda mikroCiro zaten aynı faturaları topluyor.
+  const totalRevenue = orders
+    .filter(o => (o as { source?: string }).source !== 'mikro-fatura')
+    .reduce((sum, o) => sum + (o.totalPrice || 0), 0);
   const totalCost    = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
   const profit       = totalRevenue - totalCost;
 

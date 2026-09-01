@@ -139,7 +139,12 @@ export default function DashboardPage(props: Props) {
   });
 
   const totalMikroRevenue = filteredMikroFaturalar.reduce((sum, f) => sum + (f.tutar || 0), 0);
-  const totalNativeRevenue = filteredOrders.reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
+  // ÇİFT SAYIM KORUMASI (2026-09-01): faturadan türetilen siparişler
+  // (source:'mikro-fatura') native tarafında DIŞLANIR — aynı fatura hem
+  // mikroFaturalar hem orders üzerinden iki kez ciroya girmesin.
+  const totalNativeRevenue = filteredOrders
+    .filter(o => (o as { source?: string }).source !== 'mikro-fatura')
+    .reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
   const combinedRevenue = totalNativeRevenue + totalMikroRevenue;
   // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
   // fatura olabiliyor). onSnapshot abone olur olmaz boş diziyle bile tetiklenir;
