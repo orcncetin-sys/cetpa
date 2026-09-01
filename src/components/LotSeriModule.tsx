@@ -444,7 +444,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
       {/* SERİ NO MODAL */}
       {showSeriModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-lg">{tr ? 'Seri No Ekle' : 'Add Serial No'}</h3>
               <button onClick={() => setShowSeriModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
@@ -478,7 +478,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
       {/* HAREKET MODAL */}
       {showHareketModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-lg">{tr ? 'Lot Hareketi' : 'Lot Movement'}</h3>
               <button onClick={() => setShowHareketModal(false)}><X className="w-5 h-5 text-gray-400" /></button>

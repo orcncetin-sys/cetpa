@@ -44,7 +44,7 @@ export default function EmailComposeModal({
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 40 }}
-          className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
+          className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] overflow-y-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50">

@@ -1154,7 +1154,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
               className="fixed inset-0 z-[110] flex items-center justify-center p-4"
             >
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-base font-semibold text-[#1D1D1F]">{t.odemeEkle}</h2>
@@ -1300,7 +1300,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
               exit={{ opacity: 0, scale: 0.95 }}
               className="fixed inset-0 z-[110] flex items-center justify-center p-4"
             >
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-4 text-center">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-4 text-center max-h-[90vh] overflow-y-auto">
                 <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center mx-auto">
                   <Trash2 className="w-5 h-5 text-red-500" />
                 </div>

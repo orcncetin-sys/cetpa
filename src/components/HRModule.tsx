@@ -1233,7 +1233,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         {showLeaveModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni İzin Talebi' : 'New Leave Request'}</h3>
                 <button onClick={() => setShowLeaveModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -1287,7 +1287,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         {showPayrollModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPayrollModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bordro Hesapla' : 'Calculate Payroll'}</h3>
                 <button onClick={() => setShowPayrollModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -1355,7 +1355,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         {showTrainingModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTrainingModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Eğitim' : 'New Training'}</h3>
                 <button onClick={() => setShowTrainingModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -1394,7 +1394,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         {showTravelModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTravelModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}</h3>
                 <button onClick={() => setShowTravelModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>

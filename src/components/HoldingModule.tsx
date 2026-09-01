@@ -609,7 +609,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
       {/* ENTITY FORM MODAL */}
       {showEntityForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{tr ? 'Yeni Şirket' : 'New Entity'}</h2>
               <button onClick={() => setShowEntityForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
@@ -649,7 +649,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
       {/* ACCOUNT FORM MODAL */}
       {showAccountForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{tr ? 'Yeni Hesap' : 'New Account'}</h2>
               <button onClick={() => setShowAccountForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
@@ -684,7 +684,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
       {/* INTERCOMPANY FORM MODAL */}
       {showICForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{tr ? 'Şirketlerarası İşlem' : 'Intercompany Transaction'}</h2>
               <button onClick={() => setShowICForm(false)}><X className="w-5 h-5 text-gray-400" /></button>

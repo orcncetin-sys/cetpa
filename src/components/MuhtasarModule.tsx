@@ -592,7 +592,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
       {/* EMPLOYEE FORM MODAL */}
       {showEmpForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{tr ? 'Yeni Çalışan' : 'New Employee'}</h2>
               <button onClick={() => setShowEmpForm(false)}><X className="w-5 h-5 text-gray-400" /></button>

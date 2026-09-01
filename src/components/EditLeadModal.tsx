@@ -47,7 +47,7 @@ export default function EditLeadModal({
         className="absolute inset-0 bg-black/40 backdrop-blur-sm" 
       />
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} 
-        className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200">
+        className="bg-white w-full max-w-lg rounded-2xl shadow-2xl relative z-10 overflow-hidden border border-gray-200 max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-xl font-bold">{currentT.edit_lead}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">

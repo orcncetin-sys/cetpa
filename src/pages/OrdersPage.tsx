@@ -3470,7 +3470,7 @@ export default function OrdersPage({
         {showQuickShipment && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuickShipment(null)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
                 <button onClick={() => setShowQuickShipment(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>

@@ -37,7 +37,7 @@ export default function ReturnModal({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+          className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto"
         >
           <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-orange-50/60">
             <div className="flex items-center gap-3">

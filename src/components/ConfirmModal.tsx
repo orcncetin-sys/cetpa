@@ -41,7 +41,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+          className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto"
         >
           <div className="p-6">
             <div className="flex items-center justify-between mb-6">

@@ -466,7 +466,7 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
               initial={{ scale: 0.95, y: 10 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 10 }}
-              className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+              className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl max-h-[90vh] overflow-y-auto"
             >
               <h3 className="font-bold text-gray-900 mb-2">{tr ? 'Şablonu Sil' : 'Delete Template'}</h3>
               <p className="text-sm text-gray-500 mb-5">

@@ -264,7 +264,7 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
           });
           return (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setSeciliHareket(null)}>
-              <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-5 space-y-3" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start justify-between">
                   <h3 className="font-bold text-gray-800">Hareket Detayı</h3>
                   <button onClick={() => setSeciliHareket(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>

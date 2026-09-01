@@ -623,7 +623,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
       {/* GENERATE SCHEDULE MODAL */}
       {showScheduleModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-semibold">{tr ? 'Tanıma Takvimi Oluştur' : 'Generate Schedule'}</h2>
             <p className="text-sm text-gray-600">
               {showScheduleModal.contractNo} — {showScheduleModal.customerName}

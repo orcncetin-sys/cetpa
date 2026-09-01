@@ -734,7 +734,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
         {showBoardModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBoardModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Toplantı Kaydı' : 'New Meeting Record'}</h3>
                 <button onClick={() => setShowBoardModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -774,7 +774,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
         {showShareholderModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowShareholderModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Pay Sahibi' : 'New Shareholder'}</h3>
                 <button onClick={() => setShowShareholderModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -813,7 +813,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
         {showAssemblyModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAssemblyModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Genel Kurul Kaydı' : 'New Assembly Record'}</h3>
                 <button onClick={() => setShowAssemblyModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
@@ -852,7 +852,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
         {showContractModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowContractModal(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}</h3>
                 <button onClick={() => setShowContractModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>

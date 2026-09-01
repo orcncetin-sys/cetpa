@@ -660,7 +660,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
           {/* Ödeme linki modalı (drawer üstünde) */}
           {payOpen && (
             <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/40" onClick={e => { e.stopPropagation(); if (!payBusy) setPayOpen(false); }}>
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-5 border-b border-[#f0f0f2]">
                   <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Link2 className="w-4 h-4 text-brand" />{tr ? 'Ödeme Linki' : 'Payment Link'}</h3>
                   <button onClick={() => setPayOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>

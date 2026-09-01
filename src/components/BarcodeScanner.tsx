@@ -46,7 +46,7 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] overflow-y-auto"
       >
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <div className="flex items-center gap-3">

@@ -563,7 +563,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
       {/* TALEBİ KAPAT MODAL */}
       {closingTalep && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">Talebi Kapat — {closingTalep.talepNo}</h3>
               <button onClick={() => setClosingTalep(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>
@@ -592,7 +592,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
       {/* GARANTİ MODAL */}
       {showGarantiModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">Garanti Kaydı Ekle</h3>
               <button onClick={() => setShowGarantiModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>
@@ -623,7 +623,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
       {/* TEKNİSYEN MODAL */}
       {showTeknisyenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">{editingTeknisyen ? 'Teknisyen Düzenle' : 'Teknisyen Ekle'}</h3>
               <button onClick={() => { setShowTeknisyenModal(false); setEditingTeknisyen(null); }} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>

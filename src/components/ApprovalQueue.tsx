@@ -342,7 +342,7 @@ export default function ApprovalQueue({
             <motion.div
               initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
               onClick={e => e.stopPropagation()}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto"
             >
               {/* Modal header */}
               {(() => {

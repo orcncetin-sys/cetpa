@@ -643,7 +643,7 @@ export default function DealerCommissionPanel({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto"
             >
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-bold text-gray-800">

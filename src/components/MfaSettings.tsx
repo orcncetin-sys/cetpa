@@ -161,7 +161,7 @@ export function MfaChallengeModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-brand" />

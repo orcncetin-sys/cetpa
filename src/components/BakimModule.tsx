@@ -501,7 +501,7 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
       {/* İŞ EMRİ MODAL */}
       {showIsEmriModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">İş Emri Oluştur</h3>
               <button onClick={() => setShowIsEmriModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>
@@ -563,7 +563,7 @@ export default function BakimModule({ currentLanguage: _lang, isAuthenticated }:
       {/* ARIZA MODAL */}
       {showArizaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">Arıza Bildir</h3>
               <button onClick={() => setShowArizaModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>
