@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { zamanMs } from '../utils/zaman';
 import { pdfBaslik, pdfTabloStili } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
@@ -7,6 +7,7 @@ import { Download, FileText } from 'lucide-react';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ReportsDashboard from '../components/ReportsDashboard';
+const AnalyticsPanel = React.lazy(() => import('../components/AnalyticsPanel'));
 import DemandForecastPanel from '../components/DemandForecastPanel';
 import {
   exportOrdersCSV,
@@ -38,8 +39,8 @@ interface Props {
   appQuotations: Quotation[];
   inventoryMovements: InventoryMovement[];
   recurringOrders: RecurringOrder[];
-  appReportsTab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler';
-  setAppReportsTab: (tab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler') => void;
+  appReportsTab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler' | 'analitik';
+  setAppReportsTab: (tab: 'genel' | 'crm' | 'envanter' | 'lojistik' | 'ik' | 'urunler' | 'analitik') => void;
   onNavigate: (tab: string) => void;
   /** Rapor kartından CRM→Müşteriler'e in (ada filtreli) — 2026-08-31. */
   onMusteriAc: (ad: string) => void;
@@ -268,6 +269,20 @@ export default function RaporlarPage({
         inventoryMovements={inventoryMovements} recurringOrders={recurringOrders}
         externalTab={appReportsTab} setExternalTab={setAppReportsTab}
       />
+
+      {/* ANALITIK (2026-09-04): ayri "Analitik" ust sekmesi kaldirilip Raporlar'in
+          alt sekmesi yapildi — iki ayri ust sekme ayni soruyu iki yerde cevapliyordu
+          (kullanici: "Analitik ile raporlari birlestir, raporlar kalsin"). */}
+      {appReportsTab === 'analitik' && (
+        <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+          <AnalyticsPanel
+            orders={orders}
+            leads={leads}
+            inventory={inventory}
+            currentLanguage={currentLanguage as 'tr' | 'en'}
+          />
+        </React.Suspense>
+      )}
 
       {/* ── Phase 570: KPI Hedef Takibi ─────────────────────────────────────── */}
       {appReportsTab === 'genel' && (() => {

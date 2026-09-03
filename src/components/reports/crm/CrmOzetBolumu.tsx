@@ -74,13 +74,22 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
             {kartlar.map((k, i) => (
               // Kart tıklanınca CRM→Müşteriler'e inilir (2026-08-31 kullanıcı
               // bildirimi: "kartlara basınca detaya gidemiyoruz").
-              <div key={i} onClick={() => onMusteriAc?.('')}
-                className={onMusteriAc ? 'cursor-pointer transition-transform hover:-translate-y-0.5' : undefined}
-                title={onMusteriAc ? (currentLanguage==='tr'?'Müşteri listesini aç':'Open customer list') : undefined}>
-                <KpiCard index={i} label={k.label} value={k.value} hint={k.hint}
-                  icon={k.icon} accent={k.accent} accentBg={k.accentBg}
-                  action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
-              </div>
+              //
+              // 2026-09-04 DÜZELTMESİ: sarmalayıcı düz `<div onClick>` idi —
+              // (a) klavyeyle erişilemiyordu (tab ile odaklanmıyor, Enter çalışmıyor),
+              // (b) DÖRT kart da `onMusteriAc('')` çağırıyordu, yani hangisine
+              //     basılırsa basılsın aynı filtresiz listeye iniliyordu.
+              // (a) çözüldü: KpiCard'ın kendi onClick'i <button> render eder.
+              // (b) ÇÖZÜLMEDİ, kasıtlı: `onMusteriAc` yalnız ARAMA METNİ alıyor;
+              //     "son 30 günde ilk siparişini veren" ya da "birden fazla sipariş
+              //     veren" gibi kart filtreleri arama metniyle ifade edilemiyor.
+              //     Farklı hedefler için CRM tarafında filtre parametresi gerekir —
+              //     uydurma bir arama metni göndermek yanlış liste açardı.
+              <KpiCard key={i} index={i} label={k.label} value={k.value} hint={k.hint}
+                icon={k.icon} accent={k.accent} accentBg={k.accentBg}
+                onClick={onMusteriAc ? () => onMusteriAc('') : undefined}
+                linkHint={currentLanguage==='tr' ? 'Müşterileri aç' : 'Open customers'}
+                action={k.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined} />
             ))}
           </KpiGrid>
         );

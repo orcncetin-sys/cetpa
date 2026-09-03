@@ -28,6 +28,26 @@ export interface OpsRouteCtx {
 }
 
 export function opsRoutes(app: Express, C: OpsRouteCtx): void {
+  // TOKEN SAGLIGI — acilista bir kez uyar (2026-09-04).
+  // Yasanan arıza: token'a Turkce karakter ('ğ') ve bosluk kacmisti. Sunucu bunu
+  // sorunsuz saklar (Buffer UTF-8), AMA istemci onu `X-Ops-Token` BASLIGINA
+  // koyamaz: HTTP basliklari ByteString'dir, >255 kod noktasi TypeError firlatir
+  // ("Cannot convert argument to a ByteString"). Sonuc: token "tanimli" gorunur
+  // ama uc pratikte KULLANILAMAZ — sessiz kirilma. Degeri ASLA loglamayiz,
+  // yalniz sorunun VARLIGINI ve konumunu bildiririz.
+  {
+    const t = process.env.OPS_SUMMARY_TOKEN || '';
+    if (t) {
+      const asciiDisi = [...t].findIndex(ch => ch.codePointAt(0)! > 127);
+      if (asciiDisi >= 0) {
+        console.warn(`⚠️  OPS_SUMMARY_TOKEN ASCII olmayan karakter iceriyor (konum ${asciiDisi}) — X-Ops-Token basligiyla GONDERILEMEZ. Token'i ASCII (ornegin: openssl rand -hex 24) bir degerle degistirin.`);
+      }
+      if (/\s/.test(t)) {
+        console.warn('⚠️  OPS_SUMMARY_TOKEN bosluk/satir sonu iceriyor — .env satirinda tirnak veya sondaki aciklama olabilir; eslesme basarisiz olur.');
+      }
+    }
+  }
+
   /** Operasyon bekçisi: GET son 14 günün sonuçları, POST elle çalıştır.
    *  Süper-admin panelindeki OpsWatchdogCard kullanır; cron her sabah 08:30. */
   app.get('/api/ops/watchdog', C.requireAuth, C.requireSuperAdmin, async (_req: Request, res: Response) => {

@@ -29,6 +29,7 @@ import {
 } from '../../lib/dbClient';
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
+import { siparisDurumEtiketi } from '../../utils/durumEtiketi';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { formatInCurrency } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
@@ -55,12 +56,18 @@ export default function LojistikRapor(ctx: ReportsCtx) {
               konuyla ilgili olmalı"). Yerine sevkiyat bekleyen sipariş sayısı. */}
           <KpiGrid>
             {([
-              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10' },
-              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Yolda':'In Transit', value: String(orders.filter(o=>o.status==='Shipped').length), icon: Truck, accent: 'text-blue-600', accentBg: 'bg-blue-50' },
-              { label: currentLanguage==='tr'?'Sevkiyat Bekleyen':'Awaiting Shipment', value: String(orders.filter(o=>o.status==='Pending'||o.status==='Processing').length), icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50' },
-            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string }[]).map((k,i) => (
-              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg} />
+              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10', hint: currentLanguage==='tr'?'Seçili dönemdeki tüm siparişler':'All orders in range' },
+              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), hint: currentLanguage==='tr'?'Durumu "Teslim Edildi" olanlar':'Status = Delivered', icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
+              { label: currentLanguage==='tr'?'Yolda':'In Transit', value: String(orders.filter(o=>o.status==='Shipped').length), hint: currentLanguage==='tr'?'Durumu "Kargoda" olanlar':'Status = Shipped', icon: Truck, accent: 'text-blue-600', accentBg: 'bg-blue-50' },
+              { label: currentLanguage==='tr'?'Sevkiyat Bekleyen':'Awaiting Shipment', value: String(orders.filter(o=>o.status==='Pending'||o.status==='Processing').length), hint: currentLanguage==='tr'?'Bekliyor + Hazırlanıyor':'Pending + Processing', icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50' },
+            ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; hint?: string }[]).map((k,i) => (
+              // TIKLANABILIR + IPUCU (2026-09-04, kullanici istegi): KpiCard bunlari
+              // zaten destekliyordu ama hicbiri geciliyordu — kartlar olu kutulardi.
+              // Hedef: Siparisler ekrani (bu metriklerin arkasindaki gercek liste).
+              <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon}
+                accent={k.accent} accentBg={k.accentBg} hint={k.hint}
+                onClick={onNavigate ? () => onNavigate('orders') : undefined}
+                linkHint={currentLanguage === 'tr' ? 'Siparişlere git' : 'Go to orders'} />
             ))}
           </KpiGrid>
 
@@ -1123,11 +1130,13 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Durumu Dağılımı' : 'Order Status Distribution'}</h3>
-            <p className="text-xs text-gray-500 mb-4">{orders.length} total orders · current pipeline snapshot</p>
+            <p className="text-xs text-gray-500 mb-4">{currentLanguage === 'tr'
+              ? `${orders.length} sipariş · anlık durum görünümü`
+              : `${orders.length} total orders · current pipeline snapshot`}</p>
             <div className="space-y-2">
               {statuses.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-gray-600 w-24">{s.status}</span>
+                  <span className="text-xs text-gray-600 w-24">{siparisDurumEtiketi(s.status, currentLanguage)}</span>
                   <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full" style={{width: `${(s.count / maxS) * 100}%`, background: statusColors[s.status] || '#94a3b8'}} />
                   </div>
@@ -1530,7 +1539,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <span>⏳ Stuck Orders (&gt;7 days)</span>
+              <span>⏳ {currentLanguage === 'tr' ? 'Takılı Siparişler (7 günden fazla)' : 'Stuck Orders (>7 days)'}</span>
               <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{stuck.length}</span>
             </h3>
             <div className="space-y-2">
@@ -1538,9 +1547,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                 <div key={i} className="flex items-center justify-between text-xs">
                   <div className="flex-1">
                     <span className="text-gray-700 font-medium">{o.customer}</span>
-                    <span className="ml-2 text-gray-400">{o.status}</span>
+                    <span className="ml-2 text-gray-400">{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                   </div>
-                  <span className="font-bold ml-2" style={{color: o.days > 14 ? '#ef4444' : '#f59e0b'}}>{o.days}d</span>
+                  <span className="font-bold ml-2" style={{color: o.days > 14 ? '#ef4444' : '#f59e0b'}}>{o.days}{currentLanguage === 'tr' ? 'g' : 'd'}</span>
                 </div>
               ))}
             </div>

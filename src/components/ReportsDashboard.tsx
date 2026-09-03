@@ -14,7 +14,7 @@
  * Saf görüntüleme bileşeni — veritabanına yazma yok.
  */
 import React, { Suspense } from 'react';
-import { LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3, Download } from 'lucide-react';
+import { LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3, Download, BarChart2 } from 'lucide-react';
 import ModuleHeader from './ModuleHeader';
 import { useReportsData, type ReportsProps } from './reports/useReportsData';
 
@@ -43,6 +43,10 @@ const ReportsDashboard = (props: ReportsProps) => {
     { id: 'lojistik', label: currentLanguage==='tr'?'Lojistik':'Logistics', icon: Truck },
     { id: 'ik', label: currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources', icon: UserCheck },
     { id: 'urunler', label: currentLanguage==='tr'?'Ürün Performansı':'Product Performance', icon: Package },
+    // 'analitik' 2026-09-04: ayri "Analitik" ust sekmesi buraya tasindi; panelin
+    // KENDISI RaporlarPage'de render ediliyor (leads prop'u orada mevcut), burada
+    // yalniz sekme dugmesi var — bu yuzden asagidaki render zincirinde karsiligi YOK.
+    { id: 'analitik', label: currentLanguage==='tr'?'Analitik':'Analytics', icon: BarChart2 },
   ] as const;
 
   return (

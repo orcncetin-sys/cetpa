@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
+import { siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { CreditCard, X, CheckCircle2 } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
@@ -97,7 +98,7 @@ export default function OverduePanel({
                           {age}{currentLanguage === 'tr' ? 'g' : 'd'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-gray-400">{gorunenSiparisNo(order)} · {order.status}</p>
+                      <p className="text-[10px] text-gray-400">{gorunenSiparisNo(order)} · {siparisDurumEtiketi(order.status, currentLanguage)}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-black text-gray-900">₺{amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>

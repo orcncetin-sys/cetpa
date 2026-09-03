@@ -515,6 +515,18 @@ import ReadOnlyBanner from './components/ReadOnlyBanner';
   history.replaceState(null, '', yol + window.location.search);
 })();
 
+// ── /analytics GÖÇÜ (2026-09-04) — Router mount'tan ÖNCE ─────────────────────
+// "Analitik" ust sekmesi kaldirilip Raporlar'in ALT SEKMESI yapildi (kullanici:
+// "Analitik ile raporlari birlestir, raporlar kalsin, analitik i kaldir").
+// Eski yer imleri ve dis linkler `/analytics` biçimindeydi; yonlendirilmezse
+// bilinmeyen yol olarak dashboard'a duserlerdi. Alt sekme secimi sessionStorage
+// ile tasinir — AppContent mount olurken okur.
+(() => {
+  if (window.location.pathname !== '/analytics') return;
+  try { sessionStorage.setItem('cetpa:raporSekmesi', 'analitik'); } catch { /* özel pencere */ }
+  history.replaceState(null, '', '/reports' + window.location.search);
+})();
+
 // ── Back to Top — sol altta, sayfa kaydırılınca görünür ───────────────────────
 const BackToTopButton: React.FC = () => {
   const [visible, setVisible] = useState(false);
@@ -737,7 +749,17 @@ function AppContent() {
   // olduğu App seviyesinde tutulur ki sidebar'dan doğrudan bir ERP sekmesi açılabilsin.
   const [muhasebeAccountingTab, setMuhasebeAccountingTab] = useState<string>('faturalar');
   // Lifted from ReportsDashboard so sidebar can control it
-  const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'>('genel');
+  // 'analitik' 2026-09-04'te eklendi: ayri "Analitik" ust sekmesi Raporlar'in ALTINA
+  // tasindi (kullanici: "Analitik ile raporlari birlestir, raporlar kalsin, analitik
+  // kaldirilsin"). Iki ayri ust sekme ayni soruyu iki farkli yerde cevapliyordu.
+  const [appReportsTab, setAppReportsTab] = useState<'genel'|'crm'|'envanter'|'lojistik'|'ik'|'urunler'|'analitik'>(() => {
+    // /analytics gocunden gelen alt sekme secimi (yukaridaki IIFE yazar).
+    try {
+      const g = sessionStorage.getItem('cetpa:raporSekmesi');
+      if (g === 'analitik') { sessionStorage.removeItem('cetpa:raporSekmesi'); return 'analitik'; }
+    } catch { /* özel pencere */ }
+    return 'genel';
+  });
 
   // ── Dashboard summary (30-day KPI deltas) ─────────────────────────────────
   const [summaryData, setSummaryData] = useState<{
@@ -4496,9 +4518,9 @@ function AppContent() {
                 { label: tr ? 'Lojistik' : 'Logistics',            subId: 'r-lojistik', action: () => { setActiveTab('reports'); setAppReportsTab('lojistik'); } },
                 { label: tr ? 'İnsan Kaynakları' : 'HR',           subId: 'r-ik',       action: () => { setActiveTab('reports'); setAppReportsTab('ik'); } },
                 { label: tr ? 'Ürün Performansı' : 'Products',     subId: 'r-urunler',  action: () => { setActiveTab('reports'); setAppReportsTab('urunler'); } },
+                { label: tr ? 'Analitik' : 'Analytics',            subId: 'r-analitik', action: () => { setActiveTab('reports'); setAppReportsTab('analitik'); } },
               ],
             },
-            { id: 'analytics', label: tr ? 'Analitik' : 'Analytics',         icon: BarChart2 },
             { id: 'onaylar',   label: tr ? 'Onaylar' : 'Approvals',           icon: CheckCircle2 },
             ...(userRole === 'Admin' ? [{
               id: 'admin', label: tr ? 'Yönetim' : 'Admin', icon: Shield,
@@ -5394,12 +5416,6 @@ function AppContent() {
             </motion.div>
           )}
 
-          {/* ── Analytics Panel ── */}
-          {activeTab === 'analytics' && (
-            <motion.div key="analytics" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <AnalyticsPanel orders={orders} leads={leads} inventory={inventory} currentLanguage={currentLanguage as 'tr' | 'en'} />
-            </motion.div>
-          )}
 
           {/* ── eBA Onay Kuyruğu ── */}
           {activeTab === 'onaylar' && (

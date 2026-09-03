@@ -1,6 +1,7 @@
 import { sayiBicimleyici } from '../utils/recharts';
-import { odemeTakipli } from '../utils/siparis';
+import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { gunAnahtari } from '../utils/zaman';
+import { siparisDurumEtiketi, sevkiyatDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -37,12 +38,37 @@ import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 // basiyor; o da null'i '—' yapar. CLAUDE.md: guvenilir hesaplanamayan rakam
 // yerine yaniltici bir sayi degil '—' goster.
 
-function DeltaBadge({ delta }: { delta: number | null | undefined }) {
+/**
+ * DeltaBadge — onceki doneme gore degisim.
+ *
+ * BIRIM KARISMASI DUZELTILDI (2026-09-04, kullanici bildirdi: "938530.7% nereden
+ * geliyor?"): sunucu (`reportsRoutes.ts`) delta'yi MUTLAK FARK olarak gonderiyor
+ * — ciroda TL, siparislerde ADET. Rozet ise sonuna dogrudan '%' basiyordu:
+ * ₺938.530,7'lik fark ekranda "%938530.7" olarak goruniyordu.
+ *
+ * Artik yuzde `prev` (onceki donem degeri) ile HESAPLANIR. `prev` yoksa veya 0 ise
+ * yuzde tanimsizdir (sifirdan artis sonsuzdur) — o durumda uydurma bir oran yerine
+ * mutlak degisim gosterilir. CLAUDE.md: "sahte kesinlik gosterme".
+ */
+function DeltaBadge({ delta, prev, birim = 'adet' }: {
+  delta: number | null | undefined;
+  prev?: number | null;
+  birim?: 'adet' | 'tutar';
+}) {
   if (delta == null || isNaN(delta)) return null;
   const up = delta >= 0;
+  const yuzde = (prev != null && prev !== 0 && isFinite(prev)) ? (delta / prev) * 100 : null;
+  const mutlak = birim === 'tutar'
+    ? `₺${Math.abs(delta).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`
+    : Math.abs(delta).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
   return (
-    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-      {up ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+    <span
+      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}
+      title={yuzde === null
+        ? 'Önceki dönemde karşılaştırılacak veri yok — yüzde hesaplanamıyor, mutlak değişim gösteriliyor.'
+        : `Önceki dönem: ${birim === 'tutar' ? '₺' : ''}${(prev ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+    >
+      {up ? '▲' : '▼'} {yuzde === null ? mutlak : `%${Math.abs(yuzde).toFixed(1)}`}
     </span>
   );
 }
@@ -295,7 +321,7 @@ export default function DashboardPage(props: Props) {
                 return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: dashT.total_orders, value: filteredOrders.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta },
+                  { label: dashT.total_orders, value: filteredOrders.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta, prev: summaryData?.orders?.prevCount },
                   { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, ready: leadsCountReady, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
                   { label: dashT.inventory_label, value: inventory.length, ready: inventoryCountReady, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
                 ].map((kpi, i) => (
@@ -305,7 +331,7 @@ export default function DashboardPage(props: Props) {
                       <div className={`w-9 h-9 rounded-xl ${kpi.bg} flex items-center justify-center`}>
                         <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
                       </div>
-                      <DeltaBadge delta={kpi.delta} />
+                      <DeltaBadge delta={kpi.delta} prev={(kpi as { prev?: number }).prev} />
                     </div>
                     {/* SSE kademeli akarken (özellikle buyuk koleksiyonlarda) bu sayim
                         yukselen bir ARA DEGERdir — tam anlik goruntu gelene kadar
@@ -358,10 +384,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                         <div className="flex items-center gap-1.5">
                           {revDelta != null && araligVarsayilan && (
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${revDelta >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}
-                              title={currentLanguage === 'tr' ? 'Önceki 30 güne göre değişim' : 'Change vs previous 30 days'}>
-                              {revDelta >= 0 ? '▲' : '▼'} {Math.abs(revDelta).toFixed(1)}%
-                            </span>
+                            <DeltaBadge delta={revDelta} prev={summaryData?.revenue?.prev} birim="tutar" />
                           )}
                           <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                             {(['TRY','USD','EUR'] as const).map(c => (
@@ -1680,7 +1703,7 @@ export default function DashboardPage(props: Props) {
                     key: `ship-${o.id}`,
                     icon: Truck, color: 'text-blue-600' as const, bg: 'bg-blue-50' as const,
                     title: currentLanguage === 'tr' ? `Kargoya ver: ${o.customerName}` : `Ship: ${o.customerName}`,
-                    sub: `#${o.shopifyOrderId || o.id?.slice(-6)} · ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
+                    sub: `${gorunenSiparisNo(o)} · ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
                     onClick: () => { setActiveTab('orders'); },
                   })),
                   ...staleLeads.slice(0, 2).map(l => ({
@@ -1763,16 +1786,23 @@ export default function DashboardPage(props: Props) {
                   </div>
                   <div className="space-y-2">
                     {filteredOrders.slice(0, 5).map(o => (
-                      <div key={o.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                      // TIKLANABILIR SATIR (2026-09-04 kullanici istegi): duz <div>
+                      // idi, ne fare ne klavyeyle acilabiliyordu. <button> secildi:
+                      // tabIndex/role/onKeyDown elle yazmaya gerek kalmaz, ekran
+                      // okuyucu ve Enter/Space kendiliginden calisir.
+                      <button key={o.id} type="button"
+                        onClick={() => setActiveTab('orders')}
+                        title={currentLanguage === 'tr' ? 'Siparişler ekranına git' : 'Go to orders'}
+                        className="w-full text-left flex items-center justify-between py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/70 rounded-lg px-1 -mx-1 transition-colors cursor-pointer">
                         <div>
                           <p className="text-sm font-semibold text-[#1D1D1F]">{o.customerName || currentT.customer}</p>
-                          <p className="text-xs text-gray-400">#{o.shopifyOrderId || o.id?.slice(-6)}</p>
+                          <p className="text-xs text-gray-400">{gorunenSiparisNo(o)}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-bold text-[#1D1D1F]">{fmtKpi(o.totalPrice||o.totalAmount||0)}</p>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status === 'Delivered' ? 'bg-green-100 text-green-700' : o.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{o.status}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status === 'Delivered' ? 'bg-green-100 text-green-700' : o.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                         </div>
-                      </div>
+                      </button>
                     ))}
                     {filteredOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-4">{dashT.no_orders}</p>}
                   </div>
@@ -1785,7 +1815,10 @@ export default function DashboardPage(props: Props) {
                   </div>
                   <div className="space-y-2">
                     {inventory.filter(i => i.stockLevel <= i.lowStockThreshold).slice(0, 5).map(item => (
-                      <div key={item.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                      <button key={item.id} type="button"
+                        onClick={() => setActiveTab('inventory')}
+                        title={currentLanguage === 'tr' ? 'Envanter ekranına git' : 'Go to inventory'}
+                        className="w-full text-left flex items-center justify-between py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/70 rounded-lg px-1 -mx-1 transition-colors cursor-pointer">
                         <div>
                           <p className="text-sm font-semibold text-[#1D1D1F]">{item.name}</p>
                           <p className="text-xs text-gray-400">{item.sku}</p>
@@ -1794,7 +1827,7 @@ export default function DashboardPage(props: Props) {
                           <p className="text-sm font-bold text-red-500">{item.stockLevel} {dashT.units}</p>
                           <p className="text-[10px] text-gray-400">Min: {item.lowStockThreshold}</p>
                         </div>
-                      </div>
+                      </button>
                     ))}
                     {inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length === 0 && (
                       <p className="text-sm text-green-600 text-center py-4 flex items-center justify-center gap-2"><CheckCircle2 className="w-4 h-4" />{dashT.all_in_stock}</p>

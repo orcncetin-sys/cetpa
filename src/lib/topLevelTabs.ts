@@ -28,6 +28,8 @@ export const TOP_LEVEL_TABS = new Set([
   'holding', 'ihracat', 'sube', 'performans',
   'dunning', 'gelirtanima', 'ebelge', 'vergi',
   'production', 'reports', 'settings', 'admin', 'risk', 'onaylar',
-  'kurumsal', 'analytics', 'mobilewms', 'mrp', 'iade', 'mesai',
+  // 'analytics' KALDIRILDI (2026-09-04): ust sekme Raporlar'in alt sekmesi oldu;
+  // eski /analytics yolu App.tsx'teki goc IIFE'siyle /reports'a yonlendiriliyor.
+  'kurumsal', 'mobilewms', 'mrp', 'iade', 'mesai',
   'selfservis', 'territory', 'cpq', 'muhtasar', 'lotseri', 'fiyat-istihbarat',
 ]);
