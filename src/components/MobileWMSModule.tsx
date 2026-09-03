@@ -116,6 +116,14 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   // (2026-08-17 bildirimi). editingLocId doluysa form "Kaydet" güncelleme yapar.
   const [editingLocId, setEditingLocId] = useState<string | null>(null);
   const [locFormError, setLocFormError] = useState<string | null>(null);
+  /** Gecmis sayimlar — 2026-09-04'e kadar `wmsCycleCounts` koleksiyonuna YAZILIYOR
+   *  ama hicbir yerde OKUNMUYORDU: kullanici sayimi kaydediyor, ekran sifirlaniyor
+   *  ve kayit bir daha gorunmuyordu ("kaydettim ama yok" sinifi). */
+  const [gecmisSayimlar, setGecmisSayimlar] = useState<Array<{
+    id: string; date: string; discrepancyCount: number;
+    items?: Array<{ sku?: string; name?: string; systemQty?: number; countedQty?: number | null; counted?: boolean }>;
+    createdAt?: unknown;
+  }>>([]);
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -133,6 +141,11 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
     }));
     unsubs.push(onSnapshot(collection(db, 'wmsTasks'), snap => {
       setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as WMSTask)));
+    }));
+    unsubs.push(onSnapshot(collection(db, 'wmsCycleCounts'), snap => {
+      setGecmisSayimlar(snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as typeof gecmisSayimlar[number]))
+        .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))));
     }));
     return () => unsubs.forEach(u => u());
   }, []);
@@ -656,6 +669,50 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* GECMIS SAYIMLAR (2026-09-04): kayitlar yaziliyor ama hic gosterilmiyordu.
+              Sayim bir denetim kaydidir — fark cikan sayimlar sonradan incelenebilmeli. */}
+          <div className="apple-card p-4">
+            <p className="text-sm font-semibold mb-2">
+              {tr ? `Geçmiş Sayımlar (${gecmisSayimlar.length})` : `Past Counts (${gecmisSayimlar.length})`}
+            </p>
+            {gecmisSayimlar.length === 0 ? (
+              <p className="text-xs text-gray-400">{tr ? 'Henüz kaydedilmiş sayım yok.' : 'No saved counts yet.'}</p>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {gecmisSayimlar.map(c => {
+                  const sayilan = (c.items ?? []).filter(i => i.counted).length;
+                  return (
+                    <div key={c.id} className={`rounded-lg px-3 py-2 text-xs ${c.discrepancyCount > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-gray-800">{c.date}</span>
+                        <span className={c.discrepancyCount > 0 ? 'text-amber-700 font-semibold' : 'text-emerald-600'}>
+                          {c.discrepancyCount > 0
+                            ? (tr ? `${c.discrepancyCount} fark` : `${c.discrepancyCount} discrepancies`)
+                            : (tr ? 'fark yok' : 'no discrepancies')}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        {tr ? `${sayilan} kalem sayıldı` : `${sayilan} items counted`}
+                      </p>
+                      {c.discrepancyCount > 0 && (
+                        <div className="mt-1.5 space-y-0.5">
+                          {(c.items ?? [])
+                            .filter(i => i.counted && i.countedQty !== null && i.countedQty !== i.systemQty)
+                            .slice(0, 5)
+                            .map((i, ix) => (
+                              <p key={ix} className="text-[10px] text-gray-600">
+                                {i.name ?? i.sku ?? '—'}: {tr ? 'sistem' : 'system'} {i.systemQty} → {tr ? 'sayılan' : 'counted'} {i.countedQty}
+                              </p>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

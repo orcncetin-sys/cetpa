@@ -272,6 +272,8 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   // ── Üretim ──
   workCenters: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
   routingTemplates: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
+  // Urun agaci (BOM): uretim/MRP verisi — routingTemplates ile ayni yetki sinifi.
+  urunAgaclari: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Quality'] },
   resources: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
 
   // ── CPQ / Satış araçları ──

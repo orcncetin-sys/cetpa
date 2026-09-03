@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
+import CustomerCombobox from './CustomerCombobox';
+import type { Lead } from '../types';
 import { eBelgeIndir } from '../services/ebelgeIndir';
 import { formatCurrency } from '../utils/currency';
 import {
@@ -54,6 +56,10 @@ interface EBelgeMerkeziProps {
    *  Satışlar sekmesiyle paylaşılan Mikro-fatura hesaplamasına bağlı olduğundan
    *  buraya taşınmadı (2026-08-13), yalnız hızlı geçiş linki eklendi. */
   onGoToFaturalar?: () => void;
+  /** CRM kayıtları — alıcı seçimi için. Boş geçilebilir: e-belge alıcısı CRM'de
+   *  OLMAYABİLİR (inşaat toptancısında tek seferlik alıcı olağandır), o yüzden
+   *  alan serbest yazıma da açık kalır (2026-09-04 kullanıcı kararı). */
+  leads?: Lead[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -128,7 +134,7 @@ function useToast() {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBelgeMerkeziProps) {
+export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads = [] }: EBelgeMerkeziProps) {
   const [activeTab, setActiveTab] = useState<BelgeTur>('e-fatura');
   const [belgeler, setBelgeler] = useState<EBelge[]>([]);
   const [search, setSearch] = useState('');
@@ -886,11 +892,18 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
                 {/* Alıcı */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Alıcı / Gönderici <span className="text-red-500">*</span></label>
-                  <input
-                    className="apple-input w-full px-3 py-2.5 text-sm"
+                  {/* CRM'den seç VEYA elle yaz: CustomerCombobox yazmayı engellemez,
+                      yalnız eşleşen kayıtları önerir. Seçilirse vergi no da CRM'den
+                      dolar; elle girilmişse dokunulmaz (2026-09-04 kullanıcı kararı:
+                      "manuel de eklensin, CRM'den de gelsin"). */}
+                  <CustomerCombobox
+                    leads={leads}
                     value={form.alici}
-                    onChange={e => setForm(f => ({ ...f, alici: e.target.value }))}
-                    placeholder="Müşteri / firma adı"
+                    onChange={v => setForm(f => ({ ...f, alici: v }))}
+                    onSelect={l => setForm(f => ({ ...f, alici: l.name, vergiNo: l.taxId ?? f.vergiNo }))}
+                    placeholder="Müşteri / firma adı — CRM'den seçin veya elle yazın"
+                    inputClassName="apple-input w-full px-3 py-2.5 text-sm"
+                    emptyText="CRM'de bulunamadı — elle yazmaya devam edebilirsiniz"
                   />
                 </div>
 

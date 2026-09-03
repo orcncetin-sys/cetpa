@@ -74,6 +74,7 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'sabitKiymetBakim', 'sabitKiymetSigorta', 'sabitKiymetler', 'seriNolar', 'servisTalepleri',
   'shareholders', 'skuMappings', 'subeTransferler', 'tahsilatKayitlari', 'tahsilatOdemeleri',
   'tasks', 'taxDeclarations', 'teknisyenler', 'territories', 'timeAttendance', 'trainings',
+  'urunAgaclari',
   'travelRequests', 'warehouseBins', 'webhookConfigs', 'wmsCycleCounts', 'wmsTasks', 'workCenters',
   // Entegrasyon senkron logları (firma-bazlı)
   'dynamicsSyncLog', 'logoSyncLog', 'lucaSyncLog', 'sapSyncLog', 'syncLog',

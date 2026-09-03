@@ -13,6 +13,7 @@ import {
 } from '../lib/dbClient';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { zamanDate } from '../utils/zaman';
 import {
   type Contract,
   type LegalCase,
@@ -50,6 +51,13 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
   const [activeTab, setActiveTab] = useState<'contracts' | 'cases' | 'compliance' | 'documents' | 'approvals'>('contracts');
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [cases, setCases] = useState<LegalCase[]>([]);
+  /** KVKK veri sahibi talepleri — 2026-09-04'e kadar bu koleksiyona YAZILIYOR ama
+   *  hicbir yerde OKUNMUYORDU; ekrandaki metin "dataRequests koleksiyonunda izlenir"
+   *  diyordu ama izleyen bir yuzey yoktu. KVKK m.13: 30 gun icinde sonuclandirilmali. */
+  const [dataRequests, setDataRequests] = useState<Array<{
+    id: string; subjectEmail: string; type: string; status: string;
+    requestedBy?: string | null; createdAt?: unknown;
+  }>>([]);
   const [compliance, setCompliance] = useState<ComplianceItem[]>([]);
   const [legalDocs, setLegalDocs] = useState<LegalDoc[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
@@ -236,9 +244,14 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
         setApprovals(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as ApprovalRequest))));
       }, (err) => logFirestoreError(err, OperationType.LIST, 'approvalRequests', auth.currentUser?.uid)));
     }, 600);
+    const t6 = setTimeout(() => {
+      unsubs.push(onSnapshot(query(collection(db, 'dataRequests')), (snap) => {
+        setDataRequests(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as typeof dataRequests[number]))));
+      }, (err) => logFirestoreError(err, OperationType.LIST, 'dataRequests', auth.currentUser?.uid)));
+    }, 750);
 
     return () => {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5);
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); clearTimeout(t6);
       unsubs.forEach(u => u());
     };
   }, []);
@@ -667,8 +680,56 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                           </button>
                         </div>
                         <p className="text-[10px] text-gray-400 mt-2">{tr
-                          ? 'Talep, 30 gün içinde sonuçlandırılmalıdır (KVKK m.13). Kayıtlar dataRequests koleksiyonunda izlenir.'
-                          : 'Requests must be resolved within 30 days (KVKK Art.13). Tracked in dataRequests collection.'}</p>
+                          ? 'Talep, 30 gün içinde sonuçlandırılmalıdır (KVKK m.13).'
+                          : 'Requests must be resolved within 30 days (KVKK Art.13).'}</p>
+
+                        {/* TALEP LISTESI (2026-09-04): kayitlar yaziliyor ama hicbir
+                            yerde gorunmuyordu — kullanici "talep olusturuldu" mesajini
+                            gorup sonra takip edemiyordu. 30 gunluk yasal sure de
+                            izlenemiyordu; artik gecikenler kirmizi. */}
+                        <div className="mt-4 border-t border-gray-100 pt-3">
+                          <p className="text-xs font-semibold text-gray-700 mb-2">
+                            {tr ? `Talepler (${dataRequests.length})` : `Requests (${dataRequests.length})`}
+                          </p>
+                          {dataRequests.length === 0 ? (
+                            <p className="text-[11px] text-gray-400">{tr ? 'Henüz talep yok.' : 'No requests yet.'}</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                              {dataRequests.map(r => {
+                                const d = zamanDate(r.createdAt);
+                                const gun = d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null;
+                                const acik = r.status !== 'Tamamlandı' && r.status !== 'Reddedildi';
+                                const gecikti = acik && gun !== null && gun > 30;
+                                return (
+                                  <div key={r.id} className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[11px] ${gecikti ? 'bg-red-50' : 'bg-gray-50'}`}>
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-gray-800 truncate">{r.subjectEmail}</p>
+                                      <p className="text-[10px] text-gray-500">
+                                        {r.type}
+                                        {d && ` · ${d.toLocaleDateString('tr-TR')}`}
+                                        {gun !== null && ` · ${gun} ${tr ? 'gün' : 'd'}`}
+                                        {gecikti && (tr ? ' · SÜRE AŞILDI' : ' · OVERDUE')}
+                                      </p>
+                                    </div>
+                                    <select
+                                      value={r.status}
+                                      onChange={async e => {
+                                        try { await updateDoc(doc(db, 'dataRequests', r.id), { status: e.target.value }); }
+                                        catch (err) { logFirestoreError(err, OperationType.UPDATE, 'dataRequests', auth.currentUser?.uid); }
+                                      }}
+                                      className="apple-input text-[10px] px-2 py-1 flex-shrink-0"
+                                    >
+                                      <option>Bekliyor</option>
+                                      <option>İşlemde</option>
+                                      <option>Tamamlandı</option>
+                                      <option>Reddedildi</option>
+                                    </select>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}

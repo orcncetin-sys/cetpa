@@ -242,6 +242,7 @@ const PerformansModule        = React.lazy(() => import('./components/Performans
 const CPQPanel                = React.lazy(() => import('./components/CPQPanel'));
 const DunningModule           = React.lazy(() => import('./components/DunningModule'));
 const MRPModule               = React.lazy(() => import('./components/MRPModule'));
+const UrunAgaciModule         = React.lazy(() => import('./components/UrunAgaciModule'));
 const HoldingModule           = React.lazy(() => import('./components/HoldingModule'));
 const MuhtasarModule          = React.lazy(() => import('./components/MuhtasarModule'));
 const MobileWMSModule         = React.lazy(() => import('./components/MobileWMSModule'));
@@ -1828,6 +1829,10 @@ function AppContent() {
   const [p623Draft, setP623Draft] = useState({bank:'',beneficiary:'',amount:'',currency:'USD' as 'USD'|'EUR',expiryDate:'',ref:''});
   // ── Phase 624: Üretim Emri Yönetimi ──────────────────────────────────────
   const [p624Orders, setP624Orders] = useState<Array<{id:string;productName:string;qty:number;plannedStart:string;plannedEnd:string;status:'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal';priority:'Normal'|'Acil';workCenter:string}>>([]);
+  /** Urun agaclari (BOM) — MRP II malzeme patlatmasi bunu kullanir. 2026-09-04'e
+   *  kadar MRPModule'e `boms={[]}` geciliyordu ve malzeme ihtiyaci hic hesaplanmiyordu
+   *  (projede BOM veri kaynagi yoktu; UrunAgaciModule ile eklendi). */
+  const [urunAgaclari, setUrunAgaclari] = useState<Array<{ id: string; productName: string; productSku: string; components: Array<{ inventoryId: string; name: string; quantity: number; unit: string }> }>>([]);
   const [p624ShowForm, setP624ShowForm] = useState(false);
   const [p624Draft, setP624Draft] = useState({productName:'',qty:'',plannedStart:'',plannedEnd:'',status:'Planlandı' as 'Planlandı'|'Üretimde'|'Tamamlandı'|'İptal',priority:'Normal' as 'Normal'|'Acil',workCenter:''});
   // ── Phase 625: Gelir Gider Bütçe Karşılaştırması ─────────────────────────
@@ -2772,6 +2777,7 @@ function AppContent() {
     sub('demandRequests',  (d) => setP621Demands(d as typeof p621Demands));
     sub('letterOfCredit',  (d) => setP623LCs(d as typeof p623LCs));
     sub('productionOrders',(d) => setP624Orders(d as typeof p624Orders));
+    sub('urunAgaclari',    (d) => setUrunAgaclari(d as typeof urunAgaclari));
     sub('returns',         (d) => setP639Returns(d as typeof p639Returns));
     sub('recurringBilling',(d) => setP640Subs(d as typeof p640Subs));
     sub('warranties',      (d) => setP642Warranties(d as typeof p642Warranties));
@@ -5332,6 +5338,7 @@ function AppContent() {
                     <EBelgeMerkezi
                       currentLanguage={currentLanguage}
                       isAuthenticated={!!user && hasFullAccess('ebelge')}
+                      leads={leads}
                       onGoToFaturalar={() => { setActiveTab('muhasebe'); setMuhasebeTab('genel'); setMuhasebeAccountingTab('faturalar'); }}
                     />
                   </>
@@ -5626,15 +5633,23 @@ function AppContent() {
           {activeTab === 'mrp' && (
             <motion.div key="mrp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
-                {/* CANLI VERI (2026-09-04): buraya eskiden `productionOrders={[]}` geciliyordu
-                    ve MRP II ekrani her zaman bos gorunuyordu — oysa `productionOrders`
-                    koleksiyonunun dinleyicisi (p624Orders) zaten mevcuttu.
-                    `boms` HALA bos: projede urun agaci (BOM) veri kaynagi yok. */}
+                {/* CANLI VERI (2026-09-04): buraya eskiden `productionOrders={[]}` ve
+                    `boms={[]}` geciliyordu — MRP II ekrani hem bos goruniyor hem de
+                    malzeme ihtiyaci hesaplayamiyordu. productionOrders dinleyicisi
+                    (p624Orders) zaten vardi; BOM icin veri kaynagi HIC YOKTU, bu yuzden
+                    UrunAgaciModule + `urunAgaclari` koleksiyonu yazildi (kullanici istegi). */}
                 <MRPModule
                   currentLanguage={currentLanguage}
                   isAuthenticated={!!user}
                   productionOrders={p624Orders}
-                  boms={[]}
+                  boms={urunAgaclari}
+                  inventory={inventory}
+                />
+                {/* Urun agaci tanimlama MRP'nin HEMEN ALTINDA: kullanici "malzeme
+                    ihtiyaci cikmiyor" dedigi anda ayni ekranda tanimlayabilsin. */}
+                <UrunAgaciModule
+                  currentLanguage={currentLanguage}
+                  isAuthenticated={!!user && hasFullAccess('mrp')}
                   inventory={inventory}
                 />
               </React.Suspense>
@@ -5696,7 +5711,7 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'Şubeler, şubeler arası transfer ve şube bazlı P&L analizi' : 'Branches, inter-branch transfers and branch P&L analysis'}
                     icon={GitBranch}
                   />
-                  <SubeModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('sube')} />
+                  <SubeModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('sube')} inventory={inventory} />
                 </>
               )}
             </motion.div>

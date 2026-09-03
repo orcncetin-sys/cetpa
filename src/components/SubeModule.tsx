@@ -51,7 +51,18 @@ function statusBadge(durum: string) {
   return `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${map[durum] ?? 'bg-gray-100 text-gray-600'}`;
 }
 
-export default function SubeModule({ currentLanguage, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+/**
+ * URUN SECIMI SKU BAZLI (2026-09-04, kullanici karari): sube transferinde urun
+ * alani serbest metindi — ayni urun iki sube kaydinda farkli yazilinca ("Çimento
+ * 42.5" / "cimento 42,5") transfer hicbir envanter satiriyla eslesmiyordu.
+ * Artik SKU esleme anahtaridir; bagli urun ADI da kaydediliyor ve ekranda
+ * gorunuyor (kullanici SKU ezberlemek zorunda kalmasin).
+ */
+export default function SubeModule({ currentLanguage, isAuthenticated, inventory = [] }: {
+  currentLanguage: string;
+  isAuthenticated: boolean;
+  inventory?: Array<{ id: string; name: string; sku: string }>;
+}) {
   const [activeTab, setActiveTab] = useState<'subeler' | 'transfer' | 'pl'>('subeler');
   const [subeler, setSubeler] = useState<Sube[]>([]);
   const [transferler, setTransferler] = useState<SubeTransfer[]>([]);
@@ -77,7 +88,7 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
   const emptySube: Omit<Sube, 'id'> = { subeKodu: '', subeAdi: '', sehir: '', adres: '', yonetici: '', telefon: '', email: '', durum: 'Aktif', acilisTarihi: '', calisanSayisi: 0, createdAt: null };
   const [subeForm, setSubeForm] = useState<Omit<Sube, 'id'>>(emptySube);
 
-  const emptyTransfer = { kaynakSube: '', hedefSube: '', urun: '', miktar: '', transferTarihi: '', notlar: '' };
+  const emptyTransfer = { kaynakSube: '', hedefSube: '', urun: '', urunSku: '', miktar: '', transferTarihi: '', notlar: '' };
   const [transferForm, setTransferForm] = useState(emptyTransfer);
 
   useEffect(() => {
@@ -112,7 +123,7 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
   }
 
   async function saveTransfer() {
-    if (!transferForm.kaynakSube || !transferForm.hedefSube || !transferForm.urun) return;
+    if (!transferForm.kaynakSube || !transferForm.hedefSube || !transferForm.urunSku) return;
     setSaving(true);
     const no = `TR-2026-${String(transferler.length + 1).padStart(4, '0')}`;
     await addDoc(collection(db, 'subeTransferler'), {
@@ -288,7 +299,14 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
                   <td className="py-3 px-3 font-mono text-xs text-brand font-semibold">{t.transferNo}</td>
                   <td className="py-3 px-3 text-gray-700">{t.kaynakSube}</td>
                   <td className="py-3 px-3 text-gray-700">{t.hedefSube}</td>
-                  <td className="py-3 px-3 text-gray-600">{t.urun}</td>
+                  <td className="py-3 px-3 text-gray-600">
+                    {/* Ad birincil, SKU altinda: esleme SKU ile ama okunan ad (2026-09-04).
+                        Eski kayitlarda urunSku yoktur — o zaman yalnizca ad gorunur. */}
+                    <span className="block">{t.urun || (t as unknown as { urunSku?: string }).urunSku || '—'}</span>
+                    {(t as unknown as { urunSku?: string }).urunSku && t.urun && (
+                      <span className="block text-[10px] text-gray-400 font-mono">{(t as unknown as { urunSku?: string }).urunSku}</span>
+                    )}
+                  </td>
                   <td className="py-3 px-3 text-gray-600">{t.miktar}</td>
                   <td className="py-3 px-3 text-gray-500 whitespace-nowrap">{t.transferTarihi}</td>
                   <td className="py-3 px-3"><span className={statusBadge(t.durum)}>{t.durum}</span></td>
@@ -467,8 +485,32 @@ export default function SubeModule({ currentLanguage, isAuthenticated }: { curre
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Ürün *</label>
-                <input value={transferForm.urun} onChange={e => setTransferForm(p => ({ ...p, urun: e.target.value }))} className="apple-input" placeholder="Ürün adı veya kodu" />
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Ürün * <span className="font-normal text-gray-400">(SKU ile eşleşir)</span></label>
+                <input
+                  list="cetpa-sube-urun-listesi"
+                  value={transferForm.urunSku}
+                  onChange={e => {
+                    const sku = e.target.value.trim();
+                    // ESLEME ANAHTARI SKU: bagli urun adini da yaz ki liste/rapor
+                    // ekranlarinda SKU degil okunabilir ad gorunsun.
+                    const esles = inventory.find(it => it.sku === sku);
+                    setTransferForm(p => ({ ...p, urunSku: sku, urun: esles ? esles.name : '' }));
+                  }}
+                  className="apple-input"
+                  placeholder="SKU seçin veya yazın"
+                />
+                <datalist id="cetpa-sube-urun-listesi">
+                  {inventory.map(it => <option key={it.id} value={it.sku}>{it.name}</option>)}
+                </datalist>
+                {transferForm.urunSku && (
+                  <p className={`text-[10px] mt-1 ${transferForm.urun ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {transferForm.urun
+                      ? `✓ ${transferForm.urun}`
+                      : (currentLanguage === 'tr'
+                          ? 'Bu SKU envanterde bulunamadı — transfer kaydı stokla eşleşmeyecek.'
+                          : 'SKU not found in inventory — this transfer will not match stock.')}
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

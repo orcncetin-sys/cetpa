@@ -1,5 +1,6 @@
 import { sayiBicimleyici } from '../utils/recharts';
 import KurUyarisi from '../components/KurUyarisi';
+import GecmisSayimlar from '../components/GecmisSayimlar';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -958,6 +959,12 @@ export default function InventoryPage(props: Props) {
                   </div>
                 );
               })()}
+
+              {/* GECMIS SAYIMLAR (2026-09-04 denetimi): sayim sonucu `stockCounts`
+                  koleksiyonuna yaziliyordu ama HIC OKUNMUYORDU — sayim bitince canli
+                  oturum siliniyor, arsiv hicbir ekranda gorunmuyordu. Sayim bir
+                  DENETIM kaydidir: fark cikan kalemler sonradan incelenebilmeli. */}
+              <GecmisSayimlar currentLanguage={currentLanguage} />
 
               {/* ── Phase 588: Konsinye Stok Takibi ────────────────────────────── */}
               {(() => {
