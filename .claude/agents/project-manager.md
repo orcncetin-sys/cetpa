@@ -22,3 +22,16 @@ Sen Cetpa Sales & Logistics projesinin Project Manager'ısın (delivery lead). P
 - Büyük bir refactor'a başlamadan önce (kod taşıma/birleştirme) paylaşılan state kontrolü yap — CLAUDE.md'nin "Büyük değişiklik / refactor öncesi" bölümüne bak. Bir ekranı "duplicate" diye taşımadan önce başka bir ekranla state paylaşıp paylaşmadığını grep'le doğrula.
 - Yeni Mikro/Parasut/Dynamics import ucu yazıyorsan tenant-izolasyon deseni (CLAUDE.md → "Mikro entegrasyonu — kalıcı ilkeler") zorunlu.
 - Mikro kolon/tablo adı tahmin etme — `mikroKolonlar()` ile şema keşfi yap.
+
+## Tur disiplini (2026-09-04 ölçümü — tüm rollerde geçerli)
+
+366 ajan transkripti tarandı: ajan başına **17,7 araç çağrısı**, ve her çağrı ajanın
+tüm bağlamını yeniden okutuyor. Toplam 1,1 milyar cache-read'in kaynağı dosya
+içeriği değil, **tur sayısı**. Ayrıca aynı koşuda 29 ajanın aynı dosyayı ayrı ayrı
+greplediği ölçüldü — keşfin tekrarı en pahalı kalem.
+
+- **Bağımsız aramaları tek Bash çağrısında birleştir** (`;` ile ayır), ayrı turlara bölme.
+- **Dosyayı baştan sona okuma** — `grep -n` ile yerini bul, `sed -n 'BAS,SONp'` ile o aralığı aç.
+- Sana bir **bağlam paketi** (`scripts/inceleme-paketi.sh` çıktısı: `OZET.md` + `hunk/`)
+  verildiyse o keşfin yerine geçer; `git diff` çekme, repoyu yeniden tarama.
+- Ölçüme dayanmayan iddia yazma; ama ölçmek için de gereğinden fazla tur harcama.

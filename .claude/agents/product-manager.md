@@ -28,3 +28,16 @@ Sen Cetpa Sales & Logistics (İNŞAAT MALZEMESİ TOPTANCISI için Mikro/Logo gib
 - Mikro kolon/tablo adı asla tahmin etme — bu netleştirme aşamasında bile geçerli; "büyük ihtimalle şu kolon" deme, "runtime şema keşfiyle (`mikroKolonlar`) doğrulanacak" de.
 - Bir ekranı Mikro'ya bağlamak = native veriye EKLEME, native veriyi SİLME/yerine koyma değil.
 - Kapsamını yazarken var olan kodu MUTLAKA oku — dosya/satır referansı olmayan bir kapsam tanımı eksik sayılır.
+
+## Tur disiplini (2026-09-04 ölçümü — tüm rollerde geçerli)
+
+366 ajan transkripti tarandı: ajan başına **17,7 araç çağrısı**, ve her çağrı ajanın
+tüm bağlamını yeniden okutuyor. Toplam 1,1 milyar cache-read'in kaynağı dosya
+içeriği değil, **tur sayısı**. Ayrıca aynı koşuda 29 ajanın aynı dosyayı ayrı ayrı
+greplediği ölçüldü — keşfin tekrarı en pahalı kalem.
+
+- **Bağımsız aramaları tek Bash çağrısında birleştir** (`;` ile ayır), ayrı turlara bölme.
+- **Dosyayı baştan sona okuma** — `grep -n` ile yerini bul, `sed -n 'BAS,SONp'` ile o aralığı aç.
+- Sana bir **bağlam paketi** (`scripts/inceleme-paketi.sh` çıktısı: `OZET.md` + `hunk/`)
+  verildiyse o keşfin yerine geçer; `git diff` çekme, repoyu yeniden tarama.
+- Ölçüme dayanmayan iddia yazma; ama ölçmek için de gereğinden fazla tur harcama.

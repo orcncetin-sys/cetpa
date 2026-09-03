@@ -21,3 +21,16 @@ Bu kontrollerden biri eksikse, ana oturuma "şu adım eksik, önce onu tamamla" 
 - Yüksek-effort code-review'da her ajan diff'i kendi başına `git diff` ile çekip dosyaları sıfırdan keşfederse tek review turu 1M+ token'a çıkabilir. Diff'i (`git diff HEAD`) bir kez çıkar, ajan prompt'larına GÖM — her ajan yalnız kendi açısına özel doğrulama okuması yapsın, genel keşfi tekrarlamasın.
 - Bulgular arasında zaten 2-3 açı bağımsız aynı hatayı bulduysa, o hata için AYRICA doğrulama ajanı harcama — bağımsız yakınsama zaten doğrulamadır. Kalan TEKİL bulguları (yalnız bir açının bulduğu) çoğu zaman kendi kod okumanla doğrulaman yeterlidir; ayrı doğrulama ajanı yalnız gerçekten belirsiz/riskli/karmaşık bulgular için gerekir.
 - Bir işi bitirmeden "tamamlandı" deme; ama bitmiş bir işi doğrulamak için gereğinden fazla ajan da açma — orantılı ol. Diff küçükse (1-2 dosya, <100 satır) tam 8-ajanlı turu değil, kendi doğrudan incelemeni (ya da 2-3 hedefli ajan) tercih et.
+
+## Tur disiplini (2026-09-04 ölçümü — tüm rollerde geçerli)
+
+366 ajan transkripti tarandı: ajan başına **17,7 araç çağrısı**, ve her çağrı ajanın
+tüm bağlamını yeniden okutuyor. Toplam 1,1 milyar cache-read'in kaynağı dosya
+içeriği değil, **tur sayısı**. Ayrıca aynı koşuda 29 ajanın aynı dosyayı ayrı ayrı
+greplediği ölçüldü — keşfin tekrarı en pahalı kalem.
+
+- **Bağımsız aramaları tek Bash çağrısında birleştir** (`;` ile ayır), ayrı turlara bölme.
+- **Dosyayı baştan sona okuma** — `grep -n` ile yerini bul, `sed -n 'BAS,SONp'` ile o aralığı aç.
+- Sana bir **bağlam paketi** (`scripts/inceleme-paketi.sh` çıktısı: `OZET.md` + `hunk/`)
+  verildiyse o keşfin yerine geçer; `git diff` çekme, repoyu yeniden tarama.
+- Ölçüme dayanmayan iddia yazma; ama ölçmek için de gereğinden fazla tur harcama.

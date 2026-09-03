@@ -17,3 +17,7 @@ uploads/
 dist.new/
 dist.old/
 .deploy-state/
+
+# Kod incelemesi baglam paketi (scripts/inceleme-paketi.sh uretir, gecicidir)
+.cetpa-inceleme/
+.paket-test/
