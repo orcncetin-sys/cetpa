@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from '../components/MikroFaturaDetay';
 import { faturaEsle } from '../utils/faturaEsle';
+import { odemeTakipli } from '../utils/siparis';
 import { motion } from 'motion/react';
 import BankStatementImportModal from '../components/BankStatementImportModal';
 import BankBalanceReport from '../components/BankBalanceReport';
@@ -448,7 +449,7 @@ export default function MuhasebePage(props: Props) {
                         const tr607 = currentLanguage === 'tr';
                         const today607 = new Date();
                         // Find unpaid orders sorted by createdAt
-                        const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt);
+                        const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt);
                         const withDays = unpaidOrders.map(o => {
                           let daysPast = 0;
                           try {
@@ -1012,7 +1013,7 @@ export default function MuhasebePage(props: Props) {
                       {(() => {
                         const tr638 = currentLanguage === 'tr';
                         const runMatch = () => {
-                          const unpaidInvoices = orders.filter(o=>!o.paid&&o.status!=='Cancelled').map(o=>({
+                          const unpaidInvoices = orders.filter(o=>!o.paid&&o.status!=='Cancelled'&&odemeTakipli(o)).map(o=>({
                             invoiceId:o.id,
                             invoiceNo:`INV-${o.id.slice(-6)}`,
                             customer:o.customerName||'',
@@ -1073,7 +1074,7 @@ export default function MuhasebePage(props: Props) {
                                 </div>
                               </>
                             )}
-                            {p638MatchResults.length===0&&!p638Running&&<p className="text-center text-gray-400 text-xs py-4">{tr638?`${orders.filter(o=>!o.paid&&o.status!=='Cancelled').length} ödenmemiş fatura için "Eşleştir" butonuna tıklayın.`:`Click "Match" to auto-match ${orders.filter(o=>!o.paid&&o.status!=='Cancelled').length} unpaid invoices.`}</p>}
+                            {p638MatchResults.length===0&&!p638Running&&<p className="text-center text-gray-400 text-xs py-4">{tr638?`${orders.filter(o=>!o.paid&&o.status!=='Cancelled'&&odemeTakipli(o)).length} ödenmemiş fatura için "Eşleştir" butonuna tıklayın.`:`Click "Match" to auto-match ${orders.filter(o=>!o.paid&&o.status!=='Cancelled'&&odemeTakipli(o)).length} unpaid invoices.`}</p>}
                           </div>
                         );
                       })()}
@@ -1117,7 +1118,7 @@ export default function MuhasebePage(props: Props) {
                         const now131 = Date.now();
                         // faturali siparişler Mikro'ya gidip cariBalances'a (aşağıdaki
                         // cariBalanceToplam.ar) yansıdığından burada tekrar sayılmıyor.
-                        const unpaid131 = orders.filter(o => !o.paid && o.status !== 'Cancelled' && !(o as unknown as { faturali?: boolean }).faturali);
+                        const unpaid131 = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && !(o as unknown as { faturali?: boolean }).faturali);
                         // Group by customer
                         type CustAR = { name: string; total: number; b0_30: number; b31_60: number; b61_90: number; b90p: number; oldest: number };
                         const custMap: Record<string, CustAR> = {};
@@ -1210,10 +1211,10 @@ export default function MuhasebePage(props: Props) {
                   )}
 
                   {/* ── Phase 178: Overdue Invoice Escalation ── */}
-                  {muhasebeTab === 'ar-aging' && orders.filter(o => !o.paid && o.status !== 'Cancelled').length > 0 && (() => {
+                  {muhasebeTab === 'ar-aging' && orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).length > 0 && (() => {
                     const now178 = new Date();
                     const overdueOrders = orders
-                      .filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt)
+                      .filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt)
                       .map(o => {
                         let daysOld = 0;
                         try {
@@ -1275,7 +1276,7 @@ export default function MuhasebePage(props: Props) {
                         const cogsBiliniyor = cetpaCOGS > 0;
                         const grossProfit132 = totalRevenue132 - cetpaCOGS;
                         // AR/AP = Mikro cari bakiyeleri (pozitif=alacak, eksi=borç) + Cetpa.
-                        const cetpaAR = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                        const cetpaAR = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
                         const totalAR132 = cariBalanceToplam.ar + cetpaAR;
                         const cetpaAP = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status)).reduce((s, po) => s + (po.totalAmount || 0), 0);
                         const totalAP132 = cariBalanceToplam.ap + cetpaAP;
@@ -1718,7 +1719,7 @@ export default function MuhasebePage(props: Props) {
                     // neredeyse boş — satışlar/alışlar Mikro'dan geliyor. cariBalanceToplam
                     // (Finansal Oranlar'da zaten kullanılan, Mikro cariBalances'tan gerçek
                     // net bakiye toplamı) additive eklendi — aynı desen KDV/Satışlar'da da var.
-                    const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0) + cariBalanceToplam.ar;
+                    const ar547     = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).reduce((s,o) => s + (o.totalPrice||o.totalAmount||0), 0) + cariBalanceToplam.ar;
                     // Stoklar MALİYETLE taşınır (TMS 2 / genel muhasebe ilkesi) — satış
                     // fiyatıyla değil. Eskiden i.prices.Retail (satış fiyatı) kullanılıyordu,
                     // bu Aktif'i ve dolayısıyla Toplam Aktif/Özkaynaklar'ı sistematik olarak

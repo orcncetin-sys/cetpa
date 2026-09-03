@@ -104,6 +104,13 @@ export interface OrderLineItem {
 export interface Order {
   id: string;
   shopifyOrderId?: string;
+  /** Cetpa-native sipariş no (ör. SAS-.., MF-<seri><sira>). Shopify siparişinde yok. */
+  orderNumber?: string;
+  /** Fatura tarihi (YYYY-MM-DD) — faturadan türetilen siparişlerde dolu. */
+  orderDate?: string;
+  /** 'mikro-fatura' = satış faturasından türetildi (POST /api/mikro/import/faturadan-siparis). */
+  source?: string;
+  mikroEvrak?: { seri: string; sira: string };
   customerName: string;
   totalPrice: number;
   status: 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';

@@ -1,6 +1,7 @@
 import { itemCostTRY } from '../utils/cost';
 const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatPanel'));
 import { eslesir } from '../utils/arama';
+import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
 import React, { useState, useEffect } from 'react';
@@ -304,6 +305,18 @@ export default function OrdersPage({
       return av > bv ? -1 : av < bv ? 1 : 0;
     });
 
+  /** Siparişe özel sıralama: 'syncedAt' anahtarı istendiğinde GÖSTERİLEN tarihi
+   *  (siparisTarih: syncedAt→createdAt→orderDate) kullanır. Aksi halde mikro-fatura
+   *  türevlerinde syncedAt olmadığı için hepsi '' anahtarıyla aynı kovaya düşüp
+   *  tarih sütunu dolu görünürken sıralama rastgele kalıyordu (2026-09-03). */
+  const siparisSirala = (arr: Order[], key: string, dir: 'asc' | 'desc'): Order[] => {
+    if (key !== 'syncedAt') return sortData(arr, key, dir);
+    return [...arr].sort((a, b) => {
+      const av = siparisTarihMs(a), bv = siparisTarihMs(b);
+      return dir === 'asc' ? av - bv : bv - av;
+    });
+  };
+
   const toggleSort = (
     current: { key: string; dir: 'asc' | 'desc' },
     key: string,
@@ -463,7 +476,7 @@ export default function OrdersPage({
                         const filtered = activeOrders.filter(o =>
                           (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                           (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                          (o.shopifyOrderId ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
+                          gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
                           (o.shippingAddress ?? '').toLowerCase().includes(orderSearch.toLowerCase()))
                         );
                         exportOrdersCSV(filtered, currentLanguage);
@@ -513,7 +526,7 @@ export default function OrdersPage({
                 const pending522 = activeOrders.filter(o => o.status === 'Pending').length;
                 const inProgress522 = activeOrders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length;
                 const fulfillRate = total522 > 0 ? Math.round((delivered522 / total522) * 100) : 0;
-                const unpaidOrders = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled');
+                const unpaidOrders = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o));
                 const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -521,7 +534,7 @@ export default function OrdersPage({
                       { label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Fulfillment Rate', value: `${fulfillRate}%`, color: fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600', bg: 'bg-white', sub: `${delivered522} / ${total522}` },
                       { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: currentLanguage === 'tr' ? 'Hazırlanıyor/Kargoda' : 'In Progress', value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
-                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: `₺${(unpaidTotal/1000).toFixed(1)}K`, color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
+                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: unpaidTotal >= 1e6 ? `₺${(unpaidTotal/1e6).toFixed(1)}M` : `₺${(unpaidTotal/1000).toFixed(1)}K`, color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
                         sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${currentLanguage==='tr'?'sipariş':'orders'}` : null },
                     ].map((k, i) => (
                       <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
@@ -536,7 +549,7 @@ export default function OrdersPage({
 
               {/* ── Phase 521: Invoice Aging Alert ── */}
               {(() => {
-                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt));
+                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt) && odemeTakipli(o));
                 if (unpaid521.length === 0) return null;
                 const now521 = Date.now();
                 const buckets521 = [
@@ -634,7 +647,7 @@ export default function OrdersPage({
                         setBulkActionLoading(true);
                         const sel = activeOrders.filter(o => selectedOrderIds.has(o.id));
                         for (const o of sel) {
-                          if (!o.paid) await handleToggleOrderPaid(o);
+                          if (!o.paid && odemeTakipli(o)) await handleToggleOrderPaid(o);
                         }
                         setSelectedOrderIds(new Set());
                         setBulkActionLoading(false);
@@ -673,7 +686,7 @@ export default function OrdersPage({
                             head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
                             // Para 2 ondalik: locale verilse de ondalik verilmezse
                             // tarayici 3 haneye kadar basabiliyor.
-                            body: sel.map(o => [o.shopifyOrderId ?? o.id.slice(0,8), o.customerName, o.status,
+                            body: sel.map(o => [gorunenSiparisNo(o), o.customerName, o.status,
                               `₺${(Number(o.totalPrice) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]),
                           });
                           pdfAltBilgi(pdf);
@@ -962,14 +975,14 @@ export default function OrdersPage({
                             checked={selectedOrderIds.size > 0 && (() => {
                               const filtered = activeOrders.filter(o =>
                                 o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                                o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
+                                gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase())
                               );
                               return filtered.every(o => selectedOrderIds.has(o.id));
                             })()}
                             onChange={e => {
                               const filtered = activeOrders.filter(o =>
                                 o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                                o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase())
+                                gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase())
                               );
                               if (e.target.checked) {
                                 setSelectedOrderIds(new Set(filtered.map(o => o.id)));
@@ -1006,7 +1019,7 @@ export default function OrdersPage({
                           // Phase 523: customer filter
                           if (orderCustomerFilter && o.customerName !== orderCustomerFilter) return false;
                           const q = orderSearch.toLowerCase();
-                          if (q && !o.customerName.toLowerCase().includes(q) && !o.shopifyOrderId?.toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
+                          if (q && !o.customerName.toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
                           // Phase 501: date range filter
                           if (orderDateRange !== 'all') {
                             const raw = o.createdAt ?? o.syncedAt;
@@ -1023,14 +1036,14 @@ export default function OrdersPage({
                           }
                           return true;
                         });
-                        const sorted = sortData(filtered, orderSort.key, orderSort.dir);
+                        const sorted = siparisSirala(filtered, orderSort.key, orderSort.dir);
                         return sorted.length === 0 ? (
                           <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
                         ) : sorted.map(order => (
                           <React.Fragment key={order.id}>
                           <tr
                             className={cn("hover:bg-gray-50 transition-colors cursor-pointer", selectedOrderIds.has(order.id) && "bg-brand/5")}
-                            onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `#${order.shopifyOrderId || order.id.slice(-6)} — ${order.customerName}`, tab: 'orders' }); }}
+                            onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `${gorunenSiparisNo(order)} — ${order.customerName}`, tab: 'orders' }); }}
                           >
                             <td className="pl-4 py-4 w-8" onClick={e => e.stopPropagation()}>
                               <input
@@ -1052,7 +1065,7 @@ export default function OrdersPage({
                                 <button
                                   onClick={async (e) => {
                                     e.stopPropagation();
-                                    await navigator.clipboard.writeText(order.shopifyOrderId || order.id).catch(() => {});
+                                    await navigator.clipboard.writeText(gorunenSiparisNo(order)).catch(() => {});
                                     setCopiedOrderId(order.id);
                                     setTimeout(() => setCopiedOrderId(null), 1500);
                                   }}
@@ -1063,8 +1076,8 @@ export default function OrdersPage({
                                     ? <Check className="w-3 h-3 text-emerald-500" />
                                     : <Copy className="w-3 h-3" />}
                                 </button>
-                                <span className="cursor-pointer" onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `#${order.shopifyOrderId || order.id.slice(-6)} — ${order.customerName}`, tab: 'orders' }); }}>
-                                  {order.shopifyOrderId}
+                                <span className="cursor-pointer" onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `${gorunenSiparisNo(order)} — ${order.customerName}`, tab: 'orders' }); }}>
+                                  {gorunenSiparisNo(order)}
                                 </span>
                                 {order.lineItems && order.lineItems.length > 0 && (
                                   <button
@@ -1112,7 +1125,7 @@ export default function OrdersPage({
                               </div>
                             </td>
                             <td className="px-6 py-4 text-gray-500">
-                              {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
+                              {(() => { const d = siparisTarih(order); return d ? d.toLocaleDateString() : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
                             </td>
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                               {/* Phase 534: days in current status */}
@@ -1164,7 +1177,16 @@ export default function OrdersPage({
                                 ? `₺${order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                 : formatInCurrency(order.totalPrice, kpiCurrency, exchangeRates ?? undefined)}</div>
                               <div className="flex flex-col items-end gap-0.5 mt-0.5">
-                                {order.faturali ? (
+                                {/* SIRA KRİTİK (2026-09-03 code-review): mikro-fatura dalı ÖNCE
+                                    test edilmeli. Sunucu bu kayıtlara `faturali: true` yazıyor ama
+                                    faturaTipi/kdvOran YAZMIYOR; faturali dalı önce gelirse
+                                    "e-FATURA • KDV%0" uydurulur (sahte kesinlik). */}
+                                {order.source === 'mikro-fatura' ? (
+                                  <span className="text-[9px] font-bold bg-[#1a3a5c]/10 text-[#1a3a5c] px-1.5 py-0.5 rounded-full"
+                                    title={currentLanguage === 'tr' ? `Mikro satış faturasından türetildi (${order.mikroEvrak ? order.mikroEvrak.seri + order.mikroEvrak.sira : ''})` : 'Derived from Mikro sales invoice'}>
+                                    {currentLanguage === 'tr' ? 'MİKRO FATURA' : 'MIKRO INVOICE'}
+                                  </span>
+                                ) : order.faturali ? (
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
                                     {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
                                   </span>
@@ -1185,6 +1207,7 @@ export default function OrdersPage({
                                   </span>
                                 ) : null}
                                 {/* Phase 89 + Phase 532 + Phase 535: Payment status badge + method */}
+                                {odemeTakipli(order) ? (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
                                   title={order.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
@@ -1192,6 +1215,12 @@ export default function OrdersPage({
                                 >
                                   {order.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                                 </button>
+                                ) : (
+                                  <span className="text-[9px] font-medium text-gray-400"
+                                    title={currentLanguage === 'tr' ? 'Tahsilat durumu Mikro cari hesapta izlenir — sipariş türevi bilmez' : 'Collection tracked in Mikro AR ledger'}>
+                                    {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari' : 'AR: Mikro ledger'}
+                                  </span>
+                                )}
                                 {/* Phase 535: payment method micro-badge */}
                                 {order.paid && order.paymentMethod && (() => {
                                   const pmLabels: Record<string, string> = {
@@ -1329,16 +1358,16 @@ export default function OrdersPage({
 
               {/* Mobile Card View */}
               <div className="md:hidden space-y-4">
-                {sortData(activeOrders.filter(o =>
+                {siparisSirala(activeOrders.filter(o =>
                   (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                   (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                  o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                  gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
                   o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
                 ), orderSort.key, orderSort.dir).map(order => (
                   <div key={order.id} className="apple-card p-4 space-y-3" onClick={() => setSelectedOrder(order)}>
                     <div className="flex justify-between items-start">
                       <div>
-                        <p className="font-bold text-sm text-[#1D2226]">{order.shopifyOrderId}</p>
+                        <p className="font-bold text-sm text-[#1D2226]">{gorunenSiparisNo(order)}</p>
                         <p className="text-xs text-gray-500">{order.customerName}</p>
                       </div>
                       <span className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full",
@@ -1352,13 +1381,17 @@ export default function OrdersPage({
                     </div>
                     <div className="flex justify-between items-end">
                       <div className="text-xs text-gray-400">
-                        {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
+                        {(() => { const d = siparisTarih(order); return d ? d.toLocaleDateString() : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-brand">{order.totalPrice.toLocaleString()} TL</p>
                         {/* Phase 67: invoice mini-badge on mobile */}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
-                          {order.faturali ? (
+                          {order.source === 'mikro-fatura' ? (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">
+                              {currentLanguage === 'tr' ? 'MİKRO FTR' : 'MIKRO INV'}
+                            </span>
+                          ) : order.faturali ? (
                             <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${order.faturaTipi === 'ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi === 'e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
                               {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FTR'}
                             </span>
@@ -1670,7 +1703,7 @@ export default function OrdersPage({
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <ModuleHeader
-                  title={`Order ${selectedOrder.shopifyOrderId}`}
+                  title={`${currentLanguage === 'tr' ? 'Sipariş' : 'Order'} ${gorunenSiparisNo(selectedOrder)}`}
                   subtitle={`Customer: ${selectedOrder.customerName}`}
                   className="mb-0 w-full"
                   actionButton={
@@ -1772,7 +1805,7 @@ export default function OrdersPage({
                           doc505.setFontSize(9);
                           const rawD = o.createdAt ?? o.syncedAt;
                           const oDate = rawD ? (typeof (rawD as { toDate?: () => Date }).toDate === 'function' ? (rawD as { toDate: () => Date }).toDate() : new Date(rawD as string | number)).toLocaleDateString('tr-TR') : '—';
-                          doc505.text(`#${o.shopifyOrderId || o.id.slice(-8)}`, W - 14, 13, { align: 'right' });
+                          doc505.text(gorunenSiparisNo(o), W - 14, 13, { align: 'right' });
                           doc505.text(oDate, W - 14, 21, { align: 'right' });
                           doc505.setTextColor(30, 30, 30);
                           doc505.setFontSize(11); doc505.setFont('Roboto', 'bold');
@@ -1802,7 +1835,7 @@ export default function OrdersPage({
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
                           doc505.text(`${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${o.status} · ${o.paid ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓') : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending')}`, 14, finalY505 + 10);
                           doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, finalY505 + 18, { align: 'center' });
-                          doc505.save(`receipt-${o.shopifyOrderId || o.id.slice(-8)}.pdf`);
+                          doc505.save(`receipt-${(o.orderNumber || o.shopifyOrderId || o.id.slice(-8)).replace(/[^\w-]/g, '_')}.pdf`);
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'Sipariş fişi PDF indir' : 'Download order receipt PDF'}
@@ -1850,8 +1883,8 @@ export default function OrdersPage({
                           const _waSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                           const _waAmt  = `${_waSym}${_waCv.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
                           const summary = currentLanguage === 'tr'
-                            ? `📦 *Sipariş Özeti*\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
-                            : `📦 *Order Summary*\nOrder: #${o.shopifyOrderId || o.id.slice(-6)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
+                            ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
+                            : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
                           navigator.clipboard.writeText(summary).then(() =>
                             toast(currentLanguage === 'tr' ? 'Sipariş özeti kopyalandı ✓' : 'Order summary copied ✓', 'success')
                           ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
@@ -1863,7 +1896,7 @@ export default function OrdersPage({
                         {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
                       </button>
                       {/* Phase 511: Payment Reminder copy button */}
-                      {!selectedOrder.paid && (
+                      {!selectedOrder.paid && odemeTakipli(selectedOrder) && (
                         <button
                           onClick={() => {
                             const o = selectedOrder;
@@ -1879,8 +1912,8 @@ export default function OrdersPage({
                             const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                             const amt = `${sym}${cv.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                             const msg = currentLanguage === 'tr'
-                              ? `Sayın ${o.customerName},\n\nSipariş No: #${o.shopifyOrderId || o.id.slice(-6)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
-                              : `Dear ${o.customerName},\n\nPayment of ${amt} for Order #${o.shopifyOrderId || o.id.slice(-6)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
+                              ? `Sayın ${o.customerName},\n\nSipariş No: ${gorunenSiparisNo(o)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
+                              : `Dear ${o.customerName},\n\nPayment of ${amt} for Order ${gorunenSiparisNo(o)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
                             navigator.clipboard.writeText(msg).then(() =>
                               toast(currentLanguage === 'tr' ? 'Ödeme hatırlatması kopyalandı ✓' : 'Payment reminder copied ✓', 'success')
                             ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
@@ -1978,7 +2011,10 @@ export default function OrdersPage({
                         </button>
                       )}
 
-                      {/* Phase 89: Mark Paid / Unpaid toggle in detail header */}
+                      {/* Phase 89: Mark Paid / Unpaid toggle in detail header.
+                          Mikro faturasından türetilen siparişte GİZLİ: tahsilat gerçeği
+                          Mikro cari hesapta, buradaki `paid` alanı anlamsız (2026-09-03). */}
+                      {odemeTakipli(selectedOrder) && (
                       <button
                         onClick={() => handleToggleOrderPaid(selectedOrder)}
                         className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border transition-colors ${
@@ -1993,6 +2029,7 @@ export default function OrdersPage({
                           ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid')
                           : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                       </button>
+                      )}
                       <button onClick={() => openConfirm({
                         title: currentT.confirm_delete_title,
                         message: currentT.confirm_delete,
@@ -2040,7 +2077,7 @@ export default function OrdersPage({
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.total_price}</span>
-                        <span className="font-bold text-lg">${selectedOrder.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="font-bold text-lg">₺{selectedOrder.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.tracking_number}</span>
@@ -2052,19 +2089,26 @@ export default function OrdersPage({
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.date}</span>
-                        <span className="font-medium">{selectedOrder.syncedAt ? (typeof (selectedOrder.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (selectedOrder.syncedAt as { toDate: () => Date }).toDate() : new Date(selectedOrder.syncedAt as unknown as string | number | Date)).toLocaleString() : currentT.unknown_date}</span>
+                        <span className="font-medium">{(() => { const d = siparisTarih(selectedOrder); return d ? d.toLocaleString() : currentT.unknown_date; })()}</span>
                       </div>
                       {/* Phase 95: Payment status + estimated delivery in detail grid */}
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">
                           {currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}
                         </span>
+                        {odemeTakipli(selectedOrder) ? (
                         <button
                           onClick={() => handleToggleOrderPaid(selectedOrder)}
                           className={`mt-0.5 text-xs font-bold px-2.5 py-1 rounded-full transition-colors ${selectedOrder.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
                         >
                           {selectedOrder.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
                         </button>
+                        ) : (
+                          <span className="mt-0.5 inline-block text-xs font-medium text-gray-400"
+                            title={currentLanguage === 'tr' ? 'Tahsilat durumu Mikro cari hesapta izlenir — sipariş türevi bilmez' : 'Collection tracked in Mikro AR ledger'}>
+                            {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari hesapta' : 'AR: in Mikro ledger'}
+                          </span>
+                        )}
                       </div>
                       {/* estimatedDelivery tipi `unknown`; `x && <jsx>` sonucu unknown olup ReactNode'a atanamiyor -> dogruluk kontrolunu boolean'a indirge */}
                       {!!selectedOrder.estimatedDelivery && (() => {
@@ -3230,7 +3274,7 @@ export default function OrdersPage({
                                 {currentT[order.status.toLowerCase()] || order.status}
                               </span>
                             </div>
-                            <p className="text-[10px] text-gray-500">ID: {order.shopifyOrderId}</p>
+                            <p className="text-[10px] text-gray-500">ID: {gorunenSiparisNo(order)}</p>
                             {routeStop && (
                               <p className="text-[10px] font-bold text-brand mt-1">{currentT.stop} #{routeStop.sequence} • ETA +{routeStop.estimatedMinutes}d</p>
                             )}

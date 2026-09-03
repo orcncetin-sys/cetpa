@@ -569,7 +569,7 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-900">Yeni Kasa Hareketi</h3>
@@ -695,7 +695,7 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-900">{editingKasa ? 'Kasa Düzenle' : 'Yeni Kasa'}</h3>

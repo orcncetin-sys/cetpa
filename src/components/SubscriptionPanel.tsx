@@ -261,7 +261,7 @@ export default function SubscriptionPanel({
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative z-10 bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+              className="relative z-10 bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl"
             >
               {cancelStep === 0 && (
                 <div className="p-8 text-center">

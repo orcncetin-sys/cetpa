@@ -33,7 +33,7 @@ import cron from 'node-cron';
 import { timingSafeEqual } from 'crypto';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
-  MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock,
+  MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
   getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroPost,
   mikroSatirlar, mikroSatisFiyatlari, mikroSql, mikroStokMiktari,
   mikroVergiOranlari, sqlTarih, vergiOraniCoz, kolonBul, sqlTanimlayici,
@@ -2468,15 +2468,33 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-    if (MIKRO_JUMP_SURUM < 17) {
+    // Kısa devre ÖNCE: iş zaten koşuyorsa hiçbir yoklama/sorgu maliyeti ödeme.
+    if (stokMiktarJobRunning) return res.json({ success: true, started: false, alreadyRunning: true });
+    const cidStok = await C.reqCompanyId(req);
+    // Bayrak "hayır" derse metodu GERÇEKTEN yokla (önbellekli — bkz. mikroClient).
+    const v17Var = await v17MetoduKullanilabilir('GenelAmacliMaliyetListesiV2', async () => {
+      // Yoklama KENDİ kiracısının SKU'suyla yapılır (CLAUDE.md tenant deseni);
+      // dönen SKU hata metnine girmez — kiracılar arası ad sızıntısı olmasın.
+      const probeSnap = await C.getAdminDb()!.collection('inventory')
+        .where('companyId', '==', cidStok).where('source', '==', 'mikro_import').limit(1).get();
+      const probeSku = ((probeSnap.docs[0]?.data()?.sku as string) || '').trim();
+      if (!probeSku) return false;
+      const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
+        StokKod: probeSku, IlkTarih: '2000-01-01',
+        SonTarih: new Date().toISOString().slice(0, 10), Depolar: '1',
+      });
+      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+      const d = (r0?.Data ?? {}) as Record<string, unknown>;
+      return ok && !!r0 && !r0.IsError && d.EldekiMiktar != null;
+    });
+    if (!v17Var) {
       return res.status(501).json({
         success: false,
         error: 'Stok miktarı/maliyet çekimi GenelAmacliMaliyetListesiV2 gerektirir — bu method yalnız Mikro Jump V17+ kurulumlarında var. ' +
-               'Mikro Jump V17 güncellemesi sonrası .env\'e MIKRO_JUMP_SURUM=17 ekleyin.',
+               'Mikro Jump V17 güncellemesi sonrası .env\'e MIKRO_JUMP_SURUM=17 ekleyin. (Canlı yoklama da doğrulayamadı.)',
         requiresVersion: 17, currentVersion: MIKRO_JUMP_SURUM,
       });
     }
-    if (stokMiktarJobRunning) return res.json({ success: true, started: false, alreadyRunning: true });
 
     const actor = C.reqActor(req);
     const jobRef = C.getAdminDb().collection('jobs').doc('stokMiktarImport');
@@ -2921,7 +2939,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
     const companyId = await C.reqCompanyId(req);
-    if (MIKRO_JUMP_SURUM < 17) {
+    // Bayrak düşmüş olabilir (2026-09-03) — SqlVeriOkuV2'yi de gerçekten yokla.
+    const sqlV17Var = await v17MetoduKullanilabilir('SqlVeriOkuV2', async () => {
+      const { rows, hata } = await mikroSql('SELECT TOP 1 1 AS deneme');
+      return !hata && Array.isArray(rows);
+    });
+    if (!sqlV17Var) {
       return res.status(501).json({
         success: false,
         error: 'SqlVeriOkuV2 yalnız Mikro Jump V17+ kurulumlarında mevcut (V16 koleksiyonunda yok). ' +
@@ -3358,7 +3381,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           message: 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
       }
 
-      const mevcutIdler = new Set((await C.loadCompanyDocs('orders', cid)).map(o => String(o.id ?? '')));
+      const mevcutSiparisler = await C.loadCompanyDocs('orders', cid);
+      const mevcutIdler = new Set(mevcutSiparisler.map(o => String(o.id ?? '')));
+      // BACKFILL (2026-09-03 code review): `faturali`/`mikroFaturaNo` alanları bu uca
+      // sonradan eklendi; idempotent atlama yüzünden ÖNCEKİ koşuların yazdığı kayıtlara
+      // hiç ulaşmıyordu. Sonuç: aynı listede kimi sipariş "MİKRO FATURA", kimi
+      // "FATURASIZ" görünüyor ve zaten Mikro'da kesilmiş faturada "Mikro'ya e-Fatura
+      // gönder" düğmesi duruyordu. Eksik alanı olan eski kayıtları onar.
+      const backfillGerekli = mevcutSiparisler.filter(o => {
+        const x = o as Record<string, unknown>;
+        return x.source === 'mikro-fatura' && (x.faturali !== true || !x.mikroFaturaNo);
+      });
 
       // Cari adları + kalemler: ikişer toplu sorgu (fatura başına sorgu YOK).
       const cariAd = new Map<string, string>();
@@ -3384,7 +3417,19 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
 
       let batch = C.getAdminDb().batch();
-      let ops = 0, created = 0, skipped = 0;
+      let ops = 0, created = 0, skipped = 0, onarilan = 0;
+      for (const o of backfillGerekli) {
+        const x = o as Record<string, unknown>;
+        const ev = (x.mikroEvrak ?? {}) as { seri?: unknown; sira?: unknown };
+        // Evrak no yalnız mikroEvrak'tan türetilir; yoksa alan yazılmaz (uydurma yok).
+        const evrakNo = ev.sira != null ? `${String(ev.seri ?? '')}${String(ev.sira)}` : null;
+        batch.update(C.getAdminDb().collection('orders').doc(String(x.id)), {
+          faturali: true,
+          ...(evrakNo ? { mikroFaturaNo: evrakNo } : {}),
+        });
+        onarilan++;
+        if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+      }
       for (const f of satisFaturalari) {
         const x = f as Record<string, unknown>;
         const seri = String(x.cha_evrakno_seri ?? '').trim();
@@ -3407,6 +3452,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           createdAt: tarih ? `${tarih}T12:00:00.000Z` : pgServerTimestamp(),
           source: 'mikro-fatura',
           mikroEvrak: { seri, sira },
+          // Kaynak zaten kesilmiş bir satış faturası — listede "FATURASIZ" rozeti
+          // yanlıştı (2026-09-03 SS bulgusu); ✓ Mikro rozeti evrak no'sunu gösterir.
+          faturali: true,
+          mikroFaturaNo: `${seri}${sira}`,
           companyId: cid,
         });
         created++;
@@ -3415,9 +3464,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (ops > 0) await batch.commit();
 
       await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş',
-        `${created} sipariş türetildi, ${skipped} atlandı (${satisFaturalari.length} satış faturası)`);
+        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı (${satisFaturalari.length} satış faturası)`);
       await C.writeSyncLog('faturadan-siparis', 'orders', String(created), true, null, null, Date.now() - t0, C.reqActor(req));
-      res.json({ success: true, created, skipped, total: satisFaturalari.length,
+      res.json({ success: true, created, skipped, onarilan, total: satisFaturalari.length,
         kalemsiz: pool ? undefined : 'PG yok — kalemler ve cari adları eklenemedi (lokal dev)',
         duration: Date.now() - t0 });
     } catch (err) {

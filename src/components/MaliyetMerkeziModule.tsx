@@ -950,7 +950,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h2 className="text-base font-bold text-[#1D1D1F]">
@@ -1026,7 +1026,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h2 className="text-base font-bold text-[#1D1D1F]">

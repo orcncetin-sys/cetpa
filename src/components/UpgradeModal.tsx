@@ -63,7 +63,7 @@ export default function UpgradeModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.92, y: 24 }}
         transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-        className="relative z-10 w-full max-w-md bg-white border border-black/[0.08] rounded-3xl overflow-hidden shadow-2xl"
+        className="relative z-10 w-full max-w-md bg-white border border-black/[0.08] rounded-3xl max-h-[90vh] overflow-y-auto shadow-2xl"
       >
         {/* Header */}
         <div className="relative bg-gradient-to-r from-[#ff4000] to-[#ff6b35] p-8 text-center overflow-hidden">

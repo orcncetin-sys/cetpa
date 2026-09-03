@@ -1327,7 +1327,7 @@ export default function SabitKiymetModule({
         {deleteTarget && (
           <motion.div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="apple-card w-full max-w-sm p-6 space-y-4"
+            <motion.div className="apple-card w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto"
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">

@@ -1439,7 +1439,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
 
       {isConsignmentModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsConsignmentModalOpen(false)}>
-          <div className="apple-card w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="apple-card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-bold">{currentLanguage === 'tr' ? 'Konsinye Gönder' : 'Send Consignment'}</h3>
               <button onClick={() => setIsConsignmentModalOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">
@@ -1620,7 +1620,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
 
       {isStockMovementModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsStockMovementModalOpen(false)}>
-          <div className="apple-card w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="apple-card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-bold">{currentLanguage === 'tr' ? 'Stok Hareketi Ekle' : 'Add Stock Entry'}</h3>
               <button onClick={() => setIsStockMovementModalOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">

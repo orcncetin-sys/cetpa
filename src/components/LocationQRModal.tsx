@@ -43,7 +43,7 @@ export default function LocationQRModal({
           #location-qr-print { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
         }
       `}</style>
-      <div className="apple-card w-full max-w-sm p-6">
+      <div className="apple-card w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto print:max-h-none print:overflow-visible">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">{tr ? 'QR Etiketi' : 'QR Label'}</h3>
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">

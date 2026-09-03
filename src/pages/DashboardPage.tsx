@@ -1,4 +1,6 @@
 import { sayiBicimleyici } from '../utils/recharts';
+import { odemeTakipli } from '../utils/siparis';
+import { gunAnahtari } from '../utils/zaman';
 import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -255,7 +257,7 @@ export default function DashboardPage(props: Props) {
                       : `${criticalStock.length} product${criticalStock.length > 1 ? 's' : ''} out of stock` });
 
                 // Unpaid delivered orders
-                const unpaidDelivered = orders.filter(o => o.status === 'Delivered' && !o.paid);
+                const unpaidDelivered = orders.filter(o => o.status === 'Delivered' && !o.paid && odemeTakipli(o));
                 if (unpaidDelivered.length > 0)
                   alerts.push({ id: 'unpaidDelivered', color: 'rose', icon: '💳',
                     msg: currentLanguage === 'tr'
@@ -326,6 +328,28 @@ export default function DashboardPage(props: Props) {
                   // kendisi fmtKpi'den gelir (kur yoksa '—', sembolsuz).
                   const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                   const revDelta = summaryData?.revenue?.delta;
+                  // Tutar dateRange'e göre filtreleniyor ama alt etiket sabit
+                  // "Son 30 gün" yazıyordu; delta rozeti de summary'nin 30-günlük
+                  // karşılaştırması. Kullanıcı aralığı değiştirince rakam değişip
+                  // etiket değişmiyordu (2026-09-03 SS'li bildirim). Etiket artık
+                  // gerçek aralığı söyler, 30-günlük delta yalnız varsayılan
+                  // aralıkta gösterilir — başka aralıkta yanıltıcı olur.
+                  const bugun = new Date();
+                  const otuzGunOnce = new Date(); otuzGunOnce.setDate(bugun.getDate() - 30);
+                  // gunAnahtari (utils/zaman) YEREL YYYY-MM-DD üretir — toISOString UTC
+                  // döndüğü için TR'de 00:00-03:00 arası bir gün kayardı. App.tsx'teki
+                  // varsayılan aralık da date-fns format ile yerel gün yazıyor.
+                  const araligVarsayilan = dateRange.startDate === gunAnahtari(otuzGunOnce)
+                    && dateRange.endDate === gunAnahtari(bugun);
+                  // Boş/eksik tarih (kullanıcı date input'u temizleyebilir) '' döner →
+                  // eskiden 'undefined.undefined.' basıyordu (2026-09-03 code-review).
+                  const trTarih = (iso: string): string => {
+                    const [y, a, g] = (iso || '').split('-');
+                    return (y && a && g) ? `${g}.${a}.${y}` : '—';
+                  };
+                  const aralikEtiketi = araligVarsayilan
+                    ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days')
+                    : `${trTarih(dateRange.startDate)} – ${trTarih(dateRange.endDate)}`;
                   return (
                     <div className="apple-card p-4 text-left group flex flex-col min-h-[130px]">
                       <div className="flex items-center justify-between mb-2">
@@ -333,8 +357,9 @@ export default function DashboardPage(props: Props) {
                           <DollarSign className="w-4 h-4 text-green-500" />
                         </div>
                         <div className="flex items-center gap-1.5">
-                          {revDelta != null && (
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${revDelta >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                          {revDelta != null && araligVarsayilan && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${revDelta >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}
+                              title={currentLanguage === 'tr' ? 'Önceki 30 güne göre değişim' : 'Change vs previous 30 days'}>
                               {revDelta >= 0 ? '▲' : '▼'} {Math.abs(revDelta).toFixed(1)}%
                             </span>
                           )}
@@ -355,7 +380,7 @@ export default function DashboardPage(props: Props) {
                       )}
                       <p className="text-xs font-semibold text-gray-500 mt-1">{dashT.total_revenue}</p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {summaryData ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days') : dashT.all_time}
+                        {aralikEtiketi}
                       </p>
                       {/* Phase 35: 7-day revenue sparkline */}
                       {(() => {
@@ -518,7 +543,7 @@ export default function DashboardPage(props: Props) {
                 }
 
                 // Insight 2: unpaid orders total
-                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o));
                 if (unpaidOrders.length > 0) {
                   const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                   insights.push({
@@ -931,7 +956,7 @@ export default function DashboardPage(props: Props) {
                 if (lowStockCount > 0) alerts125.push({ level: 'warn', icon: '📦', message: currentLanguage === 'tr' ? `${lowStockCount} ürün kritik stok seviyesinde` : `${lowStockCount} products at critical stock level` });
                 // Overdue payments
                 const now125 = Date.now();
-                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && o.createdAt && (() => {
+                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt && (() => {
                   const ts = o.createdAt;
                   if (!ts) return false;
                   const d = typeof (ts as { toDate?: () => Date }).toDate === 'function' ? (ts as { toDate: () => Date }).toDate() : new Date(ts as string);
@@ -981,7 +1006,7 @@ export default function DashboardPage(props: Props) {
                 });
                 const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -1260,7 +1285,7 @@ export default function DashboardPage(props: Props) {
                 // Also track unpaid customers
                 const custUnpaid: Record<string, number> = {};
                 for (const o of orders) {
-                  if (o.paid || o.status === 'Cancelled') continue;
+                  if (o.paid || o.status === 'Cancelled' || !odemeTakipli(o)) continue;
                   const name = o.customerName || '—';
                   custUnpaid[name] = (custUnpaid[name] ?? 0) + (o.totalPrice || 0);
                 }

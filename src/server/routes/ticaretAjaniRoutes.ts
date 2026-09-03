@@ -39,6 +39,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { Type } from '@google/genai';
+import { geminiDene, geminiHataMesaji } from '../geminiDayanikli.js';
 import type { GoogleGenAI } from '@google/genai';
 
 /** server.ts'ten ihtiyaç duyulan HER ŞEY — açık liste (rota-grubu deseni). */
@@ -106,15 +107,23 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
     if (!gemini) {
       return { kod: 503, hata: 'AI yapılandırılmamış: sunucuda ANTHROPIC_API_KEY yok ve Gemini anahtarı da tanımlı değil (Ayarlar → AI). İkisinden biri yeter — Gemini mevcut anahtarınızla ücretsiz katmanda çalışır.' };
     }
-    const r = await gemini.models.generateContent({
-      model: C.resolveGeminiModel(),
-      contents: args.system + '\n\nGİRDİ (JSON):\n' + JSON.stringify(args.girdi),
-      config: { responseMimeType: 'application/json', responseSchema: args.geminiSema },
-    });
+    // Geçici 503 dayanıklılığı + hata sınıflandırması ORTAK modülde
+    // (src/server/geminiDayanikli.ts) — aynı arıza sınıfı aiRoutes'taki üç ucu da
+    // vuruyordu, bandaid'i tek uçta bırakmak yerine mekanizmaya taşındı.
     try {
-      return { ham: JSON.parse(r.text ?? ''), saglayici: 'gemini' };
-    } catch {
-      return { hata: 'Gemini çıktısı JSON olarak ayrıştırılamadı.', kod: 502 };
+      const r = await geminiDene(() => gemini.models.generateContent({
+        model: C.resolveGeminiModel(),
+        contents: args.system + '\n\nGİRDİ (JSON):\n' + JSON.stringify(args.girdi),
+        config: { responseMimeType: 'application/json', responseSchema: args.geminiSema },
+      }));
+      try {
+        return { ham: JSON.parse(r.text ?? ''), saglayici: 'gemini' };
+      } catch {
+        return { hata: 'Gemini çıktısı JSON olarak ayrıştırılamadı.', kod: 502 };
+      }
+    } catch (e) {
+      const { mesaj, kod } = geminiHataMesaji(e);
+      return { hata: mesaj, kod };
     }
   };
 
@@ -232,7 +241,9 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
       res.json({ success: true, saglayici: uretim.saglayici, ozet: veri.ozet, oneriler, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
     } catch (e) {
       console.error('[satis-ajani]', e);
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      // Ham SDK hatası (JSON yığını) kullanıcıya gösterilmez — sınıflandırılmış
+      // mesajlar yukarıda üretildi; buraya düşen beklenmeyen hatadır.
+      res.status(500).json({ success: false, error: 'Beklenmeyen hata — tekrar deneyin (detay sunucu logunda).' });
     }
   });
 
@@ -307,7 +318,9 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
       res.json({ success: true, saglayici: uretim.saglayici, ozet: veri.ozet, tedarikciGruplari: gruplar, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
     } catch (e) {
       console.error('[satinalma-ajani]', e);
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      // Ham SDK hatası (JSON yığını) kullanıcıya gösterilmez — sınıflandırılmış
+      // mesajlar yukarıda üretildi; buraya düşen beklenmeyen hatadır.
+      res.status(500).json({ success: false, error: 'Beklenmeyen hata — tekrar deneyin (detay sunucu logunda).' });
     }
   });
 }

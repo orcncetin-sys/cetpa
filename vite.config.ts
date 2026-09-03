@@ -65,6 +65,13 @@ export default defineConfig(({mode}) => {
                 || id.includes('node_modules/pako')
                 || id.includes('node_modules/fflate')
                 || id.includes('node_modules/rgbcolor')
+                // jspdf@4'ün yeni bağımlılıkları (2026-09-03 sourcemap ölçümü:
+                // core-js 139 kB + fast-png 33 kB + iobuffer 19 kB ham kaynak
+                // catch-all vendor'a düşüp BOOT'a giriyordu; hepsi yalnız PDF
+                // yolunda gerekiyor).
+                || id.includes('node_modules/core-js')
+                || id.includes('node_modules/fast-png')
+                || id.includes('node_modules/iobuffer')
                 || id.includes('node_modules/stackblur-canvas')) {
               return 'vendor-jspdf';
             }
@@ -77,8 +84,23 @@ export default defineConfig(({mode}) => {
               return 'vendor-lucide';
             }
             // Recharts + D3 → its own chunk
-            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+            // recharts@3 çalışma zamanı artık Redux ailesine dayanıyor (npm ls:
+            // recharts → @reduxjs/toolkit → react-redux/immer) — 2026-09-03
+            // ölçümünde ~385 kB ham kaynak catch-all vendor'a düşüp BOOT'a
+            // giriyordu; tek tüketicileri recharts olduğu için (src'de import yok,
+            // grep ile doğrulandı) lazy vendor-charts'a alındı.
+            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')
+                || id.includes('node_modules/@reduxjs/') || id.includes('node_modules/react-redux')
+                || id.includes('node_modules/redux') || id.includes('node_modules/immer')
+                || id.includes('node_modules/reselect') || id.includes('node_modules/decimal.js-light')
+                || id.includes('node_modules/es-toolkit') || id.includes('node_modules/victory-vendor')
+                || id.includes('node_modules/use-sync-external-store')) {
               return 'vendor-charts';
+            }
+            // Sürükle-bırak yalnız ProjectModule'de (lazy ProjePage) — kendi
+            // chunk'ı olmazsa catch-all vendor ile boot'a iniyordu (122 kB ham).
+            if (id.includes('node_modules/@dnd-kit')) {
+              return 'vendor-dndkit';
             }
             // Gömülü Roboto fontu (Türkçe PDF glifleri) — TEK BAŞINA 918 kB.
             // pdfFont.ts'te dinamik import edilse bile, aşağıdaki "tüm

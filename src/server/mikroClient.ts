@@ -44,6 +44,35 @@ export function initMikroClient(d: MikroDeps): void { D = d; }
  *  server.ts'ten sabitle BIRLIKTE tasindi (2026-08-24): yorum orada kalinca
  *  V17 gecis talimati, yonettigi koddan kopuk kaliyordu. */
 export const MIKRO_JUMP_SURUM = Number(process.env.MIKRO_JUMP_SURUM || 16);
+/**
+ * V17 GERÇEĞİ ≠ V17 BAYRAĞI (2026-09-03 canlı bulgu).
+ * Kullanıcının SS'inde stok-miktar ucu "V17+ gerekir" 501'i verirken hemen altında
+ * ÖNCEKİ koşunun 2375/2375 SKU'yu işlediği görünüyordu: sunucu V17'ydi ama
+ * `.env`'deki MIKRO_JUMP_SURUM bayrağı bir deploy'da düşmüştü (varsayılan 16).
+ *
+ * Bu yüzden bayrak "hayır" dediğinde METODU YOKLARIZ. Sonuç önbelleğe alınır —
+ * aksi halde bayrak <17 kaldığı sürece HER istek ekstra bir Mikro çağrısı öderdi
+ * (code review bulgusu). Bayrak >= 17 ise yoklama hiç yapılmaz.
+ */
+const v17Yoklama = new Map<string, { ok: boolean; ts: number }>();
+const V17_YOKLAMA_TTL_MS = 10 * 60 * 1000;
+
+export async function v17MetoduKullanilabilir(
+  metot: string,
+  yokla: () => Promise<boolean>,
+): Promise<boolean> {
+  if (MIKRO_JUMP_SURUM >= 17) return true;
+  const onbellek = v17Yoklama.get(metot);
+  if (onbellek && Date.now() - onbellek.ts < V17_YOKLAMA_TTL_MS) return onbellek.ok;
+  let ok = false;
+  try { ok = await yokla(); } catch { ok = false; }
+  v17Yoklama.set(metot, { ok, ts: Date.now() });
+  if (ok) {
+    console.warn(`[V17] MIKRO_JUMP_SURUM=${MIKRO_JUMP_SURUM} ama ${metot} canlıda yanıt veriyor — .env'e MIKRO_JUMP_SURUM=17 ekleyin; bayrak V16-only uçların bloklanmasını da yönetiyor.`);
+  }
+  return ok;
+}
+
 export const MIKRO_V17_YOK = new Set([
   'BankaListesiV2', 'BarkodListesiV2', 'CariHareketKaydetV2', 'FaturaListesiV2',
   'KasaListesiV2', 'KdvOzetV2', 'MizanV2', 'OdemePlanListesiV2',

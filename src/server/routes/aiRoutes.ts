@@ -17,7 +17,9 @@ import type { Express, Request, Response } from 'express';
 // ThinkingLevel/Type Google SDK'nin KENDI enum'lari; server.ts'e bagimlilik
 // degil, dogrudan pakete import edilir (dongu yok).
 import { ThinkingLevel, Type } from '@google/genai';
+import type { GoogleGenAI } from '@google/genai';
 import { AiChatSchema, type Sema } from '../schemas.js';
+import { geminiDene, geminiHataMesaji } from '../geminiDayanikli.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface AiRouteCtx {
@@ -25,7 +27,9 @@ export interface AiRouteCtx {
   requireMfaVerified: any;
   requireAdmin: any;
   validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
-  resolveGeminiClient: () => Promise<any>;
+  /** GERÇEK tip (2026-09-03): eskiden `Promise<any>` idi ve `geminiDene` generic'i
+   *  T'yi çözemeyip yanıtları `unknown` yapıyordu — CLAUDE.md "yaklaşık tip yazma". */
+  resolveGeminiClient: () => Promise<GoogleGenAI | null>;
   resolveGeminiModel: (requested?: string) => string;
   safeAiError: (msg: string) => string;
   geminiKeySource: () => 'env' | 'vertex' | 'firestore' | 'none';
@@ -86,7 +90,7 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
     };
     if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
     try {
-      const response = await client.models.generateContent({
+      const response = await geminiDene(() => client.models.generateContent({
         model: C.resolveGeminiModel(model),
         contents: prompt,
         config: {
@@ -94,11 +98,12 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
           ...(thinkingLevel && thinkingLevel !== 'NONE' ? { thinkingConfig: { thinkingLevel: ThinkingLevel[thinkingLevel] } } : {}),
           ...(jsonSchema ? { responseMimeType: 'application/json', responseSchema: jsonSchema } : {}),
         } as Record<string, unknown>,
-      });
+      }));
       return res.json({ text: response.text ?? '' });
     } catch (e) {
       console.error('[Gemini generate]', e);
-      return res.status(500).json({ error: 'AI generation failed.' });
+      const { mesaj, kod } = geminiHataMesaji(e);
+      return res.status(kod).json({ error: mesaj });
     }
   });
 
@@ -130,11 +135,12 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
         } as Record<string, unknown>,
         history: history as { role: 'user' | 'model'; parts: { text: string }[] }[],
       });
-      const response = await chat.sendMessage({ message });
+      const response = await geminiDene(() => chat.sendMessage({ message }));
       return res.json({ text: response.text ?? '' });
     } catch (e) {
       console.error('[Gemini chat]', e);
-      return res.status(500).json({ error: 'AI chat failed.' });
+      const { mesaj, kod } = geminiHataMesaji(e);
+      return res.status(kod).json({ error: mesaj });
     }
   });
 
@@ -174,7 +180,7 @@ Context (today: ${today}):
 Based on these trends, respond in ${language} as valid JSON (no markdown fences).
 Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts only for products where stock < 30-day demand. All monetary values in TRY integers.`;
     try {
-      const result = await client.models.generateContent({
+      const result = await geminiDene(() => client.models.generateContent({
         model: C.resolveGeminiModel(),
         contents: prompt,
         config: {
@@ -191,11 +197,12 @@ Rules: topProducts ≤ 5; cashFlow = next 3 months projection; reorderAlerts onl
             required: ['summary','topProducts','cashFlow','recommendations','reorderAlerts'],
           },
         } as Record<string, unknown>,
-      });
+      }));
       return res.json(JSON.parse(result.text ?? '{}'));
     } catch (e) {
       console.error('[demand-forecast]', e);
-      return res.status(500).json({ error: 'Demand forecast failed.' });
+      const { mesaj, kod } = geminiHataMesaji(e);
+      return res.status(kod).json({ error: mesaj });
     }
   });
 }

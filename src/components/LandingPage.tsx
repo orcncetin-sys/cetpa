@@ -1499,10 +1499,13 @@ export default function LandingPage({
               style={{ background: 'radial-gradient(ellipse, rgba(255,64,0,0.28) 0%, rgba(255,140,0,0.12) 60%, transparent 100%)' }} />
             <div style={{ perspective: '1800px' }}>
               <div style={{ transform: 'rotateX(4deg)', transformOrigin: 'bottom center' }}>
+                {/* Kapak: alüminyum kenar bandı + HER TEMADA siyah ekran çerçevesi
+                    (gerçek MacBook'ta çerçeve gövde renginden bağımsız siyahtır —
+                    2026-09-03 "çok çakma duruyor" geri bildirimi üzerine giydirildi). */}
                 <div className="relative mx-auto rounded-t-[18px] rounded-b-[4px] overflow-hidden"
-                  style={{ background: d('linear-gradient(180deg, #1c1c1e 0%, #2a2a2e 100%)', 'linear-gradient(180deg, #c8c8cc 0%, #b8b8bc 100%)'), padding: '10px 10px 0', boxShadow: d('inset 0 1px 0 rgba(255,255,255,0.08), 0 -1px 0 rgba(255,255,255,0.04)', 'inset 0 1px 0 rgba(255,255,255,0.6), 0 -1px 0 rgba(0,0,0,0.08)'), maxWidth: '860px', margin: '0 auto' }}>
-                  <div className="absolute top-[14px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
-                    <div className="w-1.5 h-1.5 rounded-full bg-black/40" />
+                  style={{ background: d('linear-gradient(180deg, #3a3a3f 0%, #232327 4%, #131316 12%, #0a0a0c 100%)', 'linear-gradient(180deg, #f2f2f5 0%, #d9d9de 4%, #17171a 12%, #0b0b0d 100%)'), padding: '12px 12px 0', boxShadow: d('inset 0 1.5px 0 rgba(255,255,255,0.18), inset 1px 0 0 rgba(255,255,255,0.05), inset -1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.5)', 'inset 0 1.5px 0 rgba(255,255,255,0.9), inset 1px 0 0 rgba(255,255,255,0.35), inset -1px 0 0 rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.18)'), maxWidth: '860px', margin: '0 auto' }}>
+                  <div className="absolute top-[16px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'radial-gradient(circle at 35% 35%, #2e3a4d 0%, #0b0d12 65%)', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.05), inset 0 0 1px rgba(120,160,255,0.5)' }} />
                   </div>
                   <div className="rounded-t-[10px] rounded-b-0 overflow-hidden" style={{ background: '#000', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)' }}>
                     <div style={{ background: d('#111116', '#f0f0f5'), height: '34px', display: 'flex', alignItems: 'center', padding: '0 14px', gap: '8px', borderBottom: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }}>
@@ -1531,6 +1534,11 @@ export default function LandingPage({
                           görselinin (LCP) üstüne bindiriyordu. */}
                       <img src="/ss-envanter.webp" alt="CETPA Envanter" aria-hidden="true" className="cetpa-hero-slayt w-full block absolute inset-0" style={{ maxHeight: '480px', objectFit: 'cover', objectPosition: 'top', animationDelay: '0s' }} width={1024} height={480} loading="lazy" />
                       <img src="/ss-crm.webp" alt="CETPA CRM" aria-hidden="true" className="cetpa-hero-slayt w-full block absolute inset-0" style={{ maxHeight: '480px', objectFit: 'cover', objectPosition: 'top', animationDelay: '-14s' }} width={1024} height={480} loading="lazy" />
+                      {/* Cam yansıması: köşegen ışık süpürmesi — SS'lerin düz "yapıştırılmış"
+                          görünmesini kıran katman. Slaytların ÜSTÜNDE ama %5 opaklıkta,
+                          LCP/okunurluk etkilemez; pointer-events yok. */}
+                      <div aria-hidden="true" className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(115deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.03) 28%, transparent 42%, transparent 68%, rgba(255,255,255,0.04) 100%)' }} />
+                      <div aria-hidden="true" className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 24px rgba(0,0,0,0.35)' }} />
                     </div>
                   </div>
                 </div>
@@ -1538,20 +1546,24 @@ export default function LandingPage({
                     trackpad) — mobilde ekran görüntüsü ~343px'e küçülürken bu blok küçülmüyor,
                     orantısız/baskın görünüyordu (2026-08-16 mobil denetim). Salt dekoratif
                     olduğundan mobilde tamamen gizlendi, sm ve üstünde aynen kalıyor. */}
-                <div className="hidden sm:block mx-auto" style={{ maxWidth: '860px', height: '3px', background: d('linear-gradient(180deg, #000 0%, #1a1a1e 100%)', 'linear-gradient(180deg, #9a9a9e 0%, #b8b8bc 100%)') }} />
-                <div className="hidden sm:block mx-auto" style={{ maxWidth: '900px', background: d('linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)', 'linear-gradient(180deg, #d4d4d8 0%, #c8c8cc 100%)'), borderRadius: '0 0 16px 16px', padding: '10px 32px 0', boxShadow: d('0 2px 0 rgba(255,255,255,0.04) inset, 0 40px 80px -20px rgba(0,0,0,0.8)', '0 2px 0 rgba(255,255,255,0.5) inset, 0 40px 80px -20px rgba(0,0,0,0.18)') }}>
-                  <div style={{ height: 52, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, opacity: 0.6 }}>
+                {/* Menteşe: koyu oluk + üstte ince parlama (metal kırılması) */}
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '860px', height: '4px', background: d('linear-gradient(180deg, #000 0%, #050506 45%, #26262b 80%, #3c3c42 100%)', 'linear-gradient(180deg, #2a2a2e 0%, #6a6a70 55%, #cfcfd4 85%, #ececf0 100%)') }} />
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '900px', background: d('linear-gradient(180deg, #38383d 0%, #2b2b30 6%, #232327 55%, #1a1a1e 100%)', 'linear-gradient(180deg, #f4f4f7 0%, #e2e2e7 6%, #d2d2d7 55%, #bfbfc5 100%)'), borderRadius: '0 0 16px 16px', padding: '10px 32px 0', boxShadow: d('0 1px 0 rgba(255,255,255,0.10) inset, 0 -8px 14px -8px rgba(0,0,0,0.6) inset, 0 22px 30px -18px rgba(0,0,0,0.9), 0 55px 90px -25px rgba(0,0,0,0.75)', '0 1px 0 rgba(255,255,255,0.85) inset, 0 -8px 14px -8px rgba(0,0,0,0.10) inset, 0 22px 30px -18px rgba(0,0,0,0.28), 0 55px 90px -25px rgba(0,0,0,0.16)') }}>
+                  <div style={{ height: 52, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, opacity: 0.85 }}>
                     {[3, 4, 3].map((_, ri) => (
                       <div key={ri} style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                         {Array.from({ length: 10 }).map((_, ki) => (
-                          <div key={ki} style={{ height: 5, flex: 1, borderRadius: 2, background: d('rgba(255,255,255,0.08)', 'rgba(0,0,0,0.12)') }} />
+                          <div key={ki} style={{ height: 5, flex: 1, borderRadius: 2, background: d('linear-gradient(180deg, #3f3f45 0%, #2a2a2f 100%)', 'linear-gradient(180deg, #fdfdff 0%, #dcdce2 100%)'), boxShadow: d('0 1px 1px rgba(0,0,0,0.5), inset 0 0.5px 0 rgba(255,255,255,0.12)', '0 1px 1.5px rgba(0,0,0,0.22), inset 0 0.5px 0 rgba(255,255,255,0.9)') }} />
                         ))}
                       </div>
                     ))}
                   </div>
-                  <div style={{ width: 100, height: 60, borderRadius: 10, background: d('rgba(255,255,255,0.06)', 'rgba(0,0,0,0.10)'), margin: '8px auto 10px', border: d('1px solid rgba(255,255,255,0.06)', '1px solid rgba(0,0,0,0.08)') }} />
+                  <div style={{ width: 100, height: 60, borderRadius: 10, background: d('linear-gradient(180deg, #212126 0%, #29292e 100%)', 'linear-gradient(180deg, #c6c6cc 0%, #d6d6db 100%)'), margin: '8px auto 10px', boxShadow: d('inset 0 1px 3px rgba(0,0,0,0.55), inset 0 -0.5px 0 rgba(255,255,255,0.10)', 'inset 0 1px 3px rgba(0,0,0,0.18), inset 0 -0.5px 0 rgba(255,255,255,0.8)') }} />
                 </div>
-                <div className="hidden sm:block mx-auto" style={{ maxWidth: '920px', height: '1px', background: d('rgba(255,255,255,0.04)', 'rgba(0,0,0,0.06)') }} />
+                {/* Ön kenar dudağı + zemin temas gölgesi (gövdeyi "havada asılı"
+                    görünmekten kurtaran iki katman) */}
+                <div className="hidden sm:block mx-auto" style={{ maxWidth: '920px', height: '2px', borderRadius: '0 0 3px 3px', background: d('linear-gradient(180deg, #46464c 0%, #111114 100%)', 'linear-gradient(180deg, #fafafc 0%, #8e8e94 100%)') }} />
+                <div aria-hidden="true" className="hidden sm:block mx-auto" style={{ maxWidth: '700px', height: 16, marginTop: 2, borderRadius: '50%', background: d('radial-gradient(ellipse, rgba(0,0,0,0.55) 0%, transparent 70%)', 'radial-gradient(ellipse, rgba(0,0,0,0.22) 0%, transparent 70%)'), filter: 'blur(6px)' }} />
               </div>
             </div>
 

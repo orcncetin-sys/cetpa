@@ -22,6 +22,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
+import { odemeTakipli } from '../utils/siparis';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
 import { formatCurrency, formatInCurrency, kurCevir } from '../utils/currency';
@@ -2923,7 +2924,7 @@ export default function CRMPage({
                   if(!o.paid||!o.createdAt) return false;
                   try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff626; } catch { return false; }
                 });
-                const unpaidOrders = orders.filter(o=>!o.paid&&o.status!=='Cancelled');
+                const unpaidOrders = orders.filter(o=>!o.paid&&o.status!=='Cancelled'&&odemeTakipli(o));
                 const payRate = orders.filter(o=>o.status!=='Cancelled').length>0?(paidOrders.length/orders.filter(o=>o.status!=='Cancelled').length*100):0;
                 // Payment method breakdown
                 const methodMap:{[k:string]:number} = {};

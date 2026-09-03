@@ -19,6 +19,10 @@ const SatinAlmaPage           = React.lazy(() => import('./pages/SatinAlmaPage')
 const IKPage                  = React.lazy(() => import('./pages/IKPage'));
 const InventoryPage           = React.lazy(() => import('./pages/InventoryPage'));
 const DashboardPage           = React.lazy(() => import('./pages/DashboardPage'));
+const MesaiPage               = React.lazy(() => import('./pages/MesaiPage'));
+const SelfservisPage          = React.lazy(() => import('./pages/SelfservisPage'));
+const HukukPage               = React.lazy(() => import('./pages/HukukPage'));
+const KurumsalPage            = React.lazy(() => import('./pages/KurumsalPage'));
 import { logFirestoreError as importedLogFirestoreError, OperationType } from './utils/firebase';
 import { MfaSettings, MfaChallengeModal } from './components/MfaSettings';
 import { getMfaStatus } from './lib/mfa';
@@ -68,7 +72,6 @@ import {
   Truck,
   Package,
   LogOut,
-  Plus,
   Search,
   Calculator,
   AlertCircle,
@@ -103,7 +106,6 @@ import {
   UserCheck,
   ShieldCheck,
   Sparkles,
-  Scale,
   Activity,
   Building2,
   BookOpen,
@@ -219,11 +221,9 @@ const B2BPortalComponent = React.lazy(() => import('./components/B2BPortal'));
 const AccountingModule        = React.lazy(() => import('./components/AccountingModule'));
 const PurchasingModule        = React.lazy(() => import('./components/PurchasingModule'));
 const HRModule                = React.lazy(() => import('./components/HRModule'));
-const LegalModule             = React.lazy(() => import('./components/LegalModule'));
 const ProductionModule        = React.lazy(() => import('./components/ProductionModule'));
 const QualityModule           = React.lazy(() => import('./components/QualityModule'));
 const ProjectModule           = React.lazy(() => import('./components/ProjectModule'));
-const CorporateGovernanceModule = React.lazy(() => import('./components/CorporateGovernanceModule'));
 const FinancePanel            = React.lazy(() => import('./components/FinancePanel'));
 const RiskPanel               = React.lazy(() => import('./components/RiskPanel'));
 const AnalyticsPanel          = React.lazy(() => import('./components/AnalyticsPanel'));
@@ -3538,7 +3538,7 @@ function AppContent() {
                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                   className="fixed inset-0 z-[201] flex items-center justify-center p-4 pointer-events-none"
                 >
-                  <div className={cn("w-full max-w-lg rounded-[2.5rem] overflow-hidden pointer-events-auto shadow-2xl", darkMode ? "bg-[#1c1c1e] border border-white/10" : "bg-white border border-black/5")}>
+                  <div className={cn("w-full max-w-lg rounded-[2.5rem] max-h-[90vh] overflow-y-auto pointer-events-auto shadow-2xl", darkMode ? "bg-[#1c1c1e] border border-white/10" : "bg-white border border-black/5")}>
                     {!demoSubmitted ? (
                       <>
                         {/* Header */}
@@ -4648,7 +4648,7 @@ function AppContent() {
           {/* ── Role atanmamış: sessizce 'Sales'e düşmek yerine durdur ── */}
           {roleMissing && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="apple-card max-w-md w-full p-8 space-y-4 text-center">
+              <div className="apple-card max-w-md w-full p-8 space-y-4 text-center max-h-[90vh] overflow-y-auto">
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-6 h-6 text-amber-600" />
                 </div>
@@ -4679,7 +4679,7 @@ function AppContent() {
           {/* ── 2FA: kullanıcı güvenlik ayarları ── */}
           {showMfaSettings && user && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowMfaSettings(false)}>
-              <div className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <MfaSettings currentLanguage={currentLanguage as 'tr' | 'en'} />
                 <button onClick={() => setShowMfaSettings(false)} className="mt-3 w-full apple-button-secondary justify-center py-2.5 text-sm">
                   {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
@@ -4691,7 +4691,7 @@ function AppContent() {
           {/* ── Red-team Fix: KVKK Data Processing Modal ─────────────── */}
           {showKvkkModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="apple-card max-w-md w-full p-8 space-y-5">
+              <div className="apple-card max-w-md w-full p-8 space-y-5 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
                     <ShieldCheck className="w-5 h-5 text-blue-600" />
@@ -4751,7 +4751,7 @@ function AppContent() {
           {/* ── Gemini AI (Yapay Zeka Destek Modülü) kullanım onayı ── */}
           {showAiConsentModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="apple-card max-w-md w-full p-8 space-y-5">
+              <div className="apple-card max-w-md w-full p-8 space-y-5 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
                     <Sparkles className="w-5 h-5 text-violet-600" />
@@ -5150,210 +5150,29 @@ function AppContent() {
             </React.Suspense>
           )}
 
-          {/* ── Phase 552: Mesai & Devam (Time & Attendance) ──────────────────── */}
-          {activeTab === 'mesai' && (() => {
-            const tr552 = currentLanguage === 'tr';
-            const today552 = new Date().toISOString().slice(0,10);
-            // Stats
-            const totalHours = p552Records.reduce((s,r) => s + (r.totalHours||0), 0);
-            const avgHours   = p552Records.length ? (totalHours / p552Records.length).toFixed(1) : '0';
-            const lateCount  = p552Records.filter(r => r.status === 'Geç Giriş').length;
-            const absentCount = p552Records.filter(r => r.status === 'Devamsız').length;
-            const calcHours = (ci: string, co: string) => {
-              const [h1,m1] = ci.split(':').map(Number); const [h2,m2] = co.split(':').map(Number);
-              return Math.max(0, parseFloat(((h2*60+m2 - h1*60-m1)/60).toFixed(1)));
-            };
-            const statusFor = (ci: string) => {
-              const [h] = ci.split(':').map(Number);
-              if (h > 9) return 'Geç Giriş';
-              return 'Normal';
-            };
-            return (
-              <motion.div key="mesai" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
-                <ModuleHeader
-                  title={tr552?'Mesai & Devam Takibi':'Time & Attendance'}
-                  subtitle={tr552?'Çalışan giriş-çıkış kayıtları ve devam analizi':'Employee check-in/out records and attendance analysis'}
-                  icon={Clock}
-                  actionButton={hasFullAccess('ik') ? (
-                    <button onClick={()=>setP552AddForm(f=>!f)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
-                      <Plus className="w-3.5 h-3.5" />{tr552?'Kayıt Ekle':'Add Record'}
-                    </button>
-                  ) : undefined}
-                />
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { label: tr552?'Toplam Kayıt':'Total Records',  v: String(p552Records.length), color:'text-blue-600',   bg:'bg-blue-50' },
-                    { label: tr552?'Ort. Çalışma':'Avg Hours/Day', v: `${avgHours}h`,              color:'text-emerald-600',bg:'bg-emerald-50' },
-                    { label: tr552?'Geç Giriş':'Late Arrivals',    v: String(lateCount),           color:'text-orange-600', bg:'bg-orange-50' },
-                    { label: tr552?'Devamsız':'Absent',            v: String(absentCount),         color:'text-red-600',    bg:'bg-red-50' },
-                  ].map(k=>(
-                    <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
-                      <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
-                    </div>
-                  ))}
-                </div>
-                {p552AddForm && (
-                  <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
-                    <h4 className="font-bold text-gray-800">{tr552?'Yeni Mesai Kaydı':'New Attendance Record'}</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <input value={p552Draft.employeeName} onChange={e=>setP552Draft(d=>({...d,employeeName:e.target.value}))} placeholder={tr552?'Çalışan Adı':'Employee Name'} className="apple-input px-3 py-2 text-sm" />
-                      <input type="date" value={p552Draft.date} onChange={e=>setP552Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm" />
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-gray-500 shrink-0">{tr552?'Giriş':'In'}</label>
-                        <input type="time" value={p552Draft.checkIn} onChange={e=>setP552Draft(d=>({...d,checkIn:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-gray-500 shrink-0">{tr552?'Çıkış':'Out'}</label>
-                        <input type="time" value={p552Draft.checkOut} onChange={e=>setP552Draft(d=>({...d,checkOut:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={async()=>{
-                        if(!p552Draft.employeeName) return;
-                        const hours = calcHours(p552Draft.checkIn, p552Draft.checkOut);
-                        const status = statusFor(p552Draft.checkIn);
-                        await addDoc(collection(db,'timeAttendance'),{...p552Draft,totalHours:hours,status,createdAt:serverTimestamp()});
-                        setP552AddForm(false); setP552Draft({employeeName:'',date:today552,checkIn:'09:00',checkOut:'18:00'});
-                      }} className="apple-button-primary px-4 py-2 text-sm">{tr552?'Kaydet':'Save'}</button>
-                      <button onClick={()=>setP552AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr552?'İptal':'Cancel'}</button>
-                    </div>
-                  </div>
-                )}
-                <div className="apple-card overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead><tr className="border-b border-gray-100 bg-gray-50/60">
-                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr552?'Çalışan':'Employee'}</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr552?'Tarih':'Date'}</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Giriş':'Check-In'}</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Çıkış':'Check-Out'}</th>
-                        <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr552?'Saat':'Hours'}</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Durum':'Status'}</th>
-                      </tr></thead>
-                      <tbody>
-                        {p552Records.map(r=>{
-                          const sc = r.status==='Normal'?'bg-emerald-100 text-emerald-700':r.status==='Geç Giriş'?'bg-orange-100 text-orange-700':r.status==='Devamsız'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700';
-                          return (
-                            <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
-                              <td className="px-4 py-2.5 font-medium text-gray-800">{r.employeeName}</td>
-                              <td className="px-4 py-2.5 text-gray-500 text-xs hidden sm:table-cell">{r.date}</td>
-                              <td className="px-4 py-2.5 text-center text-gray-700 tabular-nums">{r.checkIn}</td>
-                              <td className="px-4 py-2.5 text-center text-gray-700 tabular-nums">{r.checkOut}</td>
-                              <td className="px-4 py-2.5 text-right font-bold text-gray-800 tabular-nums">{r.totalHours}h</td>
-                              <td className="px-4 py-2.5 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sc}`}>{r.status}</span></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {p552Records.length===0 && (
-                    <div className="text-center py-12 space-y-2">
-                      <Clock className="w-10 h-10 text-gray-200 mx-auto" />
-                      <p className="text-gray-400 text-sm">{tr552?'"Kayıt Ekle" ile mesai takibine başlayın':'Click "Add Record" to start tracking attendance'}</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })()}
+          {/* ── Phase 552: Mesai & Devam (Time & Attendance) ── */}
+          {activeTab === 'mesai' && (
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Mesai bloğu MesaiPage'e çıkarıldı (2026-09-03, App.tsx bölme). */}
+              <MesaiPage
+                currentLanguage={currentLanguage} hasFullAccess={hasFullAccess}
+                p552Records={p552Records}
+                p552AddForm={p552AddForm} setP552AddForm={setP552AddForm}
+                p552Draft={p552Draft} setP552Draft={setP552Draft}
+              />
+            </React.Suspense>
+          )}
 
-          {/* ── Phase 553: Çalışan Self-Servis Portalı ───────────────────────── */}
-          {activeTab === 'selfservis' && (() => {
-            const tr553 = currentLanguage === 'tr';
-            // Find current user's employee record by email
-            const myEmp = employees.find(e => e.email === user?.email);
-            const myPayrolls = payrolls.filter(p => myEmp && (p.employeeId === myEmp.id || p.employeeName === myEmp.name)).sort((a,b) => {
-              const ay = a.year*100+a.month; const by = b.year*100+b.month; return by-ay;
-            });
-            return (
-              <motion.div key="selfservis" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
-                <ModuleHeader title={tr553?'Self-Servis Portalım':'My Self-Service Portal'} subtitle={tr553?'Kişisel bilgiler, maaş bordroları ve izin bakiyeniz':'Personal info, payslips and leave balance'} icon={UserCheck} />
-                {!myEmp ? (
-                  <div className="apple-card p-8 text-center space-y-3">
-                    <Users className="w-12 h-12 text-gray-200 mx-auto" />
-                    <p className="text-gray-400">{tr553?'Hesabınıza bağlı bir çalışan kaydı bulunamadı.':'No employee record found linked to your account.'}</p>
-                    <p className="text-xs text-gray-400">{tr553?`(${user?.email})`:`(${user?.email})`}</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Employee card */}
-                    <div className="apple-card p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-brand/10 flex items-center justify-center shrink-0">
-                        <span className="text-2xl font-black text-brand">{myEmp.name.charAt(0)}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-gray-900 text-lg">{myEmp.name}</p>
-                        <p className="text-sm text-gray-500">{myEmp.position} · {myEmp.department}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{myEmp.email} · {myEmp.phone}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-400">{tr553?'Başlangıç':'Start Date'}</p>
-                        <p className="font-semibold text-gray-700">{myEmp.startDate}</p>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block ${myEmp.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-600'}`}>{myEmp.status}</span>
-                      </div>
-                    </div>
-                    {/* Payroll history */}
-                    <div className="apple-card p-5">
-                      <h4 className="font-bold text-gray-800 mb-3">{tr553?'Maaş Geçmişi':'Payroll History'}</h4>
-                      {myPayrolls.length === 0 ? (
-                        <p className="text-sm text-gray-400 text-center py-6">{tr553?'Bordro kaydı bulunamadı.':'No payroll records found.'}</p>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead><tr className="border-b border-gray-100">
-                              <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{tr553?'Dönem':'Period'}</th>
-                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Brüt':'Gross'}</th>
-                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Kesinti':'Deductions'}</th>
-                              <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Net':'Net'}</th>
-                              <th className="py-2 text-center text-xs font-bold text-gray-400 uppercase">{tr553?'Durum':'Status'}</th>
-                            </tr></thead>
-                            <tbody>
-                              {myPayrolls.slice(0,12).map((p,i) => (
-                                <tr key={i} className="border-b border-gray-50">
-                                  <td className="py-2 text-gray-700">{p.year}/{String(p.month).padStart(2,'0')}</td>
-                                  <td className="py-2 text-right tabular-nums text-gray-600">₺{((p.baseSalary||0)+(p.bonus||0)).toLocaleString('tr-TR')}</td>
-                                  <td className="py-2 text-right tabular-nums text-red-500">-₺{(p.deductions||0).toLocaleString('tr-TR')}</td>
-                                  <td className="py-2 text-right tabular-nums font-bold text-emerald-700">₺{(p.netSalary||0).toLocaleString('tr-TR')}</td>
-                                  <td className="py-2 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status==='Ödendi'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'}`}>{p.status}</span></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                    {/* Mesai summary */}
-                    {p552Records.filter(r=>r.employeeName===myEmp.name).length > 0 && (
-                      <div className="apple-card p-5">
-                        <h4 className="font-bold text-gray-800 mb-3">{tr553?'Mesai Özeti (Son 30 Gün)':'Attendance Summary (Last 30 Days)'}</h4>
-                        {(() => {
-                          const cut = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
-                          const myRecs = p552Records.filter(r=>r.employeeName===myEmp.name && r.date>=cut);
-                          const totalH = myRecs.reduce((s,r)=>s+(r.totalHours||0),0);
-                          return (
-                            <div className="grid grid-cols-3 gap-3">
-                              {[
-                                { label: tr553?'Gün':'Days', v: myRecs.length, color:'text-blue-600' },
-                                { label: tr553?'Toplam Saat':'Total Hours', v: `${totalH.toFixed(0)}h`, color:'text-emerald-600' },
-                                { label: tr553?'Geç Giriş':'Late', v: myRecs.filter(r=>r.status==='Geç Giriş').length, color:'text-orange-600' },
-                              ].map(k=>(
-                                <div key={k.label} className="text-center">
-                                  <p className={`text-2xl font-bold ${k.color}`}>{k.v}</p>
-                                  <p className="text-xs text-gray-400 mt-0.5">{k.label}</p>
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-                  </>
-                )}
-              </motion.div>
-            );
-          })()}
+          {/* ── Phase 553: Çalışan Self-Servis Portalı ── */}
+          {activeTab === 'selfservis' && (
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Self-servis bloğu SelfservisPage'e çıkarıldı (2026-09-03, App.tsx bölme). */}
+              <SelfservisPage
+                currentLanguage={currentLanguage} user={user}
+                employees={employees} payrolls={payrolls} p552Records={p552Records}
+              />
+            </React.Suspense>
+          )}
 
           {/* ── İnsan Kaynakları ── */}
           {activeTab === 'ik' && (
@@ -5407,46 +5226,15 @@ function AppContent() {
 
           {/* ── Hukuk & Uyum ── */}
           {activeTab === 'hukuk' && (
-            <motion.div key="hukuk" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('hukuk') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Hukuk & Uyum':'Legal & Compliance'} /> : (
-                <>
-                  {!hasFullAccess('hukuk') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <ModuleHeader 
-                    title={currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal & Compliance'} 
-                    subtitle={currentLanguage === 'tr' ? 'Sözleşmeler, davalar ve KVKK uyum süreçleri' : 'Contracts, cases and GDPR compliance processes'}
-                    icon={Scale}
-                  />
-                  {/* ── Phase 598: Sözleşme Yenileme Uyarıları ─────────────────── */}
-                  {(() => {
-                    const tr598 = currentLanguage === 'tr';
-                    const today598 = new Date().toISOString().slice(0,10);
-                    const alertDate598 = new Date(Date.now()+p598AlertDays*86400000).toISOString().slice(0,10);
-                    // Use contracts from LegalModule's Firestore — but we don't have them directly
-                    // Instead show alert config + derive from p597Contracts as a proxy
-                    const expiringContracts = p597Contracts.filter(c=>c.endDate&&c.endDate>=today598&&c.endDate<=alertDate598);
-                    const expiredContracts = p597Contracts.filter(c=>c.endDate&&c.endDate<today598);
-                    if (expiringContracts.length===0&&expiredContracts.length===0&&p597Contracts.length===0) return null;
-                    return (
-                      <div className="apple-card p-5">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-bold text-gray-900 text-sm">{tr598?'📋 Sözleşme Yenileme Uyarıları':'📋 Contract Renewal Alerts'}</h3>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500">{tr598?'Uyarı eşiği:':'Alert threshold:'}</span>
-                            <input type="number" value={p598AlertDays} onChange={e=>setP598AlertDays(Number(e.target.value))} className="apple-input px-2 py-1 text-xs w-14 text-right" />
-                            <span className="text-xs text-gray-500">{tr598?'gün':'days'}</span>
-                          </div>
-                        </div>
-                        {expiredContracts.length>0&&(<div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-2"><p className="text-xs text-red-700 font-bold">❌ {expiredContracts.length} {tr598?'sözleşme süresi dolmuş:':'contract(s) expired:'} {expiredContracts.map(c=>c.customerName).join(', ')}</p></div>)}
-                        {expiringContracts.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"><p className="text-xs text-amber-700 font-bold">⚠️ {expiringContracts.length} {tr598?`sözleşme ${p598AlertDays} gün içinde sona eriyor:`:`contract(s) expiring in ${p598AlertDays} days:`} {expiringContracts.map(c=>`${c.customerName} (${c.endDate})`).join(', ')}</p></div>)}
-                        {expiringContracts.length===0&&expiredContracts.length===0&&(<p className="text-center py-4 text-gray-400 text-xs">{tr598?'Yaklaşan sözleşme yenileme yok.':'No upcoming contract renewals.'}</p>)}
-                        <p className="text-[10px] text-gray-400 mt-2">* {tr598?'Gelir Tanıma modülünde kayıtlı sözleşmeler izlenmektedir.':'Contracts from Revenue Recognition module are monitored here.'}</p>
-                      </div>
-                    );
-                  })()}
-                  <LegalModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('hukuk')} />
-                </>
-              )}
-            </motion.div>
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Hukuk bloğu (Phase 598 sözleşme uyarıları + LegalModule) HukukPage'e çıkarıldı (2026-09-03, App.tsx bölme). */}
+              <HukukPage
+                currentLanguage={currentLanguage} user={user}
+                canAccess={canAccess} hasFullAccess={hasFullAccess}
+                p597Contracts={p597Contracts}
+                p598AlertDays={p598AlertDays} setP598AlertDays={setP598AlertDays}
+              />
+            </React.Suspense>
           )}
 
           {/* ── Proje Yönetimi ── */}
@@ -5496,15 +5284,13 @@ function AppContent() {
 
           {/* ── Kurumsal Yönetim ── */}
           {activeTab === 'kurumsal' && (
-            <motion.div key="kurumsal" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('kurumsal') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Kurumsal Yönetim':'Corporate Governance'} /> : (
-                <>
-                  {!hasFullAccess('kurumsal') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
-                  <CorporateGovernanceModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kurumsal')} userRole={userRole} onNavigate={setActiveTab} />
-
-                </>
-              )}
-            </motion.div>
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              {/* Kurumsal blok KurumsalPage'e çıkarıldı (2026-09-03, App.tsx bölme). */}
+              <KurumsalPage
+                currentLanguage={currentLanguage} user={user} userRole={userRole}
+                canAccess={canAccess} hasFullAccess={hasFullAccess} setActiveTab={setActiveTab}
+              />
+            </React.Suspense>
           )}
 
           {/* ── Holding grubu: Otomatik Hatırlatıcı / Holding / IFRS15 / Finans Paneli /

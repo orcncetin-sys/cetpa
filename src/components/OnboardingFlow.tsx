@@ -209,7 +209,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
         <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-purple-600/15 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1.5s' }} />
       </div>
 
-      <div className="relative z-10 w-full max-w-2xl mx-4">
+      <div className="relative z-10 w-full max-w-2xl mx-4 max-h-[94dvh] overflow-y-auto">
         {/* Progress bar */}
         <div className="flex items-center justify-center gap-2 mb-8">
           {steps.map((s, i) => (

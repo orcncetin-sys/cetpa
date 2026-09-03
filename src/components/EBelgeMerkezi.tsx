@@ -844,7 +844,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar }: EBel
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             >
               {/* Modal header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
