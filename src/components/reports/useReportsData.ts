@@ -10,6 +10,7 @@
  * elle yazıp senkron tutma yükü yok.
  */
 import { itemCostTRY, itemPriceTRY } from '../../utils/cost';
+import { siparisTarih } from '../../utils/siparis';
 import React, { useState, useEffect, useMemo } from 'react';
 import { zamanMs } from '../../utils/zaman';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../../utils/pdfTheme';
@@ -268,7 +269,7 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
         // yerel ayarina gore 3 ondalik basiyordu ("80.000,016 TL").
         `${(Number(o.totalPrice) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`,
         currentT[o.status.toLowerCase()] || o.status,
-        o.syncedAt ? format(typeof (o.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (o.syncedAt as { toDate: () => Date }).toDate() : new Date(o.syncedAt as unknown as string | number | Date), 'dd.MM.yyyy') : ''
+        (() => { const d = siparisTarih(o); return d ? format(d, 'dd.MM.yyyy') : '—'; })(),   // syncedAt yoksa createdAt/orderDate (2026-09-04)
       ]),
       startY: govdeY,
     });

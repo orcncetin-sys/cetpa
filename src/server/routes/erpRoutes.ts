@@ -157,14 +157,28 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
       for (const p of products) {
         const a = (p.attributes as Record<string, unknown>) || {};
         const sku = ((a.code as string) || String(p.id)).trim();
-        const listPrice = Number(a.list_price ?? 0);
+        // ALAN YOKSA DOKUNMA (2026-09-04 denetimi) — crons.ts'teki Mikro senkronunda
+        // çözülmüş desenin aynısı. Eskiden `?? 0` / `?? 20` vardı: Paraşüt yanıtında
+        // fiyat/stok/KDV alanı gelmediğinde `batch.update` MEVCUT envanter kaydını
+        // 0 TL fiyat ve 0 stokla eziyordu. Dış sistemde alan yoksa değer 0 değil,
+        // BİLİNMİYOR'dur (CLAUDE.md: "sayısal alanda ?? 0 YASAK").
+        const sayiVeya = (v: unknown): number | null => {
+          if (v == null || v === '') return null;
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        };
+        const listPrice = sayiVeya(a.list_price);
+        const stokAdet  = sayiVeya(a.stock_count ?? a.inventory_level);
+        const kdv       = sayiVeya(a.vat_rate);
         const fields = {
           name: (a.name as string) || sku,
           unit: (a.unit as string) || 'ADET',
-          vatRate: Number(a.vat_rate ?? 20),
-          stockLevel: Number(a.stock_count ?? a.inventory_level ?? 0),
-          price: listPrice,
-          prices: { 'Retail': listPrice, 'B2B Standard': listPrice, 'B2B Premium': listPrice, 'Dealer': listPrice },
+          ...(kdv !== null ? { vatRate: kdv } : {}),
+          ...(stokAdet !== null ? { stockLevel: stokAdet } : {}),
+          ...(listPrice !== null ? {
+            price: listPrice,
+            prices: { 'Retail': listPrice, 'B2B Standard': listPrice, 'B2B Premium': listPrice, 'Dealer': listPrice },
+          } : {}),
           parasutId: String(p.id), source: 'parasut',
           updatedAt: C.pgServerTimestamp(),
           companyId, // güncellemede de etiketle (self-heal)

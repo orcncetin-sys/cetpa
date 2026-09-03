@@ -90,12 +90,16 @@ export function exportInventoryCSV(inventory: InventoryItem[], lang: string = 't
     [tr ? 'Ürün Adı'           : 'Product Name']:    i.name,
     [tr ? 'SKU'                : 'SKU']:             i.sku,
     [tr ? 'Kategori'           : 'Category']:        i.category ?? '',
-    [tr ? 'Stok'               : 'Stock']:           i.stockLevel ?? 0,
-    [tr ? 'Min. Stok'          : 'Min. Stock']:      i.lowStockThreshold ?? 0,
-    [tr ? 'Fiyat - Perakende (₺)': 'Retail (₺)']:   i.prices?.['Retail']       ?? i.price ?? 0,
-    [tr ? 'Fiyat - B2B Std (₺)': 'B2B Std (₺)']:   i.prices?.['B2B Standard'] ?? 0,
-    [tr ? 'Fiyat - B2B Prem (₺)':'B2B Prem (₺)']:  i.prices?.['B2B Premium']  ?? 0,
-    [tr ? 'Fiyat - Bayi (₺)'  : 'Dealer (₺)']:      i.prices?.['Dealer']       ?? 0,
+    // BOS ALAN 0 DEGIL, BOS HUCRE (2026-09-04 denetimi): `?? 0` yuzunden
+    // "fiyat tanimli degil" ile "fiyati 0 TL" Excel'de ayirt edilemiyordu —
+    // dis sisteme/musteriye giden dosyada bedava urun gibi gorunuyordu.
+    // Bos hucre, hesap tablosunda toplama da girmez.
+    [tr ? 'Stok'               : 'Stock']:           i.stockLevel ?? '',
+    [tr ? 'Min. Stok'          : 'Min. Stock']:      i.lowStockThreshold ?? '',
+    [tr ? 'Fiyat - Perakende (₺)': 'Retail (₺)']:   i.prices?.['Retail']       ?? i.price ?? '',
+    [tr ? 'Fiyat - B2B Std (₺)': 'B2B Std (₺)']:   i.prices?.['B2B Standard'] ?? '',
+    [tr ? 'Fiyat - B2B Prem (₺)':'B2B Prem (₺)']:  i.prices?.['B2B Premium']  ?? '',
+    [tr ? 'Fiyat - Bayi (₺)'  : 'Dealer (₺)']:      i.prices?.['Dealer']       ?? '',
     [tr ? 'Depo'               : 'Warehouse']:       i.warehouseId ?? '',
     [tr ? 'Tedarikçi'          : 'Supplier']:        i.supplier ?? '',
   }));

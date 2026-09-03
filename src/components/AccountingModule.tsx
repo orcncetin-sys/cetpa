@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
-import { odemeTakipli } from '../utils/siparis';
+import { odemeTakipli, siparisTarihMs } from '../utils/siparis';
 import { kurCevir } from '../utils/currency';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
@@ -1848,9 +1848,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       else if (satisSortKey === 'faturali') cmp = (a.faturali ? 1 : 0) - (b.faturali ? 1 : 0);
       else if (satisSortKey === 'kdvOran') cmp = (a.kdvOran || 0) - (b.kdvOran || 0);
       else {
-        const ad = (a.syncedAt as { toDate?: () => Date })?.toDate ? (a.syncedAt as { toDate: () => Date }).toDate().toISOString() : '';
-        const bd = (b.syncedAt as { toDate?: () => Date })?.toDate ? (b.syncedAt as { toDate: () => Date }).toDate().toISOString() : '';
-        cmp = ad.localeCompare(bd);
+        // Paylasilan siparisTarihMs (2026-09-04): yalniz `syncedAt` okundugunda
+        // Mikro faturasindan turetilen siparisler '' anahtariyla ayni kovaya
+        // dusuyor ve tarih sutunu dolu gorunurken siralama rastgele kaliyordu.
+        cmp = siparisTarihMs(a) - siparisTarihMs(b);
       }
       return satisSortDir === 'asc' ? cmp : -cmp;
     });

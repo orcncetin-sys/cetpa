@@ -196,7 +196,10 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
             lowStockThreshold: 5,
             prices: mikroPrices,
             // Eski tek-fiyat alanı, Retail ile hizalı tutulur (bazı ekranlar okuyor).
-            price: mikroPrices.Retail ?? 0,
+            // Mikro'da fiyat kaydı yoksa alanı HİÇ YAZMA: `?? 0` ürünü envantere
+            // "0 TL" fiyatla sokuyordu ve satış ekranlarında bedava görünüyordu
+            // (2026-09-04 denetimi). Fiyat sonradan gelince senkron doldurur.
+            ...(mikroPrices.Retail != null ? { price: mikroPrices.Retail } : {}),
             source: 'mikro_cron', createdAt: deps().pgServerTimestamp(),
           });
           stokYeni++;
