@@ -25,6 +25,7 @@ import {
   onSnapshot, serverTimestamp
 } from '../lib/dbClient';
 import { db } from '../firebase';
+import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
 import { sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 
@@ -78,6 +79,13 @@ interface Props {
     invoiceDate?: string;
     dueDate?: string;
     paymentStatus?: string;
+    /** 'mikro-fatura' = Mikro satış faturasından türetildi; `paid` alanı YOKTUR,
+     *  tahsilat Mikro cari hesapta izlenir — gecikmiş alacak sayılamaz. */
+    source?: string;
+    orderNumber?: string;
+    shopifyOrderId?: string | number;
+    syncedAt?: unknown;
+    orderDate?: unknown;
     createdAt?: unknown;
   }>;
 }
@@ -181,6 +189,53 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
 
   const fmtTRY = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
 
+  // ── Siparişlerden içe aktarma (2026-09-04 denetimi) ──────────────────────
+  // `orders` prop'u ALINIYOR ve tipinde "auto-populate overdue invoices" yazıyordu
+  // ama gövdede HİÇ KULLANILMIYORDU: vaat edilen otomatik doldurma hiç yazılmamış,
+  // kullanıcı her gecikmiş faturayı elle giriyordu ("çalışmayan modül" şikâyeti).
+  //
+  // Otomatik DEĞİL, düğmeyle: sürpriz kayıt üretmez. Süzgeçler:
+  //  - `odemeTakipli`: Mikro faturasından türetilen siparişte `paid` YOKTUR,
+  //    tahsilat Mikro cari hesapta izlenir — onları "gecikmiş alacak" saymak
+  //    355 sahte kayıt üretirdi.
+  //  - vadesi geçmiş olmalı (dueDate varsa o, yoksa sipariş tarihi + 30 gün)
+  //  - aynı belge no ile zaten eklenmiş olanlar atlanır (düğme tekrar basılabilir)
+  const mevcutFaturaNolari = new Set(invoices.map(i => i.invoiceNo).filter(Boolean));
+  const bugunMs538 = Date.now();
+  const vadeTarihi = (o: { dueDate?: string; syncedAt?: unknown; createdAt?: unknown; orderDate?: unknown }): Date | null => {
+    if (o.dueDate) { const d = new Date(o.dueDate); return isNaN(d.getTime()) ? null : d; }
+    const t = siparisTarih(o);
+    if (!t) return null;                       // tarihi bilinmeyen sipariş içe AKTARILMAZ
+    const v = new Date(t); v.setDate(v.getDate() + 30); return v;   // varsayılan 30 gün vade
+  };
+  const iceAktarilabilir = orders.filter(o => {
+    if (!odemeTakipli(o)) return false;
+    if (o.paymentStatus === 'Ödendi' || o.paymentStatus === 'Paid') return false;
+    if (mevcutFaturaNolari.has(gorunenSiparisNo(o))) return false;
+    const vade = vadeTarihi(o);
+    return !!vade && vade.getTime() < bugunMs538 && (o.totalPrice ?? 0) > 0;
+  });
+
+  const siparislerdenIceAktar = async () => {
+    for (const o of iceAktarilabilir) {
+      const vade = vadeTarihi(o);
+      const t = siparisTarih(o);
+      if (!vade || !t) continue;               // guard: yukarıdaki süzgeç zaten eler
+      await addDoc(collection(db, 'dunningInvoices'), {
+        invoiceNo: gorunenSiparisNo(o),
+        customerName: o.customerName ?? '',
+        customerEmail: '', customerPhone: '',
+        amount: o.totalPrice ?? 0, currency: 'TRY',
+        dueDate: vade.toISOString().slice(0, 10),
+        issueDate: t.toISOString().slice(0, 10),
+        status: 'Açık',
+        siparisId: o.id,
+        activityLog: [{ date: new Date().toISOString(), action: tr ? 'Siparişlerden içe aktarıldı' : 'Imported from orders' }],
+        createdAt: serverTimestamp(),
+      });
+    }
+  };
+
   // ── Save invoice ──────────────────────────────────────────────────────────
   const saveInvoice = async () => {
     if (!invoiceDraft.customerName.trim() || !invoiceDraft.amount) return;
@@ -231,6 +286,13 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
         actionButton={isAuthenticated ? (
           <div className="flex gap-2">
             <button onClick={() => setShowPolicyEditor(true)} className="apple-button-secondary px-3 py-2 text-xs">{tr ? 'Politika Ekle' : 'Add Policy'}</button>
+            {iceAktarilabilir.length > 0 && (
+              <button onClick={siparislerdenIceAktar} className="apple-button-secondary px-4 py-2 text-sm flex items-center gap-1.5"
+                title={tr ? 'Vadesi geçmiş, ödemesi Cetpa\'da izlenen siparişleri gecikmiş fatura listesine ekler' : 'Imports overdue orders tracked in Cetpa'}>
+                <Plus className="w-3.5 h-3.5" />
+                {tr ? `Siparişlerden Aktar (${iceAktarilabilir.length})` : `Import from Orders (${iceAktarilabilir.length})`}
+              </button>
+            )}
             <button onClick={() => setShowAddInvoice(true)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
               <Plus className="w-3.5 h-3.5" />{tr ? 'Fatura Ekle' : 'Add Invoice'}
             </button>

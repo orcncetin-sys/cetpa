@@ -8,6 +8,7 @@ import { format, subMonths, startOfMonth } from 'date-fns';
 import { tr as trLocale, enUS } from 'date-fns/locale';
 import { TrendingUp, TrendingDown, ShoppingCart, Users, Package, DollarSign } from 'lucide-react';
 import { zamanMs } from '../utils/zaman';
+import { siparisTarih } from '../utils/siparis';
 
 interface Order {
   status?: string;
@@ -69,11 +70,15 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
     // Tarihi cozulemeyen siparis HICBIR aya sayilmaz (eskiden hepsi bu aya
     // dusuyordu). Bir aya ait oldugu bilinmiyorsa o ayin cirosu olarak
     // gosterilemez — CLAUDE.md: "sahte kesinlik gosterme".
+    // 2026-09-04: tarih artik `siparisTarihMs` ile cozuluyor (syncedAt -> createdAt
+    // -> orderDate). Yalniz `syncedAt` okundugunda Mikro faturasindan turetilen
+    // siparisler hicbir aya girmiyor ama totalRevenue'ya giriyordu; aylik toplamlar
+    // genel toplami tutmuyordu.
     const thisMonthRevenue = activeOrders
-      .filter(o => { const ms = zamanMs(o.syncedAt); return ms !== null && ms >= thisMonth.getTime(); })
+      .filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= thisMonth.getTime(); })
       .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
     const lastMonthRevenue = activeOrders
-      .filter(o => { const ms = zamanMs(o.syncedAt); return ms !== null && ms >= lastMonth.getTime() && ms < thisMonth.getTime(); })
+      .filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= lastMonth.getTime() && d.getTime() < thisMonth.getTime(); })
       .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
 
     const revenueGrowth = lastMonthRevenue > 0
@@ -102,9 +107,8 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
       });
     }
     orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-      const ms = zamanMs(o.syncedAt);
-      if (ms === null) return;   // aylik grafige tarihsiz kayit girmez
-      const d = new Date(ms);
+      const d = siparisTarih(o);
+      if (!d) return;            // aylik grafige tarihsiz kayit girmez
       const idx = months.findIndex(m => format(d, 'MMM yyyy') === format(m.date, 'MMM yyyy'));
       if (idx !== -1) {
         months[idx].revenue += Number(o.totalPrice) || 0;

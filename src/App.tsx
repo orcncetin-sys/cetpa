@@ -5626,10 +5626,14 @@ function AppContent() {
           {activeTab === 'mrp' && (
             <motion.div key="mrp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               <React.Suspense fallback={<div className="apple-card p-8 text-center text-gray-400">Yükleniyor…</div>}>
+                {/* CANLI VERI (2026-09-04): buraya eskiden `productionOrders={[]}` geciliyordu
+                    ve MRP II ekrani her zaman bos gorunuyordu — oysa `productionOrders`
+                    koleksiyonunun dinleyicisi (p624Orders) zaten mevcuttu.
+                    `boms` HALA bos: projede urun agaci (BOM) veri kaynagi yok. */}
                 <MRPModule
                   currentLanguage={currentLanguage}
                   isAuthenticated={!!user}
-                  productionOrders={[]}
+                  productionOrders={p624Orders}
                   boms={[]}
                   inventory={inventory}
                 />
@@ -5725,7 +5729,7 @@ function AppContent() {
                     subtitle={currentLanguage === 'tr' ? 'Lot kayıtları, seri numaraları, hareketler ve karantina yönetimi' : 'Lot records, serial numbers, movements and quarantine management'}
                     icon={Hash}
                   />
-                  <LotSeriModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('lotseri')} />
+                  <LotSeriModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('lotseri')} inventory={inventory} leads={leads} />
                 </>
               )}
             </motion.div>

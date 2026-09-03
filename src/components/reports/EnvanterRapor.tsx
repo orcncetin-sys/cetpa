@@ -2423,6 +2423,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           return new Date(v as string|number).getTime();
         };
         const monthCOGS: Record<string, number> = {};
+        let kapsamDisi348 = 0;
         orders.forEach(o => {
           const d = new Date(toTs348(o.createdAt));
           const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -2430,7 +2431,13 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             const item = inventory.find(i => i.sku === li.sku);
             return s + (li.costPrice || (item ? itemCostTRY(item, exchangeRates) : 0)) * (li.quantity || 1);
           }, 0);
-          monthCOGS[key] = (monthCOGS[key] || 0) + (cogs || (o.totalPrice || 0) * 0.55);
+          // KALEM VERISI YOKSA MALIYET BILINMIYOR (2026-09-04 denetimi).
+          // Eskiden cironun %55'i maliyet sayiliyordu; Mikro faturasindan turetilen
+          // siparislerde kalem HIC OLMADIGI icin kart "maliyet egilimi" adi altinda
+          // aslinda CIRO egilimi ciziyordu. Simdi o siparisler kapsam disi ve
+          // kac tanesinin disarida kaldigi kartta yaziyor.
+          if (cogs > 0) monthCOGS[key] = (monthCOGS[key] || 0) + cogs;
+          else kapsamDisi348++;
         });
         const keys348 = Object.keys(monthCOGS).sort().slice(-8);
         if (keys348.length < 3) return null;
@@ -2440,6 +2447,13 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Aylık Satılan Malın Maliyeti Eğilimi' : 'Monthly COGS Trend'}</h3>
             <p className="text-xs text-gray-500 mb-4">Cost of Goods Sold · {keys348.length}-month total: {fmtAna(totalCOGS,'full',0)}</p>
+            {kapsamDisi348 > 0 && (
+              <p className="text-[10px] text-amber-600 -mt-3 mb-3">
+                {currentLanguage === 'tr'
+                  ? `${kapsamDisi348} sipariş kalem maliyeti bilinmediği için hesap DIŞINDA (Mikro faturasından türetilen kayıtlarda kalem bilgisi yok).`
+                  : `${kapsamDisi348} orders excluded — no line-item cost data.`}
+              </p>
+            )}
             <div className="flex items-end gap-2 h-24">
               {keys348.map(k => (
                 <div key={k} className="flex-1 flex flex-col items-center gap-0.5">

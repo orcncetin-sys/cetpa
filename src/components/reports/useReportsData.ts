@@ -284,3 +284,42 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
 export type ReportsCtx = ReturnType<typeof useReportsData>;
 
 export { itemCostTRY, itemPriceTRY, cevrilemeyenler, cevrilemeyenMesaji } from '../../utils/cost';
+
+/**
+ * brutMarj — TEK KAYNAK brüt marj hesabı (2026-09-04 denetimi).
+ *
+ * NEDEN VAR: marj kartları maliyeti `lineItems`ten topluyordu. Mikro
+ * faturasından türetilen ve RaporlarPage'in sentetik olarak ürettiği
+ * siparişlerde `lineItems` HİÇ YOKTUR — boş dizide `reduce` 0 döndüğü için
+ * maliyet 0 sayılıyor ve marj **%100'e** şişiyordu. İnşaat malzemesi
+ * toptancısında gerçek brüt marj %15-25'tir; kart "Ø %90+" diye zümrüt-yeşil
+ * "sağlıklı" görünüyordu.
+ *
+ * KURAL (CLAUDE.md "sahte kesinlik gösterme"): kalem verisi olmayan sipariş
+ * marj hesabına GİRMEZ ve `kapsamDisi` sayacıyla raporlanır — çağıran bunu
+ * kullanıcıya söylemek zorundadır. Hiç kapsamlı sipariş yoksa `marj` null
+ * döner ('—' göster, 0 veya 100 DEĞİL).
+ *
+ * Bu hesap dört ayrı kartta kopyalanmıştı (GenelBloklar1/2, IKRapor,
+ * EnvanterRapor); her birine ayrı süzgeç eklemek "yarım düzeltme" üretirdi.
+ */
+export function brutMarj(
+  list: Array<{ totalPrice?: number; lineItems?: Array<{ inventoryId?: string; name?: string; price: number; quantity: number }> }>,
+  inventory: Parameters<typeof itemCostTRY>[0][],
+  exchangeRates: Parameters<typeof itemCostTRY>[1],
+): { ciro: number; maliyet: number; marj: number | null; kapsamDisi: number; toplamCiro: number } {
+  const toplamCiro = list.reduce((s, o) => s + (o.totalPrice || 0), 0);
+  const kapsamli = list.filter(o => (o.lineItems ?? []).length > 0);
+  const kapsamDisi = list.length - kapsamli.length;
+  const ciro = kapsamli.reduce((s, o) => s + (o.totalPrice || 0), 0);
+  const maliyet = kapsamli.reduce((s, o) =>
+    s + (o.lineItems ?? []).reduce((ls, li) => {
+      const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
+      // Kalem envanterde bulunamazsa fiyatın %60'ı yedeği KORUNDU (mevcut davranış):
+      // bu, kalemi olan ama eşleşmeyen ürün içindir — kalemi HİÇ OLMAYAN sipariş
+      // yukarıda zaten kapsam dışına alındı.
+      return ls + ((inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity);
+    }, 0), 0);
+  const marj = ciro > 0 ? Math.round(((ciro - maliyet) / ciro) * 100) : null;
+  return { ciro, maliyet, marj, kapsamDisi, toplamCiro };
+}

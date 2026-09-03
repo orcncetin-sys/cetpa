@@ -105,6 +105,12 @@ export default function RaporlarPage({
         totalAmount: f.tutar,
         createdAt: f.tarih,
         syncedAt: f.tarih,
+        // KAYNAK ETIKETI ZORUNLU (2026-09-04 denetimi): bu sentetik kayitlarda
+        // `paid` ve `lineItems` YOKTUR. Etiket olmadan `odemeTakipli()` testinden
+        // geciyorlar ve tahsilat yuzeylerinde "odenmemis alacak", marj kartlarinda
+        // "maliyeti 0" sayiliyorlardi. Etiket, tuketicilerin bu kaydin neyi
+        // BILMEDIGINI anlamasini saglar.
+        source: 'mikro-fatura',
       })) as unknown as Order[];
     return [...ordersProp, ...mikroOrders];
   }, [ordersProp, mikroFaturalar, cariAdMap]);

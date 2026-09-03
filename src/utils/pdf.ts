@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { gorunenSiparisNo, siparisTarih, siparisTarihMs } from './siparis';
 import autoTable from 'jspdf-autotable';
 
 import { Order, Lead } from '../types';
@@ -38,10 +39,13 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   doc.setTextColor(255, 255, 255);
   doc.text('SİPARİŞ / FATURA', W - 14, 15, { align: 'right' });
 
-  const dateStr = (order.syncedAt as { toDate?: () => Date })?.toDate
-    ? (order.syncedAt as { toDate: () => Date }).toDate().toLocaleDateString('tr-TR')
-    : new Date().toLocaleDateString('tr-TR');
-  const orderNo = String(order.shopifyOrderId || order.id || '').substring(0, 12);
+  // TARIHI BILMIYORSAK BUGUNU BASMA (2026-09-04 denetimi). Eskiden `?? new Date()`
+  // yedegi vardi: Mikro faturasindan turetilen siparisin PDF'inde BUGUNUN tarihi
+  // cikiyordu — musteriye giden belgede yanlis tarih. utils/zaman.ts bu tuzagi
+  // dosya basliginda "olumcul" diye belgeliyor.
+  const dateObj0 = siparisTarih(order);
+  const dateStr = dateObj0 ? dateObj0.toLocaleDateString('tr-TR') : '—';
+  const orderNo = gorunenSiparisNo(order).substring(0, 14);
 
   doc.setFontSize(8);
   doc.setFont('Roboto', 'normal');
@@ -234,11 +238,9 @@ export const exportCustomerStatement = async (
   const tableY = boxY + 34;
 
   // Sort orders by date descending
-  const sorted = [...orders].sort((a, b) => {
-    const aTs = (a.syncedAt as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
-    const bTs = (b.syncedAt as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
-    return bTs - aTs;
-  });
+  // Siralama paylasilan `siparisTarihMs` ile: `syncedAt` yoksa (Mikro turevi)
+  // eskiden 0 doner ve o kayitlar listenin sonuna yigiliyordu.
+  const sorted = [...orders].sort((a, b) => siparisTarihMs(b) - siparisTarihMs(a));
 
   const statusLabel: Record<string, { tr: string; en: string }> = {
     Pending:    { tr: 'Bekliyor',       en: 'Pending'    },
@@ -253,12 +255,12 @@ export const exportCustomerStatement = async (
     : [['Order No',   'Date',  'Status', 'Items',  'Amount (TRY)']];
 
   const body = sorted.map(o => {
-    const dateObj = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(o.syncedAt as string | number);
-    const dateStr2 = isNaN(dateObj.getTime()) ? '—' : dateObj.toLocaleDateString('tr-TR');
+    const dateObj = siparisTarih(o);
+    const dateStr2 = dateObj ? dateObj.toLocaleDateString('tr-TR') : '—';
     const itemNames = (o.lineItems ?? []).map(l => normTR(String(l.name ?? l.title ?? l.sku ?? ''))).slice(0, 2).join(', ');
     const status   = statusLabel[o.status]?.[lang] ?? o.status;
     return [
-      normTR(o.shopifyOrderId ?? o.id.slice(0, 8)),
+      normTR(gorunenSiparisNo(o)),
       dateStr2,
       status,
       normTR(itemNames || '—'),

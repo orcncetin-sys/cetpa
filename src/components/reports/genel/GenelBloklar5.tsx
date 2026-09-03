@@ -23,17 +23,25 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
           return new Date(v as string|number).getTime();
         };
         const now371 = Date.now();
-        const last90 = orders.filter(o => toTs371(o.createdAt) > now371 - 90 * 86400000);
+        // IPTAL EDILEN SIPARIS CIROYA GIRMEZ (2026-09-04 denetimi): eskiden
+        // filtrede status kontrolu yoktu ve iptaller tahmini yukari cekiyordu.
+        const gecerli371 = orders.filter(o => o.status !== 'Cancelled');
+        const last90 = gecerli371.filter(o => toTs371(o.createdAt) > now371 - 90 * 86400000);
         if (last90.length < 5) return null;
         const dailyAvg = last90.reduce((s, o) => s + (o.totalPrice || 0), 0) / 90;
-        const last30Rev = orders.filter(o => toTs371(o.createdAt) > now371 - 30 * 86400000).reduce((s, o) => s + (o.totalPrice || 0), 0);
-        const last60to30Rev = orders.filter(o => { const ts = toTs371(o.createdAt); return ts > now371 - 60 * 86400000 && ts <= now371 - 30 * 86400000; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const last30Rev = gecerli371.filter(o => toTs371(o.createdAt) > now371 - 30 * 86400000).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const last60to30Rev = gecerli371.filter(o => { const ts = toTs371(o.createdAt); return ts > now371 - 60 * 86400000 && ts <= now371 - 30 * 86400000; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const momGrowth = last60to30Rev > 0 ? (last30Rev - last60to30Rev) / last60to30Rev : 0;
-        const forecast = dailyAvg * 30 * (1 + momGrowth * 0.5);
-        const confidence = Math.min(90, Math.max(50, 70 + last90.length * 0.5));
+        const buyumeKatsayisi = 0.5;   // buyume trendinin tahmine yansitilan orani
+        const forecast = dailyAvg * 30 * (1 + momGrowth * buyumeKatsayisi);
+        // "confidence" KALDIRILDI: siparis SAYISINDAN turetilen (70 + n*0.5) bir
+        // yuzde istatistiksel guven araligi DEGILDIR — kullaniciya kesinlik
+        // uyduruyordu. Yerine tahminin neye dayandigi (kac siparis) yaziliyor.
         const bars = Array.from({length: 6}, (_, i) => ({
           label: `+${(i+1)*5}d`,
-          value: dailyAvg * (i + 1) * 5 * (1 + momGrowth * 0.3),
+          // Grafik ile bastaki rakam AYNI katsayiyi kullanir; eskiden 0.3 vs 0.5 idi
+          // ve cubuklarin toplami baslikta yazan tahmini tutmuyordu.
+          value: dailyAvg * (i + 1) * 5 * (1 + momGrowth * buyumeKatsayisi),
         }));
         const maxBar = Math.max(...bars.map(b => b.value), 1);
         return (
@@ -41,7 +49,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
             <h3 className="font-bold text-gray-800 mb-1">30-Day Revenue Forecast</h3>
             <div className="flex gap-6 mb-4">
               <div><p className="text-2xl font-black text-[#ff4000]">{fmtAna(forecast,'full',0)}</p><p className="text-[10px] text-gray-400">projected</p></div>
-              <div><p className="text-2xl font-black text-gray-700">{confidence.toFixed(0)}%</p><p className="text-[10px] text-gray-400">confidence</p></div>
+              <div><p className="text-2xl font-black text-gray-700">{last90.length}</p><p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'son 90 günde sipariş (dayanak)' : 'orders in last 90d (basis)'}</p></div>
               <div><p className="text-2xl font-black" style={{color: momGrowth >= 0 ? '#10b981' : '#ef4444'}}>{momGrowth >= 0 ? '+' : ''}{(momGrowth * 100).toFixed(1)}%</p><p className="text-[10px] text-gray-400">MoM trend</p></div>
             </div>
             <div className="flex items-end gap-2 h-16">

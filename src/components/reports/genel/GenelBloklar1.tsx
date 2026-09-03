@@ -9,7 +9,7 @@
  * Props yalnız bu dosyanın gerçekten kullandığı ctx alanlarıdır
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
-import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { itemCostTRY, brutMarj, type ReportsCtx } from '../useReportsData';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -28,25 +28,26 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
               return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
             } catch { return false; }
           });
-          const rev = mOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const cogs = mOrders.reduce((s, o) =>
-            s + (o.lineItems ?? []).reduce((ls, li) => {
-              const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-              return ls + ((inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity);
-            }, 0), 0);
-          const margin = rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0;
-          return { label, rev, cogs, margin };
+          // Kalemi olmayan siparis (Mikro fatura turevi / sentetik) marj hesabina
+          // GIRMEZ — aksi halde maliyet 0 sayilip marj %100'e sisiyordu (2026-09-04).
+          const mm = brutMarj(mOrders, inventory, exchangeRates);
+          return { label, rev: mm.ciro, cogs: mm.maliyet, margin: mm.marj, kapsamDisi: mm.kapsamDisi, toplamCiro: mm.toplamCiro };
         });
-        const avgMargin = months166.filter(m => m.rev > 0).length > 0
-          ? Math.round(months166.filter(m => m.rev > 0).reduce((s, m) => s + m.margin, 0) / months166.filter(m => m.rev > 0).length)
-          : 0;
+        // Marji BILINMEYEN ay (kalem verisi yok) ortalamaya katilmaz; hicbiri
+        // bilinmiyorsa ortalama da null'dur ('—' gosterilir, 0 degil).
+        const marjliAylar = months166.filter(m => m.margin !== null);
+        const avgMargin: number | null = marjliAylar.length > 0
+          ? Math.round(marjliAylar.reduce((s, m) => s + (m.margin as number), 0) / marjliAylar.length)
+          : null;
+        const kapsamDisiToplam = months166.reduce((s, m) => s + m.kapsamDisi, 0);
         const maxRev166 = Math.max(...months166.map(m => m.rev), 1);
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📈 Aylık Brüt Marj Trendi' : '📈 Monthly Gross Margin Trend'}</h3>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${avgMargin >= 30 ? 'bg-emerald-100 text-emerald-700' : avgMargin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
-                Ø %{avgMargin}
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${avgMargin === null ? 'bg-gray-100 text-gray-500' : avgMargin >= 30 ? 'bg-emerald-100 text-emerald-700' : avgMargin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}
+                title={kapsamDisiToplam > 0 ? (currentLanguage === 'tr' ? `${kapsamDisiToplam} sipariş kalem verisi olmadığı için marj hesabının DIŞINDA (cirosu grafikte, maliyeti bilinmiyor)` : `${kapsamDisiToplam} orders excluded from margin (no line items)`) : undefined}>
+                {avgMargin === null ? 'Ø —' : `Ø %${avgMargin}`}
               </span>
             </div>
             <div className="flex items-end gap-3 h-28 mb-3">
@@ -63,7 +64,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
                       </div>
                     </div>
                     <span className="text-[9px] text-gray-400">{m.label}</span>
-                    <span className={`text-[9px] font-bold ${m.margin >= 30 ? 'text-emerald-600' : m.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{m.margin}</span>
+                    <span className={`text-[9px] font-bold ${m.margin === null ? 'text-gray-400' : m.margin >= 30 ? 'text-emerald-600' : m.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>{m.margin === null ? '—' : `%${m.margin}`}</span>
                   </div>
                 );
               })}

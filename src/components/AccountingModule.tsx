@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
+import { odemeTakipli } from '../utils/siparis';
 import { kurCevir } from '../utils/currency';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
 import { authFetch } from '../services/authFetch';
@@ -981,8 +982,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
   // Gerçek veriden ön-doldur: alacaklar = ödenmemiş siparişler, stok = depo değeri
   const prefillWC = () => {
+    // Mikro faturasindan turetilen siparislerde `paid` YOKTUR — tahsilat gercegi
+    // Mikro cari hesabinda. Suzgec olmadan bu buton, bilinmeyeni "alacak" sayip
+    // settings/workingCapital'a KALICI yaziyordu; sonrasinda cari oran/likidite
+    // rakamlari silinmeyecek sekilde sisiyordu (2026-09-04 denetimi).
     const ar = orders
-      .filter(o => !(o as unknown as { paid?: boolean }).paid && o.status !== 'Cancelled')
+      .filter(o => !(o as unknown as { paid?: boolean }).paid && o.status !== 'Cancelled' && odemeTakipli(o))
       .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
     const stok = warehouseItems.reduce((s, w) => s + (Number(w.quantity) || 0) * (Number((w as unknown as { costPrice?: number }).costPrice) || 0), 0);
     const next = { ...workingCapital, ticariAlacaklar: Math.round(ar), stoklar: Math.round(stok) };

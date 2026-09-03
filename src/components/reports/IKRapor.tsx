@@ -39,7 +39,7 @@ import {
   type InventoryItem,
   type InventoryMovement,
 } from '../../types';
-import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
+import { itemCostTRY, itemPriceTRY, type ReportsCtx, brutMarj } from './useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 
 export default function IKRapor(ctx: ReportsCtx) {
@@ -159,7 +159,15 @@ export default function IKRapor(ctx: ReportsCtx) {
           headcount: revPerEmp188 > 0 ? Math.ceil(t.rev / revPerEmp188) : 0,
           hires: revPerEmp188 > 0 ? Math.max(0, Math.ceil(t.rev / revPerEmp188) - activeEmps188) : 0,
         }));
-        const avgSalary188 = employees.filter(e => e.status === 'Aktif' && e.salary).reduce((s, e) => s + (e.salary || 0), 0) / activeEmps188;
+        // PAY ve PAYDA AYNI KUMEDEN (2026-09-04 denetimi): pay yalniz maasi GIRILI
+        // calisanlari topluyordu, payda ise TUM aktif calisanlardi — maasi girilmemis
+        // her calisan ortalamayi asagi cekiyordu. Maasi bilinmeyen calisan ortalamaya
+        // hic girmez; hicbirinin maasi yoksa ortalama BILINMIYOR ('—'), 0 degil.
+        const maasliCalisanlar = employees.filter(e => e.status === 'Aktif' && e.salary);
+        const avgSalary188: number | null = maasliCalisanlar.length > 0
+          ? maasliCalisanlar.reduce((s, e) => s + (e.salary || 0), 0) / maasliCalisanlar.length
+          : null;
+        const maassizSayi188 = activeEmps188 - maasliCalisanlar.length;
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
@@ -173,7 +181,14 @@ export default function IKRapor(ctx: ReportsCtx) {
               </div>
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Ort. Maaş' : 'Avg Salary'}</p>
-                <p className="text-2xl font-black text-gray-800">{fmtAna(avgSalary188,'K',0)}</p>
+                <p className="text-2xl font-black text-gray-800">{avgSalary188 === null ? '—' : fmtAna(avgSalary188,'K',0)}</p>
+                {maassizSayi188 > 0 && (
+                  <p className="text-[9px] text-amber-600 mt-0.5">
+                    {currentLanguage === 'tr'
+                      ? `${maassizSayi188} çalışanın maaşı girilmemiş — ortalamaya dahil değil`
+                      : `${maassizSayi188} without salary — excluded`}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-3">
@@ -605,14 +620,10 @@ export default function IKRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'ik' && employees.length > 0 && orders.length >= 3 && inventory.length > 0 && (() => {
         const activeEmps253 = employees.filter(e => e.status === 'Aktif').length || 1;
-        const totalGross253 = orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => {
-          const rev = o.totalPrice || 0;
-          const cogs = (o.lineItems ?? []).reduce((ls, li) => {
-            const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            return ls + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
-          }, 0);
-          return s + (rev - cogs);
-        }, 0);
+        // Ortak brutMarj (2026-09-04): kalem verisi olmayan siparisler kapsam disi;
+        // aksi halde brut kar = ciro sayilip calisan basi katma deger sisiyordu.
+        const marj253 = brutMarj(orders.filter(o => o.status !== 'Cancelled'), inventory, exchangeRates);
+        const totalGross253 = marj253.ciro - marj253.maliyet;
         const grossPerEmp = Math.round(totalGross253 / activeEmps253);
         const revPerEmp253 = Math.round(orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0) / activeEmps253);
         const totalPayroll253 = employees.filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);

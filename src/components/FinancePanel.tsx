@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves, Info } from 'lucide-react';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { zamanMs } from '../utils/zaman';
+import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { kurCevir } from '../utils/currency';
 
 interface Order {
@@ -19,6 +20,9 @@ interface Order {
   // cikardi). Cozumleme `zamanMs` ile yapiliyor.
   syncedAt?: unknown;
   createdAt?: unknown;
+  /** 'mikro-fatura' = Mikro satis faturasindan turetildi; `paid` alani YOKTUR.
+   *  Alan zaten okunuyordu ama tipte yoktu ve `as` cast'iyle erisiliyordu. */
+  source?: string;
 }
 
 interface FinancePanelProps {
@@ -70,7 +74,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // Çift sayım koruması (2026-09-01): faturadan türetilen siparişler dışlanır —
   // aşağıda mikroCiro zaten aynı faturaları topluyor.
   const totalRevenue = orders
-    .filter(o => (o as { source?: string }).source !== 'mikro-fatura')
+    .filter(o => odemeTakipli(o))   // cift sayim korumasi — mikroCiro ayni faturalari topluyor
     .reduce((sum, o) => sum + (o.totalPrice || 0), 0);
   const totalCost    = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
   const profit       = totalRevenue - totalCost;
@@ -130,10 +134,17 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   ];
 
   // Phase 98: Unpaid revenue analytics
-  const unpaidOrders  = orders.filter(o => !o.paid && o.status !== 'Cancelled');
+  // YARIM DUZELTME DUZELTILDI (2026-09-04): yukaridaki totalRevenue mikro-fatura
+  // turevlerini disliyordu ama bu tahsilat hesaplari dislamiyordu — o kayitlarda
+  // `paid` YOK, dolayisiyla hepsi "odenmemis" sayilip tahsilat orani cokuyordu.
+  const odemeIzlenen  = orders.filter(o => odemeTakipli(o));
+  const unpaidOrders  = odemeIzlenen.filter(o => !o.paid && o.status !== 'Cancelled');
   const unpaidRevenue = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const paidRevenue   = orders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const collectionRate = totalRevenue > 0 ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
+  const paidRevenue   = odemeIzlenen.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+  // Payda da ayni kumeden gelmeli: aksi halde pay (yalniz izlenen) ile payda
+  // (izlenen + izlenmeyen) farkli kumelerden olur ve oran yapay olarak duser.
+  const izlenenCiro   = odemeIzlenen.reduce((s, o) => s + (o.totalPrice || 0), 0);
+  const collectionRate = izlenenCiro > 0 ? Math.round((paidRevenue / izlenenCiro) * 100) : 0;
 
   // ── Phase 127: Financial Health Score ───────────────────────────────────
   const marginPct = totalRevenue > 0 ? Math.round(((totalRevenue - totalCost) / totalRevenue) * 100) : 0;
@@ -368,8 +379,11 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
             return ms >= weekStart.getTime() && ms < weekEnd.getTime();
           });
 
-          const collected = relevant.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const expected  = relevant.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+          // Tahsilat izlenmeyen (mikro-fatura turevi) kayitlar nakit akisina
+          // "beklenen giris" olarak yazilamaz — o para Mikro'da tahsil edilmis olabilir.
+          const izlenen   = relevant.filter(o => odemeTakipli(o));
+          const collected = izlenen.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+          const expected  = izlenen.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
           const inflow    = isFuture ? expected : collected;
 
           return { weekOffset, isCurrent, isFuture, inflow, collected, expected, label: weekLabel(weekOffset * 7) };
@@ -469,7 +483,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 {recentOrders.map((o, i) => (
                   <tr key={o.id || i} className="hover:bg-gray-50/50 transition-all">
                     <td className="py-3.5 px-5 font-mono text-xs text-gray-600">
-                      #{String(o.shopifyOrderId || o.id || '').slice(-8) || '—'}
+                      {gorunenSiparisNo(o)}
                     </td>
                     <td className="py-3.5 px-5 font-medium text-gray-800 hidden sm:table-cell">{o.customerName || '—'}</td>
                     <td className="py-3.5 px-5 text-right font-bold text-gray-900">

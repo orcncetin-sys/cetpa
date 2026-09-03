@@ -3330,9 +3330,15 @@ export default function OrdersPage({
                       return;
                     }
                     try {
-                      await addDoc(collection(db, 'orderReturns'), {
+                      // KOLEKSIYON DUZELTILDI (2026-09-04): burasi `orderReturns`e
+                      // yaziyordu ama ayni sayfadaki Iade Yonetimi sekmesi (satir 279)
+                      // `salesReturns` dinliyor — kullanici "Iade kaydi olusturuldu"
+                      // toast'ini goruyor, sekmeye gidince kayit YOK. `orderReturns`
+                      // koleksiyonunu okuyan tek bir yer bile yoktu.
+                      // Durum degeri de p575 sozlugune uyduruldu ('Pending' -> 'Bekliyor').
+                      await addDoc(collection(db, 'salesReturns'), {
                         orderId: o.id, customerName: o.customerName ?? '', amount: returnAmount,
-                        items: returnItems, reason: returnReason, status: 'Pending',
+                        items: returnItems, reason: returnReason, status: 'Bekliyor',
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,
                         createdAt: serverTimestamp(),
                       });

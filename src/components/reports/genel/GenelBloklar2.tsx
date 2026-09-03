@@ -9,7 +9,7 @@
  * Props yalnız bu dosyanın gerçekten kullandığı ctx alanlarıdır
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
-import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { type Order } from '../../../types';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
@@ -246,14 +246,11 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const prevMonthStart235 = new Date(now235.getFullYear(), now235.getMonth() - 1, 1);
         const prevMonthEnd235 = new Date(now235.getFullYear(), now235.getMonth(), 0, 23, 59, 59);
         const currMonthStart235 = new Date(now235.getFullYear(), now235.getMonth(), 1);
+        // Ortak brutMarj (2026-09-04): kalemi olmayan siparis kapsam disidir,
+        // aksi halde maliyet 0 sayilip marj %100'e sisiyordu.
         const calcMargin = (ordersList: Order[]) => {
-          const rev = ordersList.reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const cogs = ordersList.reduce((s, o) =>
-            s + (o.lineItems ?? []).reduce((ls, li) => {
-              const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-              return ls + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
-            }, 0), 0);
-          return { rev, cogs, margin: rev > 0 ? Math.round(((rev - cogs) / rev) * 100) : 0, gross: rev - cogs };
+          const m = brutMarj(ordersList, inventory, exchangeRates);
+          return { rev: m.ciro, cogs: m.maliyet, margin: m.marj, gross: m.ciro - m.maliyet, kapsamDisi: m.kapsamDisi };
         };
         const filterOrders = (start: Date, end: Date) => orders.filter(o => {
           if (o.status === 'Cancelled') return false;
@@ -265,6 +262,10 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const prev235 = calcMargin(filterOrders(prevMonthStart235, prevMonthEnd235));
         const curr235 = calcMargin(filterOrders(currMonthStart235, new Date()));
         if (prev235.rev === 0 && curr235.rev === 0) return null;
+        // Marj koprusu iki ayin da marjini BILMEYI gerektirir. Kalem verisi olmayan
+        // (Mikro turevi) siparislerden olusan bir ayda marj null'dur — o durumda
+        // koprü uydurma bir "etki" ayristirmasi yapmak yerine hic gosterilmez.
+        if (prev235.margin === null || curr235.margin === null) return null;
         const revChange = curr235.rev - prev235.rev;
         const grossChange = curr235.gross - prev235.gross;
         const marginChange = curr235.margin - prev235.margin;

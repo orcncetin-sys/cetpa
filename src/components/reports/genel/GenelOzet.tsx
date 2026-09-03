@@ -15,7 +15,8 @@ import {
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area,
 } from 'recharts';
 import { Package, AlertCircle } from 'lucide-react';
-import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
+import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
@@ -175,35 +176,44 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
         // DSO: avg days from order creation to paid status
         const paidOrders = orders.filter(o => o.status === 'Delivered' || (o as unknown as Record<string,unknown>).paidAt);
         void paidOrders;
-        const unPaidOrders = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered');
+        // PAY ve PAYDA AYNI KUMEDEN (2026-09-04 denetimi): AR yalniz Cetpa'da
+        // odemesi izlenen siparislerden gelir (Mikro turevlerinde `paid` yok,
+        // tahsilat Mikro cari hesapta). Payda tum ciroyu alirsa — Mikro dahil —
+        // DSO yapay olarak DUSUK cikiyordu.
+        const izlenen185 = orders.filter(o => odemeTakipli(o));
+        const unPaidOrders = izlenen185.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered');
         const arBalance = unPaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-        const monthly90Rev = orders.filter(o => {
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= cutoff185 && o.status !== 'Cancelled';
-          } catch { return false; }
-        }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const son90 = (list: typeof orders) => list.filter(o => {
+          const od = siparisTarih(o);
+          return !!od && od >= cutoff185 && o.status !== 'Cancelled';
+        });
+        const monthly90Rev = son90(izlenen185).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const dailyRev185 = monthly90Rev / days90;
-        const dso = dailyRev185 > 0 ? Math.round(arBalance / dailyRev185) : 0;
-        // DIO: avg inventory value / daily COGS
+        const dso = dailyRev185 > 0 ? Math.round(arBalance / dailyRev185) : null;
+        // DIO: stok degeri / gunluk GERCEK maliyet.
+        // Eskiden `monthly90Rev * 0.6` ile "%60 COGS varsayimi" kullaniliyordu —
+        // gercek kalem maliyeti elde varken uydurma orandi (sahte kesinlik).
+        // Kalem verisi olmayan siparisler kapsam disi; hic kapsamli siparis yoksa
+        // DIO ve dolayisiyla CCC BILINMIYOR ('—'), 0 DEGIL.
         const inventoryVal185 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
-        const dailyCOGS185 = monthly90Rev * 0.6 / days90; // assume 60% COGS ratio
-        const dio = dailyCOGS185 > 0 ? Math.round(inventoryVal185 / dailyCOGS185) : 0;
-        const ccc = dso + dio;
-        const cccColor = ccc <= 30 ? 'text-emerald-600' : ccc <= 60 ? 'text-amber-500' : 'text-red-500';
+        const marj90 = brutMarj(son90(orders), inventory, exchangeRates);
+        const dailyCOGS185 = marj90.maliyet > 0 ? marj90.maliyet / days90 : 0;
+        const dio = dailyCOGS185 > 0 ? Math.round(inventoryVal185 / dailyCOGS185) : null;
+        const ccc = (dso !== null && dio !== null) ? dso + dio : null;
+        const cccColor = ccc === null ? 'text-gray-400' : ccc <= 30 ? 'text-emerald-600' : ccc <= 60 ? 'text-amber-500' : 'text-red-500';
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏱️ Nakit Dönüşüm Döngüsü (CCC)' : '⏱️ Cash Conversion Cycle (CCC)'}</h3>
-              <span className={`text-lg font-black ${cccColor}`}>{ccc} {currentLanguage === 'tr' ? 'gün' : 'days'}</span>
+              <span className={`text-lg font-black ${cccColor}`}>{ccc === null ? '—' : `${ccc} ${currentLanguage === 'tr' ? 'gün' : 'days'}`}</span>
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               {[
-                { label: 'DSO', desc: currentLanguage === 'tr' ? 'Alacak Tahsilat Süresi' : 'Days Sales Outstanding', value: dso, color: dso > 45 ? 'text-red-500' : dso > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(arBalance/1000).toFixed(0)}K ödenmemiş` : `₺${(arBalance/1000).toFixed(0)}K outstanding` },
-                { label: 'DIO', desc: currentLanguage === 'tr' ? 'Stok Elde Tutma Süresi' : 'Days Inventory Outstanding', value: dio, color: dio > 60 ? 'text-red-500' : dio > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(inventoryVal185/1000).toFixed(0)}K stok` : `₺${(inventoryVal185/1000).toFixed(0)}K inventory` },
+                { label: 'DSO', desc: currentLanguage === 'tr' ? 'Alacak Tahsilat Süresi' : 'Days Sales Outstanding', value: dso, color: dso === null ? 'text-gray-400' : dso > 45 ? 'text-red-500' : dso > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(arBalance/1000).toFixed(0)}K ödenmemiş` : `₺${(arBalance/1000).toFixed(0)}K outstanding` },
+                { label: 'DIO', desc: currentLanguage === 'tr' ? 'Stok Elde Tutma Süresi' : 'Days Inventory Outstanding', value: dio, color: dio === null ? 'text-gray-400' : dio > 60 ? 'text-red-500' : dio > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(inventoryVal185/1000).toFixed(0)}K stok` : `₺${(inventoryVal185/1000).toFixed(0)}K inventory` },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-4">
-                  <p className={`text-3xl font-black ${k.color}`}>{k.value}<span className="text-sm font-medium text-gray-400 ml-1">{currentLanguage === 'tr' ? 'gün' : 'd'}</span></p>
+                  <p className={`text-3xl font-black ${k.color}`}>{k.value === null ? '—' : <>{k.value}<span className="text-sm font-medium text-gray-400 ml-1">{currentLanguage === 'tr' ? 'gün' : 'd'}</span></>}</p>
                   <p className="text-[11px] text-gray-700 font-semibold mt-1">{k.label} · {k.desc}</p>
                   <p className="text-[10px] text-gray-400">{k.sub}</p>
                 </div>
@@ -211,7 +221,13 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             </div>
             <div className="flex items-center gap-1.5 bg-blue-50 rounded-xl p-3">
               <span className="text-blue-500 text-sm">💡</span>
-              <p className="text-[11px] text-blue-700">{currentLanguage === 'tr' ? `CCC = DSO + DIO. Hedef: 30 günün altı. Şu an: ${ccc} gün${ccc > 60 ? ' — nakit sıkışıklığı riski var.' : ccc > 30 ? ' — iyileştirme fırsatı var.' : ' — sağlıklı.'}` : `CCC = DSO + DIO. Target: under 30 days. Current: ${ccc} days${ccc > 60 ? ' — cash flow risk.' : ccc > 30 ? ' — room for improvement.' : ' — healthy.'}`}</p>
+              <p className="text-[11px] text-blue-700">{ccc === null
+                ? (currentLanguage === 'tr'
+                    ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: kalem maliyeti olan sipariş yok (Mikro faturasından türetilen kayıtlarda kalem bilgisi bulunmuyor).'
+                    : 'CCC = DSO + DIO. Not computable: no orders with line-item cost data.')
+                : (currentLanguage === 'tr'
+                    ? `CCC = DSO + DIO. Hedef: 30 günün altı. Şu an: ${ccc} gün${ccc > 60 ? ' — nakit sıkışıklığı riski var.' : ccc > 30 ? ' — iyileştirilebilir.' : ' — sağlıklı.'}`
+                    : `CCC = DSO + DIO. Target: under 30 days. Now: ${ccc} days.`)}</p>
             </div>
           </div>
         );

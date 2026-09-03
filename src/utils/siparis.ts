@@ -23,24 +23,47 @@
  * CLAUDE.md'nin "sahte kesinlik gösterme" kuralı. Alacak/yaşlandırma/hatırlatma
  * gibi tahsilat yüzeyleri bu süzgeçten geçmeli.
  */
-import type { Order } from '../types';
 import { zamanDate } from './zaman';
 
+/**
+ * TİPLER YAPISAL, `Order`'a BAĞLI DEĞİL (2026-09-04): bazı bileşenler
+ * (ör. FinancePanel, AnalyticsPanel) kendi daraltılmış yerel `Order` arayüzünü
+ * tanımlıyor. Bu yardımcılar kanonik tipi şart koşarsa o çağrı yerlerinde
+ * derlenmiyorlar ve düzeltme "yalnız bazı ekranlarda" uygulanabiliyor — yarım
+ * düzeltme sınıfının ta kendisi. Bu yüzden her fonksiyon GERÇEKTEN OKUDUĞU
+ * alanları ister; hem kanonik `Order` hem yerel türevler yapısal olarak uyar.
+ */
+export interface SiparisNoAlanlari {
+  id?: string;
+  orderNumber?: string;
+  shopifyOrderId?: string | number;
+}
+export interface SiparisTarihAlanlari {
+  syncedAt?: unknown;
+  createdAt?: unknown;
+  orderDate?: unknown;
+}
+export interface SiparisKaynakAlani {
+  source?: string;
+}
+
 /** Listede/başlıkta gösterilecek sipariş numarası — üreticiden bağımsız. */
-export function gorunenSiparisNo(o: Order): string {
-  return o.orderNumber || o.shopifyOrderId || `#${o.id.slice(-6)}`;
+export function gorunenSiparisNo(o: SiparisNoAlanlari): string {
+  const no = o.orderNumber || (o.shopifyOrderId != null ? String(o.shopifyOrderId) : '');
+  if (no) return no;
+  return o.id ? `#${o.id.slice(-6)}` : '—';
 }
 
 /**
  * Siparişin tarihi; çözülemezse null (asla "bugün"e düşmez — bkz. zaman.ts).
  * Sıra: Shopify `syncedAt` → native `createdAt` → türetme `orderDate`.
  */
-export function siparisTarih(o: Order): Date | null {
+export function siparisTarih(o: SiparisTarihAlanlari): Date | null {
   return zamanDate(o.syncedAt) ?? zamanDate(o.createdAt) ?? zamanDate(o.orderDate);
 }
 
 /** Sıralama için epoch ms; tarihi bilinmeyen kayıt EN SONA düşsün diye -Infinity. */
-export function siparisTarihMs(o: Order): number {
+export function siparisTarihMs(o: SiparisTarihAlanlari): number {
   const d = siparisTarih(o);
   return d ? d.getTime() : -Infinity;
 }
@@ -49,6 +72,6 @@ export function siparisTarihMs(o: Order): number {
  * Bu siparişin ödeme durumu Cetpa'da mı izleniyor?
  * false → tahsilat gerçeği Mikro cari hesapta; `paid` alanına bakma.
  */
-export function odemeTakipli(o: Order): boolean {
+export function odemeTakipli(o: SiparisKaynakAlani): boolean {
   return o.source !== 'mikro-fatura';
 }

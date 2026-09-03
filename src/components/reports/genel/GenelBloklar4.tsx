@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { odemeTakipli } from '../../../utils/siparis';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -187,7 +188,9 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         const invoiced = orders.filter(o => o.hasInvoice || o.faturali);
         if (invoiced.length === 0) return null;
         const paid = invoiced.filter(o => o.paid || (o as unknown as Record<string,unknown>).paidAt);
-        const unpaid = invoiced.filter(o => !o.paid && !(o as unknown as Record<string,unknown>).paidAt);
+        // Mikro turevi siparisler `faturali: true` tasir ama `paid`/`paidAt` HIC YOK —
+  // odeme durumu Cetpa'da izlenmiyor, "odenmedi" demek yaniltici (2026-09-04).
+  const unpaid = invoiced.filter(o => !o.paid && !(o as unknown as Record<string,unknown>).paidAt && odemeTakipli(o));
         const paidRev = paid.reduce((s, o) => s + o.totalPrice, 0);
         const unpaidRev = unpaid.reduce((s, o) => s + o.totalPrice, 0);
         const now = new Date();

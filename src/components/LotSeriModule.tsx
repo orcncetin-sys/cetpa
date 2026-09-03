@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc } from '../lib/dbClient';
 import { db } from '../firebase';
 import { Plus, Search, X, Save, AlertTriangle, Hash, CheckCircle2 } from 'lucide-react';
+import CustomerCombobox from './CustomerCombobox';
+import type { Lead } from '../types';
 
 interface LotKaydi {
   id: string;
@@ -46,7 +48,20 @@ interface LotHareketi {
   createdAt?: unknown;
 }
 
-export default function LotSeriModule({ currentLanguage, isAuthenticated }: { currentLanguage: string; isAuthenticated: boolean }) {
+/**
+ * VERI BAGLANTISI (2026-09-04 denetimi): urun/musteri alanlari serbest metindi.
+ * Elle yazim izlenebilirligi sessizce kiriyordu — "Çimento 42.5" ile "cimento 42,5"
+ * ayri kayit oluyor, seri no musterisiyle aranamiyordu. Modul artik `inventory` ve
+ * `leads` aliyor; urun alanlari datalist ile envanterden, musteri CustomerCombobox
+ * ile CRM'den seciliyor. Serbest yazim HALA mumkun (envanterde olmayan bir sey
+ * kaydedilebilir), ama secim varsayilan yol.
+ */
+export default function LotSeriModule({ currentLanguage, isAuthenticated, inventory = [], leads = [] }: {
+  currentLanguage: string;
+  isAuthenticated: boolean;
+  inventory?: Array<{ id: string; name: string; sku: string }>;
+  leads?: Lead[];
+}) {
   const tr = currentLanguage === 'tr';
   const [subTab, setSubTab] = useState<'lot' | 'seri' | 'hareketler' | 'karantina'>('lot');
   const [lotlar, setLotlar] = useState<LotKaydi[]>([]);
@@ -155,7 +170,17 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
     { label: tr ? 'Kayıtlı Seri No' : 'Serial Nos.', val: seriler.length, color: 'text-purple-600', bg: 'bg-purple-50' },
   ];
 
+  /** Urun onerileri — iki modalin da kullandigi tek datalist. */
+  const urunListesi = (
+    <datalist id="cetpa-urun-listesi">
+      {inventory.map(it => <option key={it.id} value={it.name}>{it.sku}</option>)}
+    </datalist>
+  );
+
   return (
+    <>
+      {urunListesi}
+
     <div className="space-y-4">
       {/* KPI Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -411,7 +436,14 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
             </div>
             <div className="grid grid-cols-2 gap-3">
               <input placeholder={tr ? 'Lot No *' : 'Lot No *'} value={lotForm.lotNo} onChange={e => setLotForm(p => ({ ...p, lotNo: e.target.value }))} className="apple-input" />
-              <input placeholder={tr ? 'Ürün Adı *' : 'Product Name *'} value={lotForm.urunAdi} onChange={e => setLotForm(p => ({ ...p, urunAdi: e.target.value }))} className="apple-input" />
+              <input list="cetpa-urun-listesi" placeholder={tr ? 'Ürün Adı * (listeden seç)' : 'Product Name * (pick from list)'} value={lotForm.urunAdi}
+                onChange={e => {
+                  const ad = e.target.value;
+                  // Envanterden secildiyse SKU'yu da otomatik doldur — elle yazimda bos birakilir.
+                  const esles = inventory.find(it => it.name === ad);
+                  setLotForm(p => ({ ...p, urunAdi: ad, urunSku: esles ? esles.sku : p.urunSku }));
+                }}
+                className="apple-input" />
               <input placeholder="SKU" value={lotForm.urunSku} onChange={e => setLotForm(p => ({ ...p, urunSku: e.target.value }))} className="apple-input" />
               <input type="number" placeholder={tr ? 'Miktar' : 'Quantity'} value={lotForm.miktar || ''} onChange={e => setLotForm(p => ({ ...p, miktar: Number(e.target.value) }))} className="apple-input" />
               <input placeholder={tr ? 'Tedarikçi' : 'Supplier'} value={lotForm.tedarikci} onChange={e => setLotForm(p => ({ ...p, tedarikci: e.target.value }))} className="apple-input" />
@@ -451,10 +483,22 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
             </div>
             <div className="grid grid-cols-2 gap-3">
               <input placeholder={tr ? 'Seri No *' : 'Serial No *'} value={seriForm.seriNo} onChange={e => setSeriForm(p => ({ ...p, seriNo: e.target.value }))} className="apple-input" />
-              <input placeholder={tr ? 'Ürün Adı *' : 'Product *'} value={seriForm.urunAdi} onChange={e => setSeriForm(p => ({ ...p, urunAdi: e.target.value }))} className="apple-input" />
+              <input list="cetpa-urun-listesi" placeholder={tr ? 'Ürün Adı * (listeden seç)' : 'Product * (pick from list)'} value={seriForm.urunAdi}
+                onChange={e => {
+                  const ad = e.target.value;
+                  const esles = inventory.find(it => it.name === ad);
+                  setSeriForm(p => ({ ...p, urunAdi: ad, urunSku: esles ? esles.sku : p.urunSku }));
+                }}
+                className="apple-input" />
               <input placeholder="SKU" value={seriForm.urunSku} onChange={e => setSeriForm(p => ({ ...p, urunSku: e.target.value }))} className="apple-input" />
               <input placeholder="Lot No" value={seriForm.lotNo} onChange={e => setSeriForm(p => ({ ...p, lotNo: e.target.value }))} className="apple-input" />
-              <input placeholder={tr ? 'Müşteri (satışta)' : 'Customer (on sale)'} value={seriForm.musteriAdi} onChange={e => setSeriForm(p => ({ ...p, musteriAdi: e.target.value }))} className="apple-input" />
+              <CustomerCombobox
+                leads={leads}
+                value={seriForm.musteriAdi}
+                onChange={v => setSeriForm(p => ({ ...p, musteriAdi: v }))}
+                onSelect={l => setSeriForm(p => ({ ...p, musteriAdi: l.name }))}
+                placeholder={tr ? 'Müşteri (satışta)' : 'Customer (on sale)'}
+              />
               <select value={seriForm.durum} onChange={e => setSeriForm(p => ({ ...p, durum: e.target.value as SeriNo['durum'] }))} className="apple-input">
                 <option>Stokta</option><option>Satıldı</option><option>Servis</option><option>İade</option><option>Hurda</option>
               </select>
@@ -511,5 +555,6 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated }: { cu
         </div>
       )}
     </div>
+    </>
   );
 }

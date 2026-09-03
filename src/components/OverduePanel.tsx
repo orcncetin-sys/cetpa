@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
 import { CreditCard, X, CheckCircle2 } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
@@ -22,17 +23,20 @@ export default function OverduePanel({
   if (!isOpen) return null;
 
   const nowMs538 = Date.now();
+  // Yas hesabi paylasilan `siparisTarih` uzerinden (syncedAt -> createdAt -> orderDate).
+  // Tarihi cozulemeyen kayit -1 doner ve listenin SONUNA duser; "bugun" varsayilmaz.
   const getAge = (o: Order): number => {
-    const raw = o.createdAt ?? o.syncedAt;
-    if (!raw) return 0;
-    const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-      ? (raw as { toDate: () => Date }).toDate()
-      : new Date(raw as string | number);
-    return Math.floor((nowMs538 - d.getTime()) / 86400000);
+    const d = siparisTarih(o);
+    if (!d) return -1;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
   };
 
+  // Mikro faturasindan turetilen siparislerde `paid` alani YOKTUR — tahsilat
+  // gercegi Mikro cari hesabinda yasar. Suzgec olmadan bu kayitlar "gecikmis
+  // alacak" olarak listeleniyordu: Dashboard rozeti (odemeTakipli'li) 4 derken
+  // bu cekmece 359 kayit gosteriyordu (2026-09-04 denetimi).
   const overdueList = orders
-    .filter(o => !o.paid && o.status !== 'Cancelled')
+    .filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o))
     .sort((a, b) => getAge(b) - getAge(a));
     
   const totalOwed = overdueList.reduce((s, o) => s + (o.totalPrice ?? (o as any).totalAmount ?? 0), 0);
@@ -93,7 +97,7 @@ export default function OverduePanel({
                           {age}{currentLanguage === 'tr' ? 'g' : 'd'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-gray-400">#{order.shopifyOrderId || order.id.slice(-6)} · {order.status}</p>
+                      <p className="text-[10px] text-gray-400">{gorunenSiparisNo(order)} · {order.status}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-black text-gray-900">₺{amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
