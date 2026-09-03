@@ -17,6 +17,7 @@ import { paymentRoutes } from "./src/server/routes/paymentRoutes.js";
 import { reportsRoutes } from "./src/server/routes/reportsRoutes.js";
 import { erpRoutes } from "./src/server/routes/erpRoutes.js";
 import { aiRoutes } from "./src/server/routes/aiRoutes.js";
+import { ticaretAjaniRoutes } from "./src/server/routes/ticaretAjaniRoutes.js";
 import { superadminRoutes } from "./src/server/routes/superadminRoutes.js";
 import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten, escapeHtml, isValidEmail } from "./src/server/eposta.js";
@@ -4040,6 +4041,13 @@ async function startServer() {
     resolveGeminiClient, resolveGeminiModel, safeAiError, geminiKeySource,
     // Modul, server.ts'teki `let aiHealthProbe`a YAZAR (bekci onu okuyor).
     setAiHealthProbe: (fn) => { aiHealthProbe = fn; },
+  });
+
+  // Claude ticaret ajanları (commerce-agents blueprint uyarlaması, 2026-09-01).
+  // ANTHROPIC_API_KEY yoksa uçlar 503 döner — otomatik harcama yok.
+  ticaretAjaniRoutes(app, {
+    requireAuth, requireMfaVerified, reqCompanyId, reqActor, writeAuditLog,
+    loadCompanyDocs, getPgPool: () => pgPool,
   });
 
   dynamicsRoutes(app, {

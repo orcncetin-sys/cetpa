@@ -8,6 +8,7 @@ import {
 import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
 import { Coins } from 'lucide-react';
 const FiyatKarsilastirmaPanel = React.lazy(() => import('../components/FiyatKarsilastirmaPanel'));
+import SatinAlmaAjaniPanel from '../components/SatinAlmaAjaniPanel';
 import { db } from '../firebase';
 import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, query, where, onSnapshot } from '../lib/dbClient';
 import { cn } from '../lib/utils';
@@ -43,6 +44,8 @@ interface Props {
   kpiCurrency: 'TRY' | 'USD' | 'EUR';
   setKpiCurrency: React.Dispatch<React.SetStateAction<'TRY' | 'USD' | 'EUR'>>;
 
+  /** AI kullanım onayı — Satın Alma Ajanı paneli için (2026-09-01). */
+  aiOnayli?: boolean;
   purchasingSubTab: PurchasingSubTab;
   setPurchasingSubTab: React.Dispatch<React.SetStateAction<PurchasingSubTab>>;
 
@@ -102,6 +105,7 @@ export default function SatinAlmaPage(props: Props) {
     currentLanguage, canAccess, hasFullAccess, user, userRole, darkMode,
     orders, inventory, suppliers, companyId, exchangeRates, fmtKpi, toast, setActiveTab,
     kpiCurrency, setKpiCurrency,
+    aiOnayli,
     purchasingSubTab, setPurchasingSubTab,
     apPurchaseOrders,
     addingSupplier, setAddingSupplier, editingSupplier, setEditingSupplier,
@@ -181,6 +185,8 @@ export default function SatinAlmaPage(props: Props) {
                   {/* Purchase Orders */}
                   {purchasingSubTab === 'pos' && (
                     <div className="space-y-4">
+                      {/* Claude Satın Alma Ajanı (commerce-agents blueprint, 2026-09-01). */}
+                      <SatinAlmaAjaniPanel currentLanguage={currentLanguage} aiOnayli={aiOnayli ?? false} />
                       {/* ── Phase 62: Purchasing Spend Trend ── */}
                       {orders.length > 0 && (() => {
                         // Approximate COGS trend from orders costPrice × quantities

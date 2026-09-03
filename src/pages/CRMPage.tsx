@@ -12,6 +12,7 @@ import {
   Bell, Check, FileDown, Flame, GitBranch, Headphones, Kanban,
 } from 'lucide-react';
 import { db, auth, storage } from '../firebase';
+import SatisAjaniPanel from '../components/SatisAjaniPanel';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, serverTimestamp, Timestamp, onSnapshot, query,
@@ -56,6 +57,8 @@ interface Props {
   setCrmTab: (tab: string) => void;
   /** Rapor kartından gelen müşteri-adı filtresi (2026-08-31) — Müşteriler alt sekmesine iletilir. */
   musteriAra?: string;
+  /** AI kullanım onayı (aiConsents) — Satış Ajanı paneli için (2026-09-01). */
+  aiOnayli?: boolean;
   selectedLead: Lead | null;
   setSelectedLead: React.Dispatch<React.SetStateAction<Lead | null>>;
   hasFullAccess: (tab: string) => boolean;
@@ -116,7 +119,7 @@ const DURUM_ETIKET_TR: Record<string, string> = {
 const durumEtiketi = (status: string, tr: boolean): string => (tr ? (DURUM_ETIKET_TR[status] ?? status) : status);
 
 export default function CRMPage({
-  crmTab, setCrmTab, musteriAra, selectedLead, setSelectedLead,
+  crmTab, setCrmTab, musteriAra, aiOnayli, selectedLead, setSelectedLead,
   hasFullAccess = () => true, currentLanguage, currentT,
   orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
@@ -2367,6 +2370,15 @@ export default function CRMPage({
                     })()}
                   </div>
                   <div className="space-y-6">
+                    {/* Claude Satış Ajanı (commerce-agents blueprint, 2026-09-01):
+                        seçilen Mikro carisinin alım geçmişinden öneri üretir. */}
+                    <SatisAjaniPanel
+                      currentLanguage={currentLanguage}
+                      aiOnayli={aiOnayli ?? false}
+                      musteriler={leads
+                        .map(l => ({ ad: l.name || l.company || '—', cariKod: String((l as unknown as { mikroCariKod?: string }).mikroCariKod || l.cariKod || '').trim() }))
+                        .filter(m => m.cariKod)}
+                    />
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <h3 className="font-bold mb-4 flex items-center gap-2">
                         <BarChart3 className="w-4 h-4 text-brand" /> {currentT.performance}

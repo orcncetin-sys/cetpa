@@ -5084,6 +5084,7 @@ function AppContent() {
           {activeTab === 'satin-alma' && (
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <SatinAlmaPage
+                aiOnayli={aiConsentGiven}
                 currentLanguage={currentLanguage}
                 canAccess={canAccess}
                 hasFullAccess={hasFullAccess}
@@ -6038,6 +6039,7 @@ function AppContent() {
                 crmTab={crmTab}
                 setCrmTab={setCrmTab}
                 musteriAra={raporMusteriAra}
+                aiOnayli={aiConsentGiven}
                 selectedLead={selectedLead}
                 setSelectedLead={setSelectedLead}
                 hasFullAccess={hasFullAccess}
