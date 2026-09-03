@@ -38,8 +38,16 @@ cd "$KOK"
 # hakem turu, yasak-listesinin `... src` veya `... scripts` gibi var olan repo
 # dizinlerini hala sildigini kanitladi (uyarisiz, exit 0). Kural artik su: hedef
 # ya HIC YOK, ya da BIZIM urettigimiz bir pakettir (OZET.md + hunk/ imzasi).
-CIKTI_MUTLAK="$(cd "$(dirname "$CIKTI")" 2>/dev/null && pwd)/$(basename "$CIKTI")" || CIKTI_MUTLAK="$CIKTI"
-CIKTI="$CIKTI_MUTLAK"
+# DIKKAT: `$(cd ... 2>/dev/null && pwd)` basarisiz olsa bile ATAMA basarilidir
+# (exit 0), yani `|| yedek` HIC calismaz ve geriye "/paket" gibi KOKTEN baslayan
+# bozuk bir yol kalirdi — sonra `mkdir -p` onu kokte olusturmaya calisirdi.
+# Bu yuzden ust dizini ayri degiskene alip ACIKCA bos mu diye bakiyoruz.
+CIKTI_UST="$(cd "$(dirname "$CIKTI")" 2>/dev/null && pwd || true)"
+if [ -z "$CIKTI_UST" ]; then
+  echo "HATA: cikti yolunun ust dizini yok: $(dirname "$CIKTI")" >&2
+  exit 2
+fi
+CIKTI="$CIKTI_UST/$(basename "$CIKTI")"
 if [ -e "$CIKTI" ]; then
   if [ -f "$CIKTI/OZET.md" ] && [ -d "$CIKTI/hunk" ]; then
     rm -rf "$CIKTI"                      # onceki paket — guvenle degistirilebilir
@@ -68,6 +76,11 @@ geri_al() {
     printf '%s\n' "$EKLENEN_YOLLAR" | tr '\n' '\0' \
       | xargs -0 -r git reset -q -- >/dev/null 2>&1 || true
   fi
+  # `return 0` SIGORTA: EKLENEN_YOLLAR bossa yukaridaki `if` false doner ve
+  # fonksiyon 1 ile biterdi. EXIT trap'inin cikis kodu, kabuk surumune gore
+  # betigin cikis kodunu ezebilir — basarili bir kosunun 1 donmesi, cagiran
+  # betikte (CI, verify-deploy) sahte hata olurdu.
+  return 0
 }
 trap geri_al EXIT INT TERM
 
