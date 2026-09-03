@@ -50,6 +50,23 @@
 
 **Akış:** Kullanıcıdan yeni bir iyileştirme/özellik isteği geldiğinde → **product-manager** kapsamı netleştirir, onay gerekiyorsa hangi soru sorulacağını söyler (soruyu SEN kullanıcıya sorarsın, ajan sormaz) → onaylandıysa/gerekmiyorsa **project-manager** görev listesine döküp uygular → bitince **scrum-master** push öncesi kapıları kontrol eder → **qa-verifier** kanıt üretir → push + `deploy-verify`. Küçük, tek-dosyalık, bariz işler için bu akışın tamamını çalıştırmaya gerek yok — doğrudan uygula; akış özellikle çok-adımlı/çok-dosyalı/riskli işler için var.
 
+**KURULUM TUZAĞI (2026-09-04'te ölçüldü):** Ajan tanımları **çalışma dizininin**
+`.claude/agents/` dizininden okunur — skill'lerin aksine alt dizinler taranmaz. Bu
+projede kod `cetpa-sales-&-logistics/` altında ama Claude Code'un çalışma dizini bir
+üstte (`Cetpa B2B SaaS/`), bu yüzden `.claude/agents/`'daki ajanlar **hiç
+yüklenmiyordu** (6 rol tanımlı olduğu hâlde ajan listesinde görünmüyorlardı). Çözüm
+tek kaynağı bozmayan bir symlink:
+
+```
+ln -s "../cetpa-sales-&-logistics/.claude/agents" "/Users/orcun/Desktop/Cetpa B2B SaaS/.claude/agents"
+```
+
+Bu symlink üst dizinde durur ve git'te DEĞİLDİR (orası repo değil) — yeni bir makinede
+veya `.claude/` silinirse tekrar kurulmalı. **Ajan listesi oturum BAŞINDA okunur:** yeni
+bir rol ekledikten sonra mevcut oturumda görünmez, yeni oturum gerekir. O ana kadar rolü
+`general-purpose` ajanına prompt'un başına gömerek kullanabilirsin (ölçüldü: aynı
+kazancı veriyor — araç çağrısı 17,7 → 4,0).
+
 **Bu ajanlar senin ekibin — sahiplen.** Bu roller sabit/dokunulmaz değil. Bir rolün tanımı işe yaramıyorsa, gereksiz soru soruyorsa, yanlış kapıda duruyorsa ya da projenin ihtiyacı değiştiyse: görevini değiştir, yetkisini daralt/genişlet, aracını (tools) düzenle, gerekirse tamamen kaldır ("kov") ve yerine yenisini yaz. Bunu yaparken kullanıcıya onay sormana gerek yok — bu, iş yapma biçimini optimize etmenin bir parçası; yalnız ne değiştirdiğini ve neden değiştirdiğini kısaca not düş (ör. bu dosyaya bir satırlık gerekçe, ya da `.claude/agents/` dosyasının başına tarih+sebep yorumu).
 
 ## Operasyon Bekçisi
