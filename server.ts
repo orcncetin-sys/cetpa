@@ -4048,6 +4048,7 @@ async function startServer() {
   ticaretAjaniRoutes(app, {
     requireAuth, requireMfaVerified, reqCompanyId, reqActor, writeAuditLog,
     loadCompanyDocs, getPgPool: () => pgPool,
+    resolveGeminiClient, resolveGeminiModel,
   });
 
   dynamicsRoutes(app, {

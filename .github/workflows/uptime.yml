@@ -109,6 +109,10 @@ jobs:
                 const { data: yeni } = await github.rest.issues.create({
                   owner: context.repo.owner, repo: context.repo.repo,
                   title: BASLIK, body: govde, labels: [ETIKET],
+                  // 2026-09-03: 3 kesinti issue'su acilip kapanmis ama kullanici
+                  // fark etmemisti (yalniz gunluk brifing derleyince goruldu).
+                  // Atama, GitHub'in dogrudan "assigned" e-postasini dusurur.
+                  assignees: ['orcncetin-sys'],
                 });
                 core.setFailed(`KESINTI tespit edildi, issue #${yeni.number} acildi.`);
               }

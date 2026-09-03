@@ -21,9 +21,12 @@
  *   - Katalogda olmayan SKU önerileri sunucuda SESSİZCE DEĞİL, sayaçla düşülür
  *     (yanıtta `elenenOneri` olarak raporlanır).
  *
- * MALİYET: Claude API ücretlidir ve YALNIZ bu uçlar çağrıldığında harcar;
- * ANTHROPIC_API_KEY sunucu .env'inde yoksa uçlar 503 döner, hiçbir otomatik
- * çağrı yapılmaz (kullanıcının "kartsız/sorulmadan maliyet açma" kuralı).
+ * SAĞLAYICI (2026-09-03 kullanıcı isteği "bunu Gemini ile çözemez miyiz"):
+ * ANTHROPIC_API_KEY varsa Claude (claude-opus-5), yoksa mevcut GEMINI anahtarı
+ * (resolveGeminiClient — Ayarlar→AI'daki anahtar) kullanılır; ikisi de yoksa 503.
+ * Guardrail/doğrulama katmanı sağlayıcıdan bağımsızdır: iki yolda da çıktı aynı
+ * zod şemasıyla doğrulanır, SKU'lar katalogla süzülür, rakamlar katalogdan gelir.
+ * Hiçbir otomatik çağrı yok — yalnız düğmeyle harcar (Gemini: mevcut anahtar/kota).
  *
  * Model: claude-opus-5 + adaptive thinking (varsayılan açık) + yapılandırılmış
  * çıktı (messages.parse + zodOutputFormat). Refusal-fallback parametresi
@@ -35,6 +38,8 @@ import type { Express, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { Type } from '@google/genai';
+import type { GoogleGenAI } from '@google/genai';
 
 /** server.ts'ten ihtiyaç duyulan HER ŞEY — açık liste (rota-grubu deseni). */
 export interface TicaretAjaniCtx {
@@ -45,6 +50,9 @@ export interface TicaretAjaniCtx {
   writeAuditLog: (actor: { uid: string; email: string }, action: string, details: string) => Promise<unknown>;
   loadCompanyDocs: (coll: string, cid: string) => Promise<Array<Record<string, unknown>>>;
   getPgPool: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
+  /** Gemini yolu (Claude anahtarı yokken) — aiRoutes ile aynı çözücüler. */
+  resolveGeminiClient: () => Promise<GoogleGenAI | null>;
+  resolveGeminiModel: (requested?: string) => string;
 }
 
 const MODEL = 'claude-opus-5';
@@ -75,6 +83,72 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
   const istemci = (): Anthropic | null =>
     process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;
 
+  /** Sağlayıcı-bağımsız yapılandırılmış üretim: Claude varsa Claude, yoksa
+   *  Gemini. İKİ yolda da nihai doğrulama AYNI zod şemasıyla yapılır — model
+   *  çıktısına asla doğrulamasız güvenilmez (guardrail tek kaynak). */
+  const yapilandirilmisUret = async (args: {
+    system: string; girdi: unknown;
+    zodSema: z.ZodObject<z.ZodRawShape>; geminiSema: Record<string, unknown>;
+  }): Promise<{ ham: unknown; saglayici: 'claude' | 'gemini' } | { hata: string; kod: number }> => {
+    const anthropic = istemci();
+    if (anthropic) {
+      const yanit = await anthropic.messages.parse({
+        model: MODEL, max_tokens: 4000, system: args.system,
+        messages: [{ role: 'user', content: JSON.stringify(args.girdi) }],
+        output_config: { format: zodOutputFormat(args.zodSema) },
+      });
+      if (yanit.parsed_output == null) {
+        return { hata: `Model çıktısı ayrıştırılamadı (stop: ${yanit.stop_reason ?? '?'}).`, kod: 502 };
+      }
+      return { ham: yanit.parsed_output, saglayici: 'claude' };
+    }
+    const gemini = await C.resolveGeminiClient();
+    if (!gemini) {
+      return { kod: 503, hata: 'AI yapılandırılmamış: sunucuda ANTHROPIC_API_KEY yok ve Gemini anahtarı da tanımlı değil (Ayarlar → AI). İkisinden biri yeter — Gemini mevcut anahtarınızla ücretsiz katmanda çalışır.' };
+    }
+    const r = await gemini.models.generateContent({
+      model: C.resolveGeminiModel(),
+      contents: args.system + '\n\nGİRDİ (JSON):\n' + JSON.stringify(args.girdi),
+      config: { responseMimeType: 'application/json', responseSchema: args.geminiSema },
+    });
+    try {
+      return { ham: JSON.parse(r.text ?? ''), saglayici: 'gemini' };
+    } catch {
+      return { hata: 'Gemini çıktısı JSON olarak ayrıştırılamadı.', kod: 502 };
+    }
+  };
+
+  /** Gemini responseSchema karşılıkları (zod şemalarının aynası; enum'u zod doğrular). */
+  const satisGeminiSemasi = {
+    type: Type.OBJECT,
+    properties: {
+      ozet: { type: Type.STRING },
+      oneriler: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+        sku: { type: Type.STRING },
+        oneriTipi: { type: Type.STRING, enum: ['yeniden-siparis', 'capraz-satis'] },
+        onerilenMiktar: { type: Type.NUMBER },
+        gerekce: { type: Type.STRING },
+      }, required: ['sku', 'oneriTipi', 'onerilenMiktar', 'gerekce'] } },
+      riskNotlari: { type: Type.ARRAY, items: { type: Type.STRING } },
+    },
+    required: ['ozet', 'oneriler', 'riskNotlari'],
+  };
+  const satinAlmaGeminiSemasi = {
+    type: Type.OBJECT,
+    properties: {
+      ozet: { type: Type.STRING },
+      tedarikciGruplari: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+        tedarikci: { type: Type.STRING },
+        kalemler: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+          sku: { type: Type.STRING }, onerilenMiktar: { type: Type.NUMBER },
+        }, required: ['sku', 'onerilenMiktar'] } },
+        gerekce: { type: Type.STRING },
+      }, required: ['tedarikci', 'kalemler', 'gerekce'] } },
+      riskNotlari: { type: Type.ARRAY, items: { type: Type.STRING } },
+    },
+    required: ['ozet', 'tedarikciGruplari', 'riskNotlari'],
+  };
+
   const katalogHaritasi = async (cid: string) => {
     const envanter = await C.loadCompanyDocs('inventory', cid);
     const m = new Map<string, { name: string; stockLevel: number | null; fiyatB2B: number | null }>();
@@ -95,11 +169,6 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
 
   /** POST /api/ai/satis-ajani — Body: { cariKod: string } */
   app.post('/api/ai/satis-ajani', C.requireAuth as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
-    const anthropic = istemci();
-    if (!anthropic) {
-      return res.status(503).json({ success: false, notConfigured: true,
-        error: 'Claude API anahtarı tanımlı değil — sunucu .env dosyasına ANTHROPIC_API_KEY ekleyin. Bu özellik yalnız çağrıldığında ücretlendirilir.' });
-    }
     const cariKod = String((req.body as { cariKod?: string } | undefined)?.cariKod ?? '').trim();
     if (!cariKod) return res.status(400).json({ success: false, error: 'cariKod gerekli.' });
     const pool = C.getPgPool();
@@ -135,27 +204,23 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
         .slice(0, 40)
         .map(([sku, k]) => ({ sku, urun: k.name, guncelStok: k.stockLevel }));
 
-      const yanit = await anthropic.messages.parse({
-        model: MODEL,
-        max_tokens: 4000,
+      const uretim = await yapilandirilmisUret({
         system:
           'CETPA (Türk inşaat malzemesi toptancısı) için B2B satış asistanısın. ' +
           'SADECE sana verilen listelerdeki SKU\'ları önerebilirsin; listede olmayan ürün ADI ya da SKU uydurma. ' +
           'Fiyat YAZMA — fiyatlar sisteme sunucuda eklenir. Türkçe, kısa ve gerekçeli yaz. ' +
           'yeniden-siparis: geçmişte alınan ve muhtemelen tükenmiş ürünler; capraz-satis: geçmiş alımlarla uyumlu, stokta olan yeni ürünler.',
-        messages: [{
-          role: 'user',
-          content: JSON.stringify({
-            gorev: 'Bu müşteri için en fazla 8 öneri üret (yeniden sipariş + çapraz satış karışık).',
-            musteriSatisGecmisi: gecmisOzet,
-            stoktaOlanDigerUrunler: havuz,
-          }),
-        }],
-        output_config: { format: zodOutputFormat(SatisOnerisiSemasi) },
+        girdi: {
+          gorev: 'Bu müşteri için en fazla 8 öneri üret (yeniden sipariş + çapraz satış karışık).',
+          musteriSatisGecmisi: gecmisOzet,
+          stoktaOlanDigerUrunler: havuz,
+        },
+        zodSema: SatisOnerisiSemasi, geminiSema: satisGeminiSemasi,
       });
-
-      const veri = yanit.parsed_output;
-      if (!veri) return res.status(502).json({ success: false, error: `Model çıktısı ayrıştırılamadı (stop: ${yanit.stop_reason ?? '?'}).` });
+      if ('hata' in uretim) return res.status(uretim.kod).json({ success: false, notConfigured: uretim.kod === 503 || undefined, error: uretim.hata });
+      const dogrulama = SatisOnerisiSemasi.safeParse(uretim.ham);
+      if (!dogrulama.success) return res.status(502).json({ success: false, error: 'Model çıktısı şemaya uymadı: ' + dogrulama.error.issues.slice(0, 3).map(i => i.path.join('.')).join(', ') });
+      const veri = dogrulama.data;
       // GUARDRAIL: katalogda olmayan SKU'lar düşülür; fiyat/stok SUNUCUDAN eklenir.
       let elenen = 0;
       const oneriler = veri.oneriler.flatMap(o => {
@@ -163,8 +228,8 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
         if (!k || !(o.onerilenMiktar > 0)) { elenen++; return []; }
         return [{ ...o, urunAdi: k.name, guncelStok: k.stockLevel, birimFiyat: k.fiyatB2B }];
       });
-      await C.writeAuditLog(C.reqActor(req), 'Satış Ajanı', `${cariKod}: ${oneriler.length} öneri (${elenen} elendi)`);
-      res.json({ success: true, ozet: veri.ozet, oneriler, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
+      await C.writeAuditLog(C.reqActor(req), 'Satış Ajanı', `${cariKod}: ${oneriler.length} öneri (${elenen} elendi, ${uretim.saglayici})`);
+      res.json({ success: true, saglayici: uretim.saglayici, ozet: veri.ozet, oneriler, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
     } catch (e) {
       console.error('[satis-ajani]', e);
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
@@ -173,11 +238,6 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
 
   /** POST /api/ai/satinalma-ajani — Body: {} */
   app.post('/api/ai/satinalma-ajani', C.requireAuth as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
-    const anthropic = istemci();
-    if (!anthropic) {
-      return res.status(503).json({ success: false, notConfigured: true,
-        error: 'Claude API anahtarı tanımlı değil — sunucu .env dosyasına ANTHROPIC_API_KEY ekleyin. Bu özellik yalnız çağrıldığında ücretlendirilir.' });
-    }
     const pool = C.getPgPool();
     try {
       const cid = await C.reqCompanyId(req);
@@ -219,24 +279,20 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
         acikTaslakVar: acikSas.has(k.sku),
       }));
 
-      const yanit = await anthropic.messages.parse({
-        model: MODEL,
-        max_tokens: 4000,
+      const uretim = await yapilandirilmisUret({
         system:
           'CETPA (Türk inşaat malzemesi toptancısı) için satın alma asistanısın. ' +
           'SADECE verilen listedeki SKU\'ları kullanabilirsin. Kalemleri sonAlisTedarikcisi alanına göre grupla; ' +
           'tedarikçisi bilinmeyenleri "Tedarikçisi belirsiz" grubuna koy ve riskNotlari\'nda belirt. ' +
           'acikTaslakVar=true kalemleri önermek yerine riskNotlari\'nda "taslağı zaten açık" diye not et. ' +
           'Fiyat/tutar YAZMA. Türkçe ve kısa yaz.',
-        messages: [{
-          role: 'user',
-          content: JSON.stringify({ gorev: 'Kritik stoklar için tedarikçi bazlı satın alma önerisi çıkar.', kritikStoklar: girdi }),
-        }],
-        output_config: { format: zodOutputFormat(SatinAlmaOnerisiSemasi) },
+        girdi: { gorev: 'Kritik stoklar için tedarikçi bazlı satın alma önerisi çıkar.', kritikStoklar: girdi },
+        zodSema: SatinAlmaOnerisiSemasi, geminiSema: satinAlmaGeminiSemasi,
       });
-
-      const veri = yanit.parsed_output;
-      if (!veri) return res.status(502).json({ success: false, error: `Model çıktısı ayrıştırılamadı (stop: ${yanit.stop_reason ?? '?'}).` });
+      if ('hata' in uretim) return res.status(uretim.kod).json({ success: false, notConfigured: uretim.kod === 503 || undefined, error: uretim.hata });
+      const dogrulama = SatinAlmaOnerisiSemasi.safeParse(uretim.ham);
+      if (!dogrulama.success) return res.status(502).json({ success: false, error: 'Model çıktısı şemaya uymadı: ' + dogrulama.error.issues.slice(0, 3).map(i => i.path.join('.')).join(', ') });
+      const veri = dogrulama.data;
       const gecerliSku = new Set(kritikler.map(k => k.sku));
       let elenen = 0;
       const gruplar = veri.tedarikciGruplari.map(g => ({
@@ -247,8 +303,8 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
           return [{ ...kl, urunAdi: k?.urun ?? kl.sku, mevcutStok: k?.stok ?? null, esik: k?.esik ?? null }];
         }),
       })).filter(g => g.kalemler.length > 0);
-      await C.writeAuditLog(C.reqActor(req), 'Satın Alma Ajanı', `${gruplar.length} tedarikçi grubu, ${gruplar.reduce((s, g) => s + g.kalemler.length, 0)} kalem (${elenen} elendi)`);
-      res.json({ success: true, ozet: veri.ozet, tedarikciGruplari: gruplar, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
+      await C.writeAuditLog(C.reqActor(req), 'Satın Alma Ajanı', `${gruplar.length} tedarikçi grubu, ${gruplar.reduce((s, g) => s + g.kalemler.length, 0)} kalem (${elenen} elendi, ${uretim.saglayici})`);
+      res.json({ success: true, saglayici: uretim.saglayici, ozet: veri.ozet, tedarikciGruplari: gruplar, riskNotlari: veri.riskNotlari, elenenOneri: elenen });
     } catch (e) {
       console.error('[satinalma-ajani]', e);
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
