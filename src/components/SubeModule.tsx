@@ -492,9 +492,11 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
                   onChange={e => {
                     const sku = e.target.value.trim();
                     // ESLEME ANAHTARI SKU: bagli urun adini da yaz ki liste/rapor
-                    // ekranlarinda SKU degil okunabilir ad gorunsun.
+                    // ekranlarinda SKU degil okunabilir ad gorunsun. Envanterde
+                    // bulunamazsa elle yazilan adi SILME (2026-09-04 kullanici
+                    // karari: "envanterde olmayana da kayit eklesin").
                     const esles = inventory.find(it => it.sku === sku);
-                    setTransferForm(p => ({ ...p, urunSku: sku, urun: esles ? esles.name : '' }));
+                    setTransferForm(p => ({ ...p, urunSku: sku, urun: esles ? esles.name : p.urun }));
                   }}
                   className="apple-input"
                   placeholder="SKU seçin veya yazın"
@@ -502,15 +504,30 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
                 <datalist id="cetpa-sube-urun-listesi">
                   {inventory.map(it => <option key={it.id} value={it.sku}>{it.name}</option>)}
                 </datalist>
-                {transferForm.urunSku && (
-                  <p className={`text-[10px] mt-1 ${transferForm.urun ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {transferForm.urun
-                      ? `✓ ${transferForm.urun}`
-                      : (currentLanguage === 'tr'
-                          ? 'Bu SKU envanterde bulunamadı — transfer kaydı stokla eşleşmeyecek.'
-                          : 'SKU not found in inventory — this transfer will not match stock.')}
-                  </p>
-                )}
+                {transferForm.urunSku && (() => {
+                  const envanterde = inventory.some(it => it.sku === transferForm.urunSku);
+                  return (
+                    <>
+                      <p className={`text-[10px] mt-1 ${envanterde ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {envanterde
+                          ? `✓ ${transferForm.urun}`
+                          : (currentLanguage === 'tr'
+                              ? 'Bu SKU envanterde yok — kayıt yine de eklenir, ürün adını aşağıya yazın.'
+                              : 'SKU not in inventory — record is still saved; type the product name below.')}
+                      </p>
+                      {/* Envanterde olmayan SKU icin ad ELLE yazilir: fason/yeni urun
+                          henuz tanimli olmayabilir, kayit engellenmez. */}
+                      {!envanterde && (
+                        <input
+                          value={transferForm.urun}
+                          onChange={e => setTransferForm(p => ({ ...p, urun: e.target.value }))}
+                          className="apple-input mt-1.5"
+                          placeholder={currentLanguage === 'tr' ? 'Ürün adı (envanterde yok)' : 'Product name (not in inventory)'}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
