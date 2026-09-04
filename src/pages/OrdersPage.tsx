@@ -42,6 +42,7 @@ import TransferScanPanel from '../components/TransferScanPanel';
 import CustomerCombobox from '../components/CustomerCombobox';
 import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
 import LocationStockReport from '../components/LocationStockReport';
+import { faturaTipiEtiketi } from '../utils/durumEtiketi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -1194,7 +1195,7 @@ export default function OrdersPage({
                                   </span>
                                 ) : order.faturali ? (
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
-                                    {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
+                                    {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
                                   </span>
                                 ) : (
                                   <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">
@@ -1399,7 +1400,7 @@ export default function OrdersPage({
                             </span>
                           ) : order.faturali ? (
                             <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${order.faturaTipi === 'ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi === 'e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
-                              {order.faturaTipi ? order.faturaTipi.toUpperCase() : 'e-FTR'}
+                              {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FTR'}
                             </span>
                           ) : null}
                           {order.mikroFaturaNo ? (

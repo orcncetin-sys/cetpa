@@ -36,6 +36,7 @@ const CariEkstrePanel = React.lazy(() => import('../components/CariEkstrePanel')
 const MutabakatPanel  = React.lazy(() => import('../components/MutabakatPanel'));
 const DealerCommissionPanel = React.lazy(() => import('../components/DealerCommissionPanel'));
 import B2BPortal from '../components/B2BPortal';
+import { oncelikEtiketi } from '../utils/durumEtiketi';
 import type {
   Lead, Order, Employee, InventoryItem,
   LeadActivity, VoiceNote, Warehouse,
@@ -817,7 +818,7 @@ export default function CRMPage({
                               <div className="flex items-start gap-2 mb-1 flex-wrap">
                                 <p className="text-sm font-bold text-gray-900 flex-1">{ticket.title}</p>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${priorityBadge}`}>
-                                  {ticket.priority === 'high' ? '🔴' : ticket.priority === 'medium' ? '🟡' : '⚪'} {ticket.priority.toUpperCase()}
+                                  {ticket.priority === 'high' ? '🔴' : ticket.priority === 'medium' ? '🟡' : '⚪'} {oncelikEtiketi(ticket.priority, currentLanguage)}
                                 </span>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${statusBadge}`}>{statusLabel}</span>
                               </div>

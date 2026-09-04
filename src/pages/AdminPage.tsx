@@ -20,6 +20,7 @@ import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
 import { kurCevir } from '../utils/currency';
+import { basHarf } from '../utils/buyukHarf';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -338,7 +339,7 @@ export default function AdminPage({
                     <td className="py-2.5 px-3">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-full bg-brand/10 flex items-center justify-center text-brand font-bold text-xs">
-                          {((u.email as string)||(u.displayName as string)||'?')[0].toUpperCase()}
+                          {basHarf((u.email as string) || (u.displayName as string))}
                         </div>
                         <span className="font-medium text-gray-800 text-xs">{(u.displayName as string)||(u.email as string)?.split('@')[0]||'Kullanıcı'}</span>
                       </div>

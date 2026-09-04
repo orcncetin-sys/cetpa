@@ -23,6 +23,7 @@ import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import ModuleHeader from './ModuleHeader';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { oncelikEtiketi } from '../utils/durumEtiketi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -298,7 +299,7 @@ export default function ApprovalQueue({
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {req.priority !== 'low' && (
                         <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full', PRIORITY_COLORS[req.priority])}>
-                          {req.priority.toUpperCase()}
+                          {oncelikEtiketi(req.priority, currentLanguage)}
                         </span>
                       )}
                       <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', statusBadge(req.status))}>

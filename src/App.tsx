@@ -499,6 +499,7 @@ const InventoryView = InventoryViewComponent;
 // --- Unauthorized Access View ---
 import UnauthorizedView from './components/UnauthorizedView';
 import ReadOnlyBanner from './components/ReadOnlyBanner';
+import { basHarf } from './utils/buyukHarf';
 
 // ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
 // Path yönlendirmesine geçmeden önceki linkler/yer imleri `/#crm` biçimindeydi
@@ -4211,7 +4212,7 @@ function AppContent() {
                 <div className="relative w-8 h-8 flex-shrink-0">
                   {/* Taban: baş harf — foto yüklenmezse/hatalıysa bu görünür */}
                   <div className={cn("absolute inset-0 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center", darkMode && "border-brand/40")}>
-                    <span className="text-xs font-bold text-brand">{(user?.displayName || user?.email || 'M')[0].toUpperCase()}</span>
+                    <span className="text-xs font-bold text-brand">{basHarf(user?.displayName || user?.email)}</span>
                   </div>
                   {user?.photoURL && (
                     <img src={user.photoURL} referrerPolicy="no-referrer" loading="lazy"

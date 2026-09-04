@@ -28,6 +28,7 @@ import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '../types';
+import { faturaTipiEtiketi } from '../utils/durumEtiketi';
 
 const SabitKiymetModule    = React.lazy(() => import('../components/SabitKiymetModule'));
 const MaliyetMerkeziModule = React.lazy(() => import('../components/MaliyetMerkeziModule'));
@@ -2745,7 +2746,7 @@ export default function MuhasebePage(props: Props) {
                                         <td className="px-3 py-2.5 font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR')}</td>
                                         <td className="px-3 py-2.5">
                                           {o.faturaTipi ? (
-                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{o.faturaTipi}</span>
+                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{faturaTipiEtiketi(o.faturaTipi, currentLanguage)}</span>
                                           ) : (
                                             <span className="text-[10px] text-gray-400">—</span>
                                           )}
@@ -2807,7 +2808,7 @@ export default function MuhasebePage(props: Props) {
                                   {d.shippingAddress && satir564(tr564 ? 'Adres' : 'Address', <span className="font-normal text-xs">{d.shippingAddress}</span>)}
                                   {satir564(tr564 ? 'Tutar' : 'Amount', `₺${(d.totalPrice||0).toLocaleString('tr-TR')}`)}
                                   {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ₺${d.kdvTutari.toLocaleString('tr-TR')}` : ''}`)}
-                                  {d.faturaTipi && satir564(tr564 ? 'Fatura Türü' : 'Invoice Type', d.faturaTipi)}
+                                  {d.faturaTipi && satir564(tr564 ? 'Fatura Türü' : 'Invoice Type', faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
                                   {satir564(tr564 ? 'Fatura No' : 'Invoice No', dInvoiceNo)}
                                   {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
                                   {d.irsaliyeNo && satir564(tr564 ? 'İrsaliye No' : 'Waybill No', d.irsaliyeNo)}

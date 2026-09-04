@@ -7,6 +7,7 @@ import { db } from '../../firebase';
 import { type MikroFaturaDetayVerisi } from '../MikroFaturaDetay';
 import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { faturaTipiEtiketi } from '../../utils/durumEtiketi';
 
 type InvoiceForm = {
   faturaNo: string; faturaTipi: 'e-fatura' | 'e-arsiv' | 'ihracat';
@@ -288,7 +289,7 @@ export default function FaturalarTab({
                         <p className="font-semibold text-[#1D1D1F]">{inv.customerName as string}</p>
                         {!!inv.taxId && <p className="text-[10px] text-gray-400">VKN: {inv.taxId as string}</p>}
                       </td>
-                      <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${typeColor}`}>{tp}</span></td>
+                      <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColor}`}>{faturaTipiEtiketi(tp, currentLanguage)}</span></td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{inv.date as string}</td>
                       <td className="px-4 py-3 text-right text-gray-600">%{inv.kdvOran as number}</td>
                       <td className="px-4 py-3 text-right text-gray-600">₺{(inv.kdvHaric as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>

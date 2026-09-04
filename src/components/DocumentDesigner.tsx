@@ -38,7 +38,7 @@ const defaultTemplate = (docType: string): DocTemplate => {
   return {
     id: docType,
     docType,
-    title: dt?.defaultTitle ?? docType.toUpperCase(),
+    title: dt?.defaultTitle ?? docType.toUpperCase(),   // ASCII slug fallback — DOC_TYPES'in hepsinde defaultTitle dolu, bu dal pratikte erisilmez
     color: 'var(--color-brand)',
     footer: 'Bizi tercih ettiğiniz için teşekkürler.',
     bankDetails: 'TR00 0000 0000 0000 0000 0000 00',

@@ -18,6 +18,7 @@ import { submitApprovalRequest } from './ApprovalQueue';
 import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 import { kurCevir } from '../utils/currency';
+import { basHarf } from '../utils/buyukHarf';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -749,7 +750,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                           auto-reorder taslakları ürün bazlı, tedarikçi veriden sonradan
                           doldurulur — boşken satırın NE olduğu yine de anlaşılmalı. */}
                       <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">
-                        {(order.supplier || (order as unknown as { productName?: string }).productName || '—').substring(0, 2).toUpperCase()}
+                        {basHarf(order.supplier || (order as unknown as { productName?: string }).productName, 2)}
                       </div>
                       <span className="text-sm font-medium text-gray-700">
                         {order.supplier || (
