@@ -895,35 +895,6 @@ export default function IKRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 5 && (() => {
-        const totalRevenue321 = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-        const revPerEmp = employees.length > 0 ? totalRevenue321 / employees.length : 0;
-        const depts321 = [...new Set(employees.map(e => e.department).filter(Boolean))];
-        const deptRevPerEmp = depts321.map(dept => {
-          const cnt = employees.filter(e => e.department === dept).length;
-          const estRev = cnt > 0 ? (totalRevenue321 / employees.length) * cnt : 0;
-          return { dept, cnt, estRev, perHead: cnt > 0 ? estRev / cnt : 0 };
-        }).sort((a, b) => b.perHead - a.perHead);
-        const maxPH = Math.max(...deptRevPerEmp.map(d => d.perHead), 1);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Başına Ciro' : 'Revenue per Employee'}</h3>
-            <p className="text-xs text-gray-500 mb-4">Estimated revenue contribution per headcount by department · Overall: {fmtAna(revPerEmp,'full',0)}/emp</p>
-            <div className="space-y-2">
-              {deptRevPerEmp.map((d, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-gray-600 w-28 truncate">{d.dept}</span>
-                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-indigo-400 transition-all" style={{width: `${(d.perHead / maxPH) * 100}%`}} />
-                  </div>
-                  <span className="text-[10px] text-gray-400 w-10 text-right">{d.cnt} emp</span>
-                  <span className="text-xs font-bold text-indigo-600 w-24 text-right">{fmtAna(d.perHead,'full',0)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'ik' && employees.length >= 2 && (() => {
         const deptCost: Record<string, {headcount: number; cost: number}> = {};
@@ -994,47 +965,6 @@ export default function IKRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'ik' && employees.length >= 3 && (() => {
-        const toTs342 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
-        const now342 = Date.now();
-        const tenures = employees.map(e => {
-          const start = toTs342((e as unknown as Record<string,unknown>).startDate || (e as unknown as Record<string,unknown>).hireDate || (e as unknown as Record<string,unknown>).createdAt);
-          return start > 0 ? Math.floor((now342 - start) / (365.25 * 86400000)) : -1;
-        }).filter(t => t >= 0);
-        if (tenures.length < 2) return null;
-        const buckets342 = [
-          {label: '<1yr',  max: 1,   count: 0, color: '#6366f1'},
-          {label: '1–2yr', max: 2,   count: 0, color: '#3b82f6'},
-          {label: '2–5yr', max: 5,   count: 0, color: '#10b981'},
-          {label: '5–10yr',max: 10,  count: 0, color: '#f59e0b'},
-          {label: '10yr+', max: 999, count: 0, color: '#f97316'},
-        ];
-        tenures.forEach(t => {
-          const b = buckets342.find(b => t < b.max);
-          if (b) b.count++;
-        });
-        const maxTB = Math.max(...buckets342.map(b => b.count), 1);
-        const avgTenure = (tenures.reduce((s, t) => s + t, 0) / tenures.length).toFixed(1);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
-            <p className="text-xs text-gray-500 mb-4">Years of service · Avg tenure: {avgTenure} years</p>
-            <div className="flex items-end gap-3 h-20">
-              {buckets342.map((b, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-xs font-bold" style={{color: b.color}}>{b.count}</span>
-                  <div className="w-full rounded-t-lg" style={{height: `${Math.max((b.count / maxTB) * 64, 4)}px`, background: b.color}} />
-                  <span className="text-[9px] text-gray-500">{b.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'ik' && employees.length >= 3 && (() => {
         const posMap: Record<string, {count: number; totalSalary: number}> = {};

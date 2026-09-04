@@ -379,43 +379,6 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         );
       })()}
 
-      {reportsTab === 'genel' && orders.length >= 1 && (() => {
-        const now = new Date();
-        const thirtyAgo = new Date(now.getTime() - 30 * 86400000);
-        let rev30 = 0; let orders30 = 0;
-        orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d || d < thirtyAgo) return;
-          const oR = o as unknown as Record<string,unknown>;
-          const total = typeof oR.total === 'number' ? oR.total as number
-            : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
-          rev30 += total; orders30++;
-        });
-        const aov = orders30 > 0 ? rev30 / orders30 : 0;
-        const uniqueCustomers = new Set(orders.map(o => (o as unknown as Record<string,unknown>).customerId as string || (o as unknown as Record<string,unknown>).customerName as string || 'u')).size;
-        const kpis = [
-          {label:'Revenue (30d)', val:`₺${(rev30/1000).toFixed(1)}k`, icon:'💰', color:'#ff4000'},
-          {label:'Orders (30d)', val:String(orders30), icon:'📦', color:'#3b82f6'},
-          {label:'Avg Order', val:`₺${(aov/1000).toFixed(1)}k`, icon:'📊', color:'#22c55e'},
-          {label:'Customers', val:String(uniqueCustomers), icon:'👥', color:'#8b5cf6'},
-        ];
-        return (
-          <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Yönetici KPI Özeti' : 'Executive KPI Summary'}</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {kpis.map(k => (
-                <div key={k.label} className="rounded-xl p-3" style={{background: `${k.color}12`}}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-sm">{k.icon}</span>
-                    <span className="text-[10px] text-gray-500">{k.label}</span>
-                  </div>
-                  <p className="text-xl font-bold" style={{color: k.color}}>{k.val}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const now = new Date();

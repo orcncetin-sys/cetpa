@@ -57,6 +57,12 @@ interface PurchaseOrder {
 }
 
 interface PurchasingModuleProps {
+  /** GLOBAL döviz seçimi (2026-09-04): modül kendi lokal `kpiCurrency` state'ini
+   *  tutuyordu ve sayfa başlığındaki seçiciyle bağlantısı YOKTU — aynı ekranda iki
+   *  bağımsız TRY/USD/EUR düğmesi vardı, üsttekini değiştirince buradaki kart
+   *  değişmiyordu. Artık tek kaynak: sayfa geçer, modül okur. */
+  kpiCurrency?: 'TRY' | 'USD' | 'EUR';
+  setKpiCurrency?: (c: 'TRY' | 'USD' | 'EUR') => void;
   currentLanguage: 'tr' | 'en';
   isAuthenticated: boolean;
   userRole: string | null;
@@ -68,7 +74,7 @@ interface PurchasingModuleProps {
   onPrefillConsumed?: () => void;
 }
 
-export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory = [], onNavigate, exchangeRates, prefillProduct, onPrefillConsumed }: PurchasingModuleProps) {
+export default function PurchasingModule({ currentLanguage, isAuthenticated, userRole, inventory = [], onNavigate, exchangeRates, prefillProduct, onPrefillConsumed, kpiCurrency: kpiCurrencyProp, setKpiCurrency: setKpiCurrencyProp }: PurchasingModuleProps) {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
 
@@ -93,7 +99,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [kpiCurrency, setKpiCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
+  // Prop verilmişse GLOBAL seçim kullanılır; verilmemişse (modül başka bir yerden
+  // tek başına kullanılırsa) eski lokal davranış korunur.
+  const [yerelCurrency, setYerelCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
+  const kpiCurrency = kpiCurrencyProp ?? yerelCurrency;
+  const setKpiCurrency = setKpiCurrencyProp ?? setYerelCurrency;
   const [validationError, setValidationError] = useState('');
   const showValidationError = (msg: string) => { setValidationError(msg); setTimeout(() => setValidationError(''), 3500); };
 

@@ -79,41 +79,6 @@ export default function CrmBloklar9({ reportsTab, orders, quotations, currentLan
         );
       })()}
 
-      {reportsTab === 'crm' && orders.length >= 8 && (() => {
-        const toTs377 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
-        const firstOrder: Record<string, string> = {};
-        [...orders].sort((a, b) => toTs377(a.createdAt) - toTs377(b.createdAt)).forEach(o => {
-          if (!firstOrder[o.customerName]) firstOrder[o.customerName] = (() => {
-            const d = new Date(toTs377(o.createdAt));
-            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-          })();
-        });
-        const monthNew: Record<string, number> = {};
-        Object.values(firstOrder).forEach(k => { monthNew[k] = (monthNew[k] || 0) + 1; });
-        const keys377 = Object.keys(monthNew).sort().slice(-8);
-        if (keys377.length < 3) return null;
-        const maxNew = Math.max(...keys377.map(k => monthNew[k]), 1);
-        const totalNew = keys377.reduce((s, k) => s + monthNew[k], 0);
-        return (
-          <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Yeni Müşteri Kazanımı' : 'New Customer Acquisition'}</h3>
-            <p className="text-xs text-gray-500 mb-4">{totalNew} new customers across shown period</p>
-            <div className="flex items-end gap-2 h-24">
-              {keys377.map(k => (
-                <div key={k} className="flex-1 flex flex-col items-center gap-0.5">
-                  <span className="text-[9px] text-gray-500">{monthNew[k]}</span>
-                  <div className="w-full rounded-t-lg bg-fuchsia-400 transition-all" style={{height: `${Math.max((monthNew[k] / maxNew) * 72, 4)}px`}} />
-                  <span className="text-[9px] text-gray-400">{k.slice(5)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'crm' && orders.length >= 8 && (() => {
         const toTs378 = (v: unknown): number => {

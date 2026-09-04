@@ -31,6 +31,7 @@ import { kurCevir, formatInCurrency } from '../utils/currency';
 import { registerTurkishFont } from '../utils/pdfFont';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
+import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import AccountingModule from '../components/AccountingModule';
 const CargoTrackingTab = React.lazy(() => import('../components/CargoTrackingTab'));
 const LogisticsMapLazy = React.lazy(() => import('../components/LogisticsMap'));
@@ -134,6 +135,10 @@ interface Props {
   userRole: string;
   user: { email?: string | null; uid?: string; displayName?: string | null } | null;
   kpiCurrency: 'TRY' | 'USD' | 'EUR';
+  /** 2026-09-04: sayfa `kpiCurrency`'yi OKUYUP tutarları çeviriyordu ama hiçbir
+   *  seçici RENDER ETMİYORDU — kullanıcı Siparişler'deyken para birimini
+   *  değiştiremiyordu (başka sayfada değiştirip geri gelmesi gerekiyordu). */
+  setKpiCurrency: (c: 'TRY' | 'USD' | 'EUR') => void;
   activeTab: string;
   darkMode: boolean;
   warehouses: Warehouse[];
@@ -179,7 +184,7 @@ export default function OrdersPage({
   routeStops, isRouteOptimized, selectedDepot, setSelectedDepot, DEPOTS,
   recurringOrders, hasFullAccess, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
-  userRole, user, kpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, kullaniciUid, locationStocks, shipments,
+  userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, kullaniciUid, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
   handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
@@ -460,6 +465,7 @@ export default function OrdersPage({
                 icon={Package}
                 actionButton={
                   <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                     <div className="relative w-full sm:w-auto">
                       <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                       <input

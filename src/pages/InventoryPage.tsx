@@ -685,9 +685,11 @@ export default function InventoryPage(props: Props) {
                             <tr key={item.id} className={`hover:bg-gray-50/50 transition-colors ${item.margin<0?'bg-red-50/20':item.margin<15?'bg-amber-50/20':''}`}>
                               <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[160px] truncate">{item.name}</td>
                               <td className="px-3 py-2.5 font-mono text-gray-400">{item.sku}</td>
-                              <td className="px-3 py-2.5 font-mono text-gray-600">₺{item.cost.toLocaleString('tr-TR')}</td>
-                              <td className="px-3 py-2.5 font-mono text-gray-500">₺{item.overhead.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
-                              <td className="px-3 py-2.5 font-mono font-bold text-gray-700">₺{item.totalCost.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                              {/* Doviz secici tum tutarlari etkiler (2026-09-04): eskiden
+                                  sayfadaki secici yalniz Envanter Ozeti kartini degistiriyordu. */}
+                              <td className="px-3 py-2.5 font-mono text-gray-600">{fmtKpi(item.cost)}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-500">{fmtKpi(item.overhead)}</td>
+                              <td className="px-3 py-2.5 font-mono font-bold text-gray-700">{fmtKpi(item.totalCost)}</td>
                               <td className="px-3 py-2.5 font-mono text-gray-700">{item.price > 0 ? `₺${item.price.toLocaleString('tr-TR')}` : '—'}</td>
                               <td className="px-3 py-2.5">
                                 <span className={`font-black text-sm ${item.margin>=30?'text-emerald-600':item.margin>=15?'text-amber-600':item.margin>=0?'text-orange-500':'text-red-600'}`}>
@@ -776,7 +778,7 @@ export default function InventoryPage(props: Props) {
                             <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                               <div className="h-full bg-blue-400 rounded-full" style={{width:`${pct}%`}} />
                             </div>
-                            <span className="text-xs font-bold text-gray-700 w-28 text-right font-mono">₺{v.value.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                            <span className="text-xs font-bold text-gray-700 w-28 text-right font-mono">{fmtKpi(v.value)}</span>
                             <span className="text-[10px] text-gray-400 w-10 text-right">{pct.toFixed(0)}%</span>
                           </div>
                         );
@@ -1026,7 +1028,7 @@ export default function InventoryPage(props: Props) {
                                 <td className="px-3 py-2.5 text-gray-600">{c.productName}</td>
                                 <td className="px-3 py-2.5 font-mono text-gray-500">{c.sku}</td>
                                 <td className="px-3 py-2.5 font-bold text-gray-700">{c.qty}</td>
-                                <td className="px-3 py-2.5 font-bold font-mono text-blue-700">₺{(c.qty*c.agreedPrice).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                                <td className="px-3 py-2.5 font-bold font-mono text-blue-700">{fmtKpi(c.qty*c.agreedPrice)}</td>
                                 <td className="px-3 py-2.5">
                                   <div className="flex items-center gap-2">
                                   <select value={c.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierConsignments',c.id),{status:e.target.value});}catch(err){toast((tr588?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>

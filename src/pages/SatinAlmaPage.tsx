@@ -251,6 +251,8 @@ export default function SatinAlmaPage(props: Props) {
                         orders={orders}
                         onNavigate={setActiveTab}
                         exchangeRates={exchangeRates}
+                        kpiCurrency={kpiCurrency}
+                        setKpiCurrency={setKpiCurrency}
                         prefillProduct={quickPOProduct ?? undefined}
                         onPrefillConsumed={() => setQuickPOProduct(null)}
                       />

@@ -434,7 +434,7 @@ export default function DashboardPage(props: Props) {
                                 <div
                                   className="bg-green-400 rounded-sm opacity-60 group-hover:opacity-100 transition-opacity"
                                   style={{ height: `${Math.max((d.rev / maxRev) * 100, 4)}%` }}
-                                  title={`${d.day}: ₺${d.rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                  title={`${d.day}: ${fmtKpi(d.rev)}`}   /* sabit ₺ idi — döviz seçicisine bağlandı (2026-09-04) */
                                 />
                               </div>
                             ))}
@@ -572,8 +572,8 @@ export default function DashboardPage(props: Props) {
                   insights.push({
                     icon: '💳',
                     text: currentLanguage === 'tr'
-                      ? `${unpaidOrders.length} siparişte ₺${unpaidTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ödeme bekliyor`
-                      : `${unpaidOrders.length} order${unpaidOrders.length > 1 ? 's' : ''} pending payment (₺${unpaidTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })})`,
+                      ? `${unpaidOrders.length} siparişte ${fmtKpi(unpaidTotal)} ödeme bekliyor`
+                      : `${unpaidOrders.length} order${unpaidOrders.length > 1 ? 's' : ''} pending payment (${fmtKpi(unpaidTotal)})`,
                     color: 'text-red-700',
                     bg: 'bg-red-50',
                     borderColor: 'border-red-200',

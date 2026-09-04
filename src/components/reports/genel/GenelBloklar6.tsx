@@ -354,44 +354,6 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         );
       })()}
 
-      {reportsTab === 'genel' && orders.length >= 5 && (() => {
-        const custRev: Record<string,number> = {};
-        orders.forEach(o => {
-          const cid=(o as unknown as Record<string,unknown>).customerName as string|undefined||(o as unknown as Record<string,unknown>).customerId as string|undefined||'Unknown';
-          const oR=o as unknown as Record<string,unknown>;
-          const total=typeof oR.total==='number' ? oR.total as number : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
-          custRev[cid]=(custRev[cid]??0)+total;
-        });
-        const revVals=Object.values(custRev);
-        const totalRev=revVals.reduce((a,b)=>a+b,0);
-        if (totalRev===0||revVals.length<2) return null;
-        // Herfindahl-Hirschman Index
-        const hhi = revVals.reduce((s,v)=>s+Math.pow(v/totalRev,2),0);
-        const hhiScore = Math.round(hhi*10000);
-        const label = hhiScore<1000?'Diversified':hhiScore<2500?'Moderate':hhiScore<5000?'Concentrated':'Highly Concentrated';
-        const color = hhiScore<1000?'#22c55e':hhiScore<2500?'#3b82f6':hhiScore<5000?'#f59e0b':'#ef4444';
-        const top1=revVals.sort((a,b)=>b-a)[0];
-        const top1pct=totalRev>0?Math.round((top1/totalRev)*100):0;
-        const sorted=revVals.sort((a,b)=>b-a);
-        const top3pct=Math.round((sorted.slice(0,3).reduce((a,b)=>a+b,0)/totalRev)*100);
-        return (
-          <div className="apple-card p-4 mb-4">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Ciro Yoğunlaşması' : 'Revenue Concentration'}</h3>
-              <span className="text-xs rounded-full px-2 py-0.5 font-medium" style={{background:`${color}20`,color}}>{label}</span>
-            </div>
-            <div className="text-center mb-3">
-              <p className="text-4xl font-bold" style={{color}}>{hhiScore}</p>
-              <p className="text-[10px] text-gray-400">HHI Score (0-10,000)</p>
-            </div>
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>Top customer: <strong>{top1pct}%</strong></span>
-              <span>Top 3: <strong>{top3pct}%</strong></span>
-              <span><strong>{revVals.length}</strong> customers</span>
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const now = new Date();

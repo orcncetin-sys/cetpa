@@ -2951,40 +2951,6 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
-        const catValue: Record<string, number> = {};
-        inventory.forEach(item => {
-          const cat = item.category ?? 'Other';
-          const retail = (item.prices?.['Retail'] as number | undefined) ?? 0;
-          const stk = (item.stock as number | undefined) ?? 0;
-          catValue[cat] = (catValue[cat] ?? 0) + retail * stk;
-        });
-        const total = Object.values(catValue).reduce((a,b) => a+b, 0);
-        if (total === 0) return null;
-        const rows = Object.entries(catValue).sort((a, b) => b[1] - a[1]).slice(0, 5);
-        const others = total - rows.reduce((s, [,v]) => s + v, 0);
-        if (others > 0) rows.push(['Other', others]);
-        const palette = ['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#6b7280'];
-        return (
-          <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Kategoriye Göre Stok Değeri' : 'Inventory Value by Category'}</h3>
-            <div className="flex h-4 rounded-full overflow-hidden mb-3">
-              {rows.map(([cat, val], i) => (
-                <div key={cat} style={{width: `${(val/total)*100}%`, background: palette[i]}} title={cat} />
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              {rows.map(([cat, val], i) => (
-                <div key={cat} className="flex items-center gap-1.5 text-xs">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background: palette[i]}} />
-                  <span className="text-gray-600 truncate">{cat}</span>
-                  <span className="ml-auto font-medium text-gray-800">{Math.round((val/total)*100)}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
         const products = inventory

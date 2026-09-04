@@ -5927,7 +5927,7 @@ function AppContent() {
                 employees={employees}
                 userRole={userRole}
                 user={user}
-                kpiCurrency={kpiCurrency}
+                kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency}
                 activeTab={activeTab}
                 darkMode={darkMode}
                 warehouses={warehouses}
