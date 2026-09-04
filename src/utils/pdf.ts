@@ -4,18 +4,39 @@ import autoTable from 'jspdf-autotable';
 
 import { Order, Lead } from '../types';
 import { registerTurkishFont } from './pdfFont';
+import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
 
 // Roboto (registerTurkishFont) Türkçe glifleri kapsıyor — artık harf
 // düşürmeye gerek yok, normTR eski çağrı yerlerini bozmamak için passthrough
 // olarak bırakıldı (2026-08-17, bkz. pdfFont.ts).
 const normTR = (s: string) => s;
 
-export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t: unknown) => {
+/**
+ * Sipariş / teklif PDF'i.
+ *
+ * `belgeTipi` 2026-09-04'te eklendi: bu fonksiyonun TEK çağıranı B2BPortal ve
+ * oraya bir TEKLİF nesnesi geçiyordu, ama PDF sabit "SİPARİŞ / FATURA" başlığı
+ * basıyordu — müşteriye giden belge yanlış adlandırılıyordu. Ayrıca teklifte
+ * bulunmayan "Durum / Takip No" alanları da basılıyordu (`Durum: approved`,
+ * `Takip No: -`). Başlık artık Belge Tasarımcısı şablonundan gelir.
+ */
+export const exportOrderPDF = async (
+  order: Order | Record<string, unknown>,
+  _t: unknown,
+  belgeTipi: Extract<BelgeTipi, 'siparis' | 'teklif'> = 'siparis',
+) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   await registerTurkishFont(doc);
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
-  const BRAND: [number, number, number] = [255, 64, 0];
+  const sablon = await sablonGetir(belgeTipi);
+  const teklifMi = belgeTipi === 'teklif';
+  // Para birimi ARTIK okunuyor. Eskiden 5 yerde sabit ' TL' yazıyordu; EUR bir
+  // teklif B2B Portalı'ndan indirildiğinde tutar 'TL' olarak basılıyordu —
+  // aynı teklifin QuotationDetail nüshası '€' basarken. Müşteriye giden iki
+  // belgede iki farklı para birimi.
+  const paraBirimi = String((order as Record<string, unknown>).currency || 'TL');
+  const BRAND: [number, number, number] = sablonRengi(sablon);
   const DARK:  [number, number, number] = [29, 29, 31];
   const GREY:  [number, number, number] = [134, 134, 139];
   const LIGHT: [number, number, number] = [245, 245, 247];
@@ -37,7 +58,7 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   doc.setFontSize(16);
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text('SİPARİŞ / FATURA', W - 14, 15, { align: 'right' });
+  doc.text(sablon?.title?.trim() || VARSAYILAN_BASLIK[belgeTipi], W - 14, 15, { align: 'right' });
 
   // TARIHI BILMIYORSAK BUGUNU BASMA (2026-09-04 denetimi). Eskiden `?? new Date()`
   // yedegi vardi: Mikro faturasindan turetilen siparisin PDF'inde BUGUNUN tarihi
@@ -45,7 +66,14 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   // dosya basliginda "olumcul" diye belgeliyor.
   const dateObj0 = siparisTarih(order);
   const dateStr = dateObj0 ? dateObj0.toLocaleDateString('tr-TR') : '—';
-  const orderNo = gorunenSiparisNo(order).substring(0, 14);
+  // Teklifte `orderNumber` yoktur; `gorunenSiparisNo` o durumda '#'+id.slice(-6)
+  // uretir — hem SIPARIS numarasi bicimindedir hem de QuotationDetail'in bastigi
+  // numaradan (id.substring(0,8).toUpperCase()) FARKLIDIR. Ayni teklif iki
+  // yuzeyden iki farkli numarayla cikiyordu; musteri numarayla arayinca kayit
+  // bulunamiyordu. Teklif yolunda QuotationDetail ile AYNI kurali kullan.
+  const orderNo = teklifMi
+    ? String((order as Record<string, unknown>).id ?? '').substring(0, 8).toUpperCase() || '—'
+    : gorunenSiparisNo(order).substring(0, 14);
 
   doc.setFontSize(8);
   doc.setFont('Roboto', 'normal');
@@ -77,12 +105,21 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...BRAND);
-  doc.text('SİPARİŞ DETAYI', col2 + 4, boxY + 6);
+  doc.text(teklifMi ? 'TEKLİF DETAYI' : 'SİPARİŞ DETAYI', col2 + 4, boxY + 6);
   doc.setFont('Roboto', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...DARK);
-  doc.text(`Durum: ${normTR(String(order.status || '-'))}`, col2 + 4, boxY + 13);
-  doc.text(`Takip No: ${normTR(String(order.trackingNumber || '-'))}`, col2 + 4, boxY + 20);
+  if (teklifMi) {
+    // Teklifte `status` ham İngilizce ('approved') ve `trackingNumber` HİÇ YOK —
+    // eskiden ikisi de basılıyordu ve müşteri "Takip No: -" görüyordu.
+    const gecerli = (order as Record<string, unknown>).validUntil;
+    doc.text(
+      `Geçerlilik: ${gecerli ? new Date(gecerli as string | number | Date).toLocaleDateString('tr-TR') : '—'}`,
+      col2 + 4, boxY + 13);
+  } else {
+    doc.text(`Durum: ${normTR(String(order.status || '-'))}`, col2 + 4, boxY + 13);
+    doc.text(`Takip No: ${normTR(String(order.trackingNumber || '-'))}`, col2 + 4, boxY + 20);
+  }
 
   // ── Items table ────────────────────────────────────────────────────────
   const lineItems = ((order as Record<string, unknown>).lineItems || (order as Record<string, unknown>).items || []) as any[];
@@ -91,8 +128,8 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
     normTR(String(item.title || item.name || '-')),
     item.sku || '-',
     String(item.quantity || 0),
-    `${Number(item.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
-    `${(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
+    `${Number(item.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`,
+    `${(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`,
   ]);
 
   (doc as unknown as { autoTable: (opts: unknown) => void }).autoTable({
@@ -136,8 +173,8 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
-  doc.text(`${subTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 4, { align: 'right' });
-  doc.text(`${vatTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 12, { align: 'right' });
+  doc.text(`${subTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 4, { align: 'right' });
+  doc.text(`${vatTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 12, { align: 'right' });
 
   doc.setFillColor(...BRAND);
   doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
@@ -145,19 +182,36 @@ export const exportOrderPDF = async (order: Order | Record<string, unknown>, _t:
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
-  doc.text(`${totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 23, { align: 'right' });
+  doc.text(`${totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 23, { align: 'right' });
 
   // ── Footer band ────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, H - 14, W, 14, 'F');
-  doc.setFontSize(7.5);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 220, 210);
-  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
-  doc.setTextColor(255, 255, 255);
-  doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
+  // Banka blogu ARTIK ortak cizicide: tablonun bittigi yerden asagi yerlesir ve
+  // sigmiyorsa yeni sayfa acar. Eskiden `H - 20`'ye SABIT konuluyordu ve uzun
+  // tabloda GENEL TOPLAM kutusunun uzerine biniyordu.
+  belgeAltBilgisiCiz(doc, {
+    baslangicY: totalsY + 30,
+    banka: bankaBilgisiBasilir(sablon),
+    genislik: W - 100,   // toplam kutusunun soluna sigsin
+  });
 
-  doc.save(`CETPA_Siparis_${orderNo}_${dateStr.replace(/\./g, '-')}.pdf`);
+  // Alt bant TUM sayfalara — eskiden yalniz son sayfaya ciziliyordu, cok
+  // sayfali belgede 1..N-1 sayfalarinda alt bilgi/sayfa numarasi yoktu.
+  // Footer tek satira kirpilir: sagdaki sayfa etiketiyle cakismasin diye.
+  const footerMetni = (doc.splitTextToSize(sablon?.footer?.trim() || 'Bu belge elektronik olarak oluşturulmuştur.', W - 90) as string[])[0] ?? '';
+  const toplamSayfa = doc.getNumberOfPages();
+  for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
+    doc.setPage(sayfa);
+    doc.setFillColor(...BRAND);
+    doc.rect(0, H - 14, W, 14, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('Roboto', 'normal');
+    doc.setTextColor(255, 220, 210);
+    doc.text(footerMetni, 14, H - 6);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`CETPA  •  cetpa.com.tr  •  Sayfa ${sayfa} / ${toplamSayfa}`, W - 14, H - 6, { align: 'right' });
+  }
+
+  doc.save(`CETPA_${teklifMi ? 'Teklif' : 'Siparis'}_${orderNo}_${dateStr.replace(/\./g, '-')}.pdf`);
 };
 
 // ── Customer Account Statement ────────────────────────────────────────────────

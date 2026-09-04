@@ -202,7 +202,11 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   assemblyMeetings: { read: ['Admin', 'Manager', 'Corporate', 'Legal'], write: ['Admin', 'Corporate'] },
 
   // Ortak (Genel)
-  documentTemplates: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Accounting'] },
+  // documentTemplates: B2B/Dealer da OKUR (2026-09-04). Şablon PDF üretiminde okunuyor ve
+  // B2B Portalı'ndaki teklif PDF'ini MÜŞTERİ indiriyor. Yalnız STAFF okuyabilseydi müşteri
+  // 403 alıp varsayılana düşerdi — Admin'in girdiği başlık/renk/IBAN tam da müşteriye giden
+  // nüshada uygulanmazdı. Sızıntı yok: şablonun her alanı zaten o belgeye basılıyor.
+  documentTemplates: { read: [...STAFF_ROLES, ...EXTERNAL_ROLES], write: ['Admin', 'Manager', 'Sales', 'Accounting'] },
   workflowTasks: { read: [...STAFF_ROLES], write: [...STAFF_ROLES] },
   approvalRequests: { read: ['Admin', 'Manager', 'HR', 'Accounting', 'Sales', 'Logistics', 'Purchasing'], write: ['Admin', 'Manager', 'HR', 'Accounting'] },
 

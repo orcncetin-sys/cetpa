@@ -10,6 +10,7 @@ import { registerTurkishFont } from '../utils/pdfFont';
 import { formatAmount } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
 import { format } from 'date-fns';
+import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK } from '../utils/belgeSablonu';
 import { tr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 
@@ -53,7 +54,12 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       await registerTurkishFont(doc);
       const W = doc.internal.pageSize.getWidth();   // 210
       const H = doc.internal.pageSize.getHeight();  // 297
-      const BRAND: [number, number, number] = [255, 64, 0];
+
+      // Belge Tasarimcisi sablonu (Ayarlar → Belge Tasarimcisi → Teklif).
+      // Okunamazsa `null` doner ve asagidaki varsayilanlar gecerli kalir —
+      // sablon yuzunden PDF uretimi ASLA cokmez (sablonGetir hatayi yutar).
+      const sablon = await sablonGetir('teklif');
+      const BRAND: [number, number, number] = sablonRengi(sablon);
       const DARK: [number, number, number]  = [29, 29, 31];
       const GREY: [number, number, number]  = [134, 134, 139];
       const LIGHT: [number, number, number] = [245, 245, 247];
@@ -81,7 +87,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setFontSize(16);
       doc.setFont('Roboto', 'bold');
       doc.setTextColor(255, 255, 255);
-      doc.text('TEKLİF FORMU', W - 14, 15, { align: 'right' });
+      doc.text(sablon?.title?.trim() || VARSAYILAN_BASLIK.teklif, W - 14, 15, { align: 'right' });
 
       // Parse date
       let dateObj = new Date();
@@ -223,6 +229,8 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.text(formatAmount(total, paraBirimi), W - 16, totalsY + 23, { align: 'right' });
 
       // ── Notes ────────────────────────────────────────────────────────────
+      // Icerigin bittigi Y — banka/alt bilgi blogu bunun ALTINA yerlesir.
+      let icerikSonY = totalsY + 30;   // toplam kutusunun alti
       if (quotation.notes) {
         const notesY = totalsY + 36;
         doc.setFontSize(8);
@@ -232,19 +240,40 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         doc.setFont('Roboto', 'normal');
         doc.setTextColor(...DARK);
         doc.setFontSize(8.5);
-        const noteLines = doc.splitTextToSize(tr(quotation.notes), totalsX - 22);
+        const noteLines = doc.splitTextToSize(tr(quotation.notes), totalsX - 22) as string[];
         doc.text(noteLines, 14, notesY + 6);
+        icerikSonY = notesY + 6 + noteLines.length * 4;
       }
 
       // ── Footer band ───────────────────────────────────────────────────────
-      doc.setFillColor(...BRAND);
-      doc.rect(0, H - 14, W, 14, 'F');
-      doc.setFontSize(7.5);
-      doc.setFont('Roboto', 'normal');
-      doc.setTextColor(255, 220, 210);
-      doc.text('Bu teklif elektronik olarak oluşturulmuştur. İmza gerektirmez.', 14, H - 6);
-      doc.setTextColor(255, 255, 255);
-      doc.text(`CETPA  •  cetpa.com  •  Sayfa 1`, W - 14, H - 6, { align: 'right' });
+      // Banka bilgisi — YALNIZ kullanici gercek bir deger girdiyse basilir.
+      // `bankaBilgisiBasilir` bos metni de eler: varsayilan sahte IBAN'in
+      // musteriye giden teklife basilmasi bu yuzden mumkun degil.
+      // Banka blogu ortak cizicide: not blogunun bittigi yerden asagi yerlesir,
+      // sigmiyorsa yeni sayfa acar. Eskiden `H - 20`'ye SABIT konuluyordu ve
+      // 18+ kalemli teklifte GENEL TOPLAM kutusu + notlarin UZERINE biniyordu.
+      belgeAltBilgisiCiz(doc, {
+        baslangicY: icerikSonY,
+        banka: bankaBilgisiBasilir(sablon),
+        genislik: W - 100,
+      });
+
+      // Alt bant TUM sayfalara — eskiden yalniz son sayfaya ciziliyordu, cok
+      // sayfali belgede 1..N-1 sayfalarinda alt bilgi/sayfa numarasi yoktu.
+      // Footer tek satira kirpilir: sagdaki sayfa etiketiyle cakismasin diye.
+      const footerMetni = (doc.splitTextToSize(sablon?.footer?.trim() || 'Bu teklif elektronik olarak oluşturulmuştur. İmza gerektirmez.', W - 90) as string[])[0] ?? '';
+      const toplamSayfa = doc.getNumberOfPages();
+      for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
+        doc.setPage(sayfa);
+        doc.setFillColor(...BRAND);
+        doc.rect(0, H - 14, W, 14, 'F');
+        doc.setFontSize(7.5);
+        doc.setFont('Roboto', 'normal');
+        doc.setTextColor(255, 220, 210);
+        doc.text(footerMetni, 14, H - 6);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`CETPA  •  cetpa.com.tr  •  Sayfa ${sayfa} / ${toplamSayfa}`, W - 14, H - 6, { align: 'right' });
+      }
 
       doc.save(`CETPA_Teklif_${docNo}_${dateStr.replace(/\./g, '-')}.pdf`);
       setPdfError(null);

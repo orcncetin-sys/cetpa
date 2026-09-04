@@ -42,7 +42,8 @@ import TransferScanPanel from '../components/TransferScanPanel';
 import CustomerCombobox from '../components/CustomerCombobox';
 import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
 import LocationStockReport from '../components/LocationStockReport';
-import { faturaTipiEtiketi } from '../utils/durumEtiketi';
+import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
+import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -1797,17 +1798,25 @@ export default function OrdersPage({
                       <button
                         onClick={async () => {
                           const o = selectedOrder;
+                          try {
                           const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
                           const doc505 = new jsPDF({ format: 'a4', unit: 'mm' });
                           await registerTurkishFont(doc505);
                           const W = doc505.internal.pageSize.getWidth();
-                          doc505.setFillColor(255, 64, 0);
+                          // Belge Tasarimcisi sablonu (Ayarlar → Belge Tasarimcisi → Siparis).
+                          // Okunamazsa null doner, asagidaki varsayilanlar gecerli kalir.
+                          const sablon505 = await sablonGetir('siparis');
+                          const marka505 = sablonRengi(sablon505);
+                          doc505.setFillColor(...marka505);
                           doc505.rect(0, 0, W, 28, 'F');
                           doc505.setTextColor(255, 255, 255);
                           doc505.setFontSize(16); doc505.setFont('Roboto', 'bold');
                           doc505.text('CETPA', 14, 13);
                           doc505.setFontSize(10); doc505.setFont('Roboto', 'normal');
-                          doc505.text(currentLanguage === 'tr' ? 'SİPARİŞ FIŞI' : 'ORDER RECEIPT', 14, 21);
+                          // 'SİPARİŞ FIŞI' yaziyordu — noktasiz I yanlis, dogrusu 'FİŞİ'.
+                          doc505.text(
+                            sablon505?.title?.trim() || (currentLanguage === 'tr' ? 'SİPARİŞ FİŞİ' : 'ORDER RECEIPT'),
+                            14, 21);
                           doc505.setTextColor(80, 80, 80);
                           doc505.setFontSize(9);
                           const rawD = o.createdAt ?? o.syncedAt;
@@ -1828,7 +1837,7 @@ export default function OrdersPage({
                               head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
                               body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, `₺${(li.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, `₺${((li.price || 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` ]),
                               styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
-                              headStyles: { fillColor: [255, 64, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
+                              headStyles: { fillColor: marka505, textColor: [255, 255, 255], fontStyle: 'bold' },
                               alternateRowStyles: { fillColor: [253, 248, 246] },
                               foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, `₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`]],
                               footStyles: { fillColor: [245, 245, 245], fontStyle: 'bold', fontSize: 10 },
@@ -1840,9 +1849,40 @@ export default function OrdersPage({
                           }
                           const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
-                          doc505.text(`${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${o.status} · ${o.paid ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓') : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending')}`, 14, finalY505 + 10);
-                          doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, finalY505 + 18, { align: 'center' });
+                          // Durum ARTIK cevriliyor (eskiden ham 'Delivered' basiyordu).
+                          // Odeme satiri: Mikro faturasindan TURETILEN siparislerde `paid`
+                          // alani YOKTUR — bu "odenmedi" demek DEGIL, "bilinmiyor" demektir.
+                          // Eskiden kosulsuz "Ödeme Bekleniyor" basiliyordu; musteriye giden
+                          // fise yanlis bilgi yaziyordu.
+                          const durum505 = siparisDurumEtiketi(o.status, currentLanguage);
+                          const odeme505 = odemeTakipli(o)
+                            ? (o.paid
+                                ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓')
+                                : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending'))
+                            : null;
+                          doc505.text(
+                            `${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${durum505}${odeme505 ? ` · ${odeme505}` : ''}`,
+                            14, finalY505 + 10);
+
+                          // Banka + alt bilgi ORTAK cizicide — sigmiyorsa yeni sayfa acar.
+                          // Eskiden burada birikimli `altY505` akisi vardi ve sayfa sonu
+                          // denetimi yoktu: 20 kalemli siparise IBAN A4'un altina tasip
+                          // SESSIZCE kayboluyordu (inceleme olctu: son satir y≈305, sayfa 297).
+                          const altY505 = belgeAltBilgisiCiz(doc505, {
+                            baslangicY: finalY505 + 12,
+                            banka: bankaBilgisiBasilir(sablon505),
+                            footer: sablon505?.footer,
+                            etiket: currentLanguage === 'tr' ? 'BANKA BİLGİLERİ' : 'BANK DETAILS',
+                          });
+                          doc505.setFontSize(8); doc505.setTextColor(150,150,150);
+                          doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, altY505 + 4, { align: 'center' });
                           doc505.save(`receipt-${(o.orderNumber || o.shopifyOrderId || o.id.slice(-8)).replace(/[^\w-]/g, '_')}.pdf`);
+                          } catch (e) {
+                            // Eskiden hata SESSIZDI: font/sablon/import basarisizliginda dosya
+                            // inmiyor, kullanici butonu bozuk saniyordu.
+                            console.error('Siparis fisi PDF hatasi:', e);
+                            toast(currentLanguage === 'tr' ? 'Fiş PDF oluşturulamadı.' : 'Receipt PDF failed.', 'error');
+                          }
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'Sipariş fişi PDF indir' : 'Download order receipt PDF'}

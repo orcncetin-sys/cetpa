@@ -2,50 +2,32 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Save, Eye, Settings2, Check, FileText,
-  Receipt, ClipboardList, Truck, ShoppingCart, CheckCircle, Loader2, Edit2
+  Receipt, ClipboardList, Truck, ShoppingCart, CheckCircle, Loader2, Edit2, AlertTriangle
 } from 'lucide-react';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from '../lib/dbClient';
 import { db } from '../firebase';
+import {
+  type DocTemplate, type BelgeTipi,
+  varsayilanSablon, SABLON_UYGULANIYOR, bankaBilgisiBasilir,
+} from '../utils/belgeSablonu';
 
 interface DocumentDesignerProps {
   currentLanguage: 'tr' | 'en';
 }
 
-interface DocTemplate {
-  id: string;
-  docType: string;
-  title: string;
-  color: string;
-  footer: string;
-  bankDetails: string;
-  showBankDetails: boolean;
-  vatRate: number;
-  updatedAt?: unknown;
-}
-
-const DOC_TYPES = [
-  { id: 'fatura',    labelTr: 'Fatura',       labelEn: 'Invoice',       icon: Receipt,       defaultTitle: 'SATIŞ FATURASI' },
-  { id: 'teklif',   labelTr: 'Teklif',        labelEn: 'Quotation',     icon: FileText,      defaultTitle: 'FİYAT TEKLİFİ' },
-  { id: 'irsaliye', labelTr: 'İrsaliye',      labelEn: 'Delivery Note', icon: Truck,         defaultTitle: 'SEVK İRSALİYESİ' },
-  { id: 'siparis',  labelTr: 'Sipariş',       labelEn: 'Order',         icon: ShoppingCart,  defaultTitle: 'SİPARİŞ FORMU' },
-  { id: 'makbuz',   labelTr: 'Makbuz',        labelEn: 'Receipt',       icon: ClipboardList, defaultTitle: 'TAHSİLAT MAKBUZU' },
+// `id: BelgeTipi` BILINCLI: eskiden duz string'di ve `SABLON_UYGULANIYOR[dt.id]`
+// cast'i derleyici bagi kurmuyordu — buraya eklenen bir tip belgeSablonu.ts'teki birlige
+// eklenmeyi unutulursa sessizce `undefined` okurdu. Simdi derlenmez. Varsayilan basliklar
+// da buradan kaldirildi: tek kaynak VARSAYILAN_BASLIK (ikisi ayri yasayinca ayrisiyordu).
+const DOC_TYPES: ReadonlyArray<{ id: BelgeTipi; labelTr: string; labelEn: string; icon: typeof Receipt }> = [
+  { id: 'fatura',   labelTr: 'Fatura',   labelEn: 'Invoice',       icon: Receipt },
+  { id: 'teklif',   labelTr: 'Teklif',   labelEn: 'Quotation',     icon: FileText },
+  { id: 'irsaliye', labelTr: 'İrsaliye', labelEn: 'Delivery Note', icon: Truck },
+  { id: 'siparis',  labelTr: 'Sipariş',  labelEn: 'Order',         icon: ShoppingCart },
+  { id: 'makbuz',   labelTr: 'Makbuz',   labelEn: 'Receipt',       icon: ClipboardList },
 ];
 
 const BRAND_COLORS = ['#ff4000', '#007aff', '#34c759', '#5856d6', '#ff2d55', '#ff9500', '#1d1d1f', '#636366'];
-
-const defaultTemplate = (docType: string): DocTemplate => {
-  const dt = DOC_TYPES.find(d => d.id === docType);
-  return {
-    id: docType,
-    docType,
-    title: dt?.defaultTitle ?? docType.toUpperCase(),   // ASCII slug fallback — DOC_TYPES'in hepsinde defaultTitle dolu, bu dal pratikte erisilmez
-    color: 'var(--color-brand)',
-    footer: 'Bizi tercih ettiğiniz için teşekkürler.',
-    bankDetails: 'TR00 0000 0000 0000 0000 0000 00',
-    showBankDetails: true,
-    vatRate: 20,
-  };
-};
 
 export default function DocumentDesigner({ currentLanguage }: DocumentDesignerProps) {
   const [mainTab, setMainTab] = useState<'design' | 'print'>('design');
@@ -54,9 +36,10 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
   const [saving, setSaving] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [hataMesaji, setHataMesaji] = useState<string | null>(null);
 
   // Current template = saved or default
-  const current: DocTemplate = templates[activeType] ?? defaultTemplate(activeType);
+  const current: DocTemplate = templates[activeType] ?? varsayilanSablon(activeType);
   const [draft, setDraft] = useState<DocTemplate>(current);
 
   // Load all templates from Firestore
@@ -87,7 +70,7 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
     const anahtar = `${activeType}:${templates[activeType] ? 'yuklu' : 'yok'}`;
     if (uygulananRef.current === anahtar) return;   // bu tur icin zaten kuruldu
     uygulananRef.current = anahtar;
-    setDraft(templates[activeType] ?? defaultTemplate(activeType));
+    setDraft(templates[activeType] ?? varsayilanSablon(activeType));
   }, [activeType, templates]);
 
   const handleSave = async () => {
@@ -98,26 +81,41 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
         docType: activeType,
         updatedAt: new Date(),
       });
+      setHataMesaji(null);   // onceki basarisiz denemenin kirmizi toast'i yesilin USTUNDE kalmasin
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 3000);
     } catch (e) {
+      // Eskiden yalniz console.error'du: 403/ag hatasinda kullaniciya HICBIR
+      // sey gosterilmiyor, taslak sessizce geri aliniyordu.
       console.error('DocumentTemplate save error:', e);
+      setHataMesaji(e instanceof Error ? e.message : String(e));
+      setTimeout(() => setHataMesaji(null), 6000);
     } finally {
       setSaving(false);
     }
   };
 
-  const isSaved = JSON.stringify(draft) === JSON.stringify(templates[activeType] ?? defaultTemplate(activeType));
+  // Yalniz DUZENLENEBILIR alanlari kiyasla. Eskiden tum nesne JSON'lanıyordu ve
+  // sunucunun yazdigi `updatedAt` her kayitta degistigi icin "Kaydedilmedi"
+  // rozeti kaydettikten SONRA da sonmuyordu — kullanici kaydin gitmedigini
+  // saniyordu (2026-09-04 kesfi). Bu liste DocTemplate'e alan eklenirse
+  // guncellenmeli, yoksa o alandaki degisiklik "kaydedilmis" gorunur.
+  const kiyaslanabilir = (t: DocTemplate) => JSON.stringify([
+    t.title, t.color, t.footer, t.bankDetails, t.showBankDetails, t.vatRate,
+  ]);
+  const isSaved = kiyaslanabilir(draft) === kiyaslanabilir(templates[activeType] ?? varsayilanSablon(activeType));
 
   const handleDelete = async (docType: string) => {
     try {
       await deleteDoc(doc(db, 'documentTemplates', docType));
       setDeleteConfirm(null);
       if (activeType === docType) {
-        setDraft(defaultTemplate(docType));
+        setDraft(varsayilanSablon(docType));
       }
     } catch (e) {
       console.error('Delete error:', e);
+      setHataMesaji(e instanceof Error ? e.message : String(e));
+      setTimeout(() => setHataMesaji(null), 6000);
     }
   };
 
@@ -137,6 +135,25 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
           >
             <CheckCircle className="w-4 h-4" />
             {tr ? 'Şablon kaydedildi.' : 'Template saved.'}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Hata toast'i — kaydetme/silme basarisizligi artik SESSIZ degil */}
+      <AnimatePresence>
+        {hataMesaji && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            role="alert"
+            className="fixed top-6 right-6 z-[200] bg-red-500 text-white px-5 py-3 rounded-2xl shadow-xl text-sm font-semibold flex items-start gap-2 max-w-sm"
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              {tr ? 'Şablon kaydedilemedi.' : 'Template could not be saved.'}
+              <span className="block font-normal text-white/80 text-xs mt-0.5">{hataMesaji}</span>
+            </span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -182,7 +199,14 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
                 >
                   <Icon className="w-4 h-4" />
                   {tr ? dt.labelTr : dt.labelEn}
-                  {isSavedType && (
+                  {/* Sablonu hicbir belgeye uygulanmayan tip: sessizce "calisiyor"
+                      gostermek yerine gorunur olarak isaretlenir. */}
+                  {!SABLON_UYGULANIYOR[dt.id] ? (
+                    <AlertTriangle
+                      className={`w-3.5 h-3.5 ${activeType === dt.id ? 'text-white/80' : 'text-amber-500'}`}
+                      aria-label={tr ? 'Bu şablon henüz bir belgeye uygulanmıyor' : 'This template is not applied to any document yet'}
+                    />
+                  ) : isSavedType && (
                     <span className={`w-1.5 h-1.5 rounded-full ${activeType === dt.id ? 'bg-white/70' : 'bg-green-500'}`} />
                   )}
                 </button>
@@ -206,6 +230,37 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
                   )}
                 </div>
 
+                {/* DURUSTLUK SERIDI (2026-09-04): bu ekran uzun sure kapali
+                    devreydi — kaydedilen sablonu hicbir PDF okumuyordu. Artik
+                    teklif ve siparis fisi okuyor; digerlerinin karsiligi kod
+                    tabaninda YOK. Kullaniciya hangisinin gercekten bir ciktiyi
+                    etkiledigini soylemek, "calisiyor gibi gorunen" ekran
+                    birakmaktan iyidir. */}
+                {SABLON_UYGULANIYOR[activeType as BelgeTipi] ? (
+                  <p className="text-[11px] leading-relaxed text-green-700 bg-green-50 border border-green-100 rounded-xl px-3 py-2">
+                    <Check className="w-3 h-3 inline mr-1 -mt-0.5" />
+                    {tr
+                      ? `Başlık, renk, alt bilgi ve banka bilgisi şuraya uygulanıyor: ${SABLON_UYGULANIYOR[activeType as BelgeTipi]}`
+                      : 'Title, colour, footer and bank details are applied to the generated PDF.'}
+                    {/* KDV orani BILEREK baglanmadi: belgeler kendi KDV'sini tasir (siparis
+                        `kdvOran`, teklif kalem bazli). Sablondaki oranin bunu EZMESI para
+                        matematigi hatasi olurdu. Ama alan ekranda duruyor ve onizleme onu
+                        gosteriyor — kullaniciya uygulanmadigini soylemek sart. */}
+                    <span className="block mt-1 text-amber-700">
+                      {tr
+                        ? 'KDV oranı belgelere uygulanmıyor — her belge kendi KDV\'sini kullanır; buradaki oran yalnız önizleme içindir.'
+                        : 'VAT rate is not applied to documents — each document carries its own VAT; this value only affects the preview.'}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] leading-relaxed text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    <AlertTriangle className="w-3 h-3 inline mr-1 -mt-0.5" />
+                    {tr
+                      ? 'Bu belge tipi için Cetpa henüz PDF üretmiyor — buradaki ayarlar hiçbir çıktıyı etkilemez. (Fatura ve makbuz PDF\'i yazılmadı; irsaliye Mikro tarafında oluşturuluyor.)'
+                      : 'Cetpa does not generate a PDF for this document type yet — these settings affect no output.'}
+                  </p>
+                )}
+
                 {/* Settings fields... */}
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1.5">
@@ -214,6 +269,7 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
                   <input
                     type="text"
                     value={draft.title}
+                    maxLength={40}
                     onChange={e => setDraft({ ...draft, title: e.target.value })}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand"
                   />
@@ -633,7 +689,9 @@ function DocumentPreview({ template }: { template: DocTemplate }) {
             <h4 className="font-bold text-gray-400 uppercase text-[9px] tracking-wider mb-1">NOTLAR</h4>
             <p className="text-gray-500 leading-relaxed">{template.footer}</p>
           </div>
-          {template.showBankDetails && (
+          {/* PDF ile AYNI kural: bos/yer-tutucu IBAN onizlemede de gorunmez.
+              Aksi halde kullanici onizlemede IBAN gorur, PDF'te goremez. */}
+          {bankaBilgisiBasilir(template) && (
             <div className="text-right">
               <h4 className="font-bold text-gray-400 uppercase text-[9px] tracking-wider mb-1">BANKA BİLGİLERİ</h4>
               <p className="text-gray-500 font-mono">{template.bankDetails}</p>
