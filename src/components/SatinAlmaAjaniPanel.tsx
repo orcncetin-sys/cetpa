@@ -45,7 +45,8 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
           className="apple-button-primary text-sm flex items-center gap-2 disabled:opacity-50">
           {/* 'working': ajan kritik stokları ve son-alış tedarikçilerini işliyor.
               20px preset satır-içi metin ölçeğinde ayrı tasarlanmıştır (ölçek değil). */}
-          {yukleniyor ? <ThinkingOrb state="working" size={20} /> : <Sparkles className="w-4 h-4" />}
+          {yukleniyor ? <ThinkingOrb state="working" size={20} theme="light"
+            aria-label={tr ? 'Öneri hazırlanıyor' : 'Preparing suggestion'} /> : <Sparkles className="w-4 h-4" />}
           {tr ? 'Öneri Üret' : 'Generate'}
         </button>
       </div>

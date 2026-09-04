@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { confirmAction, confirmDelete } from '../lib/confirm';
+import { odemeTakipli } from '../utils/siparis';
 import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -397,7 +398,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
             const overLimit = dealers.filter(d => {
               const limit = (d.creditLimit as number) || 0;
               if (!limit) return false;
-              const usage = portalOrders.filter(o => (o.customerName === (d.name as string) || o.customerEmail === (d.email as string)) && o.status !== 'Cancelled' && !o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
+              const usage = portalOrders.filter(o => (o.customerName === (d.name as string) || o.customerEmail === (d.email as string)) && o.status !== 'Cancelled' && !o.paid && odemeTakipli(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
               return usage > limit;
             });
             if (overLimit.length === 0) return null;

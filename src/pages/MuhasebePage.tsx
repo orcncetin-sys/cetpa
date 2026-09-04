@@ -2849,7 +2849,9 @@ export default function MuhasebePage(props: Props) {
                     const cutoff630 = new Date(Date.now()-maxDays*86400000);
                     // All invoiced orders that are unpaid
                     const unpaidInvoiced = orders.filter(o=>{
-                      if(o.paid||o.status==='Cancelled') return false;
+                      // odemeTakipli (2026-09-04 son kontrol): mikro-fatura turevinde
+                      // `paid` YOK, tahsilat Mikro cari hesapta — "odenmemis" sayilamaz.
+                      if(o.paid||o.status==='Cancelled'||!odemeTakipli(o)) return false;
                       if(!o.createdAt) return false;
                       try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff630; } catch { return false; }
                     });

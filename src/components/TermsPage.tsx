@@ -54,7 +54,7 @@ export default function TermsPage({ currentLanguage: lang, darkMode, onBack }: P
             {isTR ? 'Geri' : 'Back'}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
-          <span className="text-sm font-bold" style={{ color: '#ff4000' }}>CETPA</span>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
           <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Kullanım Koşulları' : 'Terms of Service'}</span>
         </div>
       </header>

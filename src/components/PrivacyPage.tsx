@@ -108,7 +108,7 @@ export default function PrivacyPage({ currentLanguage: lang, darkMode, onBack }:
             {isTR ? 'Geri' : 'Back'}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
-          <span className="text-sm font-bold" style={{ color: '#ff4000' }}>CETPA</span>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
           <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}</span>
         </div>
       </header>

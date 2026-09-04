@@ -815,18 +815,30 @@ export default function IKRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'ik' && employees.length >= 3 && (() => {
         const now = new Date();
+        // TEK KIDEM KARTI (2026-09-04 son kontrol): aynı başlıkla üç kart vardı ve
+        // FARKLI ortalama basıyorlardı. Bu blok korundu çünkü iş kuralı doğru —
+        // AYRILMIŞ çalışanın kıdemi ortalamaya girmemeli. Silinen bloğun iki teknik
+        // üstünlüğü buraya taşındı:
+        //   (a) Timestamp-güvenli okuma: `new Date(TimestampNesnesi)` Invalid Date
+        //       verir (bkz. utils/zaman.ts "ölümcül tuzak A") — kart tüm kovaları 0
+        //       ve "avg NaN years" gösterirdi;
+        //   (b) 365.25 günlük yıl: 30-günlük ay yılı ~%1.4 şişiriyordu.
         const tenureData = employees.filter(e=>e.status==='Aktif' && e.startDate).map(e => {
-          const start = new Date(e.startDate);
-          const months = Math.floor((now.getTime()-start.getTime())/(86400000*30));
-          return { name: e.name, months, years: months/12, dept: e.department };
-        });
+          const start = (e.startDate as unknown as { toDate?: () => Date }).toDate?.()
+            ?? new Date(e.startDate as string);
+          if (isNaN(start.getTime())) return null;      // çözülemeyen tarih ortalamaya girmez
+          const years = (now.getTime() - start.getTime()) / (365.25 * 86400000);
+          if (years < 0) return null;                    // gelecek tarihli kayıt
+          return { name: e.name, months: years * 12, years, dept: e.department };
+        }).flatMap(e => e ? [e] : []);   // null'ları düşür; tip çıkarımı korunur
         if (tenureData.length === 0) return null;
         const buckets = [
-          { label: '< 6 months', min: 0, max: 6, color: '#94a3b8' },
-          { label: '6–12 months', min: 6, max: 12, color: '#3b82f6' },
-          { label: '1–2 years', min: 12, max: 24, color: '#10b981' },
-          { label: '2–5 years', min: 24, max: 60, color: '#f59e0b' },
-          { label: '5+ years', min: 60, max: Infinity, color: '#8b5cf6' },
+          { label: currentLanguage === 'tr' ? '6 aydan az'  : '< 6 months',   min: 0,  max: 6,        color: '#94a3b8' },
+          { label: currentLanguage === 'tr' ? '6–12 ay'     : '6–12 months',  min: 6,  max: 12,       color: '#3b82f6' },
+          { label: currentLanguage === 'tr' ? '1–2 yıl'     : '1–2 years',    min: 12, max: 24,       color: '#10b981' },
+          { label: currentLanguage === 'tr' ? '2–5 yıl'     : '2–5 years',    min: 24, max: 60,       color: '#f59e0b' },
+          { label: currentLanguage === 'tr' ? '5–10 yıl'    : '5–10 years',   min: 60, max: 120,      color: '#8b5cf6' },
+          { label: currentLanguage === 'tr' ? '10 yıl+'     : '10+ years',    min: 120, max: Infinity, color: '#6366f1' },
         ];
         const bucketData = buckets.map(b => ({
           ...b,
@@ -837,7 +849,9 @@ export default function IKRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
-            <p className="text-xs text-gray-500 mb-4">Active employees · avg tenure: {avgTenure.toFixed(1)} years</p>
+            <p className="text-xs text-gray-500 mb-4">{currentLanguage === 'tr'
+              ? `Aktif çalışanlar (${tenureData.length}) · ortalama kıdem: ${avgTenure.toFixed(1)} yıl`
+              : `Active employees (${tenureData.length}) · avg tenure: ${avgTenure.toFixed(1)} years`}</p>
             <div className="space-y-2">
               {bucketData.map((b,i) => (
                 <div key={i} className="flex items-center gap-3">
@@ -1208,39 +1222,6 @@ export default function IKRapor(ctx: ReportsCtx) {
         );
       })()}
 
-      {reportsTab === 'ik' && employees.length >= 3 && (() => {
-        const now = new Date();
-        const tenures = employees.map(e => {
-          const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
-          if (!d || isNaN(d.getTime())) return null;
-          return (now.getTime() - d.getTime()) / (365.25 * 86400000);
-        }).filter((t): t is number => t !== null && t >= 0);
-        if (tenures.length < 2) return null;
-        const buckets = [[0,0.5,'<6mo'],[0.5,1,'6-12mo'],[1,2,'1-2yr'],[2,5,'2-5yr'],[5,10,'5-10yr'],[10,100,'10yr+']];
-        const counts = buckets.map(([lo,hi,lbl]) => ({
-          label: lbl as string,
-          count: tenures.filter(t => t >= (lo as number) && t < (hi as number)).length,
-        }));
-        const maxC = Math.max(...counts.map(c => c.count), 1);
-        const avgTenure = tenures.reduce((a,b) => a+b, 0) / tenures.length;
-        return (
-          <div className="apple-card p-4 mb-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Çalışan Kıdem Dağılımı' : 'Employee Tenure Distribution'}</h3>
-              <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">avg {avgTenure.toFixed(1)}yr</span>
-            </div>
-            <div className="flex items-end gap-2 h-20 mb-1">
-              {counts.map(c => (
-                <div key={c.label} className="flex-1 flex flex-col items-center gap-0.5">
-                  <span className="text-[9px] text-gray-500">{c.count > 0 ? c.count : ''}</span>
-                  <div className="w-full rounded-sm" style={{height: `${(c.count / maxC) * 56}px`, background: '#6366f1', minHeight: c.count > 0 ? 2 : 0}} />
-                  <span className="text-[9px] text-gray-400">{c.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
 
       {reportsTab === 'ik' && employees.length >= 1 && orders.length >= 1 && (() => {
         const now = new Date();

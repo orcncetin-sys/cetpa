@@ -74,7 +74,10 @@ export default function DashboardAnalysis({ data, currentLanguage = 'tr' }: Dash
                         yapıldığını gösterir. Canvas tabanlı, tema-duyarlı (auto),
                         sıfır bağımlılık. Uzun süren AI çağrısında "takıldı mı?"
                         hissini azaltır. */}
-                    <ThinkingOrb state="solving" size={64} />
+                    <ThinkingOrb
+                      state="solving" size={64} theme="light"
+                      aria-label={tr ? 'Veriler analiz ediliyor' : 'Analyzing data'}
+                    />
                     <div className="text-center">
                       <p className="text-lg font-medium text-gray-900">{tr ? 'Veriler Analiz Ediliyor...' : 'Analyzing data…'}</p>
                       <p className="text-sm text-gray-500">{tr ? 'Yüksek düşünme modu aktif. Bu işlem biraz zaman alabilir.' : 'High-reasoning mode active. This may take a moment.'}</p>

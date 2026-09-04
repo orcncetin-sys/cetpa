@@ -36,6 +36,18 @@ if [ "$PHASE" = pre ]; then
   fi
 
   # 2) .ps1 salt-ASCII (PowerShell 5.1 + Windows-1252: em-dash/Türkçe karakter parse'ı kırar)
+
+# ── Tasarim sistemi disiplini (2026-09-04) ───────────────────────────────────
+# Inline renk karanlik tema eslemesine ULASAMAZ; yeni eklenen bir tanesi
+# okunmaz metin uretir ve kimse fark etmez. Uyarilar (WARN) deploy'u DURDURMAZ,
+# yalniz FAIL durdurur — mevcut kod tabanini yeniden yazmaya zorlamaz.
+if [ -x scripts/tasarim-denetimi.sh ]; then
+  if scripts/tasarim-denetimi.sh >/tmp/tasarim-denetimi.log 2>&1; then
+    pass "tasarim denetimi (inline renk / marka rengi / tema eslemesi)"
+  else
+    fail "tasarim denetimi — $(grep -c '^FAIL' /tmp/tasarim-denetimi.log) ihlal (/tmp/tasarim-denetimi.log)"
+  fi
+fi
   PS1_FILES=$(printf '%s\n' "$CHANGED" | grep '\.ps1$' | sort -u)
   if [ -n "$PS1_FILES" ]; then
     # NOT: burada `grep -nP` vardı. -P (PCRE) macOS/BSD grep'te YOK; komut

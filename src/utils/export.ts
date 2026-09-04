@@ -6,6 +6,7 @@
  */
 
 import Papa from 'papaparse';
+import { gorunenSiparisNo } from './siparis';
 import type { Order, Lead, InventoryItem } from '../types';
 
 // ── Generic download helper ───────────────────────────────────────────────────
@@ -32,7 +33,7 @@ function ts(): string {
 export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = orders.map(o => ({
-    [tr ? 'Sipariş No'         : 'Order No']:        o.shopifyOrderId ?? o.id.slice(0, 8),
+    [tr ? 'Sipariş No'         : 'Order No']:        gorunenSiparisNo(o),
     [tr ? 'Müşteri'            : 'Customer']:         o.customerName,
     [tr ? 'Müşteri Tipi'       : 'Customer Type']:   o.customerType ?? '',
     [tr ? 'Durum'              : 'Status']:           o.status,

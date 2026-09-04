@@ -30,6 +30,7 @@ import {
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { siparisDurumEtiketi } from '../../utils/durumEtiketi';
+import { gorunenSiparisNo } from '../../utils/siparis';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { formatInCurrency } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
@@ -116,11 +117,11 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                     return 0;
                   }).slice(0,8).map((o,i) => (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-600">#{o.shopifyOrderId||o.id?.slice(-6)||'—'}</td>
+                      <td className="py-2.5 px-3 font-mono text-xs text-gray-600">{gorunenSiparisNo(o)}</td>
                       <td className="py-2.5 px-3 font-medium text-gray-800 hidden sm:table-cell">{o.customerName||'—'}</td>
                       <td className="py-2.5 px-3 text-xs text-gray-400 truncate max-w-[150px] hidden md:table-cell">{o.shippingAddress||'—'}</td>
                       <td className="py-2.5 px-3 text-center">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status==='Delivered'?'bg-green-100 text-green-600':o.status==='Shipped'?'bg-blue-100 text-blue-600':o.status==='Pending'?'bg-yellow-100 text-yellow-600':'bg-gray-100 text-gray-500'}`}>{o.status}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status==='Delivered'?'bg-green-100 text-green-600':o.status==='Shipped'?'bg-blue-100 text-blue-600':o.status==='Pending'?'bg-yellow-100 text-yellow-600':'bg-gray-100 text-gray-500'}`}>{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                       </td>
                     </tr>
                   ))}

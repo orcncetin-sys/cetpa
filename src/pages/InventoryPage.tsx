@@ -690,7 +690,7 @@ export default function InventoryPage(props: Props) {
                               <td className="px-3 py-2.5 font-mono text-gray-600">{fmtKpi(item.cost)}</td>
                               <td className="px-3 py-2.5 font-mono text-gray-500">{fmtKpi(item.overhead)}</td>
                               <td className="px-3 py-2.5 font-mono font-bold text-gray-700">{fmtKpi(item.totalCost)}</td>
-                              <td className="px-3 py-2.5 font-mono text-gray-700">{item.price > 0 ? `₺${item.price.toLocaleString('tr-TR')}` : '—'}</td>
+                              <td className="px-3 py-2.5 font-mono text-gray-700">{item.price > 0 ? fmtKpi(item.price) : '—'}</td>
                               <td className="px-3 py-2.5">
                                 <span className={`font-black text-sm ${item.margin>=30?'text-emerald-600':item.margin>=15?'text-amber-600':item.margin>=0?'text-orange-500':'text-red-600'}`}>
                                   {item.margin.toFixed(1)}%

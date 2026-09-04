@@ -597,7 +597,7 @@ function InnovationOrb({ isTR, darkMode, activeIdx }: {
   // 3 segments × 110° each, 10° gaps. Centers at: AI=270 (top), ERP=30 (br), DATA=150 (bl)
   const segs = [
     { label: isTR ? 'AI'    : 'AI',   sub: isTR ? 'Yapay Zeka' : 'Intelligence', color: '#7c3aed', a0: 215, a1: 325, center: 270 },
-    { label: isTR ? 'ERP'   : 'ERP',  sub: isTR ? 'Bulut ERP'  : 'Cloud ERP',   color: '#ff4000', a0: 335, a1: 85,  center: 30  },
+    { label: isTR ? 'ERP'   : 'ERP',  sub: isTR ? 'Bulut ERP'  : 'Cloud ERP',   color: 'var(--color-brand)', a0: 335, a1: 85,  center: 30  },
     { label: isTR ? 'VERİ'  : 'DATA', sub: isTR ? 'Veri'       : 'Data',        color: '#0ea5e9', a0: 95,  a1: 205, center: 150 },
   ];
 

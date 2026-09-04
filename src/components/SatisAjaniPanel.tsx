@@ -86,7 +86,8 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
       {yukleniyor && (
         <p className="text-xs text-gray-400 flex items-center gap-2">
           {/* 'searching': ajan gerçek satış geçmişini ve katalog havuzunu tarıyor */}
-          <ThinkingOrb state="searching" size={20} />
+          <ThinkingOrb state="searching" size={20} theme="light"
+            aria-label={tr ? 'Satış geçmişi taranıyor' : 'Scanning sales history'} />
           {tr ? 'Satış geçmişi ve katalog taranıyor…' : 'Scanning sales history…'}
         </p>
       )}

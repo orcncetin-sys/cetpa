@@ -39,7 +39,7 @@ const defaultTemplate = (docType: string): DocTemplate => {
     id: docType,
     docType,
     title: dt?.defaultTitle ?? docType.toUpperCase(),
-    color: '#ff4000',
+    color: 'var(--color-brand)',
     footer: 'Bizi tercih ettiğiniz için teşekkürler.',
     bankDetails: 'TR00 0000 0000 0000 0000 0000 00',
     showBankDetails: true,

@@ -474,12 +474,28 @@ export default function DashboardPage(props: Props) {
                 // günü gösteriyor, ama etiketi bunu söylemiyordu. Ayrıca tarih yalnız
                 // `syncedAt`ten okunuyordu: Mikro faturasından türetilen siparişlerde o
                 // alan YOK, `new Date(0)` yedeğiyle 1970'e düşüp filtreden eleniyorlardı.
-                const weekRevenue = filteredOrders
+                // KAYNAK `orders` (HAM), `filteredOrders` DEĞİL — etiket "aralıktan
+                // bağımsız" diyorsa hesap da öyle olmalı. Önceki hâli çift filtreliydi:
+                // aralık "bu yıl" iken doğru çalışıyor gibi görünüyor ama aralık "geçen
+                // ay" seçilince kart BOŞALIYORDU (kesişim boş), oysa etiket hâlâ
+                // "son 7 gün" diyordu (2026-09-04 son kontrol bulgusu).
+                //
+                // Çift sayım koruması sparkline ile aynı: mikro-fatura türevleri
+                // `mikroFaturalar` üzerinden ayrıca sayılıyor.
+                const weekRevenue = orders
                   .filter(o => {
+                    if (!odemeTakipli(o)) return false;
                     const d = siparisTarih(o);
                     return !!d && (Date.now() - d.getTime()) < 7 * 86400000;
                   })
-                  .reduce((s, o) => s + o.totalPrice, 0);
+                  .reduce((s, o) => s + (o.totalPrice || 0), 0)
+                  + mikroFaturalar
+                      .filter(f => {
+                        if (f.yon !== 'giden') return false;
+                        const d = new Date(f.tarih);
+                        return !isNaN(d.getTime()) && (Date.now() - d.getTime()) < 7 * 86400000;
+                      })
+                      .reduce((s, f) => s + (f.tutar || 0), 0);
 
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

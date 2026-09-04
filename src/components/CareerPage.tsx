@@ -69,7 +69,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
             {isTR ? 'Geri' : 'Back'}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
-          <span className="text-sm font-bold" style={{ color: '#ff4000' }}>CETPA</span>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
           <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Kariyer' : 'Careers'}</span>
         </div>
       </header>
@@ -96,7 +96,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
                     className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
                     style={{ backgroundColor: 'rgba(255,64,0,0.12)' }}
                   >
-                    <Icon className="w-5 h-5" style={{ color: '#ff4000' }} />
+                    <Icon className="w-5 h-5" style={{ color: 'var(--color-brand)' }} />
                   </div>
                   <h3 className="text-base font-bold mb-2">{value.title}</h3>
                   <p className={`text-sm leading-relaxed ${muted}`}>{value.description}</p>
@@ -135,8 +135,8 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
                 </div>
                 <a
                   href={applyHref(position.title)}
-                  className="inline-flex items-center justify-center gap-2 text-sm font-medium rounded-full px-5 py-2.5 transition-opacity hover:opacity-90 whitespace-nowrap"
-                  style={{ backgroundColor: '#ff4000', color: '#fff' }}
+                  className="inline-flex items-center justify-center gap-2 text-sm font-medium rounded-full px-5 py-2.5 transition-opacity hover:opacity-90 whitespace-nowrap text-white"
+                  style={{ backgroundColor: 'var(--color-brand)' }} /* metin rengi: text-white sinifi */
                 >
                   <Mail className="w-3.5 h-3.5" />
                   {isTR ? 'Başvur' : 'Apply'}
@@ -179,7 +179,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
             href={generalApplyHref}
             className={`inline-flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/80 hover:text-white' : 'text-black/80 hover:text-black'}`}
           >
-            <Mail className="w-4 h-4" style={{ color: '#ff4000' }} />
+            <Mail className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
             info@cetpa.com.tr
           </a>
         </div>

@@ -99,7 +99,7 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
             {isTR ? 'Geri' : 'Back'}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
-          <span className="text-sm font-bold" style={{ color: '#ff4000' }}>CETPA</span>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
           <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Blog' : 'Blog'}</span>
         </div>
       </header>
@@ -136,7 +136,7 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
         </div>
 
         <div className={`mt-12 rounded-2xl p-8 text-center ${card}`}>
-          <Sparkles className="w-6 h-6 mx-auto mb-4" style={{ color: '#ff4000' }} />
+          <Sparkles className="w-6 h-6 mx-auto mb-4" style={{ color: 'var(--color-brand)' }} />
           <h2 className="text-lg font-bold mb-2">
             {isTR ? 'Tam Yazılar Çok Yakında' : 'Full Articles Coming Soon'}
           </h2>
@@ -150,7 +150,7 @@ export default function BlogPage({ currentLanguage: lang, darkMode, onBack }: Pr
               ? 'mailto:info@cetpa.com.tr?subject=Blog%20yay%C4%B1nlan%C4%B1nca%20haber%20ver'
               : 'mailto:info@cetpa.com.tr?subject=Notify%20me%20when%20the%20blog%20is%20live'}
             className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-full text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#ff4000' }}
+            style={{ backgroundColor: 'var(--color-brand)' }}
           >
             <Mail className="w-4 h-4" />
             {isTR ? 'Yayınlanınca Haber Ver' : 'Notify Me When Live'}
