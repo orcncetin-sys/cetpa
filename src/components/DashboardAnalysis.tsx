@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Brain, Sparkles, X, Loader2, TrendingUp, AlertCircle } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import Markdown from 'react-markdown';
 import { analyzeDashboard } from '../services/geminiService';
 
@@ -68,7 +69,12 @@ export default function DashboardAnalysis({ data, currentLanguage = 'tr' }: Dash
               <div className="flex-1 overflow-y-auto p-8">
                 {isLoading ? (
                   <div className="flex flex-col items-center justify-center h-64 space-y-4">
-                    <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+                    {/* ThinkingOrb (thinking-orbs, 2026-09-04): dönen spinner yerine
+                        işin TÜRÜNÜ anlatan animasyon — 'solving' hesaplama/çıkarım
+                        yapıldığını gösterir. Canvas tabanlı, tema-duyarlı (auto),
+                        sıfır bağımlılık. Uzun süren AI çağrısında "takıldı mı?"
+                        hissini azaltır. */}
+                    <ThinkingOrb state="solving" size={64} />
                     <div className="text-center">
                       <p className="text-lg font-medium text-gray-900">{tr ? 'Veriler Analiz Ediliyor...' : 'Analyzing data…'}</p>
                       <p className="text-sm text-gray-500">{tr ? 'Yüksek düşünme modu aktif. Bu işlem biraz zaman alabilir.' : 'High-reasoning mode active. This may take a moment.'}</p>

@@ -102,6 +102,13 @@ export default defineConfig(({mode}) => {
             if (id.includes('node_modules/@dnd-kit')) {
               return 'vendor-dndkit';
             }
+            // ThinkingOrb (AI bekleme animasyonu) yalnız AI panellerinde kullanılıyor:
+            // DashboardAnalysis, SatisAjaniPanel, SatinAlmaAjaniPanel — üçü de lazy
+            // sayfalarda. Kuralsız bırakılınca catch-all vendor'a düşüp BOOT'a giriyordu
+            // (2026-09-04 ölçümü: vendor 255 → 270 kB). Kendi chunk'ında lazy iner.
+            if (id.includes('node_modules/thinking-orbs')) {
+              return 'vendor-orb';
+            }
             // Gömülü Roboto fontu (Türkçe PDF glifleri) — TEK BAŞINA 918 kB.
             // pdfFont.ts'te dinamik import edilse bile, aşağıdaki "tüm
             // node_modules → vendor" kuralı onu yine ortak vendor chunk'ına

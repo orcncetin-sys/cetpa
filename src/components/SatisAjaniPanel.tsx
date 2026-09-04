@@ -6,6 +6,7 @@
  */
 import { useMemo, useState } from 'react';
 import { Sparkles, Loader2, AlertTriangle } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
 import { eslesir } from '../utils/arama';
 
@@ -82,7 +83,13 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
         </div>
       )}
       {secili && <p className="text-[11px] text-gray-500">{tr ? 'Müşteri:' : 'Customer:'} <span className="font-semibold text-gray-700">{secili.ad}</span></p>}
-      {yukleniyor && <p className="text-xs text-gray-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" />{tr ? 'Öneriler hazırlanıyor…' : 'Generating…'}</p>}
+      {yukleniyor && (
+        <p className="text-xs text-gray-400 flex items-center gap-2">
+          {/* 'searching': ajan gerçek satış geçmişini ve katalog havuzunu tarıyor */}
+          <ThinkingOrb state="searching" size={20} />
+          {tr ? 'Satış geçmişi ve katalog taranıyor…' : 'Scanning sales history…'}
+        </p>
+      )}
       {sonuc && !sonuc.success && (
         <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{sonuc.error || (tr ? 'Öneri üretilemedi.' : 'Failed.')}</div>
       )}

@@ -1,5 +1,5 @@
 import { sayiBicimleyici } from '../utils/recharts';
-import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
+import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
 import { gunAnahtari } from '../utils/zaman';
 import { siparisDurumEtiketi, sevkiyatDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
@@ -405,15 +405,24 @@ export default function DashboardPage(props: Props) {
                       <p className="text-[10px] text-gray-400 mt-0.5">
                         {aralikEtiketi}
                       </p>
-                      {/* Phase 35: 7-day revenue sparkline */}
+                      {/* Phase 35: 7 GÜNLÜK ciro sparkline — kartın büyük rakamı seçili
+                          tarih aralığına, bu mini grafik BİLEREK son 7 güne bakar (kısa
+                          vadeli eğilim göstergesi). Farklı pencere olduğu tooltip'te yazar.
+
+                          ÇİFT SAYIM DÜZELTİLDİ (2026-09-04): `orders` HAM okunuyordu ve
+                          altında `mikroFaturalar` ayrıca toplanıyordu — Mikro faturasından
+                          türetilen siparişler (source:'mikro-fatura') iki kez sayılıyor,
+                          çubuklar gerçeğin iki katına çıkıyordu. Kartın büyük rakamı
+                          (combinedRevenue) bu korumaya zaten sahipti; sparkline değildi. */}
                       {(() => {
                         const days = Array.from({ length: 7 }, (_, i) => {
                           const d = new Date(); d.setDate(d.getDate() - (6 - i));
                           const dayStr = d.toDateString();
-                          
+
                           // Native revenue for this day
                           const revNative = orders.filter(o => {
-                            const od = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? (o.createdAt ? new Date(o.createdAt as string | number) : null);
+                            if (!odemeTakipli(o)) return false;   // mikro türevi aşağıda sayılıyor
+                            const od = siparisTarih(o);
                             return od?.toDateString() === dayStr;
                           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
                           
@@ -434,7 +443,7 @@ export default function DashboardPage(props: Props) {
                                 <div
                                   className="bg-green-400 rounded-sm opacity-60 group-hover:opacity-100 transition-opacity"
                                   style={{ height: `${Math.max((d.rev / maxRev) * 100, 4)}%` }}
-                                  title={`${d.day}: ${fmtKpi(d.rev)}`}   /* sabit ₺ idi — döviz seçicisine bağlandı (2026-09-04) */
+                                  title={`${d.day}. gün: ${fmtKpi(d.rev)} — ${currentLanguage === 'tr' ? 'son 7 gün eğilimi' : 'last 7 days trend'}`}
                                 />
                               </div>
                             ))}
@@ -459,10 +468,16 @@ export default function DashboardPage(props: Props) {
                   const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
                   return o.status === 'Shipped' && d.toDateString() === new Date().toDateString();
                 }).length;
+                // ÇİFT FİLTRE DÜZELTİLDİ (2026-09-04): `filteredOrders` zaten seçili
+                // tarih aralığına süzülmüştü, üstüne bir de sabit "son 7 gün" penceresi
+                // uygulanıyordu — kullanıcı aralığı "bu yıl" yapınca kart yine son 7
+                // günü gösteriyor, ama etiketi bunu söylemiyordu. Ayrıca tarih yalnız
+                // `syncedAt`ten okunuyordu: Mikro faturasından türetilen siparişlerde o
+                // alan YOK, `new Date(0)` yedeğiyle 1970'e düşüp filtreden eleniyorlardı.
                 const weekRevenue = filteredOrders
                   .filter(o => {
-                    const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
-                    return (Date.now() - d.getTime()) < 7 * 86400000;
+                    const d = siparisTarih(o);
+                    return !!d && (Date.now() - d.getTime()) < 7 * 86400000;
                   })
                   .reduce((s, o) => s + o.totalPrice, 0);
 
@@ -493,7 +508,12 @@ export default function DashboardPage(props: Props) {
                         {fmtKpi(weekRevenue)}
                       </p>
                       <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
-                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
+                      <p className="text-[10px] text-gray-400"
+                        title={currentLanguage === 'tr'
+                          ? 'Bu kart seçili tarih aralığından bağımsızdır: her zaman son 7 günü gösterir.'
+                          : 'Independent of the selected date range: always the last 7 days.'}>
+                        {currentLanguage === 'tr' ? 'Son 7 gün (aralıktan bağımsız)' : 'Last 7 days (range-independent)'}
+                      </p>
                     </div>
 
                     {/* ── Remaining plain cards ── */}
@@ -1448,9 +1468,12 @@ export default function DashboardPage(props: Props) {
               })()}
 
               {/* ── Phase 79: B2B vs Retail Revenue Split ── */}
-              {orders.length > 0 && (() => {
-                const b2bRev    = orders.filter(o => o.customerType === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const retailRev = orders.filter(o => o.customerType !== 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
+              {filteredOrders.length > 0 && (() => {
+                // TARİH ARALIĞINA BAĞLANDI (2026-09-04): ham `orders` okunuyordu, yani
+                // kart TÜM ZAMANLARIN oranını gösteriyordu — kullanıcı üstteki tarih
+                // aralığını daraltsa bile pastanın dilimleri hiç değişmiyordu.
+                const b2bRev    = filteredOrders.filter(o => o.customerType === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const retailRev = filteredOrders.filter(o => o.customerType !== 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const totalRev  = b2bRev + retailRev;
                 if (totalRev === 0) return null;
                 const b2bPct    = Math.round((b2bRev    / totalRev) * 100);

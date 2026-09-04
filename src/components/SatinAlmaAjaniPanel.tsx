@@ -6,6 +6,7 @@
  */
 import { useState } from 'react';
 import { Sparkles, Loader2, AlertTriangle, Factory } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
 
 interface Kalem { sku: string; urunAdi: string; onerilenMiktar: number; mevcutStok: number | null; esik: number | null; }
@@ -42,7 +43,9 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
         </div>
         <button onClick={calistir} disabled={yukleniyor || !aiOnayli}
           className="apple-button-primary text-sm flex items-center gap-2 disabled:opacity-50">
-          {yukleniyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {/* 'working': ajan kritik stokları ve son-alış tedarikçilerini işliyor.
+              20px preset satır-içi metin ölçeğinde ayrı tasarlanmıştır (ölçek değil). */}
+          {yukleniyor ? <ThinkingOrb state="working" size={20} /> : <Sparkles className="w-4 h-4" />}
           {tr ? 'Öneri Üret' : 'Generate'}
         </button>
       </div>
