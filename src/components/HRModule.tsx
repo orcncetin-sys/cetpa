@@ -30,10 +30,7 @@ import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
 import { useMikroPersonel } from '../hooks/useMikroPersonel';
 
-// İzin türü → Mikro pit_izin_tipi kodu eşlemesi
-const MIKRO_IZIN_TIPI: Record<string, number> = {
-  'Yıllık İzin': 0, 'Hastalık': 1, 'Mazeret': 2, 'Diğer': 3,
-};
+// İzin türü → Mikro kodu eşlemesi mikroEvrak.ts'te (TEK KAYNAK, Faz 1)
 
 // Employee, PerformanceReview, Training, TravelRequest, LeaveRequest, Payroll are imported from ../types
 
@@ -860,7 +857,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                      persKod,
                                      startDate: req.startDate,
                                      days: req.days,
-                                     type: MIKRO_IZIN_TIPI[req.type] ?? 0,
+                                     izinTuru: req.type,   // eşleme mikroEvrak'ta; bilinmeyen tür throw eder, 0 (yıllık) olmaz
                                      reason: `${req.type}${req.notes ? ' — ' + req.notes : ''}`,
                                    });
                                  }}

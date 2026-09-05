@@ -50,9 +50,27 @@ export interface SuperadminRouteCtx {
   getPgPool: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> } | null;
 }
 
+/**
+ * Plan ücreti — BİLİNMEYEN PLAN `null` DÖNER, 0 DEĞİL (Faz 1, 2026-09-04).
+ * Eskiden `?? 0` idi: fiyat tablosunda OLMAYAN bir plan adı (yazım hatası,
+ * kaldırılmış plan) 0 TL olarak abonelik özetine ve ödeme yoluna akıyordu.
+ * NOT: `enterprise` ve `free` tabloda BİLİNÇLİ olarak 0 — özel anlaşma/ücretsiz;
+ * onlar için 0 döner, null değil (inceleme düzeltmesi: docstring "özel anlaşma →
+ * null" diyordu, tabloyla çelişiyordu). Ödeme ucunda (`!amount || amount <= 0` → 400) guard
+ * zaten vardı; abonelik ÖZETİ ise "0 TL" gösteriyordu — sahte kesinlik.
+ * `null` UI'da '—' olur. Test: superadminRoutes.test.ts
+ */
+export function planTutari(
+  fiyatlar: Record<string, Record<string, number>>,
+  plan: string,
+  cycle: string,
+): number | null {
+  const tutar = fiyatlar[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'];
+  return typeof tutar === 'number' && Number.isFinite(tutar) ? tutar : null;
+}
+
 export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
-  const planAmount = (plan: string, cycle: string): number =>
-    C.PLAN_PRICES_TRY[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'] ?? 0;
+  const planAmount = (plan: string, cycle: string): number | null => planTutari(C.PLAN_PRICES_TRY, plan, cycle);
 
   /** İstek sahibinin süper-admin olup olmadığını döner (panel görünürlüğü için). */
   app.get('/api/superadmin/me', C.requireAuth, (req: Request, res: Response) => {
@@ -143,7 +161,7 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
       const tenants = await Promise.all(Array.from(groups.entries()).map(async ([cid, g]) => {
         let companyName = '';
         let plan = 'free'; let subStatus = 'none'; let cycle = 'monthly';
-        let nextPaymentDate: unknown = null; let lastPaymentDate: unknown = null; let amount = 0;
+        let nextPaymentDate: unknown = null; let lastPaymentDate: unknown = null; let amount: number | null = null;   // bilinmiyorsa null (özet '—'), 0 TL değil
         try {
           const profSnap = await C.getAdminDb()!.collection('settings').doc(`${cid}__companyProfile`).get();
           if (profSnap.exists) { const p = profSnap.data() as Record<string, unknown>; companyName = (p.companyName as string) || (p.name as string) || (p.unvan as string) || ''; }
@@ -160,7 +178,10 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
             amount = (s.amount as number) ?? planAmount(plan, cycle);
           }
         } catch { /* ignore */ }
-        if (!amount) amount = planAmount(plan, cycle);
+        // `=== null`, `!amount` DEĞİL (inceleme yakaladı): `!amount` gerçek 0 TL'yi de
+        // "bilinmiyor" sayıp plan tablosundan yeniden tahmin ediyordu — ücretsiz plan
+        // abonesinin özeti tabloda başka bir tutar varsa onu gösterirdi.
+        if (amount === null) amount = planAmount(plan, cycle);
         const status = await C.getCompanyStatus(cid);
         // YEDEK DURUMU (2026-08-21): her kiraci KENDI hesabina yedeklenir.
         // Kurulum yapilmamis kiraci onboarding'i TAMAMLANMAMIS sayilir —

@@ -49,7 +49,10 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
   const addLineItem = (product: InventoryItem) => {
     const existing = lineItems.find(item => item.inventoryId === product.id);
     const priceTier = selectedLead?.priceTier || 'Retail';
-    const initialPrice = (product.prices as Record<string, number>)?.[priceTier] || product.price || 0;
+    // Fiyatı OLMAYAN ürün 0 TL ile satıra girmez (Faz 1): NaN kalır → ekranda '—',
+    // Mikro'ya gönderimde teklifPayload throw eder. Eskiden `|| 0` ile 0 TL satır oluyordu.
+    const adayFiyat = (product.prices as Record<string, number>)?.[priceTier] ?? product.price;
+    const initialPrice = Number.isFinite(adayFiyat) ? Number(adayFiyat) : NaN;
 
     if (existing) {
       setLineItems(lineItems.map(item =>
@@ -78,13 +81,19 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
     setLineItems(lineItems.map(item => item.id === id ? { ...item, ...updates } : item));
   };
 
-  const totalAmount = lineItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const totalVat = lineItems.reduce((sum, item) => sum + (item.price * item.quantity * (item.vatRate / 100)), 0);
+  // Satır tutarı: fiyat/miktar BİLİNMİYORSA NaN (→ '—'), 0 DEĞİL (Faz 1, inceleme).
+  // DB'den gelen eski kayıtta `price: null` olabilir; `null * qty === 0` sessizce ₺0,00
+  // basıyordu. Bilinmeyen satır varsa toplamlar da bilinmiyor ve teklif KAYDEDİLEMEZ.
+  const satirTutari = (item: QuotationItem) =>
+    Number.isFinite(item.price) && Number.isFinite(item.quantity) ? item.price * item.quantity : NaN;
+  const eksikSatirVar = lineItems.some(item => !Number.isFinite(item.price) || !Number.isFinite(item.quantity) || item.quantity <= 0);
+  const totalAmount = lineItems.reduce((sum, item) => sum + satirTutari(item), 0);
+  const totalVat = lineItems.reduce((sum, item) => sum + satirTutari(item) * ((item.vatRate ?? 0) / 100), 0);
   const grandTotal = totalAmount + totalVat;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedLead || lineItems.length === 0) return;
+    if (!selectedLead || lineItems.length === 0 || eksikSatirVar) return;   // fiyatsız/miktarsız satır DB'ye null olarak gitmez
 
     setIsSubmitting(true);
     try {
@@ -281,8 +290,8 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
                         <input
                           type="number"
                           min="1"
-                          value={item.quantity}
-                          onChange={(e) => updateLineItem(item.id, { quantity: Number(e.target.value) })}
+                          value={Number.isFinite(item.quantity) ? item.quantity : ''}
+                          onChange={(e) => updateLineItem(item.id, { quantity: e.target.value === '' ? NaN : Number(e.target.value) })}   // boş = bilinmiyor, 0 değil
                           className="apple-input w-full text-center py-1 px-2"
                         />
                       </td>
@@ -290,8 +299,8 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
                         <input
                           type="number"
                           step="0.01"
-                          value={item.price}
-                          onChange={(e) => updateLineItem(item.id, { price: Number(e.target.value) })}
+                          value={Number.isFinite(item.price) ? item.price : ''}   // NaN → boş kutu (React 'NaN value' uyarısı da biter)
+                          onChange={(e) => updateLineItem(item.id, { price: e.target.value === '' ? NaN : Number(e.target.value) })}   // boş = bilinmiyor, 0 değil
                           className="apple-input w-full text-right py-1 px-2"
                         />
                       </td>
@@ -361,7 +370,8 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || !selectedLead || lineItems.length === 0}
+              disabled={isSubmitting || !selectedLead || lineItems.length === 0 || eksikSatirVar}
+              title={eksikSatirVar ? (t.eksik_satir || 'Fiyatı veya miktarı eksik satır var — tamamlamadan kaydedilemez') : undefined}
               className="apple-button-primary flex-1 md:flex-none px-8 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Save className="w-4 h-4" />

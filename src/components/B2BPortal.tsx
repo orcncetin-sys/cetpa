@@ -213,12 +213,19 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
               customerName: q.customerName,
               email: q.customerEmail,
               note: `Converted from Quotation #${q.id}. Notes: ${q.notes || ''}`,
-              lineItems: (q.lineItems || q.items || []).map((item: QuotationItem) => ({
-                title: item.name, sku: item.sku,
-                // KDV dahil (brüt) fiyat — önce KDV-hariç gönderiliyordu, sipariş toplamı eksikti.
-                price: Math.round((Number(item.price) || 0) * (1 + (Number(item.vatRate) || 0) / 100) * 100) / 100,
-                quantity: item.quantity,
-              })),
+              lineItems: (q.lineItems || q.items || []).map((item: QuotationItem) => {
+                // DIŞ SİSTEME SAHTE FİYAT GİTMEZ (Faz 1, inceleme): eskiden `Number(item.price) || 0`
+                // fiyatı bilinmeyen satırı Shopify taslak siparişine 0.00 ile gönderiyordu.
+                if (!Number.isFinite(item.price) || !Number.isFinite(item.quantity)) {
+                  throw new Error(`'${item.name}' satırının fiyatı/miktarı eksik — Shopify'a 0 ile gönderilemez`);
+                }
+                return {
+                  title: item.name, sku: item.sku,
+                  // KDV dahil (brüt) fiyat — önce KDV-hariç gönderiliyordu, sipariş toplamı eksikti.
+                  price: Math.round(item.price * (1 + (Number.isFinite(item.vatRate) ? item.vatRate : 0) / 100) * 100) / 100,
+                  quantity: item.quantity,
+                };
+              }),
             }),
           });
           if (!response.ok) throw new Error('Shopify API error');

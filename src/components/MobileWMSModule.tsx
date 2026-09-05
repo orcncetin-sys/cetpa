@@ -329,10 +329,18 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
     // lokal kaydı engellemez, syncLog'dan izlenir.
     const counted = cycleItems.filter(i => i.counted && i.countedQty !== null && i.sku);
     if (counted.length > 0) {
-      pushMikroEvrak('SayimSonuclariKaydetV2',
-        sayimPayload(counted.map(i => ({ sku: i.sku, counted: i.countedQty ?? 0 }))),
-        { entityType: 'cycleCount', entityId: new Date().toISOString().slice(0, 10) }
-      ).catch(() => { /* syncLog'da görünür */ });
+      // Faz 1 (2026-09-04): sayimPayload artık depo bilinmiyorsa throw eder (eskiden
+      // her sayım Mikro'ya depo 1 = HAVALİMANI olarak yazılıyordu). Bu ekran henüz
+      // depo seçtirmiyor → lokal sayım kaydedilir, Mikro gönderimi GÖRÜNÜR şekilde atlanır.
+      try {
+        const sayimEvraki = sayimPayload(counted.map(i => ({ sku: i.sku, counted: i.countedQty ?? 0 })));
+        pushMikroEvrak('SayimSonuclariKaydetV2', sayimEvraki,
+          { entityType: 'cycleCount', entityId: new Date().toISOString().slice(0, 10) }
+        ).catch(() => { /* syncLog'da görünür */ });
+      } catch (e) {
+        setScanResult({ found: false, message: (tr ? 'Sayım kaydedildi ama Mikro\'ya gönderilmedi: ' : 'Count saved but not sent to Mikro: ') + (e instanceof Error ? e.message : String(e)) });
+        setTimeout(() => setScanResult(null), 6000);
+      }
     }
     // Sayım farklarını uygula: kanonik 'stockLevel' alanına yaz (önce 'quantity'ye
     // yazıyordu — app geneli stockLevel kullanıyor, düzeltme görünmüyordu) + hareket logu.

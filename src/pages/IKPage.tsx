@@ -377,13 +377,23 @@ export default function IKPage(props: Props) {
                                   <button onClick={async () => {
                                     await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'approved' });
                                     toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success');
-                                    // Onaylanan izni Mikro'ya da gönder (hata lokali engellemez, syncLog'da görünür)
-                                    pushMikroEvrak('PersonelIzinTalepKaydetV2', izinTalepPayload({
-                                      persKod: ((lr as unknown as { mikroPersKod?: string }).mikroPersKod ?? lr.employeeName ?? '').slice(0, 15),
-                                      startDate: lr.startDate,
-                                      days: Number(lr.days) || 1,
-                                      reason: `${lr.type ?? ''}`,
-                                    }), { entityType: 'leaveRequest', entityId: lr.id }).catch(() => {});
+                                    // Onaylanan izni Mikro'ya da gönder. Faz 1 (2026-09-04): eskiden `type`
+                                    // hiç geçilmiyordu → her izin Mikro'ya YILLIK (0) yazılıyordu; `days || 1`
+                                    // gün bilinmiyorsa 1 uyduruyordu; payload hatası sessiz yutuluyordu.
+                                    try {
+                                      const izinPayload = izinTalepPayload({
+                                        persKod: ((lr as unknown as { mikroPersKod?: string }).mikroPersKod ?? lr.employeeName ?? '').slice(0, 15),
+                                        startDate: lr.startDate,
+                                        days: Number(lr.days),
+                                        izinTuru: String(lr.type ?? ''),
+                                        reason: `${lr.type ?? ''}`,
+                                      });
+                                      pushMikroEvrak('PersonelIzinTalepKaydetV2', izinPayload, { entityType: 'leaveRequest', entityId: lr.id }).catch(() => {});
+                                    } catch (e) {
+                                      toast(currentLanguage === 'tr'
+                                        ? `Onaylandı ama Mikro'ya gönderilemedi: ${e instanceof Error ? e.message : String(e)}`
+                                        : `Approved, but not sent to Mikro: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                                    }
                                   }}
                                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
                                     {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}

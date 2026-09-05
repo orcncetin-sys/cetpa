@@ -1294,7 +1294,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                             if (!sku) return null;
                             return stokHareketPayload({
                               sku,
-                              quantity: Number(mov.quantity) || 0,
+                              quantity: Number(mov.quantity),   // NaN/0 → stokHareketPayload throw eder; eskiden `|| 0` ile 0 adet gidiyordu
                               type: mov.type,
                             });
                           }}

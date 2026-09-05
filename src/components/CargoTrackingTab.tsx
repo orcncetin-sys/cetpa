@@ -51,7 +51,8 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
 
   // Load saved tracks from Firestore
   useEffect(() => {
-    const q = query(collection(db, 'cargoTracking'), limit(20));
+    // limit 50 (20 idi): eski uydurma kayıtlar istemcide süzülüyor; dar pencere gerçek kayıtları dışarıda bırakabilirdi (inceleme).
+    const q = query(collection(db, 'cargoTracking'), limit(50));
     const unsub = onSnapshot(q, snap => {
       setSavedTracks(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     });
@@ -98,9 +99,11 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
       )}>
         <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <span>
+          {/* "demo modunda çalışır" metni KALDIRILDI (Faz 1, 2026-09-04): demo modu yok artık —
+              anahtarı olmayan taşıyıcıda takip yapılmaz, uydurma veri gösterilmez. */}
           {currentLanguage === 'tr'
-            ? 'Türk kargo firmaları demo modunda çalışır. Gerçek veriler için Entegrasyonlar\'dan API anahtarlarını girin. Uluslararası taşıyıcılar için '
-            : 'Turkish carriers run in demo mode. Add API keys in Integrations for live data. International carriers require '}
+            ? 'API anahtarı girilmemiş taşıyıcılarda takip yapılamaz — uydurma veri gösterilmez. Türk kargolar için Entegrasyonlar\'dan anahtar girin; uluslararası taşıyıcılar için '
+            : 'Carriers without an API key cannot be tracked — no placeholder data is shown. Add Turkish carrier keys in Integrations; international carriers require '}
           <strong>DHL_API_KEY</strong>{', '}<strong>UPS_CLIENT_ID</strong>{', '}<strong>FEDEX_CLIENT_ID</strong>
           {currentLanguage === 'tr' ? ' ortam değişkenlerini ayarlayın.' : ' env vars.'}
         </span>
@@ -205,11 +208,9 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                   <span className={cn("text-xs font-bold px-3 py-1 rounded-full", statusColors[trackResult.statusCode] || 'bg-gray-100 text-gray-700')}>
                     {statusLabels[trackResult.statusCode] || trackResult.status}
                   </span>
-                  {trackResult.isMock && (
-                    <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", darkMode ? "bg-yellow-500/20 text-yellow-400" : "bg-yellow-100 text-yellow-700")}>
-                      DEMO
-                    </span>
-                  )}
+                  {/* DEMO rozeti KALDIRILDI (Faz 1, 2026-09-04): sunucu `mock`, burası `isMock`
+                      bekliyordu — hiç yanmadı. Artık uydurma veri üretilmiyor; anahtar yoksa
+                      `error` gelir ve yukarıdaki hata bloğu gösterir. */}
                 </div>
                 <p className={cn("text-lg font-black tracking-tight", darkMode ? "text-white" : "text-[#1D1D1F]")}>
                   {trackResult.trackingNumber}
@@ -307,7 +308,9 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
             </h3>
           </div>
           <div className="divide-y" style={{ borderColor: darkMode ? 'rgba(255,255,255,0.06)' : '#f5f5f7' }}>
-            {savedTracks.slice(0, 8).map((t: any) => (
+            {/* Faz 1: daha önce kaydedilmiş UYDURMA sonuçlar (isMock/mock) listelenmez —
+                tıklanınca rozetsiz, gerçekmiş gibi açılıyordu. Veri temizliği Açık İş. */}
+            {savedTracks.filter((t: any) => !t?.isMock && !t?.mock).slice(0, 8).map((t: any) => (
               <button
                 key={t.id}
                 onClick={() => {

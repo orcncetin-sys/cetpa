@@ -20,13 +20,14 @@ export interface TrackingResult {
   weight?: string;
   service?: string;
   events: TrackingEvent[];
-  isMock?: boolean;
+  // `isMock` KALDIRILDI (Faz 1, 2026-09-04): sunucu artık uydurma veri üretmiyor;
+  // anahtar yoksa `error` dolu gelir ve ekran onu gösterir. Eski rozet zaten
+  // hiç yanmıyordu (sunucu `mock`, ekran `isMock` bekliyordu).
   error?: string;
 }
 
 // Normalize DHL response
 function normalizeDHL(data: any, trackingNumber: string): TrackingResult {
-  if (data.mock) return data as TrackingResult;
 
   const shipment = data.shipments?.[0];
   if (!shipment) throw new Error('No DHL shipment data');
@@ -66,7 +67,6 @@ function normalizeDHL(data: any, trackingNumber: string): TrackingResult {
 
 // Normalize UPS response
 function normalizeUPS(data: any, trackingNumber: string): TrackingResult {
-  if (data.mock) return data as TrackingResult;
 
   const pkg = data.trackResponse?.shipment?.[0]?.package?.[0];
   if (!pkg) throw new Error('No UPS package data');
@@ -100,7 +100,6 @@ function normalizeUPS(data: any, trackingNumber: string): TrackingResult {
 
 // Normalize FedEx response
 function normalizeFedEx(data: any, trackingNumber: string): TrackingResult {
-  if (data.mock) return data as TrackingResult;
 
   const result = data.output?.completeTrackResults?.[0]?.trackResults?.[0];
   if (!result) throw new Error('No FedEx tracking result');

@@ -36,10 +36,15 @@ const MikroPushButton: React.FC<Props> = ({
 
   const run = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const payload = buildPayload();
-    if (!payload) { setState('err'); setMsg('Eksik veri — gönderilemedi'); return; }
+    // buildPayload TRY İÇİNDE (Faz 1, 2026-09-04): payload üreticileri artık
+    // eksik veride throw ediyor (ör. teklifPayload — fiyatsız satır Mikro'ya
+    // 0 TL ile gitmesin diye). Eskiden bu çağrı try dışındaydı; throw
+    // yakalanmaz, React hata sınırına düşer ve kullanıcı NEDEN gönderilmediğini
+    // göremezdi. Şimdi mesaj (satır numarasıyla) butonun yanında görünür.
     setState('busy'); setMsg(null);
     try {
+      const payload = buildPayload();
+      if (!payload) { setState('err'); setMsg('Eksik veri — gönderilemedi'); return; }
       const r = await pushMikroEvrak(method, payload, { entityType, entityId });
       if (r.notConfigured) { setState('err'); setMsg('Mikro yapılandırılmamış'); return; }
       if (r.success) { setState('ok'); setMsg('Mikro’ya kaydedildi ✓'); onSuccess?.(); }

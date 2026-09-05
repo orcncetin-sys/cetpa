@@ -74,11 +74,45 @@ export async function processMikroRetries(): Promise<void> {
   });
 }
 
+/**
+ * DEPO BİLİNMİYORSA DIŞ SİSTEME GİTMEZ (Faz 1, 2026-09-04 — inceleme 3/3 CONFIRMED).
+ *
+ * Beş payload üreticisi `depoNo ?? 1` yapıyordu ve HİÇBİR çağıran depoNo geçmiyordu:
+ * sayım (MobileWMS), stok hareketi (InventoryView), bakım, servis, üretim
+ * (ProductionModule/MRPModule). Yani her sayım sonucu, her dahili stok hareketi ve
+ * her üretim talebi Mikro'ya DEPO 1 = HAVALİMANI olarak yazılıyordu — stok fiilen
+ * depo 2 (ESKİ SANAYİ)'de. Okuma yolunda aynı `|| '1'` 2026-08-01'de "yanlış depo
+ * göstermek, göstermemekten kötüdür" gerekçesiyle kaldırılmıştı (mikroRoutes.ts:731);
+ * yazma yolu dokunulmamıştı — yarım düzeltme. Depo bilinmiyorsa yüksek sesle
+ * başarısız ol; çağıran depo seçtirene kadar Mikro'ya sayım/hareket gitmez (Açık İş).
+ */
+function depoGerekli(depoNo: number | undefined, evrak: string): number {
+  if (!Number.isFinite(depoNo) || (depoNo as number) <= 0) {
+    throw new Error(`${evrak}: depo bilinmiyor — Mikro'ya depo 1 (HAVALİMANI) varsayılarak gönderilemez. Bu ekranda depo seçimi henüz yok; kayıt Cetpa'da duruyor, Mikro'ya elle işleyin.`);
+  }
+  return depoNo as number;
+}
+
 // ── 1. Verilen Teklif (QuotationForm/Detail) ─────────────────────────────────
 export function teklifPayload(q: {
   date?: string; cariKod: string; lineItems: { sku?: string; quantity?: number; price?: number; title?: string }[];
   notes?: string; belgeNo?: string;
 }) {
+  // FİYATI/MİKTARI OLMAYAN SATIR DIŞ SİSTEME GİTMEZ (Faz 1, 2026-09-04).
+  // Eskiden `l.price ?? 0` ve `l.quantity ?? 1` idi: fiyatı girilmemiş satır
+  // Mikro'ya 0 TL, miktarı girilmemiş satır 1 adet olarak YAZILIYORDU — bu
+  // ekranda değil, karşı tarafın ERP'sinde sahte kayıt demek. Eksik satır varsa
+  // yüksek sesle başarısız ol; MikroPushButton hatayı kullanıcıya gösterir.
+  const eksik = q.lineItems
+    .map((l, i) => ({ i, fiyat: Number.isFinite(l.price), miktar: Number.isFinite(l.quantity) }))
+    .filter(x => !x.fiyat || !x.miktar);
+  if (eksik.length) {
+    const ilk = eksik[0];
+    throw new Error(
+      `Teklif satırı ${ilk.i + 1}: ${!ilk.fiyat ? 'fiyat' : 'miktar'} eksik — Mikro'ya 0 ile gönderilemez` +
+      (eksik.length > 1 ? ` (+${eksik.length - 1} satır daha)` : ''),
+    );
+  }
   return {
     evraklar: [{
       evrak_aciklamalari: q.notes ? [{ aciklama: q.notes.slice(0, 120) }] : [],
@@ -90,9 +124,9 @@ export function teklifPayload(q: {
         tkl_harekettipi: 0,
         tkl_stok_kod: l.sku ?? '',
         tkl_Aciklama: (l.title ?? '').slice(0, 50),
-        tkl_Alisfiyati: l.price ?? 0, // V17 örneğindeki fiyat alanı (deneysel)
+        tkl_Alisfiyati: l.price as number,   // yukarıda doğrulandı — eksikse buraya gelinmez
         tkl_baslangic_tarihi: trDate(q.date),
-        tkl_miktar: l.quantity ?? 1,
+        tkl_miktar: l.quantity as number,    // yukarıda doğrulandı
         tkl_birim_pntr: 1,
         tkl_vergi_pntr: 4,
         tkl_cari_tipi: '0',
@@ -109,7 +143,7 @@ export function sayimPayload(rows: { sku: string; counted: number; depoNo?: numb
     evraklar: [{
       satirlar: rows.map(r => ({
         sym_tarihi: trDate(r.date),
-        sym_depono: r.depoNo ?? 1,
+        sym_depono: depoGerekli(r.depoNo, 'Sayım'),
         sym_Stokkodu: r.sku,
         sym_miktar1: r.counted,
         sym_birim_pntr: 1,
@@ -123,6 +157,9 @@ export function sayimPayload(rows: { sku: string; counted: number; depoNo?: numb
 export function stokHareketPayload(m: {
   sku: string; quantity: number; type: 'in' | 'out'; date?: string; note?: string; depoNo?: number;
 }) {
+  if (!Number.isFinite(m.quantity) || m.quantity <= 0) {
+    throw new Error('Stok hareketi: miktar eksik/sıfır — Mikro\'ya 0 adet hareket gönderilemez');
+  }
   return {
     evraklar: [{
       satirlar: [{
@@ -140,17 +177,38 @@ export function stokHareketPayload(m: {
         sth_tutar: 0,
         sth_vergi_pntr: 1,
         sth_vergisiz_fl: 1,
-        sth_giris_depo_no: m.type === 'in' ? (m.depoNo ?? 1) : 0,
-        sth_cikis_depo_no: m.type === 'out' ? (m.depoNo ?? 1) : 0,
+        sth_giris_depo_no: m.type === 'in' ? depoGerekli(m.depoNo, 'Stok girişi') : 0,
+        sth_cikis_depo_no: m.type === 'out' ? depoGerekli(m.depoNo, 'Stok çıkışı') : 0,
       }],
     }],
   };
 }
 
 // ── 4. Personel İzin Talebi (İK) ─────────────────────────────────────────────
+/**
+ * İzin türü → Mikro `pit_izin_tipi` kodu. TEK KAYNAK (Faz 1, 2026-09-04 — HRModule'den
+ * taşındı). Eskiden bu tablo yalnız HRModule'deydi ve `?? 0` ile bilinmeyen türü
+ * YILLIK İZİN (0) sayıyordu; IKPage ise tabloyu hiç kullanmıyor, `type` geçmiyordu →
+ * onaylanan HER izin (hastalık dahil) Mikro'ya yıllık izin olarak yazılıyor, personelin
+ * yıllık bakiyesinden düşüyordu. Eşlenemeyen tür artık throw eder, 0'a düşmez.
+ */
+export const MIKRO_IZIN_TIPI: Record<string, number> = {
+  // types.ts LeaveRequest + HRModule sözlüğü
+  'Yıllık İzin': 0, 'Hastalık': 1, 'Mazeret': 2, 'Diğer': 3,
+  // IKPage'in KENDİ lokal LeaveRequest sözlüğü — aynı `leaveRequests` koleksiyonuna iki
+  // ekran iki farklı dizgi yazıyor (Faz 2 tek-kaynak işi, Açık İşler'de). Eşleme burada
+  // ikisini de tanır ki hangi ekrandan gelirse gelsin doğru Mikro koduna gitsin.
+  'annual': 0, 'sick': 1, 'other': 3,
+  // 'unpaid' (Ücretsiz izin) BİLİNÇLİ YOK: Mikro'daki ücretsiz izin kodu bilinmiyor —
+  // tahmin edip yıllık/mazeret yazmak yerine throw eder, kullanıcı görür.
+};
+
 export function izinTalepPayload(l: {
-  persKod: string; startDate: string; days: number; type?: number; reason?: string;
+  persKod: string; startDate: string; days: number; izinTuru: string; reason?: string;
 }) {
+  const tip = MIKRO_IZIN_TIPI[l.izinTuru];
+  if (tip === undefined) throw new Error(`İzin türü '${l.izinTuru}' Mikro'ya eşlenemedi — yıllık izin varsayılmaz`);
+  if (!Number.isFinite(l.days) || l.days <= 0) throw new Error('İzin gün sayısı eksik — Mikro\'ya 1 gün varsayılarak gönderilemez');
   return {
     evraklar: [{
       satirlar: [{
@@ -158,7 +216,7 @@ export function izinTalepPayload(l: {
         pit_baslangictarih: trDate(l.startDate),
         pit_pers_kod: l.persKod,
         pit_mali_yil: new Date().getFullYear(),
-        pit_izin_tipi: l.type ?? 0,
+        pit_izin_tipi: tip,   // yukarıda eşlendi; eşlenemeyen tür buraya gelmez
         pit_gun_sayisi: l.days,
         pit_yol_izni: 0,
         pit_amac: (l.reason ?? '').slice(0, 40),
@@ -235,11 +293,17 @@ export function bakimTalepPayload(b: {
         bkmkb_evrakno_seri: 'CTP',
         bkmkb_tuketici_kodu: b.tuketiciKod ?? '',
         bkmkb_teslim_edilme_sekli: 0,
-        bkmkb_depono: b.depoNo ?? 1,
+        bkmkb_depono: depoGerekli(b.depoNo, 'Bakım talebi'),
         bkmkb_aciklama: (b.note ?? '').slice(0, 120),
         bkmkb_hareket_tipi: 0,
         bkmkb_stok_hizmet_kodu: b.stokKod ?? '',
-        bkmkb_miktari: b.quantity ?? 1,
+        // Miktar bilinmiyorsa alan HİÇ gitmez (Faz 1): eskiden `?? 1` idi ve BakimModule
+
+        // quantity'yi hiç geçmediği için HER bakım talebi Mikro'ya 1 adet yazılıyordu.
+
+        // Mikro alanı zorunlu tutuyorsa API görünür hata döner — sessiz 1 değil.
+
+        ...(Number.isFinite(b.quantity) ? { bkmkb_miktari: b.quantity } : {}),
         bkmkb_servis_turu: 0,
         bkmkb_servis_yeri: 0,
         bkmkb_talep_gelis_sekli: 0,
@@ -296,7 +360,7 @@ export function servisMalzemePayload(m: { isEmriKod: string; sku: string; quanti
         smpl_miktar: m.quantity,
         smpl_tutar: 0,
         smpl_aciklama: (m.note ?? '').slice(0, 120),
-        smpl_depono: m.depoNo ?? 1,
+        smpl_depono: depoGerekli(m.depoNo, 'Servis malzemesi'),
         smpl_garanti_dahili_fl: 0,
         smpl_onaylandi_fl: 1,
       }],
@@ -317,7 +381,7 @@ export function uretimTalepPayload(u: { sku: string; quantity: number; deliveryD
         utl_Sor_Merk: '',
         utl_Stok_kodu: u.sku,
         utl_miktari: u.quantity,
-        utl_depo_no: u.depoNo ?? 1,
+        utl_depo_no: depoGerekli(u.depoNo, 'Üretim talebi'),
         utl_projekodu: '',
       }],
     }],
@@ -351,7 +415,9 @@ export function recetePayload(r: {
 }
 
 // ── 10. Etiket Basım (LabelSheetModal) ───────────────────────────────────────
-export function etiketPayload(items: { sku: string; adet: number }[], depoNo = 1) {
+export function etiketPayload(items: { sku: string; adet: number }[], depoNo?: number) {
+  // 7. depo tüketicisi (inceleme 2. tur): `depoNo = 1` varsayılan parametresi `?? 1` grep'inden kaçmıştı.
+  const depo = depoGerekli(depoNo, 'Etiket basımı');
   return {
     evraklar: [{
       satirlar: items.map(i => ({
@@ -363,7 +429,7 @@ export function etiketPayload(items: { sku: string; adet: number }[], depoNo = 1
         Etkb_EtiketTip: 0,
         Etkb_BasimTipi: 0,
         Etkb_BasimAdet: i.adet,
-        Etkb_DepoNo: depoNo,
+        Etkb_DepoNo: depo,
         Etkb_StokKodu: i.sku,
         Etkb_BasilacakMiktar: i.adet,
       })),

@@ -29,7 +29,7 @@ interface Tenant {
   subStatus: string;
   status: string; // 'active' | 'suspended'
   cycle: string;
-  amount: number;
+  amount: number | null;   // sunucu bilinmeyen plan için null gönderir (Faz 1) — 0 değil
   nextPaymentDate: unknown;
   lastPaymentDate: unknown;
   createdAt: unknown;
@@ -353,7 +353,16 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
     return t.companyName.toLowerCase().includes(s) || t.ownerEmail.toLowerCase().includes(s) || t.companyId.toLowerCase().includes(s);
   });
   const totalUsers = tenants.reduce((s, t) => s + t.userCount, 0);
-  const mrr = tenants.filter(t => t.status === 'active' && t.subStatus === 'active').reduce((s, t) => s + (t.cycle === 'yearly' ? (t.amount || 0) / 12 : (t.amount || 0)), 0);
+  // MRR: tutarı BİLİNMEYEN kiracı toplama girmez ve SAYILIR (Faz 1, 2026-09-04).
+  // Sunucu artık bilinmeyen plan için `amount: null` gönderiyor; eskiden buradaki
+  // `(t.amount || 0)` null'u sessizce 0 sayıp MRR'ı düşük gösteriyordu — sunucu
+  // tarafındaki düzeltme bu yüzeye ulaşmıyordu (inceleme yakaladı: yarım düzeltme).
+  const aktifler = tenants.filter(t => t.status === 'active' && t.subStatus === 'active');
+  const tutariBilinmeyen = aktifler.filter(t => typeof t.amount !== 'number' || !Number.isFinite(t.amount)).length;
+  const mrr = aktifler.reduce((s, t) => {
+    if (typeof t.amount !== 'number' || !Number.isFinite(t.amount)) return s;
+    return s + (t.cycle === 'yearly' ? t.amount / 12 : t.amount);
+  }, 0);
   const suspended = tenants.filter(t => t.status === 'suspended').length;
 
   const planBadge = (plan: string) => ({
@@ -381,7 +390,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Users className="w-4 h-4" />{tr ? 'Kullanıcı' : 'Users'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{totalUsers}</p></div>
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldCheck className="w-4 h-4" />{tr ? 'Aktif' : 'Active'}</div><p className="text-2xl font-bold text-green-600">{tenants.length - suspended}</p></div>
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{tr ? 'Askıda' : 'Suspended'}</div><p className="text-2xl font-bold text-red-500">{suspended}</p></div>
-        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><CreditCard className="w-4 h-4" />{tr ? 'Aylık Gelir' : 'MRR'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{fmtMoney(mrr)}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><CreditCard className="w-4 h-4" />{tr ? 'Aylık Gelir' : 'MRR'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{fmtMoney(mrr)}</p>{tutariBilinmeyen > 0 && <p className="text-[10px] text-amber-600 mt-0.5">{tr ? `${tutariBilinmeyen} kiracının tutarı bilinmiyor — toplama dahil değil` : `${tutariBilinmeyen} tenant(s) with unknown amount excluded`}</p>}</div>
       </div>
 
       {/* Operasyon Bekçisi — günlük altyapı sağlık kontrolleri */}

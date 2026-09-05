@@ -25,19 +25,7 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
     const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
 
     if (!apiKey) {
-      return res.json({
-        mock: true, carrier: 'DHL', trackingNumber,
-        status: 'In Transit', statusCode: 'in_transit',
-        origin: 'Frankfurt, DE', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() + 2 * 86400000).toISOString(),
-        service: 'DHL Express Worldwide',
-        events: [
-          { timestamp: new Date().toISOString(), location: 'Frankfurt, DE', status: 'In Transit', description: 'Shipment is in transit' },
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Leipzig Hub, DE', status: 'Departed', description: 'Departed from facility' },
-          { timestamp: new Date(Date.now() - 7200000).toISOString(), location: 'Leipzig Hub, DE', status: 'Arrived', description: 'Arrived at DHL hub' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Sender City, DE', status: 'Picked Up', description: 'Shipment picked up' },
-        ]
-      });
+      return res.json(yapilandirilmamis('DHL', trackingNumber, 'DHL_API_KEY tanımlı değil'));
     }
 
     try {
@@ -60,19 +48,7 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
     const trackingNumber = Array.isArray(req.params.trackingNumber) ? req.params.trackingNumber[0] : req.params.trackingNumber;
 
     if (!clientId || !clientSecret) {
-      return res.json({
-        mock: true, carrier: 'UPS', trackingNumber,
-        status: 'Out For Delivery', statusCode: 'out_for_delivery',
-        origin: 'Louisville, KY, US', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() + 86400000).toISOString(),
-        service: 'UPS Worldwide Express',
-        events: [
-          { timestamp: new Date().toISOString(), location: 'Istanbul, TR', status: 'Out For Delivery', description: 'Out for delivery' },
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Istanbul Customs, TR', status: 'Cleared', description: 'Released from customs' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Cologne Hub, DE', status: 'In Transit', description: 'Arrived at UPS facility' },
-          { timestamp: new Date(Date.now() - 2 * 86400000).toISOString(), location: 'Louisville, KY, US', status: 'Departed', description: 'Departed from facility' },
-        ]
-      });
+      return res.json(yapilandirilmamis('UPS', trackingNumber, 'UPS_CLIENT_ID / UPS_CLIENT_SECRET tanımlı değil'));
     }
 
     try {
@@ -107,20 +83,7 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
     const { trackingNumber } = req.body;
 
     if (!clientId || !clientSecret) {
-      return res.json({
-        mock: true, carrier: 'FedEx', trackingNumber,
-        status: 'Delivered', statusCode: 'delivered',
-        origin: 'Memphis, TN, US', destination: 'Istanbul, TR',
-        estimatedDelivery: new Date(Date.now() - 3600000).toISOString(),
-        service: 'FedEx International Priority',
-        events: [
-          { timestamp: new Date(Date.now() - 3600000).toISOString(), location: 'Istanbul, TR', status: 'DL', description: 'Delivered - Package handed to recipient' },
-          { timestamp: new Date(Date.now() - 7200000).toISOString(), location: 'Istanbul, TR', status: 'OD', description: 'On FedEx vehicle for delivery' },
-          { timestamp: new Date(Date.now() - 86400000).toISOString(), location: 'Istanbul Ataturk, TR', status: 'AR', description: 'Arrived at FedEx location' },
-          { timestamp: new Date(Date.now() - 2 * 86400000).toISOString(), location: 'Paris CDG, FR', status: 'DP', description: 'Left FedEx origin facility' },
-          { timestamp: new Date(Date.now() - 3 * 86400000).toISOString(), location: 'Memphis, TN, US', status: 'PU', description: 'Picked up' },
-        ]
-      });
+      return res.json(yapilandirilmamis('FedEx', trackingNumber, 'FEDEX_CLIENT_ID / FEDEX_CLIENT_SECRET tanımlı değil'));
     }
 
     try {
@@ -154,30 +117,40 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
 
   // ── Turkish Cargo Carrier Tracking ──────────────────────────────────────────
   // Returns a normalised TrackingResult-compatible object.
-  // Falls back to realistic mock data when credentials aren't configured.
   // Credentials (optional) stored in env vars or Firestore settings/cargoApiKeys.
 
-  function trMockEvents(carrier: string, no: string, status: string) {
-    const now = Date.now();
+  /**
+   * UYDURMA KARGO VERİSİ YOK (Faz 1, 2026-09-04).
+   *
+   * Eskiden bir sahte-olay üreticisi vardı: API anahtarı yoksa, API hata verirse
+   * VEYA ağ koparsa her takip numarasına "Ankara Dağıtım Merkezi: Dağıtıma çıktı"
+   * gibi SAHTE olaylar, DHL/UPS/FedEx için "Frankfurt→İstanbul, 2 gün sonra
+   * teslim" dönüyordu. DHL/UPS/FedEx `mock` gönderiyor, ekran `isMock` bekliyordu →
+   * o üçünde DEMO rozeti hiç yanmıyordu; Türk kargolarda `isMock:true` gidiyor ve
+   * rozet yanıyordu, ama uydurma olaylar yine gerçek gibi listeleniyordu. İki
+   * durumda da müşteri uydurma bilgiyi okuyordu. CLAUDE.md "sahte kesinlik
+   * gösterme": bilinmeyen kargo durumu uydurulmaz, "yapılandırılmamış /
+   * alınamadı" denir. Test: trackingRoutes.test.ts
+   */
+  function yapilandirilmamis(carrier: string, trackingNumber: string, sebep: string) {
     return {
-      mock: true, carrier, trackingNumber: no,
-      statusCode: 'in_transit' as const, status,
-      origin: 'İstanbul', destination: 'Ankara',
-      estimatedDelivery: new Date(now + 86400000).toISOString(),
-      isMock: true,
-      events: [
-        { timestamp: new Date(now - 1800000).toISOString(), location: 'Ankara Dağıtım Merkezi', status: 'Dağıtıma Çıktı', description: `${carrier}: Dağıtıma çıktı` },
-        { timestamp: new Date(now - 7200000).toISOString(), location: 'Ankara Transfer Merkezi', status: 'Transfer Merkezi', description: `${carrier}: Transfer merkezine ulaştı` },
-        { timestamp: new Date(now - 86400000).toISOString(), location: 'İstanbul Çıkış Deposu', description: `${carrier}: Kargo alındı`, status: 'Alındı' },
-      ],
+      configured: false as const, mock: false, isMock: false,
+      carrier, trackingNumber,
+      status: 'Takip yapılandırılmamış', statusCode: 'pending' as const,
+      origin: '', destination: '', events: [] as never[],
+      error: sebep,
     };
+  }
+  /** API ulaşılamaz/hatalı: bu da uydurulmaz — "alınamadı" denir. */
+  function alinamadi(carrier: string, trackingNumber: string, sebep: string) {
+    return { ...yapilandirilmamis(carrier, trackingNumber, sebep), status: 'Takip bilgisi alınamadı' };
   }
 
   // Yurtiçi Kargo
   app.get('/api/tracking/yurtici/:no', C.requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.YURTICI_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('Yurtiçi', no, 'Dağıtımda'));
+    if (!apiKey) return res.json(yapilandirilmamis('Yurtiçi', no, 'YURTICI_API_KEY tanımlı değil'));
     try {
       const r = await fetch('https://ws.yurticikargo.com/GetShipmentInfo/v1', {
         method:  'POST',
@@ -185,11 +158,11 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
         body:    JSON.stringify({ trackingNumbers: [no] }),
         signal:  AbortSignal.timeout(8000),
       });
-      if (!r.ok) return res.json(trMockEvents('Yurtiçi', no, 'Bilinmiyor'));
+      if (!r.ok) return res.json(alinamadi('Yurtiçi', no, `Yurtiçi API HTTP ${r.status}`));
       const data = await r.json() as Record<string, unknown>;
       res.json(data);
     } catch {
-      res.json(trMockEvents('Yurtiçi', no, 'Bilgi Alınamadı'));
+      res.json(alinamadi('Yurtiçi', no, 'Yurtiçi API yanıt vermedi'));
     }
   });
 
@@ -197,17 +170,17 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
   app.get('/api/tracking/mng/:no', C.requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.MNG_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('MNG', no, 'Yolda'));
+    if (!apiKey) return res.json(yapilandirilmamis('MNG', no, 'MNG_API_KEY tanımlı değil'));
     try {
       const r = await fetch(`https://service.mngkargo.com.tr/mngWS.asmx/Sorgu?TakipNo=${encodeURIComponent(no)}`, {
         headers: { 'x-api-key': apiKey },
         signal:  AbortSignal.timeout(8000),
       });
-      if (!r.ok) return res.json(trMockEvents('MNG', no, 'Bilinmiyor'));
+      if (!r.ok) return res.json(alinamadi('MNG', no, `MNG API HTTP ${r.status}`));
       const data = await r.json() as Record<string, unknown>;
       res.json(data);
     } catch {
-      res.json(trMockEvents('MNG', no, 'Bilgi Alınamadı'));
+      res.json(alinamadi('MNG', no, 'MNG API yanıt vermedi'));
     }
   });
 
@@ -215,17 +188,17 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
   app.get('/api/tracking/aras/:no', C.requireAuth, async (req: Request, res: Response) => {
     const no = req.params['no'] as string;
     const apiKey = process.env.ARAS_API_KEY;
-    if (!apiKey) return res.json(trMockEvents('Aras', no, 'Transfer Merkezinde'));
+    if (!apiKey) return res.json(yapilandirilmamis('Aras', no, 'ARAS_API_KEY tanımlı değil'));
     try {
       const r = await fetch(`https://kargo.aras.com.tr/api/v1/shipment/track/${encodeURIComponent(no)}`, {
         headers: { 'Authorization': `Bearer ${apiKey}` },
         signal:  AbortSignal.timeout(8000),
       });
-      if (!r.ok) return res.json(trMockEvents('Aras', no, 'Bilinmiyor'));
+      if (!r.ok) return res.json(alinamadi('Aras', no, `Aras API HTTP ${r.status}`));
       const data = await r.json() as Record<string, unknown>;
       res.json(data);
     } catch {
-      res.json(trMockEvents('Aras', no, 'Bilgi Alınamadı'));
+      res.json(alinamadi('Aras', no, 'Aras API yanıt vermedi'));
     }
   });
 
@@ -240,11 +213,11 @@ export function trackingRoutes(app: Express, C: TrackingRouteCtx): void {
       });
       if (r.ok) {
         const data = await r.json() as Record<string, unknown>;
-        return res.json({ ...trMockEvents('PTT', no, 'Yolda'), ...data, mock: false, isMock: false });
+        return res.json({ configured: true, mock: false, isMock: false, carrier: 'PTT', trackingNumber: no, ...data });
       }
-      return res.json(trMockEvents('PTT', no, 'Teslimatta'));
+      return res.json(alinamadi('PTT', no, 'PTT API yanıt vermedi'));
     } catch {
-      res.json(trMockEvents('PTT', no, 'Teslimatta'));
+      res.json(alinamadi('PTT', no, 'PTT API yanıt vermedi'));
     }
   });
 }

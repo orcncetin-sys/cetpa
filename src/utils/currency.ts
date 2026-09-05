@@ -15,11 +15,25 @@ const CURRENCY_LOCALES: Record<string, string> = {
  * If exchangeRates supplied, amount is treated as TRY and converted to the
  * app's display currency via the rates map — currently we display in TRY.
  */
+/**
+ * BİLİNMEYEN TUTAR '—' DÖNER, '₺0,00' DEĞİL (Faz 1, 2026-09-04).
+ * Eskiden NaN/undefined → '₺0,00' basılıyordu. Bu fonksiyon 20 çağrı yerinin
+ * tek kaynağı: Mikro'dan henüz gelmemiş bakiye, yüklenmemiş toplam, alanı
+ * olmayan sipariş — hepsi ekranda "sıfır borç / sıfır ciro" görünüyordu.
+ * CLAUDE.md "sahte kesinlik gösterme": güvenilir hesaplanamayan rakam '—'.
+ *
+ * `Number.isFinite`, GLOBAL sürüm DEĞİL (inceleme yakaladı, 2026-09-04): global sürüm
+ * null'u 0'a zorlar ve true döner, yani `formatCurrency(null)` yine '₺0,00' basardı —
+ * ve gerçek veri şekli tam olarak null'dur (Mikro'dan gelmemiş alan). `Number.`
+ * öneki zorlamaz: null/undefined/'' → false → '—'.
+ * Aynı dosyadaki `kurCevir` bu ilkeyi zaten uyguluyordu; burası uygulamıyordu
+ * (yarım düzeltme). Mevcut test bu yanlış davranışı SABİTLİYORDU — güncellendi.
+ */
 export const formatCurrency = (
   amount: number,
   _exchangeRates?: ExchangeRates,
 ): string => {
-  if (!isFinite(amount)) return '₺0,00';
+  if (!Number.isFinite(amount)) return '—';
   return new Intl.NumberFormat('tr-TR', {
     style: 'currency',
     currency: 'TRY',
@@ -63,7 +77,7 @@ const bicimle = (deger: number, currency: string): string => {
  * sinyali artık yalnız gerçekten çeviri isteyen yoldan çıkıyor.
  */
 export const formatAmount = (amount: number, currency: string): string => {
-  if (!isFinite(amount)) return `0 ${currency}`;
+  if (!Number.isFinite(amount)) return '—';   // bilinmeyen tutar — '0 USD' sahte kesinlikti
   return bicimle(amount, currency);
 };
 
@@ -92,10 +106,10 @@ export const kurCevir = (
   currency: string,
   exchangeRates?: ExchangeRates | null,
 ): number | null => {
-  if (!isFinite(amountInTRY)) return null;
+  if (!Number.isFinite(amountInTRY)) return null;   // global sürüm null'u 0 sayar — o yüzden Number.
   if (currency === 'TRY') return amountInTRY;
   const kur = exchangeRates?.[currency];
-  if (!kur || !isFinite(kur) || kur <= 0) return null;
+  if (!kur || !Number.isFinite(kur) || kur <= 0) return null;
   return amountInTRY / kur;
 };
 
@@ -104,7 +118,7 @@ export const formatInCurrency = (
   currency: string,
   exchangeRates?: ExchangeRates,
 ): string => {
-  if (!isFinite(amountInTRY)) return `0 ${currency}`;
+  if (!Number.isFinite(amountInTRY)) return '—';   // bilinmeyen tutar — '0 USD' sahte kesinlikti
 
   // Cevirinin kendisi `kurCevir`de — iki kopya kacinilmaz olarak sapardi.
   let converted = amountInTRY;
@@ -118,7 +132,7 @@ export const formatInCurrency = (
     // DİKKAT: bu '—' bir GÖSTERİM sinyali. Sayı bekleyen bir yere (PDF/CSV
     // hücresi, hesap) akmamalı — çeviri istemeyen çağıran `formatAmount`
     // kullanmalı.
-    if (!kur || !isFinite(kur) || kur <= 0) return '—';
+    if (!kur || !Number.isFinite(kur) || kur <= 0) return '—';
     converted = amountInTRY / kur;
   }
 

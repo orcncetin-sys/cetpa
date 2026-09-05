@@ -8,10 +8,19 @@ describe('formatCurrency', () => {
     expect(result).toContain('₺');
   });
 
-  it('returns ₺0,00 for non-finite values', () => {
-    expect(formatCurrency(NaN)).toBe('₺0,00');
-    expect(formatCurrency(Infinity)).toBe('₺0,00');
-    expect(formatCurrency(-Infinity)).toBe('₺0,00');
+  // Faz 1 (2026-09-04): eskiden '₺0,00' bekleniyordu — test YANLIŞ davranışı
+  // sabitliyordu. Bilinmeyen tutar sıfır değil, bilinmiyordur.
+  it("bilinmeyen tutar '—' döner — '₺0,00' sahte kesinlikti", () => {
+    expect(formatCurrency(NaN)).toBe('—');
+    expect(formatCurrency(Infinity)).toBe('—');
+    expect(formatCurrency(-Infinity)).toBe('—');
+    expect(formatCurrency(Number(undefined))).toBe('—');   // Mikro'dan gelmemiş alan
+    // GERÇEK VERİ ŞEKLİ: null. Global isFinite(null) === true olduğundan ilk düzeltme
+    // bunu kaçırmıştı ('₺0,00' basıyordu) — inceleme yakaladı, Number.isFinite ile kapandı.
+    expect(formatCurrency(null as unknown as number)).toBe('—');
+    expect(formatCurrency(undefined as unknown as number)).toBe('—');
+    expect(formatCurrency('' as unknown as number)).toBe('—');
+    expect(formatCurrency(0)).not.toBe('—');               // GERÇEK sıfır sıfırdır
   });
 
   it('formats zero correctly', () => {
@@ -48,7 +57,7 @@ describe('formatInCurrency', () => {
 
   it('returns 0 currency fallback for non-finite', () => {
     const result = formatInCurrency(NaN, 'USD', rates);
-    expect(result).toBe('0 USD');
+    expect(result).toBe('—');   // Faz 1: '0 USD' sahte kesinlikti
   });
 
   it("kur yoksa '—' döner — TL tutarı yabancı sembolle GÖSTERİLMEZ", () => {

@@ -33,7 +33,8 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
   // (QuotationForm.tsx teklifi duzenlemeye acarken `initialData.currency || 'TRY'` yapiyor).
   const paraBirimi = quotation.currency || 'TRY';
   // totalAmount BILINMIYOR olabilir; 0 varsaymak yerine UI'da '—' gosteriyoruz.
-  const toplam = quotation.totalAmount;
+  // null da bilinmiyordur: `null === undefined` false → `null / 1.2 === 0` → ₺0,00 basılırdı (inceleme).
+  const toplam = Number.isFinite(quotation.totalAmount) ? Number(quotation.totalAmount) : undefined;
   const araToplam = toplam === undefined ? undefined : toplam / 1.2;
   const kdvToplam = toplam === undefined ? undefined : toplam - toplam / 1.2;
   const tutarYaz = (v: number | undefined) => (v === undefined ? '—' : formatAmount(v, paraBirimi));
@@ -163,10 +164,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         String(i + 1),
         tr(item.name || ''),
         item.sku || '',
-        String(item.quantity || 0),
-        formatAmount(item.price || 0, paraBirimi),
+        Number.isFinite(item.quantity) ? String(item.quantity) : '—',
+        formatAmount(item.price, paraBirimi),   // bilinmeyen → '—' (eskiden ₺0,00 basılıyordu)
         `%${item.vatRate ?? 0}`,
-        formatAmount((item.price || 0) * (item.quantity || 0), paraBirimi),
+        formatAmount(Number.isFinite(item.price) && Number.isFinite(item.quantity) ? item.price * item.quantity : NaN, paraBirimi),   // null*qty=0 tuzağı — bilinmeyen '—'
       ]);
 
       autoTable(doc, {
@@ -198,7 +199,9 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
 
       // ── Totals ───────────────────────────────────────────────────────────
       const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-      const total    = quotation.totalAmount || 0;
+      // Bilinmeyen toplam PDF'e ₺0,00 olarak GİTMEZ (Faz 1): ekran zaten '—' gösteriyordu,
+      // PDF `|| 0` ile sıfırlık teklif basıyordu — müşteri yüzeyinde yarım düzeltme.
+      const total    = Number.isFinite(quotation.totalAmount) ? Number(quotation.totalAmount) : NaN;
       const subTotal = total / 1.2;
       const vatTotal = total - subTotal;
 
@@ -405,7 +408,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
                       <td className="p-4 text-center text-sm font-medium text-gray-900">{item.quantity}</td>
                       <td className="p-4 text-right text-sm font-medium text-gray-900">{formatAmount(item.price, paraBirimi)}</td>
                       <td className="p-4 text-center text-sm font-medium text-gray-500">%{item.vatRate}</td>
-                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatAmount(item.price * item.quantity * (1 + item.vatRate / 100), paraBirimi)}</td>
+                      <td className="p-4 text-right text-sm font-bold text-gray-900">{formatAmount(Number.isFinite(item.price) && Number.isFinite(item.quantity) ? item.price * item.quantity * (1 + (item.vatRate ?? 0) / 100) : NaN, paraBirimi)   /* null*qty=0 tuzağı (2. inceleme) */}</td>
                     </tr>
                   ))}
                 </tbody>
