@@ -240,7 +240,11 @@ export default function OrdersPage({
     syncedAt: ms.tarih,
     mikroBelgeNo: ms.belgeNo,
     notes: ms.satirAciklamasi,
-    lineItems: []
+    lineItems: [],
+    // Kaynak etiketi (Faz 1 3/n): odemeTakipli bu kayıtları "ödeme Cetpa'da izlenmiyor"
+    // diye ayırsın — eskiden etiket yoktu, CSV'de her Mikro siparişi 'Bekliyor' çıkıyordu.
+    // NOT: `status: 'Pending'` sabiti de sahte kesinlik (Mikro sipariş durumu bilinmiyor) — Açık İş.
+    source: 'mikro-siparis',
   })) as unknown as Order[];
   
   const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;

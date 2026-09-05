@@ -71,7 +71,12 @@ export async function kurlariYukle(tarihler: Iterable<string>): Promise<void> {
   if (!eksik.length) return;
 
   for (let i = 0; i < eksik.length; i += ES_ZAMANLI) {
-    const grup = eksik.slice(i, i + ES_ZAMANLI);
+    // HER GRUPTA YENİDEN SÜZ (Faz 1 3/n incelemesi ölçtü): `eksik` girişte bir kez
+    // süzülüyor, `ucusta.set` ise grubun sırası gelince yapılıyordu → aynı anda mount olan
+    // iki panel aynı 10 tarihi isteyince 16 istek gidiyor, TCMB/sunucu yükü 2× oluyordu.
+    // Şimdi bir tarih, bu çağrı sırasına gelene kadar başka çağrı tarafından çekildiyse atlanır.
+    const grup = eksik.slice(i, i + ES_ZAMANLI).filter(t => !onbellek.has(t) && !ucusta.has(t));
+    if (!grup.length) continue;
     await Promise.all(grup.map(t => {
       const p = tekTarihYukle(t);
       ucusta.set(t, p);
@@ -96,7 +101,7 @@ export function kurAl(tarih: string | undefined | null, birim: string): number |
   // rakam çıkar ama yanlış dönemin kurudur. Bilmiyorsak bilmiyoruz.
   if (!g || g.yedek) return null;
   const k = g.kurlar?.[birim];
-  return (typeof k === 'number' && isFinite(k) && k > 0) ? k : null;
+  return (typeof k === 'number' && Number.isFinite(k) && k > 0) ? k : null;   // CLAUDE.md: global isFinite değil
 }
 
 /** O tarihin kuru GERÇEK tarihsel kur mu, yoksa güncel kura mı düşüldü? */

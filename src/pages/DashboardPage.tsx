@@ -194,7 +194,11 @@ export default function DashboardPage(props: Props) {
     totalPrice: ms.tutar,
     status: 'Pending', // Mikro'daki açık siparişler
     createdAt: ms.tarih,
-    syncedAt: new Date().toISOString()
+    // syncedAt = MİKRO'NUN TARİHİ, bugün DEĞİL (Faz 1 3/n): eskiden `new Date()` yazılıyordu →
+    // her Mikro siparişi Dashboard'da "bugün" görünüp 7 günlük ciro/KPI'ya sızıyordu.
+    // OrdersPage aynı eşlemede `ms.tarih` kullanıyor; tarih yoksa siparisTarih null döner.
+    syncedAt: ms.tarih,
+    source: 'mikro-siparis',   // odemeTakipli ayrımı için (OrdersPage ile aynı düzeltme)
   })) as unknown as Order[];
   
   const combinedOrders = [...orders, ...mappedMikroSiparisler];

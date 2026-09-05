@@ -73,5 +73,9 @@ export function siparisTarihMs(o: SiparisTarihAlanlari): number {
  * false → tahsilat gerçeği Mikro cari hesapta; `paid` alanına bakma.
  */
 export function odemeTakipli(o: SiparisKaynakAlani): boolean {
-  return o.source !== 'mikro-fatura';
+  // 'mikro' ÖNEKİ, yalnız 'mikro-fatura' DEĞİL (Faz 1 3/n incelemesi): Siparişler → Mikro
+  // sekmesi `mappedMikroSiparisler`'i (source:'mikro-siparis') aynı yüzeylere veriyor; eski
+  // eşitlik kontrolü onları "takipli" sayıp CSV'de 'Bekliyor' yazıyordu. Mikro kaynaklı
+  // HİÇBİR kaydın tahsilatı Cetpa'da izlenmez — gerçeği Mikro cari hesapta yaşar.
+  return !(o.source ?? '').startsWith('mikro');
 }

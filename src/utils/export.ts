@@ -6,7 +6,7 @@
  */
 
 import Papa from 'papaparse';
-import { gorunenSiparisNo } from './siparis';
+import { gorunenSiparisNo, odemeTakipli } from './siparis';
 import type { Order, Lead, InventoryItem } from '../types';
 
 // ── Generic download helper ───────────────────────────────────────────────────
@@ -37,10 +37,13 @@ export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
     [tr ? 'Müşteri'            : 'Customer']:         o.customerName,
     [tr ? 'Müşteri Tipi'       : 'Customer Type']:   o.customerType ?? '',
     [tr ? 'Durum'              : 'Status']:           o.status,
-    [tr ? 'Ödeme Durumu'       : 'Payment Status']:  o.paid ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Unpaid'),
+    // Mikro faturasından türetilen siparişte `paid` yokluğu 'ödenmedi' DEĞİL 'bilinmiyor'
+    // (siparis.ts odemeTakipli). CSV eskiden hepsini 'Bekliyor' yazıyordu — ₺17,6M sahte
+    // alacak arızasının dışa aktarım yüzeyi.
+    [tr ? 'Ödeme Durumu'       : 'Payment Status']:  !odemeTakipli(o) ? (tr ? 'Bilinmiyor (Mikro)' : 'Unknown (Mikro)') : o.paid ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Unpaid'),
     [tr ? 'Toplam (₺)'         : 'Total (₺)']:       o.totalPrice,
     [tr ? 'Fatura Tipi'        : 'Invoice Type']:    o.faturaTipi ?? (o.faturali ? 'e-fatura' : ''),
-    [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? 0,
+    [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? '',   // bilinmiyorsa BOŞ hücre, 0 değil (satır 94 dersi — yarım kalmıştı)
     [tr ? 'Kargo No'           : 'Tracking No']:     o.trackingNumber ?? '',
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',
     [tr ? 'Teslimat Adresi'    : 'Shipping Address']:o.shippingAddress ?? '',
@@ -67,7 +70,7 @@ export function exportLeadsCSV(leads: Lead[], lang: string = 'tr'): void {
     [tr ? 'Durum'              : 'Status']:          l.status,
     [tr ? 'E-posta'            : 'Email']:           l.email ?? '',
     [tr ? 'Telefon'            : 'Phone']:           l.phone ?? '',
-    [tr ? 'Kredi Limiti (₺)'  : 'Credit Limit (₺)']:l.creditLimit ?? 0,
+    [tr ? 'Kredi Limiti (₺)'  : 'Credit Limit (₺)']:l.creditLimit ?? '',   // limit girilmemiş ≠ limit 0
     [tr ? 'Ödeme Vadesi'       : 'Payment Terms']:   l.paymentTerms ?? '',
     [tr ? 'Atanan'             : 'Assigned To']:     l.assignedTo ?? '',
     [tr ? 'AI Skoru'           : 'AI Score']:        l.score ?? '',
