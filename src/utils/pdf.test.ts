@@ -146,3 +146,49 @@ describe('sertleştirme — inceleme önerileri', () => {
     expect(dosyalar.length).toBeGreaterThan(200);   // tarama gerçekten oldu
   });
 });
+
+describe('sahte kesinlik — Faz 1 4/n (para.ts bağlandı)', () => {
+  it("fiyatı/miktarı bilinmeyen satır PDF'te '—', 0,00 DEĞİL", async () => {
+    await exportOrderPDF({ ...teklif, lineItems: [{ title: 'Kum', sku: 'KUM', quantity: 3 }, { title: 'Çakıl', sku: 'CKL', price: 90 }] }, null, 'teklif');
+    const metin = basilan().join('\n');
+    expect(metin).not.toMatch(/\b0,00 EUR/);
+    expect(basilan().filter(s => s === '—').length).toBeGreaterThanOrEqual(3);   // fiyat, satır tutarı, miktar/tutar
+  });
+  it("KDV oranı bilinmiyorsa Ara Toplam/KDV '—' ve etiket 'KDV (%—)' — %20 VARSAYILMAZ; Genel Toplam yine basılır", async () => {
+    await exportOrderPDF({ ...teklif, kdvOran: undefined }, null, 'teklif');
+    const metin = basilan().join('\n');
+    expect(metin).toContain('KDV (%—):');
+    expect(metin).not.toMatch(/KDV \(%20\)/);
+    expect(basilan().some(s => s === '1.350,00 EUR')).toBe(true);
+    expect(basilan().some(s => s === '1.125,00 EUR')).toBe(false);   // 1350/1.2 — sahte ayrışım basılmadı
+  });
+  it("kdvOran biliniyorsa ayrışım doğru: 1350 brüt %20 → net 1.125,00, KDV 225,00", async () => {
+    await exportOrderPDF(teklif, null, 'teklif');
+    expect(basilan()).toContain('1.125,00 EUR');
+    expect(basilan()).toContain('225,00 EUR');
+  });
+  it("ÜRETİM ŞEKLİ (B2B Portal teklifi, 4/n incelemesi): kdvOran YOK, kalemlerde vatRate VAR → net/KDV kalemlerden, etiket ortak oran", async () => {
+    // QuotationForm'un yazdığı kayıt: {lineItems[].vatRate, totalAmount} — kdvOran/kdvHaricTutar hiç yok.
+    await exportOrderPDF({ id: 'q1', customerName: 'Şirin Yapı', lineItems: [{ title: 'Çimento', sku: 'CMT', quantity: 2, price: 500, vatRate: 20 }], totalAmount: 1200 }, null, 'teklif');
+    const m = basilan();
+    expect(m).toContain('KDV (%20):');
+    expect(m).toContain('1.000,00 TL');   // ara toplam (kalemlerden)
+    expect(m).toContain('200,00 TL');     // KDV
+    expect(m).toContain('1.200,00 TL');   // genel toplam
+    expect(m.filter(s => s === '—')).toHaveLength(0);
+  });
+  it("karışık oranlar (%20 + %10): tutarlar kalemlerden, etiket oransız 'KDV:'; totalAmount yoksa brüt de kalemlerden", async () => {
+    await exportOrderPDF({ id: 'q2', customerName: 'X', lineItems: [{ title: 'A', sku: 'A', quantity: 1, price: 100, vatRate: 20 }, { title: 'B', sku: 'B', quantity: 1, price: 100, vatRate: 10 }] }, null, 'teklif');
+    const m = basilan();
+    expect(m).toContain('KDV:');
+    expect(m).not.toContain('KDV (%—):');
+    expect(m).toContain('200,00 TL'); expect(m).toContain('30,00 TL'); expect(m).toContain('230,00 TL');
+  });
+  it("toplam tutarı bilinmeyen sipariş: Genel Toplam/Ara Toplam/KDV '—' (eskiden 0,00)", async () => {
+    await exportOrderPDF({ ...teklif, totalPrice: undefined, currency: undefined }, null);
+    // Tam eşleşme: `/0,00 TL/` deseni '1.200,00 TL' satır tutarının sonunu da yakalıyordu (ilk sürüm hatası).
+    expect(basilan().some(s => s === '0,00 TL')).toBe(false);
+    expect(basilan().filter(s => s === '—').length).toBeGreaterThanOrEqual(3);   // ara toplam, KDV, genel toplam
+    expect(basilan()).toContain('1.200,00 TL');   // satır tutarları yine basılır
+  });
+});

@@ -43,6 +43,7 @@ import {
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
 import { pgServerTimestamp } from '../pgShim.js';
+import { isimAnahtari } from '../../lib/isimAnahtari.js';
 
 
 /** Bu rota grubunun server.ts'ten ihtiyac duydugu HER SEY - acik liste. */
@@ -424,7 +425,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
         const vkn = vknNorm((data.taxId as string) || (data.taxNo as string));
         if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        // İsim anahtarı TEK KAYNAK (isimAnahtari.ts, Türkçe locale) — gelen taraf da aynı fonksiyon.
+        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
         if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
 
@@ -448,7 +450,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           companyId,
         };
         const vkn = vknNorm(fields.taxId);
-        const nameKey = fields.name.trim().toLowerCase();
+        const nameKey = isimAnahtari(fields.name);
         const ref = leadByKod.get(kod)
           || (vkn ? leadByVkn.get(vkn) : undefined)
           || (nameKey ? leadByName.get(nameKey) : undefined);
@@ -705,7 +707,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               // olabilen nesne) yazılıyordu: Mikro fiyat döndürmediği her senkronda
               // elle girilmiş fiyatlar `{}` ile eziliyordu — stockLevel/vatRate'te
               // düzeltilen sessiz-sıfır arıza sınıfının aynısı.
-              ...(Object.keys(prices).length ? { prices, price: prices['Retail'] ?? 0 } : {}),
+              // Eski tekil `price` alanı yalnız Retail BİLİNİYORSA yazılır: `?? 0` başka kademe
+              // varken 0 TL basıyor, elle girilmiş perakende fiyatı eziyordu (Faz 1 4/n testi).
+              ...(Object.keys(prices).length ? { prices, ...(prices['Retail'] != null ? { price: prices['Retail'] } : {}) } : {}),
               mikroStoKod:      sku,
               mikroSynced:      true,
               source:           'mikro_import',
@@ -872,7 +876,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (kod && !existingByKod.has(kod)) existingByKod.set(kod, docSnap.ref);
         const vkn = normalizeVkn((data.taxId as string) || (data.taxNo as string));
         if (vkn && !existingByVkn.has(vkn)) existingByVkn.set(vkn, docSnap.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        // İsim anahtarı TEK KAYNAK (isimAnahtari.ts, Türkçe locale) — gelen taraf da aynı fonksiyon.
+        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
         if (nameKey && !existingByName.has(nameKey)) existingByName.set(nameKey, docSnap.ref);
       }
 
@@ -925,7 +930,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // Upsert oncelik sirasi: mikroCariKod (zaten Mikro'yla eslesmis) ->
             // VKN (en guvenilir kimlik) -> case-insensitive isim.
             const vkn = normalizeVkn(lead.taxId);
-            const nameKey = unvan.trim().toLowerCase();
+            const nameKey = isimAnahtari(unvan);
             const existingRef = existingByKod.get(cariKod)
               || (vkn ? existingByVkn.get(vkn) : undefined)
               || (nameKey ? existingByName.get(nameKey) : undefined);

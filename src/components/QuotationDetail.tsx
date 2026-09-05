@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK } from '../utils/belgeSablonu';
 import { tr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
+import { teklifToplamlari } from '../utils/para';
 
 interface QuotationDetailProps {
   isOpen: boolean;
@@ -34,9 +35,14 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
   const paraBirimi = quotation.currency || 'TRY';
   // totalAmount BILINMIYOR olabilir; 0 varsaymak yerine UI'da '—' gosteriyoruz.
   // null da bilinmiyordur: `null === undefined` false → `null / 1.2 === 0` → ₺0,00 basılırdı (inceleme).
-  const toplam = Number.isFinite(quotation.totalAmount) ? Number(quotation.totalAmount) : undefined;
-  const araToplam = toplam === undefined ? undefined : toplam / 1.2;
-  const kdvToplam = toplam === undefined ? undefined : toplam - toplam / 1.2;
+  // KALEM BAZLI (Faz 1 4/n, tek kaynak `teklifToplamlari`): eskiden `/1.2` sabit %20 — %10'luk
+  // kalemi olan teklifte Form ile Detail farklı KDV gösteriyordu. Kalemi olmayan eski kayıtta
+  // brüt = kaydedilmiş totalAmount, net/KDV bilinmiyor ('—'); oran uydurulmaz.
+  const kalemToplam = teklifToplamlari(quotation.lineItems ?? []);
+  const kayitliBrut = Number.isFinite(quotation.totalAmount) ? Number(quotation.totalAmount) : NaN;
+  const toplam = Number.isFinite(kalemToplam.brut) ? kalemToplam.brut : Number.isFinite(kayitliBrut) ? kayitliBrut : undefined;
+  const araToplam = Number.isFinite(kalemToplam.net) ? kalemToplam.net : undefined;
+  const kdvToplam = Number.isFinite(kalemToplam.kdv) ? kalemToplam.kdv : undefined;
   const tutarYaz = (v: number | undefined) => (v === undefined ? '—' : formatAmount(v, paraBirimi));
 
   const handleConvertToOrder = async () => {
@@ -201,9 +207,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
       // Bilinmeyen toplam PDF'e ₺0,00 olarak GİTMEZ (Faz 1): ekran zaten '—' gösteriyordu,
       // PDF `|| 0` ile sıfırlık teklif basıyordu — müşteri yüzeyinde yarım düzeltme.
-      const total    = Number.isFinite(quotation.totalAmount) ? Number(quotation.totalAmount) : NaN;
-      const subTotal = total / 1.2;
-      const vatTotal = total - subTotal;
+      // Ekranla AYNI kaynak (teklifToplamlari) — PDF `/1.2` sabitini de bırakıyor.
+      const total    = toplam ?? NaN;
+      const subTotal = araToplam ?? NaN;
+      const vatTotal = kdvToplam ?? NaN;
 
       const totalsX = W - 70;
       const totalsY = finalY + 8;

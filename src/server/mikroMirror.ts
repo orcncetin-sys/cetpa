@@ -232,7 +232,13 @@ export async function initMikroTables(): Promise<void> {
   console.log('Mikro tablo aynası hazır ✓ (15 tablo + eşleşme kaydı)');
 }
 
-const numOrNull = (v: unknown): number | null => (v === undefined || v === null || v === '' ? null : Number(v));
+/** Eksik/boş → null (0 DEĞİL). Sayısal olmayan metin de null — NaN DEĞİL: pg NaN'ı numeric
+ *  kolona sessizce kabul eder ve rapor toplamları NaN'a döner (CLAUDE.md `Number.isFinite`). */
+const numOrNull = (v: unknown): number | null => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 const strOrNull = (v: unknown): string | null => (v === undefined || v === null ? null : String(v));
 
 /** Hash-dedupe'lu genel ekleme — aynı ham kayıt iki kez yazılmaz (idempotent). */

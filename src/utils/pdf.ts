@@ -14,6 +14,7 @@ applyPlugin(jsPDF);
 import { Order, Lead } from '../types';
 import { registerTurkishFont } from './pdfFont';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
+import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari } from './para';
 
 // Roboto (registerTurkishFont) Türkçe glifleri kapsıyor — artık harf
 // düşürmeye gerek yok, normTR eski çağrı yerlerini bozmamak için passthrough
@@ -136,9 +137,9 @@ export const exportOrderPDF = async (
     String(idx + 1),
     normTR(String(item.title || item.name || '-')),
     item.sku || '-',
-    String(item.quantity || 0),
-    `${Number(item.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`,
-    `${(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`,
+    bilinenSayi(item.quantity) ? String(item.quantity) : '—',
+    tutarYaz(item.price, paraBirimi),                                  // bilinmeyen '—' (eskiden `|| 0` → 0,00)
+    tutarYaz(satirTutari(item.price, item.quantity), paraBirimi),
   ]);
 
   // FONKSİYONEL biçim, plugin-yöntemi DEĞİL (Faz 1 2/n, inceleme CONFIRMED): eskiden
@@ -168,10 +169,32 @@ export const exportOrderPDF = async (
 
   // ── Totals ─────────────────────────────────────────────────────────────
   const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-  const totalPrice = Number((order as Record<string, unknown>).totalPrice) || Number((order as Record<string, unknown>).totalAmount) || 0;
-  const kdvOran   = Number((order as Record<string, unknown>).kdvOran) || 20;
-  const subTotal  = Number((order as Record<string, unknown>).kdvHaricTutar) || totalPrice / (1 + kdvOran / 100);
-  const vatTotal  = Number((order as Record<string, unknown>).kdvTutari) || (totalPrice - subTotal);
+  // Toplamlar (Faz 1 4/n): eskiden `totalPrice || … || 0` ve `kdvOran || 20` — tutarı bilinmeyen
+  // sipariş 0,00, KDV oranı bilinmeyen sipariş %20 varsayımıyla basılıyordu (müşteriye giden belge).
+  // Artık: brüt bilinmiyorsa '—'; oran bilinmiyorsa Ara Toplam/KDV '—', Genel Toplam yine basılır.
+  const o = order as Record<string, unknown>;
+  // KALEM BAZLI KDV ÖNCE (4/n incelemesi): teklif kayıtlarında (B2BPortal → 'teklif') kdvOran YOK,
+  // ama her kalemde vatRate VAR — Form/Detail ile aynı `teklifToplamlari`. Aksi halde bilinen KDV
+  // kırılımı müşteriye '—' diye gidiyordu. Sıra: açık kdvHaric/kdvTutari → kalemler → kdvOran ile ayrıştır.
+  // Tablo satırlarıyla aynı kaynak (`lineItems || items`) — yeniden inceleme: iki şekil ayrışmasın.
+  const hamKalemler = Array.isArray(o.lineItems) ? o.lineItems : Array.isArray(o.items) ? o.items : [];
+  const kalemler = hamKalemler as Parameters<typeof teklifToplamlari>[0];
+  const kalemToplam = kalemler.length ? teklifToplamlari(kalemler) : null;
+  const kalemdenBilinir = kalemToplam !== null && kalemToplam.bilinmeyenSatir === 0 && Number.isFinite(kalemToplam.kdv);
+  const totalPrice = bilinenSayi(o.totalPrice) ? Number(o.totalPrice)
+    : bilinenSayi(o.totalAmount) ? Number(o.totalAmount)
+    : kalemdenBilinir && kalemToplam ? kalemToplam.brut : NaN;
+  const kdvOran   = bilinenSayi(o.kdvOran) ? Number(o.kdvOran) : NaN;
+  const ayrisim   = bilinenSayi(o.kdvHaricTutar) && bilinenSayi(o.kdvTutari)
+    ? { net: Number(o.kdvHaricTutar), kdv: Number(o.kdvTutari) }
+    : kalemdenBilinir && kalemToplam ? { net: kalemToplam.net, kdv: kalemToplam.kdv }
+    : kdvAyristir(totalPrice, kdvOran);
+  const subTotal  = ayrisim ? ayrisim.net : NaN;
+  const vatTotal  = ayrisim ? ayrisim.kdv : NaN;
+  // Etiketteki oran: açık kdvOran; yoksa kalemlerin ORTAK oranı; oranlar karışıksa oransız 'KDV:'; bilinmiyorsa '%—'.
+  const kalemOranlari = new Set(kalemler.map(k => Number((k as { vatRate?: unknown }).vatRate)).filter(Number.isFinite));
+  const etiketOran = Number.isFinite(kdvOran) ? kdvOran : (kalemdenBilinir && kalemOranlari.size === 1 ? [...kalemOranlari][0] : null);
+  const kdvEtiketi = etiketOran != null ? `KDV (%${etiketOran}):` : ayrisim ? 'KDV:' : 'KDV (%—):';
 
   const totalsX = W - 70;
   const totalsY = finalY + 8;
@@ -183,12 +206,12 @@ export const exportOrderPDF = async (
   doc.setFont('Roboto', 'normal');
   doc.setTextColor(...GREY);
   doc.text('Ara Toplam:', totalsX + 2, totalsY + 4);
-  doc.text(`KDV (%${kdvOran}):`, totalsX + 2, totalsY + 12);
+  doc.text(kdvEtiketi, totalsX + 2, totalsY + 12);
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
-  doc.text(`${subTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 4, { align: 'right' });
-  doc.text(`${vatTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 12, { align: 'right' });
+  doc.text(tutarYaz(subTotal, paraBirimi), W - 16, totalsY + 4, { align: 'right' });
+  doc.text(tutarYaz(vatTotal, paraBirimi), W - 16, totalsY + 12, { align: 'right' });
 
   doc.setFillColor(...BRAND);
   doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
@@ -196,7 +219,7 @@ export const exportOrderPDF = async (
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
-  doc.text(`${totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`, W - 16, totalsY + 23, { align: 'right' });
+  doc.text(tutarYaz(totalPrice, paraBirimi), W - 16, totalsY + 23, { align: 'right' });
 
   // ── Footer band ────────────────────────────────────────────────────────
   // Banka blogu ARTIK ortak cizicide: tablonun bittigi yerden asagi yerlesir ve
@@ -332,7 +355,7 @@ export const exportCustomerStatement = async (
       dateStr2,
       status,
       normTR(itemNames || '—'),
-      (o.totalPrice ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }),
+      tutarYaz(o.totalPrice, '').trim(),   // bilinmeyen '—'
     ];
   });
 
@@ -499,16 +522,16 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...BRAND);
-  doc.text(`${lang === 'tr' ? 'Toplam' : 'Total'}: ${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, col2 + 4, boxY + 30);
+  doc.text(`${lang === 'tr' ? 'Toplam' : 'Total'}: ${tutarYaz(po.totalAmount, 'TL')}`, col2 + 4, boxY + 30);
 
   // ── Items table ───────────────────────────────────────────────────────────
   const tableData = (po.items || []).map((item, idx) => [
     String(idx + 1),
     normTR(item.name || '-'),
     item.sku || '-',
-    String(item.quantity || 0),
-    `${Number(item.purchasePrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
-    `${(Number(item.purchasePrice || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
+    bilinenSayi(item.quantity) ? String(item.quantity) : '—',
+    tutarYaz(item.purchasePrice, 'TL'),
+    tutarYaz(satirTutari(item.purchasePrice, item.quantity), 'TL'),
   ]);
 
   const head = lang === 'tr'
@@ -546,7 +569,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', totalsX + 2, totalsY + 7.5);
-  doc.text(`${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, totalsY + 7.5, { align: 'right' });
+  doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, totalsY + 7.5, { align: 'right' });
 
   // ── Notes ─────────────────────────────────────────────────────────────────
   if (po.notes) {
@@ -649,9 +672,9 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
     String(idx + 1),
     normTR(item.name || '-'),
     item.sku || '-',
-    String(item.quantity || 0),
-    `${Number(item.purchasePrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
-    `${(Number(item.purchasePrice || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`,
+    bilinenSayi(item.quantity) ? String(item.quantity) : '—',
+    tutarYaz(item.purchasePrice, 'TL'),
+    tutarYaz(satirTutari(item.purchasePrice, item.quantity), 'TL'),
     '☐',   // received check column
   ]);
 
@@ -691,7 +714,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(255, 255, 255);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', W - 70, sigY + 7.5);
-  doc.text(`${(po.totalAmount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL`, W - 16, sigY + 7.5, { align: 'right' });
+  doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, sigY + 7.5, { align: 'right' });
 
   // Signature boxes
   const sigBoxY = sigY + 20;

@@ -41,6 +41,7 @@ import {
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
   SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
 } from "./src/lib/collections.js";
+import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import pg from "pg";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
@@ -1668,14 +1669,14 @@ async function startServer() {
       // teorik degil: devtools'tan `?init=payrolls,bankAccounts` demek yetiyordu.
       // Ayni fonksiyon (isAllowed) kullaniliyor ki iki yol asla ayrisamasin.
       const streamRole = await getUserRole(streamUid);
-      const rowVisible = (coll: string, data: Record<string, unknown> | undefined): boolean => {
+      // Görünürlük kuralı `akisSatiriGorunur` (src/lib/tenantErisim.ts) — GET yoluyla AYNI modül.
+      // 4/n incelemesi (2026-09-05): buradaki kopyada `users` dalı yoktu → kiracı A'nın Admin'i
+      // `?init=users` ile tüm kiracıların kullanıcı kayıtlarını alıyordu. Kopya kaldırıldı.
+      const akisKimlik = { uid: streamUid, cid: streamCid };
+      const rowVisible = (coll: string, id: string | undefined, data: Record<string, unknown> | undefined): boolean => {
         if (SERVER_ONLY_COLLECTIONS.has(coll)) return false; // sunucuya özel — stream'e asla çıkmaz
         if (!isAllowed(streamRole, coll, 'read')) return false; // rol yetmiyorsa hiç gösterme
-        if (!data) return true;
-        if (TENANT_COLLECTIONS.has(coll)) { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; }
-        if (USER_SCOPED_COLLECTIONS.has(coll)) { const du = data.userId as string | undefined; return !du || du === streamUid; }
-        if (coll === 'settings') { const dc = data.companyId as string | undefined; return !dc || dc === streamCid; } // firma-bazlı ayar init izolasyonu
-        return true;
+        return akisSatiriGorunur(coll, id, data, akisKimlik);
       };
       try {
         // Kiracı filtresini SQL'e it. Eskiden bu sorgu koleksiyonların TÜM
@@ -1690,24 +1691,23 @@ async function startServer() {
         // gonderilir ki istemci o koleksiyon icin sonsuza kadar beklemede
         // kalmasin — yetkisizlik "veri yok" gibi gorunur, sizinti olmaz.
         const izinliColls = initColls.filter(c => isAllowed(streamRole, c, 'read'));
-        const tenantColls = izinliColls.filter(c => TENANT_COLLECTIONS.has(c));
-        const userColls   = izinliColls.filter(c => USER_SCOPED_COLLECTIONS.has(c));
-        // SERVER_ONLY hiç sorgulanmaz (rowVisible zaten eliyordu; artık diske de
-        // gitmiyor). initColls'ta KALIR ki istemci o koleksiyon için boş bir init
-        // eventi alsın ve beklemede kalmasın.
-        const otherColls  = izinliColls.filter(c => !TENANT_COLLECTIONS.has(c) && !USER_SCOPED_COLLECTIONS.has(c) && !SERVER_ONLY_COLLECTIONS.has(c));
+        // Kovalar `akisKovalari` (tenantErisim.ts): SERVER_ONLY hiç sorgulanmaz (initColls'ta
+        // KALIR ki istemci boş init eventi alıp beklemede kalmasın); `users` KENDİ kovasında —
+        // eskiden filtresiz `otherColls`a düşüyordu (4/n incelemesi, kiracılar-arası PII).
+        const kova = akisKovalari(izinliColls);
         const { rows } = izinliColls.length
           ? await docsDb.query(
               `SELECT coll, id, data FROM docs WHERE
                  (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
               OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
+              OR (coll = ANY($6) AND (data->>'companyId' = $4 OR id = $5))
               OR (coll = ANY($3))`,
-              [tenantColls, userColls, otherColls, streamCid, streamUid],
+              [kova.tenant, kova.user, kova.diger, streamCid, streamUid, kova.users],
             )
           : { rows: [] as Array<{ coll: string; id: string; data: unknown }> };
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
         for (const c of initColls) byColl[c] = [];
-        for (const r of rows) if (rowVisible(r.coll, r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
+        for (const r of rows) if (rowVisible(r.coll, String(r.id), r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
         for (const c of initColls) {
           const docs = byColl[c];
           // Sessiz kırpma YOK: tavana çarpınca logla ve istemciye bildir.
@@ -1724,13 +1724,16 @@ async function startServer() {
       } catch (e) {
         res.write(`event: err\ndata: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
       }
-      const onChange = (ev: { coll: string; cid?: string; uid?: string }) => {
+      const onChange = (ev: { coll: string; id?: string; cid?: string; uid?: string }) => {
         if (!colls.includes(ev.coll)) return;
         if (SERVER_ONLY_COLLECTIONS.has(ev.coll)) return; // sunucuya özel — yayınlanmaz
         // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
         if (ev.coll === 'settings' && ev.cid && ev.cid !== streamCid) return; // firma-bazlı ayar yayını izolasyonu
+        // users: kendi kaydı ya da kendi kiracısı — etiketsiz users değişimi de yayınlanmaz
+        // (init tarafı `akisSatiriGorunur` ile aynı kural; 4/n incelemesi).
+        if (ev.coll === 'users' && !(ev.id === streamUid || (ev.cid && ev.cid === streamCid))) return;
         // `broadcastDocChange` olaya dokümanın TAMAMINI iliştirir (pgShim.ts:97),
         // yani maskelenmezse sır buradan da akar.
         const gonder = 'data' in ev ? { ...ev, data: redactForRole(streamRole, ev.coll, (ev as { data?: unknown }).data) } : ev;
@@ -1799,90 +1802,20 @@ async function startServer() {
       return out;
     };
 
-    // Kiracı/kullanıcı kapsam WHERE eki — lenient (etiketsiz legacy docs sahibe görünür).
-    // Dönen params $2'den başlar.
-    const tenantWhere = async (req: Request, coll: string): Promise<{ sql: string; params: unknown[] }> => {
+    // Kiracı/kullanıcı kapsam kuralları `src/lib/tenantErisim.ts`'e TAŞINDI (Faz 1 4/n,
+    // 2026-09-05) — saf ve testli (tenantErisim.test.ts); gerekçe yorumları da oraya gitti
+    // (users PII sızıntısı, koşulsuz userId damgası, sahiplikDenetimli'nin neden tek yerde
+    // olduğu, etiketsiz users dokümanı kuralı). Buradakiler yalnız isteğin kimliğini çözen
+    // ince sarmalayıcılar; `cid` TEMBEL getter: USER_SCOPED/sınıfsız koleksiyonlarda
+    // getUserCompanyId hiç çağrılmaz (eski davranış korunur).
+    const reqKimlik = (req: Request): KiraciKimligi => {
       const uid = (req as Request & { uid?: string }).uid || '';
-      if (TENANT_COLLECTIONS.has(coll)) {
-        return { sql: " AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))", params: [await getUserCompanyId(uid)] };
-      }
-      if (USER_SCOPED_COLLECTIONS.has(coll)) {
-        return { sql: " AND (data->>'userId' = $2 OR NOT (data ? 'userId'))", params: [uid] };
-      }
-      // `users` İKİ SETTE DE YOK, dolayısıyla buraya kadar düşüyordu ve
-      // boş filtre dönüyordu: GET /api/db/users HER kiracının kullanıcı
-      // kayıtlarını (ad, e-posta, rol, companyId) döküyordu — kiracılar arası
-      // PII sızıntısı (2026-08-22 denetim bulgusu; C7/C19'un listeleme yarısı).
-      // Süper-admin ayrıcalığı burada YOK: onun için ayrı /api/superadmin/*
-      // uçları var ve onlar bilerek global.
-      if (coll === 'users') {
-        // Kendi kaydı her koşulda görünür (companyId'si henüz damgalanmamış
-        // yeni davet edilen kullanıcı kendini okuyabilsin diye).
-        return {
-          sql: " AND (data->>'companyId' = $2 OR id = $3)",
-          params: [await getUserCompanyId(uid), uid],
-        };
-      }
-      return { sql: '', params: [] };
+      return { uid, cid: () => getUserCompanyId(uid), superAdmin: isSuperAdmin(req) };
     };
-    // Yazmada companyId/userId enjekte et (client değerini geçersiz kıl).
-    const injectTenant = async (req: Request, coll: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => {
-      const uid = (req as Request & { uid?: string }).uid || '';
-      if (TENANT_COLLECTIONS.has(coll)) return { ...data, companyId: await getUserCompanyId(uid) };
-      // KOŞULSUZ damgala (2026-08-22, P3 ile birlikte): eskiden `!('userId' in
-      // data)` şartı vardı — istemci userId'yi KENDİSİ gönderirse ona
-      // GÜVENİLİYORDU, yani bir kullanıcı başka birinin bildirim/tercih
-      // kaydını yazabilirdi. TENANT damgası (üstte) nasıl istemci companyId'sini
-      // her zaman eziyorsa, userId de öyle ezilir. Kod tabanındaki tüm meşru
-      // yazmalar zaten kendi uid'sini gönderiyor (App.tsx createNotification vb.).
-      if (USER_SCOPED_COLLECTIONS.has(coll)) return { ...data, userId: uid };
-      return data;
-    };
-    // Mevcut doc sahibin mi? (etiketsiz legacy → erişilebilir)
-    /**
-     * Bir koleksiyonun SAHİPLİK denetimine tabi olup olmadığı — `ownsDoc` bu
-     * yüklem doğruyken çağrılır.
-     *
-     * NEDEN AYRI (2026-08-22 denetim bulgusu): koşul dört ayrı yerde
-     * (SET/DELETE/increment/update) elle `TENANT_COLLECTIONS.has(coll) ||
-     * USER_SCOPED_COLLECTIONS.has(coll)` diye yazılıydı. `users` ise İKİ SETTE
-     * DE YOK — bu yüzden C7/C19 için `ownsDoc` içine eklenen "users" dalı bu
-     * dört yolda HİÇ çağrılmıyordu: kiracı A'nın Admin'i
-     * DELETE /api/db/users/<B-uid> ile BAŞKA firmanın kullanıcısını
-     * silebiliyordu (aynı şekilde listeleme de filtresizdi). Yüklem tek yere
-     * alındı ve `users` açıkça dahil edildi.
-     */
-    const sahiplikDenetimli = (coll: string): boolean =>
-      TENANT_COLLECTIONS.has(coll) || USER_SCOPED_COLLECTIONS.has(coll) || coll === 'users';
-
-    const ownsDoc = async (req: Request, coll: string, docData: Record<string, unknown> | undefined, docId?: string): Promise<boolean> => {
-      const uid = (req as Request & { uid?: string }).uid || '';
-      if (!docData) return true; // yeni kayıt
-      // users KİRACI-KAPSAMLI DEĞİL (TENANT_COLLECTIONS dışında) — bu yüzden
-      // eskiden buradan hep `true` dönüyor ve A kiracısının Admin'i B kiracısının
-      // kullanıcılarının rolünü/durumunu değiştirebiliyordu (denied() Admin'e
-      // users yazmayı veriyor, sahiplik kontrolü yoktu). Kural (2026-08-22):
-      //   kendi dokümanın → serbest; süper-admin → serbest;
-      //   aksi halde hedef dokümanın companyId'si SENİN kiracın olmalı.
-      // Etiketsiz (companyId'siz) bir users dokümanı BAŞKA bir kiracının
-      // sahibidir (companyId = kendi uid'i) — ona da dokunulamaz; bu yüzden
-      // burada TENANT koleksiyonlarındaki "etiketsiz → görünür" esnekliği YOK.
-      if (coll === 'users') {
-        if (docId && docId === uid) return true;
-        if (isSuperAdmin(req)) return true;
-        const hedefCid = (docData.companyId as string) || null;
-        return !!hedefCid && hedefCid === await getUserCompanyId(uid);
-      }
-      if (TENANT_COLLECTIONS.has(coll)) {
-        const dc = (docData.companyId as string) || null;
-        return dc === null || dc === await getUserCompanyId(uid);
-      }
-      if (USER_SCOPED_COLLECTIONS.has(coll)) {
-        const du = (docData.userId as string) || null;
-        return du === null || du === uid;
-      }
-      return true;
-    };
+    const tenantWhere = (req: Request, coll: string) => kiraciWhere(coll, reqKimlik(req));
+    const injectTenant = (req: Request, coll: string, data: Record<string, unknown>) => kiraciDamgala(coll, data, reqKimlik(req));
+    const ownsDoc = (req: Request, coll: string, docData: Record<string, unknown> | undefined, docId?: string) =>
+      dokumanSahibiMi(coll, docData, reqKimlik(req), docId);
     // settings/{key} → firma-bazlı gerçek id. perCompany ise GET'te legacy global'e fallback edilir.
     const settingsRealId = async (req: Request, coll: string, id: string): Promise<{ realId: string; perCompany: boolean; cid: string }> => {
       if (coll === 'settings' && PER_COMPANY_SETTINGS.has(id)) {

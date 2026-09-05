@@ -8,6 +8,7 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
+import { isimAnahtari } from '../../lib/isimAnahtari.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface DynamicsRouteCtx {
@@ -138,7 +139,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
         if (did) byDynId.set(did, d.ref);
         const vkn = normVkn((data.taxId as string) || (data.taxNo as string));
         if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
         if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
       }
       let created = 0, updated = 0;
@@ -163,7 +164,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
           companyId, // create+update etiketle (self-heal)
         };
         const vkn = normVkn(fields.taxId);
-        const nameKey = name.trim().toLowerCase();
+        const nameKey = isimAnahtari(name);
         const ref = byDynId.get(did)
           || (vkn ? byVkn.get(vkn) : undefined)
           || (nameKey ? byName.get(nameKey) : undefined);

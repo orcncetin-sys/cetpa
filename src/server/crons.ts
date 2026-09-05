@@ -25,6 +25,7 @@ import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
          MIKRO_JUMP_SURUM } from './mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
+import { isimAnahtari } from '../lib/isimAnahtari.js';
 
 
 export interface CronDeps {
@@ -226,7 +227,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
         const vkn = normalizeVknCron((data.taxId as string) || (data.taxNo as string));
         if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
         if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
       let cariYeni = 0, cariGuncel = 0;
@@ -251,7 +252,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         // mikroCariKod'u olmadigi icin salt-kod eslesme onlari ikinci kez
         // olusturuyordu).
         const vkn = normalizeVknCron(fields.taxId);
-        const nameKey = fields.name.trim().toLowerCase();
+        const nameKey = isimAnahtari(fields.name);
         const ref = leadByKod.get(kod)
           || (vkn ? leadByVkn.get(vkn) : undefined)
           || (nameKey ? leadByName.get(nameKey) : undefined);

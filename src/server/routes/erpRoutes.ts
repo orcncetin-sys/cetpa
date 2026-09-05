@@ -20,6 +20,7 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
+import { isimAnahtari } from '../../lib/isimAnahtari.js';
 
 /** Parasut API kok adresi. Kod icinde SABIT - istemciden gelmez, dolayisiyla
  *  SSRF yuzeyi yok (2026-08-25 denetiminde bu ACIKCA dogrulandi). */
@@ -82,7 +83,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
         if (pid) byParasutId.set(pid, d.ref);
         const vkn = normalizeVknP((data.taxId as string) || (data.taxNo as string));
         if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = ((data.name as string) || (data.company as string) || '').trim().toLowerCase();
+        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
         if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
       }
       let created = 0, updated = 0;
@@ -109,7 +110,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
         // Oncelik: parasutId -> VKN -> case-insensitive isim (ayni mikro/import/cari
         // fix'i - manuel olusturulmus leads'in parasutId'si olmaz).
         const vkn = normalizeVknP(fields.taxId);
-        const nameKey = fields.name.trim().toLowerCase();
+        const nameKey = isimAnahtari(fields.name);
         const ref = byParasutId.get(pid)
           || (vkn ? byVkn.get(vkn) : undefined)
           || (nameKey ? byName.get(nameKey) : undefined);

@@ -7,6 +7,7 @@ import { collection, addDoc, setDoc, doc, serverTimestamp } from '../lib/dbClien
 import { db } from '../firebase';
 import { formatAmount } from '../utils/currency';
 import { type Lead, type InventoryItem, type Quotation, type QuotationItem } from '../types';
+import { teklifToplamlari } from '../utils/para';
 
 interface QuotationFormProps {
   isOpen: boolean;
@@ -84,12 +85,14 @@ export default function QuotationForm({ isOpen, onClose, leads = [], inventory =
   // Satır tutarı: fiyat/miktar BİLİNMİYORSA NaN (→ '—'), 0 DEĞİL (Faz 1, inceleme).
   // DB'den gelen eski kayıtta `price: null` olabilir; `null * qty === 0` sessizce ₺0,00
   // basıyordu. Bilinmeyen satır varsa toplamlar da bilinmiyor ve teklif KAYDEDİLEMEZ.
-  const satirTutari = (item: QuotationItem) =>
-    Number.isFinite(item.price) && Number.isFinite(item.quantity) ? item.price * item.quantity : NaN;
-  const eksikSatirVar = lineItems.some(item => !Number.isFinite(item.price) || !Number.isFinite(item.quantity) || item.quantity <= 0);
-  const totalAmount = lineItems.reduce((sum, item) => sum + satirTutari(item), 0);
-  const totalVat = lineItems.reduce((sum, item) => sum + satirTutari(item) * ((item.vatRate ?? 0) / 100), 0);
-  const grandTotal = totalAmount + totalVat;
+  // TEK KAYNAK (Faz 1 4/n): Form, Detail ve PDF aynı `teklifToplamlari`'nı kullanır. Eskiden
+  // Detail/PDF brütü `/1.2` ile sabit %20'ye ayırıyordu — %10'luk kalemi olan teklifte üç yüzey
+  // üç farklı KDV basıyordu. Kalem oranı bilinmiyorsa KDV '—' (eskiden `?? 0` → %0 sayılıyordu).
+  const toplamlar = teklifToplamlari(lineItems);
+  const eksikSatirVar = toplamlar.bilinmeyenSatir > 0 || lineItems.some(item => Number.isFinite(item.quantity) && item.quantity <= 0);
+  const totalAmount = toplamlar.net;
+  const totalVat = toplamlar.kdv;
+  const grandTotal = toplamlar.brut;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -44,6 +44,7 @@ import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
 import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
+import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -359,22 +360,24 @@ export default function OrdersPage({
   };
 
   // Sevkiyatta stok düş, iptalde geri yükle (idempotent — order.stockApplied flag).
+  // Plan SAF ve TESTLİ: `siparisStokPlani` (utils/siparisStok.ts). Eski gövde
+  // `Number(li.quantity) || 0` ile miktarı bilinmeyen satırı ve envanterde bulunmayan
+  // ürünü SESSİZCE atlıyordu; sipariş yine "stok uygulandı" damgalanıyordu. Artık
+  // atlanan satırlar sebebiyle "düşürülemedi" listesine girer (Faz 1 4/n).
   const applyOrderStock = async (order: Order, direction: 'out' | 'in', reason: string): Promise<string[]> => {
-    const basarisiz: string[] = [];  // stoğu GÜNCELLENEMEYEN ürünler (P1)
-    for (const li of (order.lineItems || []) as unknown as Array<Record<string, unknown>>) {
-      const invId = (li.inventoryId as string) || '';
-      const qty = Number(li.quantity) || 0;
-      const inv = inventory.find(i => i.id === invId || i.sku === (li.sku as string));
-      if (!inv || qty <= 0) continue;
+    const plan = siparisStokPlani(order, inventory);
+    const dil = currentLanguage === 'tr' ? 'tr' : 'en';
+    const basarisiz: string[] = plan.atlanan.map(a => `${a.satir} (${ATLANMA_SEBEBI[a.sebep][dil]})`);  // stoğu GÜNCELLENEMEYEN ürünler (P1)
+    for (const h of plan.hareketler) {
       try {
-        await incrementField('inventory', inv.id, 'stockLevel', direction === 'out' ? -qty : qty, 0);
+        await incrementField('inventory', h.invId, 'stockLevel', direction === 'out' ? -h.miktar : h.miktar, 0);
         await addDoc(collection(db, 'inventoryMovements'), {
-          type: direction, productId: inv.id, productName: inv.name || (li.name as string) || inv.id,
-          quantity: qty, reason, orderId: order.id, timestamp: serverTimestamp(),
+          type: direction, productId: h.invId, productName: h.urunAdi,
+          quantity: h.miktar, reason, orderId: order.id, timestamp: serverTimestamp(),
         });
       } catch (err) {
         console.error('[applyOrderStock]', err);
-        basarisiz.push(inv.name || inv.id);
+        basarisiz.push(h.urunAdi);
       }
     }
     return basarisiz;
@@ -392,13 +395,14 @@ export default function OrdersPage({
       // Kısmi başarıda bayrağı yine set ediyoruz (başarılı satırları ikinci kez
       // düşmemek için) ama kullanıcıya YÜKSEK SESLE hangi satırların düşmediğini
       // söylüyoruz — sessiz yanlış stok, gürültülü eksik stoktan kötüdür.
-      if (ord && !applied && (status === 'Shipped' || status === 'Delivered')) {
+      const gecis = stokGecisi(status, applied);   // 'out' | 'in' | null — saf, testli (siparisStok.ts)
+      if (ord && gecis === 'out') {
         const hatalilar = await applyOrderStock(ord, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
         if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'
           ? `DİKKAT: ${hatalilar.length} ürünün stoğu düşürülemedi: ${hatalilar.join(', ')} — elle düzeltin.`
           : `WARNING: stock not decremented for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
-      } else if (ord && applied && status === 'Cancelled') {
+      } else if (ord && gecis === 'in') {
         const hatalilar = await applyOrderStock(ord, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
         if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'

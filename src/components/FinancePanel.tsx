@@ -5,6 +5,7 @@ import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { zamanMs } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { kurCevir } from '../utils/currency';
+import { toplaBilinen, tahsilatOrani } from '../utils/para';
 
 interface Order {
   id?: string;
@@ -137,19 +138,20 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // YARIM DUZELTME DUZELTILDI (2026-09-04): yukaridaki totalRevenue mikro-fatura
   // turevlerini disliyordu ama bu tahsilat hesaplari dislamiyordu — o kayitlarda
   // `paid` YOK, dolayisiyla hepsi "odenmemis" sayilip tahsilat orani cokuyordu.
+  // TEK KAYNAK (Faz 1 4/n): `tahsilatOrani` — yalnız ödemesi izlenen, iptal olmayan, tutarı
+  // BİLİNEN siparişler. Eski `|| 0` reduce'ları tutarı bilinmeyen siparişi 0 sayıp oranı
+  // sessizce kaydırıyordu; izlenen ciro 0 iken "%0 tahsilat" basıyordu (sahte kesinlik → null).
   const odemeIzlenen  = orders.filter(o => odemeTakipli(o));
   const unpaidOrders  = odemeIzlenen.filter(o => !o.paid && o.status !== 'Cancelled');
-  const unpaidRevenue = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const paidRevenue   = odemeIzlenen.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-  // Payda da ayni kumeden gelmeli: aksi halde pay (yalniz izlenen) ile payda
-  // (izlenen + izlenmeyen) farkli kumelerden olur ve oran yapay olarak duser.
-  const izlenenCiro   = odemeIzlenen.reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const collectionRate = izlenenCiro > 0 ? Math.round((paidRevenue / izlenenCiro) * 100) : 0;
+  const unpaidRevenue = toplaBilinen(unpaidOrders, o => o.totalPrice).toplam;
+  const tahsilat      = tahsilatOrani(orders);
+  const paidRevenue   = tahsilat.odenen;
+  const collectionRate = tahsilat.oran;   // number | null
 
   // ── Phase 127: Financial Health Score ───────────────────────────────────
   const marginPct = totalRevenue > 0 ? Math.round(((totalRevenue - totalCost) / totalRevenue) * 100) : 0;
   const deliveryRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100) : 0;
-  const healthScore = Math.round((collectionRate * 0.4) + (Math.min(marginPct, 50) * 0.6) + (deliveryRate * 0.2)) ;
+  const healthScore = Math.round(((collectionRate ?? 0) * 0.4) + (Math.min(marginPct, 50) * 0.6) + (deliveryRate * 0.2)) ;
   const clampedScore = Math.min(100, Math.max(0, healthScore));
   const scoreColor = clampedScore >= 70 ? 'text-emerald-600' : clampedScore >= 40 ? 'text-amber-600' : 'text-red-500';
   const scoreLabel = clampedScore >= 70
@@ -166,6 +168,14 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           <div>
             <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Finansal Sağlık Skoru' : 'Financial Health Score'}</h3>
             <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Tahsilat · Kâr Marjı · Teslimat' : 'Collection · Margin · Delivery'}</p>
+            {(collectionRate == null || tahsilat.bilinmeyen > 0) && (
+              <p className="text-[9px] text-amber-600 mt-1 flex items-center gap-1 max-w-xs">
+                <Info size={10} className="flex-shrink-0" />
+                {collectionRate == null
+                  ? (currentLanguage === 'tr' ? 'Tahsilat oranı hesaplanamıyor: ödemesi izlenen ve tutarı bilinen sipariş yok — skora 0 katkı.' : 'Collection rate unavailable: no tracked orders with a known amount — contributes 0 to the score.')
+                  : (currentLanguage === 'tr' ? `${tahsilat.bilinmeyen} siparişin tutarı bilinmiyor, tahsilat oranına dahil edilmedi.` : `${tahsilat.bilinmeyen} order(s) have an unknown amount and are excluded from the collection rate.`)}
+              </p>
+            )}
             {mikroGiden.length > 0 && (
               <p className="text-[9px] text-gray-400 mt-1 flex items-center gap-1 max-w-xs">
                 <Info size={10} className="flex-shrink-0" />
@@ -196,10 +206,10 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
             { label: currentLanguage === 'tr' ? 'Teslimat' : 'Delivery', value: deliveryRate, unit: '%', weight: 20 },
           ].map(m => (
             <div key={m.label} className="text-center">
-              <p className={`text-lg font-bold ${m.value >= 50 ? 'text-emerald-600' : m.value >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{m.value}{m.unit}</p>
+              <p className={`text-lg font-bold ${m.value == null ? 'text-gray-400' : m.value >= 50 ? 'text-emerald-600' : m.value >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{m.value == null ? '—' : `${m.value}${m.unit}`}</p>
               <p className="text-[10px] text-gray-400">{m.label}</p>
               <div className="w-full bg-gray-100 rounded-full h-1 mt-1 overflow-hidden">
-                <div className={`h-1 rounded-full ${m.value >= 50 ? 'bg-emerald-400' : m.value >= 25 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${Math.min(m.value, 100)}%` }} />
+                <div className={`h-1 rounded-full ${m.value == null ? 'bg-gray-200' : m.value >= 50 ? 'bg-emerald-400' : m.value >= 25 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${m.value == null ? 0 : Math.min(m.value, 100)}%` }} />
               </div>
             </div>
           ))}
@@ -219,14 +229,15 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 : `${unpaidOrders.length} order${unpaidOrders.length !== 1 ? 's' : ''} with pending payment`}
             </p>
             <p className="text-xs text-amber-600 mt-0.5">
-              {cvt(unpaidRevenue)} {currentLanguage === 'tr' ? 'tahsil bekliyor' : 'outstanding'} · {currentLanguage === 'tr' ? 'Tahsilat Oranı' : 'Collection Rate'}: <strong>{collectionRate}%</strong>
+              {cvt(unpaidRevenue)} {currentLanguage === 'tr' ? 'tahsil bekliyor' : 'outstanding'} · {currentLanguage === 'tr' ? 'Tahsilat Oranı' : 'Collection Rate'}: <strong>{collectionRate == null ? '—' : `${collectionRate}%`}</strong>
+              {tahsilat.bilinmeyen > 0 && (currentLanguage === 'tr' ? ` · ${tahsilat.bilinmeyen} siparişin tutarı bilinmiyor (toplama girmedi)` : ` · ${tahsilat.bilinmeyen} order(s) with unknown amount (excluded)`)}
             </p>
           </div>
           <div className="flex-shrink-0">
             <div className="w-24 bg-amber-200 rounded-full h-2">
-              <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${collectionRate}%` }} />
+              <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${collectionRate == null ? 0 : collectionRate}%` }} />
             </div>
-            <p className="text-[9px] text-amber-600 font-bold text-right mt-1">{collectionRate}% {currentLanguage === 'tr' ? 'tahsil' : 'collected'}</p>
+            <p className="text-[9px] text-amber-600 font-bold text-right mt-1">{collectionRate == null ? '—' : `${collectionRate}%`} {currentLanguage === 'tr' ? 'tahsil' : 'collected'}</p>
           </div>
         </div>
       )}
