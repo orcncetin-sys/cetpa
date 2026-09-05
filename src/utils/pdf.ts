@@ -1,6 +1,15 @@
 import { jsPDF } from 'jspdf';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs } from './siparis';
-import autoTable from 'jspdf-autotable';
+import autoTable, { applyPlugin } from 'jspdf-autotable';
+
+// Plugin'i BU modülün jsPDF'ine açıkça uygula (Faz 1 2/n, 2026-09-05).
+// GERÇEK MEKANİZMA (ilk yorum yanlıştı, inceleme düzeltti): jspdf-autotable 5 modül
+// yüklenirken plugin'i YALNIZ `window.jsPDF || window.jspdf?.jsPDF` UMD globaline uygular;
+// Vite'ın kullandığı jspdf ES build hiçbir global yazmaz → tarayıcıda otomatik uygulama
+// HİÇ çalışmıyordu. Fonksiyonel `autoTable(doc, …)` plugin'e bağımlı değil; plugin-yöntemi
+// `doc.autoTable(…)` ise tanımsızdı. Artık tüm çağrılar fonksiyonel; bu satır savunma
+// amaçlı kalıyor (`doc.lastAutoTable` sugar'ı ve olası bir plugin-yöntemi kalıntısı için).
+applyPlugin(jsPDF);
 
 import { Order, Lead } from '../types';
 import { registerTurkishFont } from './pdfFont';
@@ -132,7 +141,12 @@ export const exportOrderPDF = async (
     `${(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${paraBirimi}`,
   ]);
 
-  (doc as unknown as { autoTable: (opts: unknown) => void }).autoTable({
+  // FONKSİYONEL biçim, plugin-yöntemi DEĞİL (Faz 1 2/n, inceleme CONFIRMED): eskiden
+  // `(doc as …).autoTable({…})` idi. jspdf-autotable 5 plugin'i yalnız `window.jsPDF` globali
+  // varsa uygular; Vite'ın ESM jspdf'i global yazmaz → bu tek çağrı canlıda 2026-04-16'dan
+  // beri "doc.autoTable is not a function" ile çöküyordu (B2B Portalı → teklif PDF İndir).
+  // Dosyadaki diğer 3 ve repodaki 14 çağrı zaten fonksiyonel. Değişmez testi: pdf.test.ts.
+  autoTable(doc, {
     startY: boxY + boxH + 6,
     head: [['#', 'Ürün', 'SKU', 'Miktar', 'Birim Fiyat', 'Tutar']],
     body: tableData.length ? tableData : [['', 'Kalem eklenmedi', '', '', '', '']],
