@@ -20,7 +20,8 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
-import { isimAnahtari } from '../../lib/isimAnahtari.js';
+import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
+import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 
 /** Parasut API kok adresi. Kod icinde SABIT - istemciden gelmez, dolayisiyla
  *  SSRF yuzeyi yok (2026-08-25 denetiminde bu ACIKCA dogrulandi). */
@@ -28,6 +29,8 @@ const PARASUT_BASE = 'https://api.parasut.com';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ErpRouteCtx {
+  /** Bakım kilidi / yazıcı kaydı (bakimKilidi.ts). server.ts'te sonradan atanan `let` — GETTER; lokal Firestore fallback'ta yok. */
+  getPgPool?: () => any;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
   requireMfaVerified: any;
@@ -61,6 +64,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
   });
 
   app.post('/api/parasut/import/cari', C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `parasut-import-cari:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const creds = await C.getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'DB yok.' });
@@ -83,7 +87,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
         if (pid) byParasutId.set(pid, d.ref);
         const vkn = normalizeVknP((data.taxId as string) || (data.taxNo as string));
         if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
+        const nameKey = firmaAnahtari(data);
         if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
       }
       let created = 0, updated = 0;
@@ -114,7 +118,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
         const ref = byParasutId.get(pid)
           || (vkn ? byVkn.get(vkn) : undefined)
           || (nameKey ? byName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); updated++; }
+        if (ref) { const { source: _kokeniKoru, ...guncelle } = fields; void _kokeniKoru; batch.update(ref, guncelle); updated++; }   // kökeni (source) ezme — bkz. mikroRoutes cari import notu
         else {
           const newRef = C.getAdminDb().collection('leads').doc();
           batch.set(newRef, { ...fields, status: 'Active', createdAt: C.pgServerTimestamp() });
@@ -185,7 +189,7 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
           companyId, // güncellemede de etiketle (self-heal)
         };
         const ref = bySku.get(sku);
-        if (ref) { batch.update(ref, fields); updated++; }
+        if (ref) { const { source: _kokeniKoru, ...guncelle } = fields; void _kokeniKoru; batch.update(ref, guncelle); updated++; }   // kökeni (source) ezme — bkz. mikroRoutes cari import notu
         else { batch.set(C.getAdminDb().collection('inventory').doc(), { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: C.pgServerTimestamp() }); created++; }
         if (++ops >= 400) await flush();
       }

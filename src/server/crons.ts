@@ -25,13 +25,16 @@ import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
          MIKRO_JUMP_SURUM } from './mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
-import { isimAnahtari } from '../lib/isimAnahtari.js';
+import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
+import { bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
 
 
 export interface CronDeps {
   /** server.ts'te SONRADAN atanan `let` - deger degil GETTER. */
   /** `any` DEGIL: yapisal tip, tip denetimini korur (bkz. adminDbTypes.ts). */
   getAdminDb: () => AdminDbLike | null;
+  /** Bakım kilidi için (bakimKilidi.ts). server.ts'te SONRADAN atanan `let` — GETTER. Opsiyonel: lokal Firestore fallback'ta yok. */
+  getPgPool?: () => SqlCalistirici | null;
   /** Kiraci-filtreli snapshot (server.ts'te kaldi). */
   tenantSnap: (coll: string, cid: string, daralt?: DocDaralt) => Promise<{ docs: Array<{ id: string; data: () => Record<string, unknown>; ref: AdminDocRef }> }>;
   /** Oturumsuz baglamda hedef kiraci. */
@@ -107,6 +110,13 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
   };
 
   cron.schedule('0 * * * *', async () => {
+    // Yazıcı kaydı (2026-09-11): bakım scripti kilidi koyduktan sonra bu koşunun BİTMESİNİ bekler —
+    // yalnız başlangıçta kilide bakmak yetmiyordu (T0 ref'leriyle silinen kopya diriliyordu).
+    const yaziciSonucu = await yaziciOlarakCalistir(deps().getPgPool?.() ?? null, 'mikro-cron', async () => {
+    // Bakım kilidi (2026-09-05): lead-birlestir gibi veri bakımları koşarken cari/stok upsert'i silinen
+    // kaydı pgShim UPSERT'iyle DİRİLTİR (inceleme). Kilit varken bu koşu atlanır, bir sonraki saatte tekrar denenir.
+    const kilit = await bakimKilidiVar(deps().getPgPool?.() ?? null);
+    if (kilit) { console.warn(`[cron] bakım kilidi var (${kilit.aciklama}, ${kilit.baslangic}) — Mikro senkronu bu saat atlandı`); return; }
     const cronCreds = await getMikroCreds();
     const db = deps().getAdminDb();
     if (!cronCreds || !db) return;
@@ -227,7 +237,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (kod && !leadByKod.has(kod)) leadByKod.set(kod, d.ref);
         const vkn = normalizeVknCron((data.taxId as string) || (data.taxNo as string));
         if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
-        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
+        const nameKey = firmaAnahtari(data);
         if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
       let cariYeni = 0, cariGuncel = 0;
@@ -274,6 +284,8 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     } catch (err) {
       console.error('Mikro cron sync hatası:', err);
     }
+    });
+    if ('kilit' in yaziciSonucu) console.warn(`[cron] bakım kilidi (${yaziciSonucu.kilit.aciklama}, ${yaziciSonucu.kilit.baslangic}) — Mikro senkronu bu saat atlandı`);
   });
 
   // ── Gece 04:00: stok miktar + maliyet senkronu (yalnız V17+) ──────────────

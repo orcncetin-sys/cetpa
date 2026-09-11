@@ -18,9 +18,13 @@ import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE } from '../mikroClie
 import path from 'path';
 import fs from 'fs';
 import { timingSafeEqual } from 'crypto';
+import { broadcastDocChange } from '../pgShim.js';
+import express from 'express';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface OpsRouteCtx {
+  /** /api/ops/yayinla için (bakım scripti doğrudan SQL yazar, SSE olayı üretemez). GETTER; opsiyonel. */
+  getPgPool?: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
   requireMfaVerified: any;
@@ -94,6 +98,35 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
         ? 'Test postası gönderildi. Gelen kutunu (ve spam) kontrol et.'
         : 'Posta GÖNDERİLEMEDİ — hata alanına bak.',
     });
+  });
+
+  /**
+   * POST /api/ops/yayinla — verilen dokümanlar için SSE değişiklik olayı yayınlar. Neden: veri bakımı
+   * scriptleri (scripts/lead-birlestir.ts) `docs` tablosuna DOĞRUDAN SQL yazar; pgShim'in
+   * broadcastDocChange'i süreç içi olduğundan açık istemciler değişikliği görmez ve bayat kopyayla
+   * (ör. eski activities dizisi) üzerine yazabilir (2026-09-11 incelemesi). Script işi bitince
+   * buraya {coll, ids, silinen} gönderir; istemciler taze veriyi alır. Token: X-Ops-Token.
+   */
+  app.post('/api/ops/yayinla', express.json({ limit: '256kb' }), async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || '';
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    const govde = (req.body ?? {}) as { coll?: unknown; ids?: unknown; silinen?: unknown };
+    const coll = String(govde.coll ?? '');
+    const ids = Array.isArray(govde.ids) ? govde.ids.map(String).slice(0, 2000) : [];
+    const silinen = Array.isArray(govde.silinen) ? govde.silinen.map(String).slice(0, 2000) : [];
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(coll)) return res.status(400).json({ error: 'coll geçersiz' });
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ error: 'pg havuzu yok (lokal Firestore fallback)' });
+    let yayin = 0;
+    if (ids.length) {
+      const { rows } = await pool.query('SELECT id, data FROM docs WHERE coll = $1 AND id = ANY($2)', [coll, ids]);
+      for (const r of rows) { broadcastDocChange(coll, 'set', String(r.id), r.data); yayin++; }
+    }
+    for (const id of silinen) { broadcastDocChange(coll, 'delete', id); yayin++; }
+    res.json({ success: true, yayin });
   });
 
   app.get('/api/ops/summary', async (req: Request, res: Response) => {

@@ -43,7 +43,8 @@ import {
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
 import { pgServerTimestamp } from '../pgShim.js';
-import { isimAnahtari } from '../../lib/isimAnahtari.js';
+import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
+import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 
 
 /** Bu rota grubunun server.ts'ten ihtiyac duydugu HER SEY - acik liste. */
@@ -363,6 +364,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
   app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-cari-listesi:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -426,7 +428,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const vkn = vknNorm((data.taxId as string) || (data.taxNo as string));
         if (vkn && !leadByVkn.has(vkn)) leadByVkn.set(vkn, d.ref);
         // İsim anahtarı TEK KAYNAK (isimAnahtari.ts, Türkçe locale) — gelen taraf da aynı fonksiyon.
-        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
+        const nameKey = firmaAnahtari(data);
         if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
 
@@ -555,6 +557,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
   app.post('/api/mikro/import/stok', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -842,6 +845,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
   app.post('/api/mikro/import/cari', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -877,7 +881,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const vkn = normalizeVkn((data.taxId as string) || (data.taxNo as string));
         if (vkn && !existingByVkn.has(vkn)) existingByVkn.set(vkn, docSnap.ref);
         // İsim anahtarı TEK KAYNAK (isimAnahtari.ts, Türkçe locale) — gelen taraf da aynı fonksiyon.
-        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
+        const nameKey = firmaAnahtari(data);
         if (nameKey && !existingByName.has(nameKey)) existingByName.set(nameKey, docSnap.ref);
       }
 
@@ -923,8 +927,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               type:           leadType,
               status:         'Active',
               mikroSynced:    true,
-              source:         'mikro_import',
               mikroSyncedAt:  pgServerTimestamp(),
+              // `source` YALNIZ yeni kayıtta (aşağıda): güncellemede elle açılan lead'in kökeni ezilmez —
+              // eskiden import'a bir kez yakalanan elle lead 'mikro_import' oluyor, birleştirme scripti
+              // onu Mikro kopyası sanıp SİLEBİLİRDİ (inceleme, 2026-09-05).
             };
 
             // Upsert oncelik sirasi: mikroCariKod (zaten Mikro'yla eslesmis) ->
@@ -940,7 +946,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               batch.update(targetRef, { ...lead, companyId }); // güncellemede de etiketle (self-heal)
               updated++;
             } else {
-              batch.set(targetRef, { ...lead, companyId, createdAt: pgServerTimestamp() });
+              batch.set(targetRef, { ...lead, source: 'mikro_import', companyId, createdAt: pgServerTimestamp() });
               created++;
             }
             existingByKod.set(cariKod, targetRef);
@@ -2471,6 +2477,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    */
   let stokMiktarJobRunning = false;
   app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     // Kısa devre ÖNCE: iş zaten koşuyorsa hiçbir yoklama/sorgu maliyeti ödeme.
@@ -2940,6 +2947,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  401 döner — Mikro destek tenant DB'de tanımlayınca çalışır.
    */
   app.post('/api/mikro/import/faturalar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
@@ -3375,6 +3383,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  tekrar çalıştırmak kopya üretmez. Mevcut NATIVE siparişlere dokunulmaz
    *  (Mikro'ya bağlarken EKLE, YERİNE KOYMA). */
   app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const t0 = Date.now();
     try {
       const cid = await C.reqCompanyId(req);
@@ -4174,6 +4183,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 // POST /api/mikro/pull/personel (requireAuth + requireMfaVerified).
 
 app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-pull-bakiye:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -4272,6 +4282,7 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
   // ÜZERİNE YAZMAZ (EKLE, YERİNE KOYMA ilkesi; bu alan için "ekleme" = eksik
   // olanı doldurmak).
   app.post('/api/mikro/pull/cari-adres', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-pull-cari-adres:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();

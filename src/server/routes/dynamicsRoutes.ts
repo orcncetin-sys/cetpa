@@ -8,10 +8,13 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
-import { isimAnahtari } from '../../lib/isimAnahtari.js';
+import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
+import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface DynamicsRouteCtx {
+  /** Bakım kilidi / yazıcı kaydı (bakimKilidi.ts). server.ts'te sonradan atanan `let` — GETTER; lokal Firestore fallback'ta yok. */
+  getPgPool?: () => any;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
   requireMfaVerified: any;
@@ -97,7 +100,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
           companyId, // create+update etiketle (self-heal)
         };
         const ref = bySku.get(sku);
-        if (ref) { batch.update(ref, fields); updated++; }
+        if (ref) { const { source: _kokeniKoru, ...guncelle } = fields; void _kokeniKoru; batch.update(ref, guncelle); updated++; }   // kökeni (source) ezme — bkz. mikroRoutes cari import notu
         else {
           const newRef = C.getAdminDb().collection('inventory').doc();
           batch.set(newRef, { ...fields, sku, category: 'Genel', lowStockThreshold: 5, costPrice: 0, createdAt: C.pgServerTimestamp() });
@@ -117,6 +120,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
   // BC customer → leads upsert (dedup: dynamicsId → VKN → isim; Paraşüt/Mikro deseni).
   // NOT: canlı BC'ye karşı test EDİLMEDİ — ilk gerçek sync doğrulayacak.
   app.post('/api/dynamics/import/cari', C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
+    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `dynamics-import-cari:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const token = await C.getDynamicsToken();
     if (!token) return res.json({ success: false, notConfigured: true, created: 0, updated: 0, errors: 0 });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'DB yok.' });
@@ -139,7 +143,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
         if (did) byDynId.set(did, d.ref);
         const vkn = normVkn((data.taxId as string) || (data.taxNo as string));
         if (vkn && !byVkn.has(vkn)) byVkn.set(vkn, d.ref);
-        const nameKey = isimAnahtari((data.name as string) || (data.company as string));
+        const nameKey = firmaAnahtari(data);
         if (nameKey && !byName.has(nameKey)) byName.set(nameKey, d.ref);
       }
       let created = 0, updated = 0;
@@ -168,7 +172,7 @@ export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
         const ref = byDynId.get(did)
           || (vkn ? byVkn.get(vkn) : undefined)
           || (nameKey ? byName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); updated++; }
+        if (ref) { const { source: _kokeniKoru, ...guncelle } = fields; void _kokeniKoru; batch.update(ref, guncelle); updated++; }   // kökeni (source) ezme — bkz. mikroRoutes cari import notu
         else {
           const newRef = C.getAdminDb().collection('leads').doc();
           batch.set(newRef, { ...fields, status: 'Active', createdAt: C.pgServerTimestamp() });

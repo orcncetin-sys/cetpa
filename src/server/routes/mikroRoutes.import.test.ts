@@ -40,6 +40,7 @@ type SnapDoc = { id: string; data: () => Record<string, unknown>; ref: Ref };
 let yazilan: Yazim[] = [];
 let snap: Record<string, SnapDoc[]> = {};
 let sayac = 0;
+let kilitVar = false;
 const gecir = () => (_r: unknown, _s: unknown, next: () => void) => next();
 const doc = (coll: string, id?: string) => {
   const ref: Ref & { set: (d: Record<string, unknown>) => Promise<void> } = {
@@ -78,7 +79,7 @@ const C: MikroRouteCtx = {
   requireAuth: gecir(),
   requireMfaVerified: gecir(),
   getAdminDb: () => adminDb as unknown as ReturnType<MikroRouteCtx['getAdminDb']>,
-  getPgPool: () => null,
+  getPgPool: () => (kilitVar ? { query: async () => ({ rows: [{ data: { aciklama: 'lead-birlestir', baslangic: '2026-09-05T12:00:00.000Z' } }] }) } : null),
   getUserCompanyId: async () => 'A',
   mikroIdCozucuIds: () => (a: string) => a,
   validate: () => null,
@@ -101,7 +102,7 @@ async function calistir(yol: string) {
 }
 const koleksiyon = (coll: string) => yazilan.filter(y => y.ref.coll === coll);
 
-beforeEach(() => { yazilan = []; snap = {}; sayac = 0; syncLog.mockClear(); });
+beforeEach(() => { yazilan = []; snap = {}; sayac = 0; kilitVar = false; syncLog.mockClear(); });
 
 describe('POST /api/mikro/import/stok', () => {
   it("yabancı kiracının aynı SKU'lu kaydına DOKUNULMAZ (yeni doküman); etiketsiz eski kayıt eşleşir ve companyId damgalanır", async () => {
@@ -169,5 +170,29 @@ describe('POST /api/mikro/import/cari', () => {
     expect(c2).toMatchObject({ op: 'update', ref: { id: 'eskL' } });
     expect(c2?.data?.companyId).toBe('A');
     expect(res.govde).toMatchObject({ success: true, created: 1, updated: 1 });
+  });
+});
+
+describe('cari import — FİRMA anahtarı ve köken (source) koruması (lead-birlestir incelemesi, 2026-09-05)', () => {
+  it("elle lead {name:'Ahmet Yılmaz' (yetkili), company:'Beta İnşaat'} Mikro şahıs carisi 'AHMET YILMAZ' ile EŞLEŞMEZ (yeni doküman); 'BETA İNŞAAT' unvanı ise eşleşir ve source EZİLMEZ", async () => {
+    snap.leads = [snapDoc('leads', 'beta', { name: 'Ahmet Yılmaz', company: 'Beta İnşaat', source: 'crm' })];
+    mikroYaniti([], [{ cari_kod: 'C5', cari_unvan1: 'AHMET YILMAZ' }, { cari_kod: 'C6', cari_unvan1: 'BETA İNŞAAT' }]);
+    await calistir('/api/mikro/import/cari');
+    const leads = koleksiyon('leads');
+    expect(leads.find(y => y.data?.mikroCariKod === 'C5')).toMatchObject({ op: 'set' });
+    const beta = leads.find(y => y.data?.mikroCariKod === 'C6');
+    expect(beta).toMatchObject({ op: 'update', ref: { id: 'beta' } });
+    expect('source' in (beta?.data ?? {}), 'güncellemede source yazılmamalı').toBe(false);
+    expect(leads.find(y => y.op === 'set')?.data?.source).toBe('mikro_import');
+  });
+  it('bakım kilidi varken import uçları 423 döner, hiçbir şey yazmaz', async () => {
+    kilitVar = true;
+    mikroYaniti([{ sto_kod: 'X' }], [{ cari_kod: 'C1', cari_unvan1: 'X' }]);
+    for (const yol of ['/api/mikro/import/stok', '/api/mikro/import/cari']) {
+      const res = await calistir(yol);
+      expect(res.kod).toBe(423);
+      expect(String((res.govde as { error?: string })?.error)).toMatch(/Bakım kilidi/);
+    }
+    expect(yazilan).toEqual([]);
   });
 });

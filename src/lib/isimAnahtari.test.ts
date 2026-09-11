@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { isimAnahtari } from './isimAnahtari';
+import { isimAnahtari, firmaAnahtari } from './isimAnahtari';
 
 describe('isimAnahtari', () => {
   it("'ŞİRİN YAPI' ↔ 'Şirin Yapı' aynı anahtar (toLowerCase ile eşleşmiyordu)", () => {
@@ -17,6 +17,16 @@ describe('isimAnahtari', () => {
     expect(isimAnahtari('  Akdeniz İnşaat ')).toBe('akdeniz inşaat');
     expect(isimAnahtari(null)).toBe('');
     expect(isimAnahtari(undefined)).toBe('');
+  });
+});
+
+describe('firmaAnahtari — company önce, name yalnız company boşsa', () => {
+  it("elle lead {name:'Ahmet Yılmaz', company:'Beta İnşaat'} → 'beta i̇nşaat' değil 'beta inşaat'; Mikro {name=company='BETA İNŞAAT'} ile eşleşir; şahıs carisi 'AHMET YILMAZ' ile EŞLEŞMEZ", () => {
+    expect(firmaAnahtari({ name: 'Ahmet Yılmaz', company: 'Beta İnşaat' })).toBe('beta inşaat');
+    expect(firmaAnahtari({ name: 'BETA İNŞAAT', company: 'BETA İNŞAAT' })).toBe('beta inşaat');
+    expect(firmaAnahtari({ name: 'AHMET YILMAZ', company: 'AHMET YILMAZ' })).not.toBe(firmaAnahtari({ name: 'Ahmet Yılmaz', company: 'Beta İnşaat' }));
+    expect(firmaAnahtari({ name: 'Şirin Yapı' })).toBe('şirin yapı');
+    expect(firmaAnahtari({})).toBe('');
   });
 });
 

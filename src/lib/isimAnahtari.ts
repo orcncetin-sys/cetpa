@@ -10,3 +10,14 @@
 export function isimAnahtari(ad: unknown): string {
   return String(ad ?? '').trim().toLocaleLowerCase('tr-TR');
 }
+
+/**
+ * FİRMA anahtarı: `company` varsa o, yoksa `name`. Elle açılan lead'de `name` YETKİLİ KİŞİ adıdır
+ * (NewLeadModal "İletişim Adı"), firma `company`'de; Mikro/ERP import'u ikisine de unvanı yazar.
+ * `name`i önce almak iki farklı firmanın aynı adlı yetkilisini eşleştirir — cari import'u bu yüzden
+ * yanlış lead'i GÜNCELLEYEBİLİR, birleştirme scripti yanlış lead'i SİLEBİLİRDİ (inceleme, 2026-09-05).
+ * Harita (mevcut lead'ler) ve gelen taraf (unvan) AYNI fonksiyondan geçer.
+ */
+export function firmaAnahtari(data: { company?: unknown; name?: unknown }): string {
+  return isimAnahtari(data.company || data.name);
+}

@@ -645,7 +645,7 @@ async function initDocsTable(): Promise<void> {
 initMikroMirror({ getPgPool: () => pgPool });
 // Cron'lar: eskiden bu noktada modul duzeyinde kayitliydi, oyle kaldi
 // (kayit sirasi ve zamanlama davranisi birebir korunsun diye).
-initCrons({ getAdminDb: adminDbZorunlu, tenantSnap, serverTenantId, pgServerTimestamp });
+initCrons({ getAdminDb: adminDbZorunlu, tenantSnap, serverTenantId, pgServerTimestamp, getPgPool: () => pgPool });   // getPgPool: bakım kilidi (bakimKilidi.ts)
 
 initDocsTable().catch(e => console.warn('PostgreSQL init failed:', (e as Error).message));
 
@@ -3912,6 +3912,7 @@ async function startServer() {
   });
 
   opsRoutes(app, {
+    getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
   });
 
@@ -3963,6 +3964,7 @@ async function startServer() {
 
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.
   erpRoutes(app, {
+    getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin,
     reqActor, reqCompanyId, writeAuditLog, writeSyncLog, pgServerTimestamp, tenantSnap,
     getParasutCreds, getParasutToken, parasutGetAll,
@@ -3985,6 +3987,7 @@ async function startServer() {
   });
 
   dynamicsRoutes(app, {
+    getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
     writeAuditLog, pgServerTimestamp, tenantSnap,
     getDynamicsToken, dynamicsGetAll, getDynamicsBase, getDynamicsCredsFromFirestore,

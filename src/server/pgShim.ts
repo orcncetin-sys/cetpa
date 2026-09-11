@@ -226,13 +226,24 @@ export class PgDocRef {
     );
     broadcastDocChange(this.coll, 'set', this.id, final);
   }
+  /**
+   * update = var olan dokümana yama. Doküman YOKSA hiçbir şey yazılmaz (uyarı loglanır).
+   * Firestore'da da `update` var olmayan dokümanda hata verir; eski sürüm UPSERT yapıyordu ve bu
+   * "silinmiş dokümanı diriltme" arıza sınıfı üretiyordu: bakım scripti mükerrer lead'i silerken
+   * T0 snapshot'ıyla koşan cron/import `batch.update(eskiRef, alanlar)` ile aynı id'de yalnız
+   * birkaç alanlı zombi kayıt yaratıyordu (2026-09-11 incelemesi, KRİTİK). Yeni doküman
+   * oluşturmak isteyen `set` kullanır.
+   */
   async update(data: PgDocData): Promise<void> {
     const patch = resolveSentinels(data) as PgDocData;
     const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
-    const final = mergeDocData((rows[0]?.data as PgDocData) ?? {}, patch);
+    if (!rows.length) {
+      console.warn(`[pgShim] update: ${this.coll}/${this.id} yok — yazılmadı (silinmiş doküman diriltilmez; oluşturmak için set kullanın)`);
+      return;
+    }
+    const final = mergeDocData(rows[0].data as PgDocData, patch);
     await this.pool.query(
-      `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
-       ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      'UPDATE docs SET data = $3, updated_at = now() WHERE coll = $1 AND id = $2',
       [this.coll, this.id, JSON.stringify(final)],
     );
     broadcastDocChange(this.coll, 'set', this.id, final);

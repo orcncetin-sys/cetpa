@@ -129,6 +129,7 @@ export const USER_SCOPED_COLLECTIONS: readonly string[] = [
  * o zaman alanı kırpılmış özel bir uç yazılır — sessizce sızmaz.
  */
 export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
+  'opsLocks',          // bakım kilidi (bakimKilidi.ts) — script koyar, cron/import uyar; API'ye kapalı
   'opsChecks', 'emailLog', 'whatsappMessages', 'waMessageLog',
   // Cerezsiz trafik sayaci (2026-08-28) - gunluk toplamlar, kisisel veri yok.
   // Istemci /api/db'den okuyamaz; super-admin GET /api/trafik/ozet ile okur.
