@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt, byField } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -416,7 +417,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Aktif Değer' : 'Active Value'}</p>
                   <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#ff4000] transition-colors" />
                 </div>
-                <p className="text-3xl font-bold text-[#1D1D1F]">{activeContractsValue.toLocaleString('tr-TR')} ₺</p>
+                <p className="text-3xl font-bold text-[#1D1D1F]">{paraYaz(activeContractsValue, { ondalik: 0 })}</p>
               </button>
             </div>
 
@@ -462,7 +463,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         <td className="py-4 px-6 font-bold text-[#1D1D1F]">{contract.title}</td>
                         <td className="py-4 px-6 text-gray-600">{contract.party}</td>
                         <td className="py-4 px-6 text-gray-600 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-gray-400"/> {contract.endDate}</td>
-                        <td className="py-4 px-6 font-semibold text-[#1D1D1F]">{contract.value.toLocaleString('tr-TR')} ₺</td>
+                        <td className="py-4 px-6 font-semibold text-[#1D1D1F]">{paraYaz(contract.value, { ondalik: 0 })}</td>
                         <td className="py-4 px-6">
                           <span className={`px-3 py-1 rounded-full text-[11px] font-bold ${
                             contract.status === 'Aktif' ? 'bg-green-100 text-green-700' :
@@ -520,7 +521,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Toplam Değer' : 'Total Value'}</p>
                   <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#ff4000] transition-colors" />
                 </div>
-                <p className="text-3xl font-bold text-[#1D1D1F]">{totalCasesValue.toLocaleString('tr-TR')}₺</p>
+                <p className="text-3xl font-bold text-[#1D1D1F]">{paraYaz(totalCasesValue, { ondalik: 0 })}</p>
               </div>
             </div>
 
@@ -572,7 +573,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                             {item.nextHearing || '—'}
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-right font-bold text-[#ff4000]">{item.amount.toLocaleString('tr-TR')} ₺</td>
+                        <td className="py-4 px-6 text-right font-bold text-[#ff4000]">{paraYaz(item.amount, { ondalik: 0 })}</td>
                         <td className="py-4 px-6 text-center">
                           <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${
                             item.status === 'Devam Ediyor' ? 'bg-blue-100 text-blue-700' :

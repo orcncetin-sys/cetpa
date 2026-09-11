@@ -15,6 +15,7 @@ import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { db } from '../firebase';
 import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from '../lib/dbClient';
 import { byField } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
 
 // Pazarlama rakamı SABİT YAZILMAZ — 2026-08-31 code-review: '26' sabiti, seti
@@ -448,7 +449,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                 {
                   labelTR: 'Verimlilik artışı',
                   labelEN: 'Productivity gain',
-                  value:   `₺${productivityGain.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} / ${isTR ? 'ay' : 'mo'}`,
+                  value:   `${paraYaz(productivityGain, { ondalik: 0 })} / ${isTR ? 'ay' : 'mo'}`,
                   accent:  false,
                   citationTR: 'Varsayım: çalışan başına aylık %12 getiri',
                   citationEN: 'Assumption: 12% ROI per employee per month',
@@ -1900,7 +1901,7 @@ export default function LandingPage({
                   <div className="mb-8">
                     {price !== null ? (
                       <div className="flex items-baseline gap-1">
-                        <span className="text-4xl font-black">{isTR ? '₺' : '$'}{price?.toLocaleString()}</span>
+                        <span className="text-4xl font-black">{paraYaz(price, { birim: isTR ? 'TRY' : 'USD', ondalik: Number.isInteger(Number(price)) ? 0 : 2 })}</span>
                         <span className={cn('text-sm', d('text-white/65', 'text-black/70'))}>{isTR ? '/ay' : '/mo'}</span>
                       </div>
                     ) : (

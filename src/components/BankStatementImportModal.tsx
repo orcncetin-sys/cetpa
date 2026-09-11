@@ -14,6 +14,7 @@
  */
 import { useState, useMemo, useEffect } from 'react';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
+import { paraYaz } from '../utils/currency';
 import { motion } from 'motion/react';
 import Papa from 'papaparse';
 import { X, Upload, Check, AlertCircle, Landmark } from 'lucide-react';
@@ -241,7 +242,7 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
                       <tr key={i}>
                         <td className="px-2 py-1.5 tabular-nums">{p.date}</td>
                         <td className="px-2 py-1.5 truncate max-w-[240px]">{p.description}</td>
-                        <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${p.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{p.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                        <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${p.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{paraYaz(p.amount, { birim: selectedAccount?.currency })}</td>
                       </tr>
                     ))}
                   </tbody>

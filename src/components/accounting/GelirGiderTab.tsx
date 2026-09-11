@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, paraYaz } from '../../utils/currency';
 import { formatTRY, type AccountingT } from './shared';
 
 /**
@@ -20,7 +20,7 @@ const kurEtiketi = (
   if (!kur || !isFinite(kur) || kur <= 0) {
     return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
   }
-  return `1 ${currency} = ₺${kur.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `1 ${currency} = ${paraYaz(kur)}`;
 };
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };

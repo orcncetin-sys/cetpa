@@ -27,6 +27,7 @@ import {
 import { db } from '../firebase';
 import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
     return true;
   });
 
-  const fmtTRY = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+  const fmtTRY = (v: number) => paraYaz(v, { ondalik: 0 });
 
   // ── Siparişlerden içe aktarma (2026-09-04 denetimi) ──────────────────────
   // `orders` prop'u ALINIYOR ve tipinde "auto-populate overdue invoices" yazıyordu

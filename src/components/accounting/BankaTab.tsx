@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save, RefreshCw, ArrowRightLeft, AlertCircle, Landmark } from 'lucide-react';
 import { type BankAccount, type BankTransaction } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { paraYaz } from '../../utils/currency';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type BankForm = {
@@ -68,19 +69,19 @@ export default function BankaTab({
           {[
             {
               label: t.tryBalance, value: formatTRY(tryBalance), symbol: '₺', color: 'text-green-600',
-              onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance ?? 0) })), total: formatTRY(tryBalance) })
+              onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance) })), total: formatTRY(tryBalance) })
             },
             {
-              label: t.usdBalance, value: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '$', color: 'text-blue-600',
-              onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `$${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `$${usdBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
+              label: t.usdBalance, value: paraYaz(usdBalance, { birim: 'USD' }), symbol: '$', color: 'text-blue-600',
+              onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: paraYaz(a.balance, { birim: 'USD' }) })), total: paraYaz(usdBalance, { birim: 'USD' }) })
             },
             {
-              label: t.eurBalance, value: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, symbol: '€', color: 'text-purple-600',
-              onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: `€${(a.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })), total: `€${eurBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })
+              label: t.eurBalance, value: paraYaz(eurBalance, { birim: 'EUR' }), symbol: '€', color: 'text-purple-600',
+              onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: paraYaz(a.balance, { birim: 'EUR' }) })), total: paraYaz(eurBalance, { birim: 'EUR' }) })
             },
             {
               label: t.accountCount, value: String(bankAccounts.length), symbol: '#', color: 'text-[#ff4000]',
-              onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: a.currency === 'TRY' ? formatTRY(a.balance ?? 0) : a.currency === 'USD' ? `$${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `€${(a.balance ?? 0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}` })) })
+              onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: paraYaz(a.balance, { birim: a.currency }) })) })
             },
           ].map((kpi, i) => (
             <button key={i} onClick={kpi.onClick} className="apple-card p-4 text-left cursor-pointer group">
@@ -178,12 +179,7 @@ export default function BankaTab({
                     <td className="py-2.5 px-3 text-gray-600">{acc.accountType}</td>
                     <td className="py-2.5 px-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{acc.iban}</td>
                     <td className="py-2.5 px-3 text-right font-semibold text-gray-800">
-                      {acc.currency === 'TRY'
-                        ? formatTRY(acc.balance ?? 0)
-                        : acc.currency === 'USD'
-                          ? `$${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : `€${(acc.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      }
+                      {paraYaz(acc.balance, { birim: acc.currency })}
                     </td>
                     <td className="py-2.5 px-3 hidden sm:table-cell">
                       <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-semibold">{acc.currency}</span>
@@ -336,10 +332,10 @@ export default function BankaTab({
                         </span>
                       </td>
                       <td className={`px-4 py-3 text-sm font-semibold text-right whitespace-nowrap ${tx.type === 'credit' ? 'text-green-600' : 'text-red-500'}`}>
-                        {tx.type === 'debit' ? '−' : '+'}{tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.amount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {tx.type === 'debit' ? '−' : '+'}{paraYaz(tx.amount, { birim: tx.currency })}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-600 whitespace-nowrap">
-                        {tx.currency === 'TRY' ? '₺' : tx.currency === 'USD' ? '$' : '€'}{(tx.balance ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {paraYaz(tx.balance, { birim: tx.currency })}
                       </td>
                     </tr>
                   ));

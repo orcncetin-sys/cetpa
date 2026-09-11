@@ -4,6 +4,7 @@ import { Check, ArrowRight, Building2, Rocket, Sparkles, Plug, Server, Cloud, Do
 import { PLANS, type SubscriptionPlan, createTrialSubscription, type UserSubscription } from '../types/subscription';
 import { doc, setDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
+import { paraYaz } from '../utils/currency';
 
 interface OnboardingFlowProps {
   currentLanguage: 'tr' | 'en';
@@ -407,7 +408,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                       )}
                     </div>
                     <p className="text-white/60 text-xs">
-                      ₺{plan.monthlyPrice.toLocaleString('tr-TR')}/{lang === 'tr' ? 'ay' : 'mo'} · {plan.maxUsers} {lang === 'tr' ? 'kullanıcı' : 'users'}
+                      {paraYaz(plan.monthlyPrice, { ondalik: 0 })}/{lang === 'tr' ? 'ay' : 'mo'} · {plan.maxUsers} {lang === 'tr' ? 'kullanıcı' : 'users'}
                     </p>
                     <p className="text-[#ff4000]/70 text-[10px] font-bold mt-1">
                       {plan.modulesAllowed.length} {lang === 'tr' ? 'modül dahil' : 'modules included'}

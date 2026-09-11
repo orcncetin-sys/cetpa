@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { FileText, Download, Plus, X, Users, Calculator } from 'lucide-react';
+import { paraYaz } from '../utils/currency';
 
 interface MuhtasarModuleProps {
   currentLanguage: string;
@@ -114,7 +115,7 @@ function calcSalaryEntry(emp: Employee, period: string): Omit<SalaryEntry, 'id' 
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', minimumFractionDigits: 2 }).format(n);
+  return paraYaz(n);
 }
 
 function generateMuhtasarXML(entries: SalaryEntry[], period: string, companyTaxId = '0000000000'): string {

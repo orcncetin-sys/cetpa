@@ -1,4 +1,5 @@
 import { sayiBicimleyici } from '../utils/recharts';
+import { paraYaz, tlYaz, kisaTutar } from '../utils/currency';
 import React, { useState, useEffect } from 'react';
 import { ayAnahtari } from '../utils/zaman';
 import { motion, AnimatePresence } from 'motion/react';
@@ -257,10 +258,10 @@ export default function DealerCommissionPanel({
   // TL etiketler. Kritik olan RAKAM ile BİRİMİN aynı para biriminde olması.
   const grafikKur    = (kpiKur && isFinite(kpiKur) && kpiKur > 0) ? kpiKur : 0;
   const grafikSembol = grafikKur > 0 ? currencySymbol : '₺';
+  const grafikBirim  = grafikKur > 0 ? kpiCurrency : 'TRY';
+  // Tek kaynak (Faz 2 1/n): tlYaz kur yoksa '—' basar, satır içi bölme yok.
   const kurluBicim = (tryTutar: number): string =>
-    (kpiKur && isFinite(kpiKur) && kpiKur > 0)
-      ? `${currencySymbol}${(tryTutar / kpiKur).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`
-      : '—';
+    tlYaz(tryTutar, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
 
   const tabs = [
     { id: 'performance', label: currentLanguage === 'tr' ? 'Performans' : 'Performance', icon: TrendingUp },
@@ -427,7 +428,7 @@ export default function DealerCommissionPanel({
                       />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        formatter={sayiBicimleyici((value) => [`${grafikSembol}${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Satış' : 'Sales'])}
+                        formatter={sayiBicimleyici((value) => [paraYaz(value, { birim: grafikBirim, ondalik: 0 }), currentLanguage === 'tr' ? 'Satış' : 'Sales'])}
                       />
                       <Bar dataKey="convertedSales" radius={[6, 6, 0, 0]} name={currentLanguage === 'tr' ? 'Satış' : 'Sales'}>
                         {dealerPerformance.slice(0, 8).map((d, i) => (
@@ -610,7 +611,7 @@ export default function DealerCommissionPanel({
                     <div className="grid grid-cols-3 gap-3">
                       <div className="text-center">
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{currentLanguage === 'tr' ? 'Hedef' : 'Target'}</p>
-                        <p className="text-lg font-bold text-gray-900">₺{(rule.targetAmount / 1000).toFixed(0)}K</p>
+                        <p className="text-lg font-bold text-gray-900">{kisaTutar(rule.targetAmount, { fmt: 'K', ondalik: 0 })}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{currentLanguage === 'tr' ? 'Baz Oran' : 'Base Rate'}</p>

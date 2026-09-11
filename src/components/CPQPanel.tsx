@@ -23,6 +23,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -260,7 +261,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
     setTemplateDraft(emptyTemplate);
   };
 
-  const fmtTRY = (v: number) => `₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
+  const fmtTRY = (v: number) => paraYaz(v);
 
   return (
     <div className="space-y-4">

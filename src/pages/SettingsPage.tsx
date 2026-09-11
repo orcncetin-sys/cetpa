@@ -13,6 +13,7 @@ import {
 } from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
+import { paraYaz } from '../utils/currency';
 import ModuleHeader from '../components/ModuleHeader';
 import SubscriptionPanel from '../components/SubscriptionPanel';
 import ERPHubPanel from '../components/ERPHubPanel';
@@ -191,9 +192,9 @@ export default function SettingsPage({
               </span>
             </div>
             <div className="space-y-2 text-xs text-gray-500">
-              <div className="flex justify-between"><span>USD / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.USD ? `₺${(exchangeRates.USD).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
-              <div className="flex justify-between"><span>EUR / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.EUR ? `₺${(exchangeRates.EUR).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
-              <div className="flex justify-between"><span>GBP / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.GBP ? `₺${(exchangeRates.GBP).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</span></div>
+              <div className="flex justify-between"><span>USD / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.USD ? paraYaz(exchangeRates.USD) : '—'}</span></div>
+              <div className="flex justify-between"><span>EUR / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.EUR ? paraYaz(exchangeRates.EUR) : '—'}</span></div>
+              <div className="flex justify-between"><span>GBP / TRY</span><span className="font-mono font-semibold text-gray-800">{exchangeRates?.GBP ? paraYaz(exchangeRates.GBP) : '—'}</span></div>
             </div>
             <button
               onClick={async () => {

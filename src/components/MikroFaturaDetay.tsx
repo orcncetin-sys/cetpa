@@ -16,6 +16,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, Download, FileCode, Loader2, AlertTriangle, Package } from 'lucide-react';
 import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
+import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
 
 export interface MikroFaturaDetayVerisi {
@@ -39,8 +40,7 @@ interface Props {
   onClose: () => void;
 }
 
-const tl = (n: number) =>
-  `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tl = (n: number) => paraYaz(n);
 
 export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: Props) {
   const tr = currentLanguage === 'tr';

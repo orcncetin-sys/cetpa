@@ -1,4 +1,5 @@
 import { sayiBicimleyici } from '../utils/recharts';
+import { paraYaz, kisaTutar } from '../utils/currency';
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -115,8 +116,7 @@ const T = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const formatTRY = (n: number) =>
-  new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n);
+const formatTRY = (n: number) => paraYaz(n, { ondalik: 0 });
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 
@@ -801,7 +801,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                   <BarChart data={deptChartData} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="dept" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₺${(v / 1000).toFixed(0)}K`} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={v => kisaTutar(v, { fmt: 'K' })} />
                     <Tooltip formatter={sayiBicimleyici((v) => formatTRY(v))} />
                     <Legend />
                     <Bar dataKey={t.butce} fill="#e5e7eb" radius={[4, 4, 0, 0]} />

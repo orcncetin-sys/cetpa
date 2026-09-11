@@ -32,7 +32,7 @@ import { logFirestoreError as importedLogFirestoreError, OperationType } from '.
 import { siparisDurumEtiketi } from '../../utils/durumEtiketi';
 import { gorunenSiparisNo } from '../../utils/siparis';
 import { sortByCreatedAt } from '../../utils/fsSort';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, paraYaz, kisaTutar } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -479,8 +479,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
             </div>
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
-                { label: currentLanguage === 'tr' ? 'Toplam Nakliye' : 'Total Shipping', value: `₺${(totalShipping/1000).toFixed(0)}K`, color: 'text-blue-600' },
-                { label: currentLanguage === 'tr' ? 'Sipariş Başı' : 'Per Order', value: `₺${avgShippingPerOrder.toLocaleString()}`, color: 'text-gray-700' },
+                { label: currentLanguage === 'tr' ? 'Toplam Nakliye' : 'Total Shipping', value: kisaTutar(totalShipping, { fmt: 'K' }), color: 'text-blue-600' },
+                { label: currentLanguage === 'tr' ? 'Sipariş Başı' : 'Per Order', value: paraYaz(avgShippingPerOrder, { ondalik: 0 }), color: 'text-gray-700' },
                 { label: currentLanguage === 'tr' ? 'Sipariş Sayısı' : 'Orders Tracked', value: String(shippingOrders.length), color: 'text-gray-500' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -2185,7 +2185,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                 <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
                   <span className="text-[9px] text-gray-500">{b.count>0?b.count:''}</span>
                   <div className="w-full rounded-sm" style={{height:`${(b.count/maxCount)*56}px`,background:'#6366f1',minHeight:b.count>0?2:0}}/>
-                  <span className="text-[8px] text-gray-400">{b.min>=1000?`₺${(b.min/1000).toFixed(0)}k`:`₺${b.min.toFixed(0)}`}</span>
+                  <span className="text-[8px] text-gray-400">{kisaTutar(b.min, { fmt: b.min >= 1000 ? 'K' : 'full' })}</span>
                 </div>
               ))}
             </div>

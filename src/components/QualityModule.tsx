@@ -21,6 +21,7 @@ import {
   doc, serverTimestamp, query 
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { paraYaz } from '../utils/currency';
 
 interface QCRecord {
   id: string;
@@ -1208,7 +1209,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               </div>
               <div className="apple-card p-5 bg-purple-50">
                 <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Sağlanan Tasarruf' : 'Savings'}</p>
-                <p className="text-2xl font-bold text-purple-600">₺{kaizenRecords.reduce((sum, r) => sum + (r.savings || 0), 0).toLocaleString('tr-TR')}</p>
+                <p className="text-2xl font-bold text-purple-600">{paraYaz(kaizenRecords.reduce((sum, r) => sum + (r.savings || 0), 0), { ondalik: 0 })}</p>
               </div>
             </div>
 

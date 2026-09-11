@@ -3,6 +3,7 @@ import { collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc,
 import { db } from '../firebase';
 import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, TrendingUp } from 'lucide-react';
 import { byField } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 
 interface VergiDeadline {
   id: string;
@@ -147,7 +148,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
           { label: tr ? 'Bu Ay Yaklaşan' : 'Due This Month', val: upcoming.length, icon: Calendar, color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: tr ? 'Geciken' : 'Overdue', val: late.length, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
           { label: tr ? 'Tamamlanan' : 'Completed', val: done.length, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-          { label: tr ? 'Toplam Tutar' : 'Total Amount', val: `₺${Math.round(deadlines.reduce((s, d) => s + (d.tahminiTutar || 0), 0)).toLocaleString('tr-TR')}`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+          { label: tr ? 'Toplam Tutar' : 'Total Amount', val: paraYaz(deadlines.reduce((s, d) => s + (d.tahminiTutar || 0), 0), { ondalik: 0 }), icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
           { label: tr ? 'Toplam Kayıt' : 'Total Records', val: deadlines.length, icon: Clock, color: 'text-gray-600', bg: 'bg-gray-50' },
         ].map(k => (
           <div key={k.label} className={`apple-card flex items-center gap-3 p-4 ${k.bg}`}>
@@ -228,9 +229,9 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
                       className="text-xs text-right tabular-nums hover:bg-white rounded-lg px-2 py-1 transition-colors disabled:cursor-default"
                       title={tr ? 'Tutarı düzenle (mali müşavir / e-Beyanname)' : 'Edit amount'}>
                       {d.tahminiTutar
-                        ? <span className="font-bold text-gray-900">₺{d.tahminiTutar.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                        ? <span className="font-bold text-gray-900">{paraYaz(d.tahminiTutar, { ondalik: 0 })}</span>
                         : (d.vergiTuru.includes('KDV') && ayKdvOner(d.donem) > 0)
-                          ? <span className="text-blue-500" title={tr ? 'Faturalardan türetilen satış KDV önerisi' : 'Suggested from invoices'}>≈₺{Math.round(ayKdvOner(d.donem)).toLocaleString('tr-TR')} <span className="text-[9px] opacity-70">öner</span></span>
+                          ? <span className="text-blue-500" title={tr ? 'Faturalardan türetilen satış KDV önerisi' : 'Suggested from invoices'}>≈{paraYaz(ayKdvOner(d.donem), { ondalik: 0 })} <span className="text-[9px] opacity-70">öner</span></span>
                           : isAuthenticated ? <span className="text-gray-300">{tr ? '+ tutar' : '+ amount'}</span> : null}
                     </button>
                   )}

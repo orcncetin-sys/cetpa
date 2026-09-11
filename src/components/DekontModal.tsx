@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { X, Loader2, AlertTriangle } from 'lucide-react';
 import { pushMikroEvrak, dekontPayload } from '../services/mikroEvrak';
 import { authFetch } from '../services/authFetch';
+import { paraYaz } from '../utils/currency';
 
 interface HareketTuru {
   cha_evrak_tip: number;
@@ -34,8 +35,7 @@ interface Props {
   onSuccess?: () => void;
 }
 
-const tl = (n: number) =>
-  `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tl = (n: number) => paraYaz(n);
 
 export default function DekontModal({ cariKod, cariAdi, mevcutBakiye, entityId, onClose, onSuccess }: Props) {
   const [turler, setTurler]   = useState<HareketTuru[]>([]);

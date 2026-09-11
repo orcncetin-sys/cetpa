@@ -16,6 +16,7 @@ import {
 } from '../services/mikroService';
 import { getSyncQueueStats, clearDeadJobs } from '../services/syncRetryService';
 import { processMikroRetries } from '../services/mikroEvrak';
+import { paraYaz } from '../utils/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -311,7 +312,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       const d = await r.json() as { success: boolean; period?: string; kdvMatrahi?: number; hesaplananKdv?: number; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
-      setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ₺${(d.kdvMatrahi ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} · KDV: ₺${(d.hesaplananKdv ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, error: null });
+      setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ${paraYaz(d.kdvMatrahi, { ondalik: 0 })} · KDV: ${paraYaz(d.hesaplananKdv, { ondalik: 0 })}`, error: null });
     } catch (e) {
       setKdvPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
     }
@@ -733,7 +734,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
                     <span className="font-mono text-xs text-gray-800">{no}</span>
                     {f.cha_kod && <span className="text-[11px] text-gray-400 ml-2">{f.cha_kod}</span>}
                     {f.cha_tarihi && <span className="text-[10px] text-gray-400 ml-2">{String(f.cha_tarihi).slice(0, 10)}</span>}
-                    {f.cha_meblag != null && <span className="text-[10px] font-semibold text-gray-700 ml-2">{Number(f.cha_meblag).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>}
+                    {f.cha_meblag != null && <span className="text-[10px] font-semibold text-gray-700 ml-2">{paraYaz(f.cha_meblag)}</span>}
                     {done && (
                       <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${f.gibDurumu === 'kabul' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
                         {f.gibDurumu === 'kabul' ? (t ? 'Kabul edildi' : 'Accepted') : (t ? 'Reddedildi' : 'Rejected')}

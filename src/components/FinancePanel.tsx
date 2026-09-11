@@ -4,7 +4,7 @@ import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, Al
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { zamanMs } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
-import { kurCevir } from '../utils/currency';
+import { tlYaz } from '../utils/currency';
 import { toplaBilinen, tahsilatOrani } from '../utils/para';
 
 interface Order {
@@ -55,7 +55,6 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
 
   // Use external currency if provided, otherwise local toggle
   const currency = externalCurrency ?? localCurrency;
-  const sym      = currency === 'TRY' ? '₺' : currency === 'USD' ? '$' : '€';
   // KUR UYDURMASI KALDIRILDI (2026-08-26). Eskiden kur okunurken "yoksa 1"
   // yedegi vardi: bolen 1 olunca TL tutari OLDUGU GIBI kalip
   // basina '$' konuyordu (₺40.000 -> "$40.000", ~38 kat sisirilmis).
@@ -64,11 +63,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // TRY yolunda `kurCevir` tutari aynen dondurur -> davranis birebir ayni.
   // Sembol de ICERIDE ekleniyor: cagri yerleri disaridan {sym} eklerse kur
   // yokken "$—" gibi bir sey cikardi.
-  const cvt      = (v: number): string => {
-    const cevrilen = kurCevir(v, currency, exchangeRates);
-    if (cevrilen === null) return '—';
-    return `${sym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-  };
+  // 2026-09-05: gövde tek kaynağa (tlYaz) devredildi — kur yoksa '—', bilinmeyen tutar '—'.
+  const cvt      = (v: unknown): string =>
+    tlYaz(v, { birim: currency, rates: exchangeRates, ondalik: 0 });
 
   // Native orders (bu caride Mikro-ağırlıklı satışlar orders'a değil mikroFaturalar'a
   // düşüyor — orders tek başına kullanılınca panel hep ₺0 gösteriyordu, 2026-08-13).
@@ -498,7 +495,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                     </td>
                     <td className="py-3.5 px-5 font-medium text-gray-800 hidden sm:table-cell">{o.customerName || '—'}</td>
                     <td className="py-3.5 px-5 text-right font-bold text-gray-900">
-                      {cvt(o.totalPrice || 0)}
+                      {cvt(o.totalPrice)}
                     </td>
                     <td className="py-3.5 px-5 text-center">
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>

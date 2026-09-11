@@ -32,7 +32,7 @@ import {
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
-import { formatInCurrency } from '../../utils/currency';
+import { paraYaz } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -163,7 +163,7 @@ export default function UrunlerRapor(ctx: ReportsCtx) {
                           </td>
                           <td className="px-4 py-3 text-right text-xs font-semibold text-gray-700">{p.quantity.toLocaleString('tr-TR')}</td>
                           <td className="px-4 py-3 text-right text-xs text-gray-500">{p.orderCount}</td>
-                          <td className="px-4 py-3 text-right text-xs font-bold text-gray-800">₺{p.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-gray-800">{paraYaz(p.revenue, { ondalik: 0 })}</td>
                           <td className="px-4 py-3 text-right">
                             <span className="text-[10px] font-bold text-gray-500">{p.pct.toFixed(1)}%</span>
                           </td>
@@ -174,7 +174,7 @@ export default function UrunlerRapor(ctx: ReportsCtx) {
                   <tfoot className="bg-gray-50 border-t border-gray-200">
                     <tr>
                       <td colSpan={5} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
-                      <td className="px-4 py-3 text-right text-sm font-black text-gray-800">₺{totalRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-3 text-right text-sm font-black text-gray-800">{paraYaz(totalRevenue, { ondalik: 0 })}</td>
                       <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100%</td>
                     </tr>
                   </tfoot>

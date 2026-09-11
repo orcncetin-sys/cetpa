@@ -14,6 +14,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { confirmDelete } from '../lib/confirm';
+import { paraYaz } from '../utils/currency';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Cpu, Plus, X, Settings, AlertTriangle, BarChart2, ArrowRight, Package,
@@ -451,7 +452,7 @@ export default function MRPModule({
                     </div>
                   </div>
                   {wc.costPerHour > 0 && (
-                    <p className="text-xs text-gray-500 text-right">₺{wc.costPerHour.toLocaleString('tr-TR')}/{tr ? 'saat' : 'hr'}</p>
+                    <p className="text-xs text-gray-500 text-right">{paraYaz(wc.costPerHour)}/{tr ? 'saat' : 'hr'}</p>
                   )}
                 </div>
               );

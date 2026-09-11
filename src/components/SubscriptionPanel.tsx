@@ -13,6 +13,7 @@ import {
   daysRemaining,
   isTrialActive,
 } from '../types/subscription';
+import { paraYaz } from '../utils/currency';
 
 interface SubscriptionPanelProps {
   currentLanguage: 'tr' | 'en';
@@ -229,7 +230,7 @@ export default function SubscriptionPanel({
                   <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                     <td className="py-3 px-6 text-gray-700">{p.date}</td>
                     <td className="py-3 px-6 font-bold text-gray-800">{p.plan}</td>
-                    <td className="py-3 px-6 text-right font-bold text-gray-900">₺{p.amount.toLocaleString('tr-TR')}</td>
+                    <td className="py-3 px-6 text-right font-bold text-gray-900">{paraYaz(p.amount, { ondalik: 0 })}</td>
                     <td className="py-3 px-6 text-center">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">{t.paid}</span>
                     </td>

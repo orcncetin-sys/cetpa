@@ -20,6 +20,7 @@ import {
   doc, serverTimestamp, query 
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { paraYaz } from '../utils/currency';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; dir: 'asc' | 'desc' }; onSort: (key: string) => void; align?: 'left' | 'right' | 'center' }> = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isActive = currentSort.key === sortKey;
@@ -513,7 +514,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                             </div>
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-right font-bold text-[#1D1D1F]">₺{project.budget.toLocaleString()}</td>
+                        <td className="py-4 px-6 text-right font-bold text-[#1D1D1F]">{paraYaz(project.budget, { ondalik: 0 })}</td>
                         <td className="py-4 px-6 text-center">
                           <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                             project.status === 'Active' ? 'bg-green-100 text-green-600' :

@@ -1,5 +1,6 @@
 import { motion } from 'motion/react';
 import { RefreshCw } from 'lucide-react';
+import { paraYaz } from '../../utils/currency';
 
 type WCField = 'kasaBanka' | 'ticariAlacaklar' | 'stoklar' | 'ticariBorclar' | 'vergiSgk' | 'krediler';
 
@@ -18,7 +19,7 @@ export default function IsletmeSermayesiTab({ currentLanguage, workingCapital, w
   const kvYukumluluk = wc.ticariBorclar + wc.vergiSgk + wc.krediler;
   const netSermaye = donenVarliklar - kvYukumluluk;
   const cariOran = kvYukumluluk > 0 ? donenVarliklar / kvYukumluluk : 0;
-  const fmt = (n: number) => `₺${Math.round(n).toLocaleString('tr-TR')}`;
+  const fmt = (n: number) => paraYaz(n, { ondalik: 0 });
   const oranDurum = cariOran >= 1.5 ? { txt: tr ? 'İdeal' : 'Ideal', cls: 'text-emerald-600' }
     : cariOran >= 1 ? { txt: tr ? 'Yeterli' : 'Adequate', cls: 'text-amber-600' }
     : { txt: tr ? 'Riskli' : 'At risk', cls: 'text-red-600' };

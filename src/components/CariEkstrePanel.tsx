@@ -16,6 +16,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
+import { paraYaz } from '../utils/currency';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
@@ -59,7 +60,7 @@ function ageColor(ageD: number): string {
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return paraYaz(n);
 }
 
 function toDate(ts: unknown): Date | null {
@@ -90,7 +91,7 @@ function BucketBar({ buckets, lang }: { buckets: AgingBuckets; lang: string }) {
         {items.map((b, i) => {
           const pct = (b.value / total) * 100;
           if (pct < 0.5) return null;
-          return <div key={i} className={`${b.color} transition-all`} style={{ width: `${pct}%` }} title={`${b.label}: ₺${fmt(b.value)}`} />;
+          return <div key={i} className={`${b.color} transition-all`} style={{ width: `${pct}%` }} title={`${b.label}: ${fmt(b.value)}`} />;
         })}
       </div>
       {/* Legend */}
@@ -100,7 +101,7 @@ function BucketBar({ buckets, lang }: { buckets: AgingBuckets; lang: string }) {
             <div className={`w-3 h-3 rounded-sm flex-shrink-0 ${b.color}`} />
             <div>
               <div className="text-[10px] text-gray-500">{b.label}</div>
-              <div className="text-xs font-bold text-gray-800">₺{fmt(b.value)}</div>
+              <div className="text-xs font-bold text-gray-800">{fmt(b.value)}</div>
             </div>
           </div>
         ))}
@@ -376,11 +377,11 @@ export default function CariEkstrePanel({
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 rounded-xl p-3 text-center">
           <div className="text-[10px] text-blue-500 font-bold uppercase">{mikroModu ? (agingYonu === 'ap' ? (t ? 'Toplam Borcumuz' : 'Total Payable') : (t ? 'Toplam Alacağımız' : 'Total Receivable')) : (t ? 'Toplam Alacak' : 'Total AR')}</div>
-          <div className="text-base font-bold text-blue-700">₺{fmt(totalAR)}</div>
+          <div className="text-base font-bold text-blue-700">{fmt(totalAR)}</div>
         </div>
         <div className={`rounded-xl p-3 text-center ${overdueAR > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
           <div className={`text-[10px] font-bold uppercase ${overdueAR > 0 ? 'text-red-500' : 'text-green-500'}`}>{mikroModu && agingYonu === 'ap' ? (t ? 'Vadesi Geçmiş (borcumuz)' : 'Overdue (payable)') : (t ? 'Vadesi Geçmiş' : 'Overdue')}</div>
-          <div className={`text-base font-bold ${overdueAR > 0 ? 'text-red-700' : 'text-green-700'}`}>₺{fmt(overdueAR)}</div>
+          <div className={`text-base font-bold ${overdueAR > 0 ? 'text-red-700' : 'text-green-700'}`}>{fmt(overdueAR)}</div>
         </div>
         {mikroModu && (computedBalance !== null || balance !== undefined) ? (() => {
           // Bakiye: eksi = Cetpa borçlu (yeşil), artı = cari borçlu (kırmızı).
@@ -392,7 +393,7 @@ export default function CariEkstrePanel({
           return (
             <div className={`rounded-xl p-3 text-center ${bal < 0 ? 'bg-green-50' : bal > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
               <div className={`text-[10px] font-bold uppercase ${bal < 0 ? 'text-green-500' : bal > 0 ? 'text-red-500' : 'text-gray-500'}`}>{t ? (bal < 0 ? 'Bakiye (borcumuz)' : bal > 0 ? 'Bakiye (alacağımız)' : 'Bakiye') : 'Balance'}</div>
-              <div className={`text-base font-bold ${bal < 0 ? 'text-green-700' : bal > 0 ? 'text-red-700' : 'text-gray-700'}`}>₺{fmt(Math.abs(bal))}</div>
+              <div className={`text-base font-bold ${bal < 0 ? 'text-green-700' : bal > 0 ? 'text-red-700' : 'text-gray-700'}`}>{fmt(Math.abs(bal))}</div>
             </div>
           );
         })() : (
@@ -509,7 +510,7 @@ export default function CariEkstrePanel({
                     {!leadId && (
                       <td className="px-4 py-2.5 font-medium text-gray-800 max-w-[160px] truncate">{row.customerName}</td>
                     )}
-                    <td className="px-4 py-2.5 text-right font-bold text-gray-800">₺{fmt(row.amount)}</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-gray-800">{fmt(row.amount)}</td>
                     <td className="px-4 py-2.5 text-center">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ageColor(row.ageD)}`}>
                         {ageLabel(row.ageD)} {t ? 'gün' : 'd'}

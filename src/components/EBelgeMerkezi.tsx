@@ -11,7 +11,7 @@ import { authFetch } from '../services/authFetch';
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead } from '../types';
 import { eBelgeIndir } from '../services/ebelgeIndir';
-import { formatCurrency } from '../utils/currency';
+import { paraYaz } from '../utils/currency';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
@@ -447,8 +447,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   const hata = belgeler.filter(b => b.durum === 'Hata').length;
   const bekleyen = belgeler.filter(b => b.durum === 'Bekliyor').length;
 
-  const fmt = (n: number) =>
-    (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt = (n: number) => paraYaz(n);
 
   return (
     <div className="space-y-5">
@@ -581,7 +580,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
                   <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-3 whitespace-nowrap"><div className="font-semibold text-gray-900">{inv.faturaNo}</div><div className="text-xs text-gray-500">{inv.date}</div></td>
                     <td className="px-5 py-3"><div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.customerName}</div><div className="text-xs text-gray-500 font-mono">{inv.taxId}</div></td>
-                    <td className="px-5 py-3 whitespace-nowrap font-bold text-gray-900">{formatCurrency(inv.totalPrice ?? 0)}</td>
+                    <td className="px-5 py-3 whitespace-nowrap font-bold text-gray-900">{paraYaz(inv.totalPrice)}</td>
                     <td className="px-5 py-3 text-right">
                       <button onClick={() => handleeFaturaGonder(inv.id)} disabled={sendingInvoiceId === inv.id} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 text-xs flex items-center gap-1.5 ml-auto">
                         {sendingInvoiceId === inv.id ? (<><RefreshCw size={14} className="animate-spin" /> Gönderiliyor</>) : (<><FileUp size={14} /> e-Fatura Gönder</>)}
@@ -712,7 +711,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
                 <th className="px-4 py-3 text-left font-medium">Belge No</th>
                 <th className="px-4 py-3 text-left font-medium">Alıcı / Gönderici</th>
                 <th className="px-4 py-3 text-left font-medium">Vergi No</th>
-                <th className="px-4 py-3 text-right font-medium">Tutar (₺)</th>
+                <th className="px-4 py-3 text-right font-medium">Tutar</th>
                 <th className="px-4 py-3 text-left font-medium">Tarih</th>
                 <th className="px-4 py-3 text-left font-medium">Tür</th>
                 <th className="px-4 py-3 text-left font-medium">Yön</th>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { zamanMs } from '../utils/zaman';
+import { paraYaz, kisaTutar } from '../utils/currency';
 import { pdfBaslik, pdfTabloStili } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
@@ -177,7 +178,7 @@ export default function RaporlarPage({
                   ...pdfTabloStili(),
                   startY: finalY + 4,
                   head: [[tr63 ? 'Müşteri' : 'Customer', tr63 ? 'Ciro' : 'Revenue', tr63 ? 'Pay' : 'Share']],
-                  body: top5.map(([name, rev]) => [name, `₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
+                  body: top5.map(([name, rev]) => [name, paraYaz(rev, { ondalik: 0 }), `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
                   styles: { font: 'Roboto', fontSize: 9 },
                 });
                 // Section 3: Inventory highlights
@@ -312,9 +313,9 @@ export default function RaporlarPage({
         const closedLeads570 = leads.filter(l => l.status === 'Closed Won' || l.status === 'Closed').length;
         const actLeadConv570 = totalLeads570 > 0 ? (closedLeads570 / totalLeads570) * 100 : 0;
         const kpis570 = [
-          { label: tr570 ? 'Aylık Ciro' : 'Monthly Revenue', actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1) + (tr570 ? ' ₺' : ' ₺'), key: 'revenue' as const, color: 'blue' },
+          { label: tr570 ? 'Aylık Ciro' : 'Monthly Revenue', actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1), key: 'revenue' as const, color: 'blue' },
           { label: tr570 ? 'Sipariş Adedi' : 'Order Count', actual: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
-          { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0) + ' ₺', key: 'avgOrderVal' as const, color: 'purple' },
+          { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0), key: 'avgOrderVal' as const, color: 'purple' },
           { label: tr570 ? 'Lead Dönüşüm %' : 'Lead Conv. %', actual: actLeadConv570, target: p570Targets.leadConv, fmt: (v: number) => v.toFixed(1) + '%', key: 'leadConv' as const, color: 'orange' },
         ];
         const colorMap570: Record<string, string> = { blue: 'bg-blue-500', green: 'bg-green-500', purple: 'bg-purple-500', orange: 'bg-orange-500' };
@@ -388,7 +389,7 @@ export default function RaporlarPage({
         const lastVal = data603[data603.length - 1]?.value || 0;
         const prevVal = data603[data603.length - 2]?.value || 0;
         const trend = prevVal > 0 ? ((lastVal - prevVal) / prevVal) * 100 : 0;
-        const fmt603 = (v: number) => p603TrendMetric === 'revenue' ? `₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : String(v);
+        const fmt603 = (v: number) => p603TrendMetric === 'revenue' ? paraYaz(v, { ondalik: 0 }) : String(v);
         return (
           <div className="apple-card p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -469,7 +470,7 @@ export default function RaporlarPage({
           const val = Math.max(0, avgRev + slope * (histMonths + i));
           return { label, val };
         });
-        const fmtF = (v: number) => v >= 1000000 ? `₺${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `₺${(v / 1000).toFixed(0)}K` : `₺${Math.round(v).toLocaleString('tr-TR')}`;
+        const fmtF = (v: number) => kisaTutar(v, { fmt: v >= 1_000_000 ? 'M' : v >= 1000 ? 'K' : 'full', ondalik: v >= 1_000_000 ? 1 : 0 });
         return (
           <div className="apple-card p-5 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CreditCard, X, Check } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
+import { paraYaz } from '../utils/currency';
 
 export function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(' ');
@@ -42,7 +43,7 @@ export default function PaymentMethodModal({
               <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Ödeme Al' : 'Record Payment'}</h3>
               <p className="text-xs text-gray-400">
                 #{order.shopifyOrderId || order.id.slice(-6)} · {order.customerName}
-                {' · '}₺{(order.totalPrice ?? (order as any).totalAmount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                {' · '}{paraYaz(order.totalPrice ?? (order as any).totalAmount)}
               </p>
             </div>
             <button onClick={onClose} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors">

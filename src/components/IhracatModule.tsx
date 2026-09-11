@@ -5,6 +5,7 @@ import {
 import { useToast } from './Toast';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import { Package, CreditCard, FileText, Plus, X, Ship
 } from 'lucide-react';
 
@@ -286,7 +287,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Toplam İhracat', value: ihracatlar.length, color: 'text-brand' },
-            { label: 'Toplam Tutar (₺)', value: ihracatToplam === null ? '—' : `₺${Math.round(ihracatToplam).toLocaleString('tr-TR')}`, color: 'text-green-600' },
+            { label: 'Toplam Tutar (₺)', value: paraYaz(ihracatToplam, { ondalik: 0 }), color: 'text-green-600' },
             { label: 'Bekleyen Gümrük', value: bekleyenGumruk, color: 'text-amber-600' },
             { label: 'Ort. Teslimat (gün)', value: '14', color: 'text-blue-600' },
           ].map(kpi => (
@@ -341,7 +342,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 text-gray-600">{i.ulke}</td>
                   <td className="py-3 px-3 text-gray-600">{i.urun}</td>
                   <td className="py-3 px-3 text-gray-600">{i.miktar}</td>
-                  <td className="py-3 px-3 font-semibold text-gray-900">{i.doviz} {i.tutar?.toLocaleString()}</td>
+                  <td className="py-3 px-3 font-semibold text-gray-900">{paraYaz(i.tutar, { birim: i.doviz })}</td>
                   <td className="py-3 px-3"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">{i.incoterm}</span></td>
                   <td className="py-3 px-3 font-mono text-xs text-gray-500">{i.hsKodu}</td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{i.sevkTarihi}</td>
@@ -376,9 +377,9 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 font-medium text-gray-900">{i.tedarikci}</td>
                   <td className="py-3 px-3 text-gray-600">{i.cikisUlkesi}</td>
                   <td className="py-3 px-3 text-gray-600">{i.urun}</td>
-                  <td className="py-3 px-3 font-semibold">{i.doviz} {i.tutar?.toLocaleString()}</td>
-                  <td className="py-3 px-3 text-gray-600">₺ {i.gumrukVergi?.toLocaleString()}</td>
-                  <td className="py-3 px-3 text-gray-600">₺ {i.kdv?.toLocaleString()}</td>
+                  <td className="py-3 px-3 font-semibold">{paraYaz(i.tutar, { birim: i.doviz })}</td>
+                  <td className="py-3 px-3 text-gray-600">{paraYaz(i.gumrukVergi)}</td>
+                  <td className="py-3 px-3 text-gray-600">{paraYaz(i.kdv)}</td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{i.tahminiVarisTarihi}</td>
                   <td className="py-3 px-3 text-xs">
                     {(() => {
@@ -431,7 +432,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 font-mono text-xs text-brand font-semibold">{a.akreditifNo}</td>
                   <td className="py-3 px-3 font-medium text-gray-900">{a.banka}</td>
                   <td className="py-3 px-3 text-gray-600">{a.lehdarAmir}</td>
-                  <td className="py-3 px-3 font-semibold">{a.doviz} {a.tutar?.toLocaleString()}</td>
+                  <td className="py-3 px-3 font-semibold">{paraYaz(a.tutar, { birim: a.doviz })}</td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">
                     {a.vadesi}
                     {(() => {
@@ -477,7 +478,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
                   <td className="py-3 px-3 font-mono text-xs text-brand font-semibold">{b.beyanNo}</td>
                   <td className="py-3 px-3"><span className="bg-gray-100 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{b.rejim}</span></td>
                   <td className="py-3 px-3 text-gray-600 whitespace-nowrap">{b.tarih}</td>
-                  <td className="py-3 px-3 font-semibold text-gray-900">₺ {Number(b.deger).toLocaleString()}</td>
+                  <td className="py-3 px-3 font-semibold text-gray-900">{paraYaz(b.deger)}</td>
                   <td className="py-3 px-3 text-gray-600">{b.gumrukMusaviri}</td>
                   <td className="py-3 px-3"><span className={statusBadge(b.durum)}>{b.durum}</span></td>
                 </tr>

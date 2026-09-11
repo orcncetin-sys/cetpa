@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { type Order, type Employee } from '../../types';
-import { kurCevir } from '../../utils/currency';
+import { kurCevir, paraYaz, tlYaz } from '../../utils/currency';
 
 interface GelirTablosuTabProps {
   currentLanguage: string;
@@ -80,12 +80,8 @@ export default function GelirTablosuTab({
     return typeof k === 'number' && isFinite(k) && k > 0 ? k : null;
   })();
   const kurYok = gelirCurrency !== 'TRY' && gecerliKur === null;
-  const fmt = (v: number) => {
-    const cevrilen = kurCevir(v, gelirCurrency, exchangeRates);
-    return cevrilen === null
-      ? '—'
-      : `${sym}${cevrilen.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  // Tek kaynak (Faz 2 1/n): tlYaz = kurCevir + paraYaz; kur yoksa '—'.
+  const fmt = (v: number) => tlYaz(v, { birim: gelirCurrency, rates: exchangeRates });
   const fmtPct = (v: number) => `%${v.toFixed(1)}`;
 
   const rows: { label: string; value: number; indent?: number; bold?: boolean; separator?: boolean; isNeg?: boolean; pct?: number; highlight?: string }[] = [
@@ -142,7 +138,7 @@ export default function GelirTablosuTab({
           ))}
           {gecerliKur !== null && (
             <span className="ml-2 text-[10px] text-gray-400 font-mono">
-              1 {gelirCurrency} = ₺{gecerliKur.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              1 {gelirCurrency} = {paraYaz(gecerliKur)}
             </span>
           )}
           {kurYok && (

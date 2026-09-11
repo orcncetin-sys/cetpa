@@ -11,6 +11,7 @@ import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp,
 } from '../lib/dbClient';
+import { paraYaz } from '../utils/currency';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,11 +77,8 @@ interface SigortaKayit {
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 
-const formatTRY = (val: number) =>
-  new Intl.NumberFormat('tr-TR', {
-    style: 'currency', currency: 'TRY',
-    minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(val);
+// Tek kaynak: utils/currency.paraYaz (0 ondalık, bilinmeyen tutar '—'). İmza korundu, çağrı yerleri değişmedi.
+const formatTRY = (val: number) => paraYaz(val, { ondalik: 0 });
 
 const formatDateTR = (str: string): string => {
   if (!str) return '-';
@@ -792,7 +790,7 @@ export default function SabitKiymetModule({
                       <td className="px-4 py-3"><KategoriBadge kategori={item.kategori} /></td>
                       <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.alisTarihi)}</td>
                       <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">
-                        {item.paraBirimi !== 'TRY' ? `${item.paraBirimi} ` : ''}{formatTRY(item.alisBedeli).replace('₺', item.paraBirimi === 'TRY' ? '₺' : '')}
+                        {paraYaz(item.alisBedeli, { birim: item.paraBirimi, ondalik: 0 })}
                       </td>
                       <td className="px-4 py-3 text-sm text-orange-600 whitespace-nowrap">{formatTRY(calcBirikmisSalinma(item))}</td>
                       <td className="px-4 py-3 text-sm font-semibold text-green-700 whitespace-nowrap">{formatTRY(calcNetDeger(item))}</td>

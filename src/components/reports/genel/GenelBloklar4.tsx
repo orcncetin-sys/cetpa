@@ -11,6 +11,7 @@
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
 import { odemeTakipli } from '../../../utils/siparis';
+import { paraYaz } from '../../../utils/currency';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -125,7 +126,7 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
                   height: `${maxVal > 0 ? Math.max(2, v / maxVal * 72) : 2}px`,
                   background: i === rolling7.length - 1 ? '#f97316' : '#6366f1',
                   opacity: 0.6 + i / rolling7.length * 0.4
-                }} title={`₺${v.toLocaleString('tr-TR', {maximumFractionDigits: 0})}`} />
+                }} title={paraYaz(v, { ondalik: 0 })} />
               ))}
             </div>
             <div className="flex justify-between text-[9px] text-gray-400 mt-1">
@@ -487,7 +488,7 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
                         : intensity < 0.5  ? '#4ade80'
                         : intensity < 0.75 ? '#16a34a'
                         : '#166534';
-                      return <div key={di} className="h-5 rounded-sm" style={{background: bg}} title={val > 0 ? `₺${val.toLocaleString('tr-TR', {maximumFractionDigits:0})}` : ''} />;
+                      return <div key={di} className="h-5 rounded-sm" style={{background: bg}} title={val > 0 ? paraYaz(val, { ondalik: 0 }) : ''} />;
                     })}
                   </div>
                 ))}

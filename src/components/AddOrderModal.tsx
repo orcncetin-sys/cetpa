@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Search, Scan, Package, Trash2, FileText, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { paraYaz } from '../utils/currency';
 const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead, InventoryItem, Order, OrderLineItem } from '../types';
@@ -469,15 +470,15 @@ export default function AddOrderModal({
                       <div className="mt-2 pt-2 border-t border-gray-200 space-y-0.5 text-xs text-gray-500">
                         <div className="flex justify-between">
                           <span>{currentLanguage === 'tr' ? 'Matrah (KDV hariç)' : 'Net (excl. VAT)'}</span>
-                          <span className="font-semibold">₺{(computedTotal / (1 + (newOrder.kdvOran || 0) / 100)).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="font-semibold">{paraYaz(computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
                         </div>
                         <div className="flex justify-between text-brand">
                           <span>KDV %{newOrder.kdvOran || 0}</span>
-                          <span className="font-semibold">₺{(computedTotal - computedTotal / (1 + (newOrder.kdvOran || 0) / 100)).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="font-semibold">{paraYaz(computedTotal - computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
                         </div>
                         <div className="flex justify-between font-bold text-gray-800 pt-0.5">
                           <span>{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</span>
-                          <span>₺{computedTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span>{paraYaz(computedTotal)}</span>
                         </div>
                       </div>
                     )}

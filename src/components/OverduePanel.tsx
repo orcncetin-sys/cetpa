@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
 import { siparisDurumEtiketi } from '../utils/durumEtiketi';
+import { paraYaz } from '../utils/currency';
 import { CreditCard, X, CheckCircle2 } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
@@ -67,7 +68,7 @@ export default function OverduePanel({
                 {currentLanguage === 'tr' ? 'Vadesi Geçmiş Ödemeler' : 'Overdue Payments'}
               </h3>
               <p className="text-xs text-gray-400">
-                {overdueList.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · ₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {currentLanguage === 'tr' ? 'toplam' : 'total'}
+                {overdueList.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {paraYaz(totalOwed, { ondalik: 0 })} {currentLanguage === 'tr' ? 'toplam' : 'total'}
               </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -87,7 +88,7 @@ export default function OverduePanel({
             ) : overdueList.map(order => {
               const age = getAge(order);
               const isOld = age > 30;
-              const amount = order.totalPrice ?? (order as any).totalAmount ?? 0;
+              const amount = order.totalPrice ?? (order as any).totalAmount;
               return (
                 <div key={order.id} className={`rounded-2xl border p-4 ${isOld ? 'border-red-200 bg-red-50/50' : 'border-gray-200 bg-white'}`}>
                   <div className="flex items-start gap-3">
@@ -101,7 +102,7 @@ export default function OverduePanel({
                       <p className="text-[10px] text-gray-400">{gorunenSiparisNo(order)} · {siparisDurumEtiketi(order.status, currentLanguage)}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-black text-gray-900">₺{amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</p>
+                      <p className="font-black text-gray-900">{paraYaz(amount, { ondalik: 0 })}</p>
                       <button
                         onClick={() => {
                           onClose();
@@ -122,7 +123,7 @@ export default function OverduePanel({
           {overdueList.length > 0 && (
             <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between">
               <span className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable'}</span>
-              <span className="text-lg font-black text-red-600">₺{totalOwed.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+              <span className="text-lg font-black text-red-600">{paraYaz(totalOwed, { ondalik: 0 })}</span>
             </div>
           )}
         </motion.div>

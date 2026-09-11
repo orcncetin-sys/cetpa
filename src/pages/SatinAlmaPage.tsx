@@ -19,7 +19,7 @@ import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import type { Order, InventoryItem, Supplier, Lead } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
-import { kurCevir } from '../utils/currency';
+import { paraYaz, tlYaz } from '../utils/currency';
 import { eslesir } from '../utils/arama';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
@@ -210,10 +210,8 @@ export default function SatinAlmaPage(props: Props) {
                         const totalCost6m = months.reduce((s, m) => s + m.cost, 0);
                         if (totalCost6m === 0) return null;
                         // Kur yoksa TL tutari yabanci sembolle basmak ~38x sisirme demekti
-                        // (`exchangeRates?.USD || 1`). kurCevir kur yoksa null doner; null'da
-                        // rakam degil '—' gosteriyoruz. TRY yolu aynen korunur.
-                        const sym6m = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                        const cost6m = kpiCurrency === 'TRY' ? totalCost6m : kurCevir(totalCost6m, kpiCurrency, exchangeRates);
+                        // (`exchangeRates?.USD || 1`). tlYaz kur yoksa rakam degil '—' basar.
+                        // TRY yolu aynen korunur.
                         return (
                           <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                             <div className="flex items-center justify-between mb-4">
@@ -223,7 +221,7 @@ export default function SatinAlmaPage(props: Props) {
                               </h3>
                               <div className="flex items-center gap-2">
                                 <span className={cn("text-xs font-bold", darkMode ? "text-white/70" : "text-gray-700")}>
-                                  {cost6m === null ? '—' : `${sym6m}${cost6m.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                  {tlYaz(totalCost6m, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 })}
                                 </span>
                                 <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                               </div>
@@ -234,7 +232,7 @@ export default function SatinAlmaPage(props: Props) {
                                   <div
                                     className={cn("w-full rounded-t-md transition-all duration-700", m.cost > 0 ? "bg-emerald-400" : darkMode ? "bg-white/10" : "bg-gray-100")}
                                     style={{ height: `${Math.max((m.cost / maxCost) * 100, m.cost > 0 ? 8 : 4)}%` }}
-                                    title={`₺${m.cost.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                    title={paraYaz(m.cost, { ondalik: 0 })}
                                   />
                                   <span className={cn("text-[9px] font-semibold", darkMode ? "text-white/65" : "text-gray-400")}>{m.label}</span>
                                 </div>
@@ -406,7 +404,7 @@ export default function SatinAlmaPage(props: Props) {
                                   <p className="flex items-center gap-1.5 font-semibold text-gray-700"
                                      title={currentLanguage==='tr'?'Cari bakiye (eksi = borcumuz)':'Account balance (negative = we owe)'}>
                                     <Wallet className="w-3 h-3 flex-shrink-0" />
-                                    ₺{s.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {paraYaz(s.balance)}
                                   </p>
                                 )}
                                 {s.sonIslem && (
@@ -653,7 +651,7 @@ export default function SatinAlmaPage(props: Props) {
                       <div className="space-y-4">
                         <ModuleHeader
                           title={currentLanguage === 'tr' ? 'Tedarikçi Ödeme Takvimi' : 'Vendor Payment Schedule'}
-                          subtitle={currentLanguage === 'tr' ? `${openPOs.length} açık sipariş · Toplam ₺${grandTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}` : `${openPOs.length} open POs · Total ₺${grandTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                          subtitle={currentLanguage === 'tr' ? `${openPOs.length} açık sipariş · Toplam ${paraYaz(grandTotal, { ondalik: 0 })}` : `${openPOs.length} open POs · Total ${paraYaz(grandTotal, { ondalik: 0 })}`}
                           icon={Calendar}
                         />
                         {groups.map(g => (
@@ -825,7 +823,7 @@ export default function SatinAlmaPage(props: Props) {
                     return (
                       <div className="apple-card p-6 mt-4">
                         <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? '💳 Tedarikçiye Göre Harcama' : '💳 Spend by Supplier'}</h3>
-                        <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? `Toplam: ₺${totalSpend.toLocaleString()}` : `Total: ₺${totalSpend.toLocaleString()}`}</p>
+                        <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? `Toplam: ${paraYaz(totalSpend)}` : `Total: ${paraYaz(totalSpend)}`}</p>
                         <div className="space-y-2.5">
                           {supList.map(([sup, spend]) => {
                             const pct = Math.round((spend / totalSpend) * 100);
@@ -902,7 +900,7 @@ export default function SatinAlmaPage(props: Props) {
                     const open551   = selPOs.filter(po => !['Teslim Alındı','İptal Edildi'].includes(po.status));
                     const closed551 = selPOs.filter(po => ['Teslim Alındı','İptal Edildi'].includes(po.status));
                     const totalOpen = open551.reduce((s,po) => s+(po.totalAmount||0),0);
-                    const fPO = (v:number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const fPO = (v: number | undefined) => paraYaz(v, { ondalik: 0 });
                     const statusBadge = (s:string) => s==='Onaylandı'?'bg-emerald-100 text-emerald-700':s==='Teslim Alındı'?'bg-blue-100 text-blue-700':s==='İptal Edildi'?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700';
                     return (
                       <motion.div key="tedarikci-portal" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -955,7 +953,7 @@ export default function SatinAlmaPage(props: Props) {
                                   <tr key={po.id} className="border-b border-gray-50 hover:bg-gray-50">
                                     <td className="px-4 py-2.5 font-medium text-gray-800">#{po.orderNumber}</td>
                                     <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{po.supplier}</td>
-                                    <td className="px-4 py-2.5 text-right font-bold tabular-nums text-gray-800">{fPO(po.totalAmount||0)}</td>
+                                    <td className="px-4 py-2.5 text-right font-bold tabular-nums text-gray-800">{fPO(po.totalAmount)}</td>
                                     <td className="px-4 py-2.5 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadge(po.status)}`}>{po.status}</span></td>
                                   </tr>
                                 ))}
@@ -985,14 +983,14 @@ export default function SatinAlmaPage(props: Props) {
                           </div>
                         </div>
                         {pendingApproval.length === 0 ? (
-                          <p className="text-center py-4 text-gray-400 text-xs">{tr578?`₺${p578Threshold.toLocaleString()} ve üzeri onay bekleyen PO yok.`:`No POs awaiting approval above ₺${p578Threshold.toLocaleString()}.`}</p>
+                          <p className="text-center py-4 text-gray-400 text-xs">{tr578?`${paraYaz(p578Threshold, { ondalik: 0 })} ve üzeri onay bekleyen PO yok.`:`No POs awaiting approval above ${paraYaz(p578Threshold, { ondalik: 0 })}.`}</p>
                         ) : (
                           <div className="space-y-2">
                             {pendingApproval.map(po => (
                               <div key={po.id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
                                 <div>
                                   <p className="font-bold text-sm text-gray-800">PO #{po.orderNumber}</p>
-                                  <p className="text-xs text-gray-500">{po.supplier} — <span className="font-bold text-amber-700">₺{(po.totalAmount||0).toLocaleString('tr-TR')}</span></p>
+                                  <p className="text-xs text-gray-500">{po.supplier} — <span className="font-bold text-amber-700">{paraYaz(po.totalAmount)}</span></p>
                                 </div>
                                 {hasFullAccess('satin-alma') && (
                                   <div className="flex gap-2">
@@ -1070,7 +1068,7 @@ export default function SatinAlmaPage(props: Props) {
                             <span className="text-emerald-600 font-bold text-lg">🏆</span>
                             <div>
                               <p className="text-xs font-bold text-emerald-800">{tr608?'En İyi Fiyat:':'Best Price:'} {bestQuote.supplier}</p>
-                              <p className="text-sm font-black text-emerald-700">₺{bestQuote.price.toLocaleString('tr-TR')} · {bestQuote.leadDays}g {tr608?'teslim':'lead'}</p>
+                              <p className="text-sm font-black text-emerald-700">{paraYaz(bestQuote.price)} · {bestQuote.leadDays}g {tr608?'teslim':'lead'}</p>
                             </div>
                           </div>
                         )}
@@ -1086,7 +1084,7 @@ export default function SatinAlmaPage(props: Props) {
                                 {[...p608Quotes].sort((a,b)=>a.price-b.price).map((q,idx)=>(
                                   <tr key={q.id} className={`hover:bg-gray-50/50 ${idx===0?'bg-emerald-50/40':''}`}>
                                     <td className="px-3 py-2.5 font-medium text-gray-800">{q.supplier}{idx===0&&<span className="ml-1.5 text-[9px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-full">BEST</span>}</td>
-                                    <td className="px-3 py-2.5 font-bold font-mono text-gray-800">₺{q.price.toLocaleString('tr-TR')}</td>
+                                    <td className="px-3 py-2.5 font-bold font-mono text-gray-800">{paraYaz(q.price)}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.leadDays}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.minQty}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.validUntil?new Date(q.validUntil).toLocaleDateString('tr-TR'):'—'}</td>
@@ -1143,8 +1141,8 @@ export default function SatinAlmaPage(props: Props) {
                         {p612Budgets.length > 0 && (
                           <>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                              <div className="apple-card p-4 bg-blue-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Toplam Bütçe':'Total Budget'}</p><p className="text-xl font-black text-blue-600">₺{Math.round(totalAllocated).toLocaleString('tr-TR')}</p></div>
-                              <div className="apple-card p-4 bg-amber-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Harcanan':'Spent'}</p><p className="text-xl font-black text-amber-600">₺{Math.round(totalSpent).toLocaleString('tr-TR')}</p></div>
+                              <div className="apple-card p-4 bg-blue-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Toplam Bütçe':'Total Budget'}</p><p className="text-xl font-black text-blue-600">{paraYaz(totalAllocated, { ondalik: 0 })}</p></div>
+                              <div className="apple-card p-4 bg-amber-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Harcanan':'Spent'}</p><p className="text-xl font-black text-amber-600">{paraYaz(totalSpent, { ondalik: 0 })}</p></div>
                               <div className={`apple-card p-4 ${utilizationPct>90?'bg-red-50':utilizationPct>70?'bg-orange-50':'bg-emerald-50'}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Kullanım':'Utilization'}</p><p className={`text-xl font-black ${utilizationPct>90?'text-red-600':utilizationPct>70?'text-orange-600':'text-emerald-600'}`}>%{utilizationPct.toFixed(1)}</p></div>
                             </div>
                             <div className="space-y-3">
@@ -1157,7 +1155,7 @@ export default function SatinAlmaPage(props: Props) {
                                       <div><p className="font-semibold text-gray-800 text-sm">{b.category}</p><p className="text-[10px] text-gray-400">{b.period}</p></div>
                                       <div className="flex items-center gap-3">
                                       <div className="text-right">
-                                        <p className={`text-sm font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{Math.round(b.spent).toLocaleString('tr-TR')} / ₺{Math.round(b.allocated).toLocaleString('tr-TR')}</p>
+                                        <p className={`text-sm font-bold ${isOver?'text-red-600':'text-gray-700'}`}>{paraYaz(b.spent, { ondalik: 0 })} / {paraYaz(b.allocated, { ondalik: 0 })}</p>
                                         <p className={`text-xs ${isOver?'text-red-500':'text-gray-400'}`}>%{pct.toFixed(1)}{isOver?' ⚠️':''}</p>
                                       </div>
                                       <button type="button" onClick={()=>{setP612Draft({category:b.category,allocated:String(b.allocated),spent:String(b.spent),period:b.period});setP612EditId(b.id);setP612ShowForm(true);}} title={tr612?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>

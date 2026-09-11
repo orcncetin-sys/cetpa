@@ -16,7 +16,7 @@ import { db, auth } from '../firebase';
 import { doc, collection, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, isCollectionReady } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
-import { kurCevir } from '../utils/currency';
+import { paraYaz, tlYaz } from '../utils/currency';
 import { confirmDelete } from '../lib/confirm';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import ModuleHeader from '../components/ModuleHeader';
@@ -59,14 +59,14 @@ function DeltaBadge({ delta, prev, birim = 'adet' }: {
   const up = delta >= 0;
   const yuzde = (prev != null && prev !== 0 && isFinite(prev)) ? (delta / prev) * 100 : null;
   const mutlak = birim === 'tutar'
-    ? `₺${Math.abs(delta).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`
+    ? paraYaz(Math.abs(delta), { ondalik: 0 })
     : Math.abs(delta).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
   return (
     <span
       className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}
       title={yuzde === null
         ? 'Önceki dönemde karşılaştırılacak veri yok — yüzde hesaplanamıyor, mutlak değişim gösteriliyor.'
-        : `Önceki dönem: ${birim === 'tutar' ? '₺' : ''}${(prev ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+        : `Önceki dönem: ${birim === 'tutar' ? paraYaz(prev, { ondalik: 0 }) : (prev ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
     >
       {up ? '▲' : '▼'} {yuzde === null ? mutlak : `%${Math.abs(yuzde).toFixed(1)}`}
     </span>
@@ -1131,15 +1131,10 @@ export default function DashboardPage(props: Props) {
                   if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
                 }
                 const maxWeek = Math.max(...weeks, 1);
-                const s159 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                // fmtKpi DEGIL: bu kart tutari her zaman CALISMA ZAMANI yereliyle
-                // basiyordu (`toLocaleString(undefined, ...)`). TRY ciktisi birebir
-                // ayni kalsin diye o davranis korundu; degisen tek sey, kur yoksa
-                // artik uydurma bir kurla bolmek yerine '—' donmesi.
-                const f159 = (v: number) => {
-                  const cv = kurCevir(v, kpiCurrency, exchangeRates);
-                  return cv === null ? '—' : `${s159}${cv.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-                };
+                // Tek kaynak (2026-09-05): kur cevirisi + bicim tlYaz'da (kur yoksa '—').
+                // Eskiden calisma zamani yereliyle (`toLocaleString(undefined)`) basiyordu;
+                // artik birime gore yerel gruplama (TRY -> ₺1.234, USD -> $1,234).
+                const f159 = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-3">
@@ -1354,12 +1349,8 @@ export default function DashboardPage(props: Props) {
                 }
                 const topPayers = Object.values(custPay).sort((a, b) => b.totalPaid - a.totalPaid).slice(0, 5);
                 const topDebtors = Object.entries(custUnpaid).sort(([,a],[,b]) => b - a).slice(0, 5);
-                const s160 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                // fmtKpi DEGIL — f159 ile ayni gerekce: calisma zamani yereli korunuyor.
-                const f160 = (v: number) => {
-                  const cv = kurCevir(v, kpiCurrency, exchangeRates);
-                  return cv === null ? '—' : `${s160}${cv.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-                };
+                // Tek kaynak — f159 ile ayni: tlYaz (kur yoksa '—').
+                const f160 = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
@@ -1746,7 +1737,7 @@ export default function DashboardPage(props: Props) {
                     key: `ship-${o.id}`,
                     icon: Truck, color: 'text-blue-600' as const, bg: 'bg-blue-50' as const,
                     title: currentLanguage === 'tr' ? `Kargoya ver: ${o.customerName}` : `Ship: ${o.customerName}`,
-                    sub: `${gorunenSiparisNo(o)} · ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`,
+                    sub: `${gorunenSiparisNo(o)} · ${paraYaz(o.totalPrice, { ondalik: 0 })}`,
                     onClick: () => { setActiveTab('orders'); },
                   })),
                   ...staleLeads.slice(0, 2).map(l => ({
@@ -2000,7 +1991,7 @@ export default function DashboardPage(props: Props) {
                           <Tooltip
                             formatter={sayiBicimleyici((value, name) =>
                               name === 'revenue'
-                                ? [`₺${value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Ciro' : 'Revenue']
+                                ? [paraYaz(value, { ondalik: 0 }), currentLanguage === 'tr' ? 'Ciro' : 'Revenue']
                                 : [value, currentLanguage === 'tr' ? 'Sipariş' : 'Orders']
                             )}
                             contentStyle={{ fontSize: 11, borderRadius: 10, border: '1px solid #f0f0f0' }}

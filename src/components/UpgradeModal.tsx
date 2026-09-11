@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { Lock, ArrowRight, Check, Zap } from 'lucide-react';
 import { PLANS, getPlanConfig, type SubscriptionPlan, type UserSubscription } from '../types/subscription';
+import { paraYaz } from '../utils/currency';
 
 interface UpgradeModalProps {
   isOpen: boolean;
@@ -94,7 +95,7 @@ export default function UpgradeModal({
                 <span className="text-2xl block mb-1">{recommendedPlan.icon}</span>
                 <p className="text-gray-900 font-bold text-sm">{recommendedPlan.name[lang]}</p>
                 <p className="text-[#ff4000] text-xs font-bold mt-1">
-                  ₺{recommendedPlan.monthlyPrice.toLocaleString('tr-TR')}{t.perMonth}
+                  {paraYaz(recommendedPlan.monthlyPrice, { ondalik: 0 })}{t.perMonth}
                 </p>
               </div>
             )}

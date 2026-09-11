@@ -30,7 +30,7 @@ import {
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, kisaTutar } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -120,7 +120,7 @@ export default function IKRapor(ctx: ReportsCtx) {
               {[
                 { label: currentLanguage==='tr'?'İK / Ciro Oranı':'HR Cost Ratio', value: `%${hrCostRatio}`, color: hrCostRatio <= 20 ? 'text-emerald-600' : hrCostRatio <= 40 ? 'text-amber-600' : 'text-red-500', desc: currentLanguage==='tr'?'Maaş/Toplam Ciro':'Payroll/Revenue' },
                 { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenuePerPayroll}x`, color: 'text-blue-600', desc: currentLanguage==='tr'?'Ciro/Maaş Kütlesi':'Revenue/Payroll' },
-                { label: currentLanguage==='tr'?'Toplam Maaş':'Total Payroll', value: `₺${(totalPayrollHR/1000).toFixed(0)}K`, color: 'text-gray-700', desc: currentLanguage==='tr'?'Aylık':'Monthly' },
+                { label: currentLanguage==='tr'?'Toplam Maaş':'Total Payroll', value: kisaTutar(totalPayrollHR, { fmt: 'K' }), color: 'text-gray-700', desc: currentLanguage==='tr'?'Aylık':'Monthly' },
                 { label: currentLanguage==='tr'?'Çalışan Başı Sipariş':'Orders/Employee', value: String(avgOrdersPerEmp), color: 'text-purple-600', desc: currentLanguage==='tr'?'Toplam sipariş/aktif':'Total orders/active' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-4 text-center">
@@ -329,7 +329,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                 <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'📊 Çalışan Başı Üretkenlik':'📊 Revenue per Employee'}</h4>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    { label: currentLanguage==='tr'?'Çalışan Başı Ciro':'Rev / Employee', value: `₺${(revPerEmp/1000).toFixed(1)}K`, color: 'text-blue-600' },
+                    { label: currentLanguage==='tr'?'Çalışan Başı Ciro':'Rev / Employee', value: kisaTutar(revPerEmp, { fmt: 'K', ondalik: 1 }), color: 'text-blue-600' },
                     { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenueMultiplier}x`, color: 'text-emerald-600' },
                     { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Staff', value: String(activeEmps), color: 'text-gray-700' },
                   ].map(k => (
@@ -384,8 +384,8 @@ export default function IKRapor(ctx: ReportsCtx) {
                 return (
                   <div key={i} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex items-end gap-0.5" style={{ height: '80px' }}>
-                      <div className="flex-1 bg-blue-400 rounded-t-sm" style={{ height: `${Math.max(2, revH)}px` }} title={`Rev ₺${(m.rev/1000).toFixed(0)}K`} />
-                      <div className="flex-1 bg-red-300 rounded-t-sm" style={{ height: `${Math.max(2, payH)}px` }} title={`Payroll ₺${(m.payroll/1000).toFixed(0)}K`} />
+                      <div className="flex-1 bg-blue-400 rounded-t-sm" style={{ height: `${Math.max(2, revH)}px` }} title={`Rev ${kisaTutar(m.rev, { fmt: 'K' })}`} />
+                      <div className="flex-1 bg-red-300 rounded-t-sm" style={{ height: `${Math.max(2, payH)}px` }} title={`Payroll ${kisaTutar(m.payroll, { fmt: 'K' })}`} />
                     </div>
                     <span className="text-[9px] text-gray-400 leading-none">{m.label}</span>
                     {m.ratio > 0 && <span className={`text-[8px] font-bold ${m.ratio <= 30 ? 'text-emerald-500' : m.ratio <= 50 ? 'text-amber-500' : 'text-red-500'}`}>%{m.ratio}</span>}
@@ -551,7 +551,7 @@ export default function IKRapor(ctx: ReportsCtx) {
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⚡ Personel Verimlilik Skoru' : '⚡ Payroll Efficiency Score'}</h3>
               <span className={`text-2xl font-black ${efficiency >= 3 ? 'text-emerald-600' : efficiency >= 1.5 ? 'text-amber-500' : 'text-red-500'}`}>{efficiency}×</span>
             </div>
-            <p className="text-[11px] text-gray-500 mb-4">{currentLanguage === 'tr' ? `Son ${months233} ayda ₺${(recentRev/1000).toFixed(0)}K ciro / ₺${(totalPayroll233/1000).toFixed(0)}K maaş kütlesi` : `Last ${months233} months: ₺${(recentRev/1000).toFixed(0)}K revenue / ₺${(totalPayroll233/1000).toFixed(0)}K payroll`}</p>
+            <p className="text-[11px] text-gray-500 mb-4">{currentLanguage === 'tr' ? `Son ${months233} ayda ${kisaTutar(recentRev, { fmt: 'K' })} ciro / ${kisaTutar(totalPayroll233, { fmt: 'K' })} maaş kütlesi` : `Last ${months233} months: ${kisaTutar(recentRev, { fmt: 'K' })} revenue / ${kisaTutar(totalPayroll233, { fmt: 'K' })} payroll`}</p>
             {deptList233.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre:' : 'By Department:'}</p>
@@ -881,7 +881,7 @@ export default function IKRapor(ctx: ReportsCtx) {
           const lo = min + i * bucketSize;
           const hi = min + (i + 1) * bucketSize;
           const count = salaries.filter(s => s >= lo && (i === 4 ? s <= hi : s < hi)).length;
-          return {label: `₺${(lo / 1000).toFixed(0)}k–${(hi / 1000).toFixed(0)}k`, count};
+          return {label: `${kisaTutar(lo, { fmt: 'K' })}–${kisaTutar(hi, { fmt: 'K' })}`, count};
         });
         const maxCount = Math.max(...buckets.map(b => b.count), 1);
         return (
@@ -1266,7 +1266,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const step = (max - min) / 5 || 1000;
         const buckets = Array.from({length: 5}, (_, i) => ({
           lo: min + i * step, hi: min + (i+1) * step,
-          label: `₺${((min + i * step)/1000).toFixed(0)}k`,
+          label: kisaTutar(min + i * step, { fmt: 'K' }),
           count: 0,
         }));
         salaries.forEach(s => {
@@ -1550,9 +1550,9 @@ export default function IKRapor(ctx: ReportsCtx) {
         });
         const metrics = [
           {label:'Orders/rep (30d)', val:(orders30/salesCount).toFixed(1), color:'#3b82f6'},
-          {label:'Rev/rep (30d)', val:`₺${((rev30/salesCount)/1000).toFixed(1)}k`, color:'#ff4000'},
+          {label:'Rev/rep (30d)', val: kisaTutar(rev30/salesCount, { fmt: 'K', ondalik: 1 }), color:'#ff4000'},
           {label:'Orders/rep (90d)', val:(orders90/salesCount).toFixed(1), color:'#22c55e'},
-          {label:'Rev/rep (90d)', val:`₺${((rev90/salesCount)/1000).toFixed(1)}k`, color:'#8b5cf6'},
+          {label:'Rev/rep (90d)', val: kisaTutar(rev90/salesCount, { fmt: 'K', ondalik: 1 }), color:'#8b5cf6'},
         ];
         return (
           <div className="apple-card p-4 mb-4">

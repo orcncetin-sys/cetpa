@@ -10,6 +10,7 @@
 import { motion } from 'motion/react';
 import { UserCheck, Users } from 'lucide-react';
 import ModuleHeader from '../components/ModuleHeader';
+import { paraYaz } from '../utils/currency';
 import type { Employee, Payroll } from '../types';
 
 /** IKPage.tsx / MesaiPage.tsx'teki AttendanceRecord ile birebir aynı tanım. */
@@ -79,9 +80,9 @@ export default function SelfservisPage({
                     {myPayrolls.slice(0,12).map((p,i) => (
                       <tr key={i} className="border-b border-gray-50">
                         <td className="py-2 text-gray-700">{p.year}/{String(p.month).padStart(2,'0')}</td>
-                        <td className="py-2 text-right tabular-nums text-gray-600">₺{((p.baseSalary||0)+(p.bonus||0)).toLocaleString('tr-TR')}</td>
-                        <td className="py-2 text-right tabular-nums text-red-500">-₺{(p.deductions||0).toLocaleString('tr-TR')}</td>
-                        <td className="py-2 text-right tabular-nums font-bold text-emerald-700">₺{(p.netSalary||0).toLocaleString('tr-TR')}</td>
+                        <td className="py-2 text-right tabular-nums text-gray-600">{paraYaz((p.baseSalary||0)+(p.bonus||0))}</td>
+                        <td className="py-2 text-right tabular-nums text-red-500">{paraYaz(-p.deductions)}</td>
+                        <td className="py-2 text-right tabular-nums font-bold text-emerald-700">{paraYaz(p.netSalary)}</td>
                         <td className="py-2 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status==='Ödendi'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'}`}>{p.status}</span></td>
                       </tr>
                     ))}

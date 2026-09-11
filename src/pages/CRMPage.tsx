@@ -25,7 +25,7 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { odemeTakipli } from '../utils/siparis';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
-import { formatCurrency, formatInCurrency, kurCevir } from '../utils/currency';
+import { formatCurrency, formatInCurrency, paraYaz, tlYaz, kisaTutar } from '../utils/currency';
 import { scoreLead } from '../services/geminiService';
 import { pushMikroEvrak, ziyaretPayload } from '../services/mikroEvrak';
 import { pullCariFromMikro, type MikroCariItem } from '../services/mikroService';
@@ -245,17 +245,11 @@ export default function CRMPage({
     setter: (v: { key: string; dir: 'asc' | 'desc' }) => void
   ) => setter({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' });
 
-  // KPI tutarı biçimlendirme. Kur yoksa UYDURMA (eskiden `?? 32` / `?? 35` ile
-  // 2024'ten kalma sabit kur kullanılıyordu) — `kurCevir` null döner, '—' basarız.
+  // KPI tutarı biçimlendirme — tek kaynak `kisaTutar` (utils/currency). Kur yoksa
+  // UYDURMA (eskiden `?? 32` / `?? 35` ile 2024'ten kalma sabit kur vardı): '—' basar.
   // TRY seçiliyken kur hiç gerekmez, davranış eskisiyle aynı.
-  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const cv = kurCevir(v, kpiCurrency, exchangeRates);
-    if (cv === null) return '—';
-    const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
-    const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
-    return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
-  };
+  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string =>
+    kisaTutar(v, { fmt, ondalik: decimals, birim: kpiCurrency, rates: exchangeRates });
 
   // İşaretli fark (+/-). fmtKpi '—' döndüyse başına '+' KOYMA — "+—" saçma olur.
   const fmtKpiDelta = (v: number, positive: boolean, fmt: 'full' | 'K' = 'K', decimals = 1): string => {
@@ -643,7 +637,7 @@ export default function CRMPage({
                                         <FileText className="w-2.5 h-2.5 text-amber-600" />
                                       </span>
                                     )}
-                                    ₺{(order.totalPrice ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {paraYaz(order.totalPrice)}
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -1198,7 +1192,7 @@ export default function CRMPage({
                           <div key={c.id} className={`bg-white border rounded-xl p-4 flex items-center gap-4 shadow-sm ${expired ? 'border-red-100' : expiringSoon ? 'border-amber-100' : 'border-gray-100'}`}>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-bold text-gray-900">{c.title}</p>
-                              <p className="text-xs text-gray-500">{c.customerName} · {fmtKpi((c.value || 0),'full',0)}</p>
+                              <p className="text-xs text-gray-500">{c.customerName} · {fmtKpi(c.value,'full',0)}</p>
                               {c.endDate && (
                                 <p className={`text-[10px] mt-0.5 font-semibold ${expired ? 'text-red-600' : expiringSoon ? 'text-amber-600' : 'text-gray-400'}`}>
                                   {currentLanguage === 'tr'
@@ -1358,8 +1352,8 @@ export default function CRMPage({
                               <p className="text-[10px] text-gray-400 mt-0.5 truncate">{p.reason}</p>
                             </div>
                             <div className="flex flex-col items-end gap-1 flex-shrink-0 text-right">
-                              <p className="text-xs text-gray-400 line-through">{fmtKpi((p.standardPrice || 0))}</p>
-                              <p className="text-sm font-bold text-gray-900">{fmtKpi((p.requestedPrice || 0))}</p>
+                              <p className="text-xs text-gray-400 line-through">{fmtKpi(p.standardPrice)}</p>
+                              <p className="text-sm font-bold text-gray-900">{fmtKpi(p.requestedPrice)}</p>
                               <span className={`text-[9px] font-bold ${discountPct < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                 {discountPct < 0 ? '▼' : '▲'}{Math.abs(discountPct)}%
                               </span>
@@ -1902,7 +1896,7 @@ export default function CRMPage({
                               />
                               <span className="absolute inset-0 flex items-center px-3 text-[10px] font-bold text-white mix-blend-difference">
                                 {count} {currentLanguage === 'tr' ? 'aday' : 'lead'}{count !== 1 ? 's' : ''}
-                                {rev > 0 && ` · ₺${rev.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                {rev > 0 && ` · ${paraYaz(rev, { ondalik: 0 })}`}
                               </span>
                             </div>
                             <div className="w-14 text-right shrink-0">
@@ -1940,15 +1934,13 @@ export default function CRMPage({
                 const avgScore   = leads.filter(l => l.score != null).length > 0
                   ? Math.round(leads.filter(l => l.score != null).reduce((s, l) => s + (l.score ?? 0), 0) / leads.filter(l => l.score != null).length)
                   : null;
-                const p91Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                // Kur yoksa null — TL rakamı '$'/'€' ile basmak ~38× şişkin gösterirdi.
-                const p91Val  = kurCevir(pipelineVal, kpiCurrency, exchangeRates);
+                // Kur yoksa '—' (tlYaz) — TL rakamı '$'/'€' ile basmak ~38× şişkin gösterirdi.
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { label: currentLanguage === 'tr' ? 'Toplam Aday' : 'Total Leads',    value: total.toString(),       sub: null,                        color: 'text-gray-800' },
                       { label: currentLanguage === 'tr' ? 'Kazanma Oranı' : 'Win Rate',      value: `${winRate}%`,          sub: `${closed} ${currentLanguage==='tr'?'kapandı':'closed'}`, color: winRate >= 40 ? 'text-emerald-700' : winRate >= 20 ? 'text-amber-700' : 'text-red-600' },
-                      { label: currentLanguage === 'tr' ? 'Pipeline Değeri' : 'Pipeline Value', value: p91Val === null ? '—' : `${p91Sym}${p91Val.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, sub: currentLanguage==='tr'?'aktif adaylar':'active leads', color: 'text-blue-700' },
+                      { label: currentLanguage === 'tr' ? 'Pipeline Değeri' : 'Pipeline Value', value: tlYaz(pipelineVal, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 }), sub: currentLanguage==='tr'?'aktif adaylar':'active leads', color: 'text-blue-700' },
                       { label: currentLanguage === 'tr' ? 'Ort. AI Puanı' : 'Avg AI Score',  value: avgScore != null ? `${avgScore}/100` : '—',  sub: `${convRate}% ${currentLanguage==='tr'?'dönüşüm':'conversion'}`, color: avgScore != null && avgScore >= 70 ? 'text-emerald-700' : 'text-gray-700' },
                     ].map((s, i) => (
                       <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
@@ -2218,11 +2210,9 @@ export default function CRMPage({
                                     .filter(o => o.customerName === lead.name || o.customerName === lead.company)
                                     .reduce((s, o) => s + (o.totalPrice || 0), 0);
                                   if (rev === 0) return null;
-                                  const p85Sym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                                  const p85Val  = kurCevir(rev, kpiCurrency, exchangeRates);
                                   return (
                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0">
-                                      {p85Val === null ? '—' : `${p85Sym}${p85Val.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                                      {tlYaz(rev, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 })}
                                     </span>
                                   );
                                 })()}
@@ -2455,11 +2445,7 @@ export default function CRMPage({
                                   <div className="flex items-center justify-between mb-0.5">
                                     <p className="text-[11px] font-semibold text-gray-700 truncate">{name}</p>
                                     <p className="text-[11px] font-bold text-gray-800 ml-2 flex-shrink-0">
-                                      {(() => {
-                                        const cevrilen = kurCevir(rev, kpiCurrency, exchangeRates);
-                                        if (cevrilen === null) return '—';
-                                        return `${kpiCurrency==='TRY'?'₺':kpiCurrency==='USD'?'$':'€'}${cevrilen.toLocaleString('tr-TR',{maximumFractionDigits:0})}`;
-                                      })()}
+                                      {tlYaz(rev, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 })}
                                     </p>
                                   </div>
                                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -2673,7 +2659,7 @@ export default function CRMPage({
                                 </div>
                               </td>
                               <td className="px-3 py-2.5 font-bold font-mono text-brand">
-                                {r.revenue > 0 ? `₺${r.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}` : '—'}
+                                {r.revenue > 0 ? paraYaz(r.revenue, { ondalik: 0 }) : '—'}
                                 {p586Targets[r.name] > 0 && r.revenue > 0 && (
                                   <span className={`ml-1 text-[9px] font-bold px-1 py-0.5 rounded-full ${r.revenue>=p586Targets[r.name]?'bg-green-100 text-green-700':'bg-red-100 text-red-500'}`}>
                                     {Math.round((r.revenue/p586Targets[r.name])*100)}%
@@ -2756,7 +2742,7 @@ export default function CRMPage({
                               <div className="h-full bg-gradient-to-r from-brand to-orange-400 rounded-full" style={{width:`${c.score}%`}}/>
                             </div>
                             <span className="text-xs font-bold text-gray-700 w-8 text-right">{c.score}</span>
-                            <span className="text-[10px] text-gray-400 w-20 text-right hidden sm:block">₺{c.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                            <span className="text-[10px] text-gray-400 w-20 text-right hidden sm:block">{paraYaz(c.revenue, { ondalik: 0 })}</span>
                           </div>
                         );
                       })}
@@ -2822,7 +2808,7 @@ export default function CRMPage({
                           <div key={seg} className="bg-gray-50 rounded-xl p-3">
                             <p className="text-xs text-gray-500 font-semibold">{seg}</p>
                             <p className="text-xl font-bold text-gray-800 mt-1">{v.count}</p>
-                            <p className="text-xs text-gray-400">₺{v.revenue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+                            <p className="text-xs text-gray-400">{paraYaz(v.revenue, { ondalik: 0 })}</p>
                           </div>
                         ))}
                       </div>
@@ -2843,7 +2829,7 @@ export default function CRMPage({
                           <div key={type} className={`rounded-xl p-4 ${type==='B2B'?'bg-blue-50':'bg-purple-50'}`}>
                             <p className={`text-sm font-bold ${type==='B2B'?'text-blue-700':'text-purple-700'}`}>{type==='B2B'?'🏢 B2B':'🛒 Retail'}</p>
                             <p className="text-2xl font-bold text-gray-800 mt-1">{list.length}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">{tr601?'Toplam gelir:':'Total revenue:'} ₺{list.reduce((s,c)=>s+c.revenue,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{tr601?'Toplam gelir:':'Total revenue:'} {paraYaz(list.reduce((s,c)=>s+c.revenue,0), { ondalik: 0 })}</p>
                           </div>
                         ))}
                       </div>
@@ -2883,7 +2869,7 @@ export default function CRMPage({
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr613?'Müşteri':'Customers'}</p><p className="text-xl font-black text-blue-600">{custRows.length}</p></div>
-                      <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr613?'Toplam Ciro':'Total Rev.'}</p><p className="text-base font-black text-emerald-600">₺{Math.round(totalRev613/1000)}K</p></div>
+                      <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr613?'Toplam Ciro':'Total Rev.'}</p><p className="text-base font-black text-emerald-600">{kisaTutar(totalRev613, { fmt: 'K' })}</p></div>
                       <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">Pareto 80/20</p><p className="text-xl font-black text-amber-600">%{paretoShare.toFixed(0)}</p></div>
                     </div>
                     <div className="overflow-x-auto">
@@ -2901,7 +2887,7 @@ export default function CRMPage({
                                 <td className="px-3 py-2 text-gray-400">{idx+1}</td>
                                 <td className="px-3 py-2 font-medium text-gray-800 truncate max-w-[140px]">{r.name}</td>
                                 <td className="px-3 py-2 text-gray-500">{r.customerType}</td>
-                                <td className="px-3 py-2 font-mono font-bold text-gray-700">₺{Math.round(r.revenue).toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2 font-mono font-bold text-gray-700">{paraYaz(r.revenue, { ondalik: 0 })}</td>
                                 <td className="px-3 py-2 text-gray-500">{r.orderCount}</td>
                                 <td className="px-3 py-2 text-blue-600 font-bold">%{share.toFixed(1)}</td>
                               </tr>
@@ -3009,14 +2995,14 @@ export default function CRMPage({
                           {commList.map(r=>(
                             <tr key={r.rep} className="hover:bg-gray-50/50">
                               <td className="px-4 py-2.5 font-medium text-gray-800">{r.rep}</td>
-                              <td className="px-4 py-2.5 font-mono text-gray-600">₺{r.rev.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
-                              <td className="px-4 py-2.5 font-bold font-mono text-emerald-600">₺{r.comm.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                              <td className="px-4 py-2.5 font-mono text-gray-600">{paraYaz(r.rev, { ondalik: 0 })}</td>
+                              <td className="px-4 py-2.5 font-bold font-mono text-emerald-600">{paraYaz(r.comm, { ondalik: 0 })}</td>
                             </tr>
                           ))}
                           <tr className="border-t-2 border-gray-200 bg-gray-50">
                             <td className="px-4 py-2 font-bold text-gray-700">{tr604?'Toplam':'Total'}</td>
-                            <td className="px-4 py-2 font-bold font-mono text-gray-700">₺{commList.reduce((s,r)=>s+r.rev,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
-                            <td className="px-4 py-2 font-bold font-mono text-emerald-700">₺{commList.reduce((s,r)=>s+r.comm,0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                            <td className="px-4 py-2 font-bold font-mono text-gray-700">{paraYaz(commList.reduce((s,r)=>s+r.rev,0), { ondalik: 0 })}</td>
+                            <td className="px-4 py-2 font-bold font-mono text-emerald-700">{paraYaz(commList.reduce((s,r)=>s+r.comm,0), { ondalik: 0 })}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -3077,7 +3063,7 @@ export default function CRMPage({
                                 <td className="px-3 py-2.5"><p className="font-semibold text-gray-800">{r.name}</p><p className="text-[10px] text-gray-400">{r.company}</p></td>
                                 <td className="px-3 py-2.5"><span className={`font-bold ${r.rScore>=4?'text-emerald-600':r.rScore<=2?'text-red-500':'text-amber-500'}`}>{r.rScore}</span><span className="text-[10px] text-gray-400 ml-1">{r.recency<999?`${r.recency}g`:'—'}</span></td>
                                 <td className="px-3 py-2.5"><span className="font-bold text-blue-600">{r.fScore}</span><span className="text-[10px] text-gray-400 ml-1">{r.frequency}</span></td>
-                                <td className="px-3 py-2.5"><span className="font-bold text-purple-600">{r.mScore}</span><span className="text-[10px] text-gray-400 ml-1">₺{(r.monetary/1000).toFixed(0)}K</span></td>
+                                <td className="px-3 py-2.5"><span className="font-bold text-purple-600">{r.mScore}</span><span className="text-[10px] text-gray-400 ml-1">{kisaTutar(r.monetary, { fmt: 'K' })}</span></td>
                                 <td className="px-3 py-2.5 font-black text-gray-800">{r.total}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${segCls[r.seg]}`}>{segLabel[r.seg]}</span></td>
                               </tr>
@@ -3205,7 +3191,7 @@ export default function CRMPage({
                               : `${clvCount} order${clvCount !== 1 ? 's' : ''}`}
                           >
                             <Tag className="w-3 h-3" />
-                            CLV: ₺{clvTotal.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            CLV: {paraYaz(clvTotal, { ondalik: 0 })}
                           </span>
                         ) : null;
                       })()}
@@ -3371,12 +3357,7 @@ export default function CRMPage({
                     {/* Phase 96 + Phase 104: Financial summary + CLV + Churn Risk */}
                     {(() => {
                       const custOrders = orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name);
-                      const p96Sym    = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                      const fmt       = (v: number) => {
-                        const cevrilen = kurCevir(v, kpiCurrency, exchangeRates);
-                        if (cevrilen === null) return '—';
-                        return `${p96Sym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-                      };
+                      const fmt       = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                       if (custOrders.length === 0) return null;
                       const totalRev  = custOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
@@ -3525,10 +3506,10 @@ export default function CRMPage({
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                           {[
-                            { label: currentLanguage === 'tr' ? 'Bu Ay Satış' : 'Monthly Sales', value: `₺${actualSales.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-gray-900' },
-                            { label: currentLanguage === 'tr' ? 'Hedef' : 'Target', value: `₺${targetAmount.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-gray-500' },
+                            { label: currentLanguage === 'tr' ? 'Bu Ay Satış' : 'Monthly Sales', value: paraYaz(actualSales, { ondalik: 0 }), color: 'text-gray-900' },
+                            { label: currentLanguage === 'tr' ? 'Hedef' : 'Target', value: paraYaz(targetAmount, { ondalik: 0 }), color: 'text-gray-500' },
                             { label: currentLanguage === 'tr' ? 'Gerçekleşme' : 'Achievement', value: `${achievementRate.toFixed(1)}%`, color: achievementRate >= 100 ? 'text-emerald-600' : 'text-amber-600' },
-                            { label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', value: `₺${commissionEarned.toLocaleString('tr-TR', {maximumFractionDigits:0})}`, color: 'text-violet-700' },
+                            { label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', value: paraYaz(commissionEarned, { ondalik: 0 }), color: 'text-violet-700' },
                           ].map((s, i) => (
                             <div key={i} className="bg-gray-50 rounded-xl p-3">
                               <p className={`text-base font-black ${s.color}`}>{s.value}</p>

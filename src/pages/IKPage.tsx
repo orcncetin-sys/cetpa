@@ -11,6 +11,7 @@ import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
+import { paraYaz } from '../utils/currency';
 import type { Order, Lead, Employee } from '../types';
 
 const HRModule = React.lazy(() => import('../components/HRModule'));
@@ -901,7 +902,7 @@ export default function IKPage(props: Props) {
                                   <td className="px-3 py-2.5 font-medium text-gray-800">{e.name}</td>
                                   <td className="px-3 py-2.5 text-gray-500">{e.department}</td>
                                   <td className="px-3 py-2.5 font-bold text-blue-600">{e.sales.orders}</td>
-                                  <td className="px-3 py-2.5 font-bold text-emerald-600">₺{Math.round(e.sales.revenue).toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 font-bold text-emerald-600">{paraYaz(e.sales.revenue, { ondalik: 0 })}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -948,10 +949,10 @@ export default function IKPage(props: Props) {
                         {p636Calculated && p636Payrolls.length > 0 && (
                           <>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div className="bg-gray-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Brüt Toplam':'Total Gross'}</p><p className="text-lg font-black text-gray-800">₺{totalGross.toLocaleString('tr-TR')}</p></div>
-                              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Net Toplam':'Total Net'}</p><p className="text-lg font-black text-emerald-600">₺{totalNet.toLocaleString('tr-TR')}</p></div>
-                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'İşveren SGK':'Employer SGK'}</p><p className="text-lg font-black text-orange-600">₺{totalSgkEmployer.toLocaleString('tr-TR')}</p></div>
-                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Toplam Maliyet':'Total Cost'}</p><p className="text-lg font-black text-red-600">₺{totalCost.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-gray-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Brüt Toplam':'Total Gross'}</p><p className="text-lg font-black text-gray-800">{paraYaz(totalGross, { ondalik: 0 })}</p></div>
+                              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Net Toplam':'Total Net'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalNet, { ondalik: 0 })}</p></div>
+                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'İşveren SGK':'Employer SGK'}</p><p className="text-lg font-black text-orange-600">{paraYaz(totalSgkEmployer, { ondalik: 0 })}</p></div>
+                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Toplam Maliyet':'Total Cost'}</p><p className="text-lg font-black text-red-600">{paraYaz(totalCost, { ondalik: 0 })}</p></div>
                             </div>
                             <div className="overflow-x-auto">
                               <table className="min-w-[560px] w-full text-xs">
@@ -965,11 +966,11 @@ export default function IKPage(props: Props) {
                                     <tr key={r.id} className="hover:bg-gray-50/50">
                                       <td className="px-3 py-2.5 font-semibold text-gray-800">{r.name}</td>
                                       <td className="px-3 py-2.5 text-gray-500">{r.position}</td>
-                                      <td className="px-3 py-2.5 font-mono text-gray-700">₺{r.gross.toLocaleString('tr-TR')}</td>
-                                      <td className="px-3 py-2.5 font-mono text-orange-600">₺{r.sgkEmployee.toLocaleString('tr-TR')}</td>
-                                      <td className="px-3 py-2.5 font-mono text-purple-600">₺{r.incomeTax.toLocaleString('tr-TR')}</td>
-                                      <td className="px-3 py-2.5 font-mono text-gray-500">₺{r.stampTax.toLocaleString('tr-TR')}</td>
-                                      <td className="px-3 py-2.5 font-bold font-mono text-emerald-600">₺{r.net.toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2.5 font-mono text-gray-700">{paraYaz(r.gross, { ondalik: 0 })}</td>
+                                      <td className="px-3 py-2.5 font-mono text-orange-600">{paraYaz(r.sgkEmployee, { ondalik: 0 })}</td>
+                                      <td className="px-3 py-2.5 font-mono text-purple-600">{paraYaz(r.incomeTax, { ondalik: 0 })}</td>
+                                      <td className="px-3 py-2.5 font-mono text-gray-500">{paraYaz(r.stampTax, { ondalik: 0 })}</td>
+                                      <td className="px-3 py-2.5 font-bold font-mono text-emerald-600">{paraYaz(r.net, { ondalik: 0 })}</td>
                                     </tr>
                                   ))}
                                 </tbody>

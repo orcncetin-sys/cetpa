@@ -33,6 +33,7 @@ import {
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
 import { cn } from '../lib/utils';
+import { paraYaz } from '../utils/currency';
 
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
@@ -979,7 +980,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-sm font-bold text-gray-900">
-                          {((item as unknown as { price?: number }).price ?? (item.prices as PriceTier | undefined)?.['Retail'] ?? 0).toLocaleString()} TL
+                          {paraYaz((item as unknown as { price?: number }).price ?? (item.prices as PriceTier | undefined)?.['Retail'])}
                         </span>
                       </td>
                       {/* Phase 59: Cost Price + Margin cell */}
@@ -990,7 +991,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           const margin = retail > 0 && cost > 0 ? Math.round(((retail - cost) / retail) * 100) : null;
                           return (
                             <div className="flex flex-col gap-0.5">
-                              <span className="text-xs font-semibold text-gray-500">{cost > 0 ? `₺${cost.toLocaleString('tr-TR')}` : '—'}</span>
+                              <span className="text-xs font-semibold text-gray-500">{cost > 0 ? paraYaz(cost) : '—'}</span>
                               {margin !== null && (
                                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full w-fit ${margin >= 30 ? 'bg-emerald-50 text-emerald-700' : margin >= 15 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>
                                   %{margin}
@@ -1190,7 +1191,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.price}</p>
-                    <p className="text-sm font-bold">{((item as unknown as { price?: number }).price ?? (item.prices as PriceTier | undefined)?.['Retail'] ?? 0).toLocaleString()} TL</p>
+                    <p className="text-sm font-bold">{paraYaz((item as unknown as { price?: number }).price ?? (item.prices as PriceTier | undefined)?.['Retail'])}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-[#86868B] uppercase">{currentT.category}</p>

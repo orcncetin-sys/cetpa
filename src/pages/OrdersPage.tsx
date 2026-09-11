@@ -27,7 +27,7 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { exportOrdersCSV } from '../utils/export';
-import { kurCevir, formatInCurrency } from '../utils/currency';
+import { kurCevir, formatInCurrency, paraYaz, kisaTutar } from '../utils/currency';
 import { registerTurkishFont } from '../utils/pdfFont';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
@@ -45,6 +45,7 @@ import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
+import { satirTutari } from '../utils/para';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -335,16 +336,10 @@ export default function OrdersPage({
     setter: (v: { key: string; dir: 'asc' | 'desc' }) => void
   ) => setter({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' });
 
-  // Kur yoksa '—' (2026-08-26). Eskiden 2024'ten kalma SABİT kurlar (USD 32 / EUR 35)
-  // kullanılıyordu — sahte kesinlik. TL yolu birebir aynı: çevrilmez, aynen biçimlenir.
-  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const cv = kpiCurrency === 'TRY' ? v : kurCevir(v, kpiCurrency, exchangeRates);
-    if (cv === null) return '—';  // sembol de basma — "$—" saçma olurdu
-    const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
-    const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
-    return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
-  };
+  // Tek kaynak (Faz 2 1/n, 2026-09-05): kisaTutar — kur yoksa '—' (sembol de basılmaz),
+  // 'K' kısaltması, birim sembolü ve yerel gruplama orada. İmza korundu, çağrı yerleri değişmedi.
+  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string =>
+    kisaTutar(v, { fmt, ondalik: decimals, birim: kpiCurrency, rates: exchangeRates });
 
   const createNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' = 'info') => {
     try { await addDoc(collection(db, 'notifications'), { title, message, type, read: false, createdAt: serverTimestamp() }); } catch { /* ignore */ }
@@ -550,7 +545,7 @@ export default function OrdersPage({
                       { label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Fulfillment Rate', value: `${fulfillRate}%`, color: fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600', bg: 'bg-white', sub: `${delivered522} / ${total522}` },
                       { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: currentLanguage === 'tr' ? 'Hazırlanıyor/Kargoda' : 'In Progress', value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
-                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: unpaidTotal >= 1e6 ? `₺${(unpaidTotal/1e6).toFixed(1)}M` : `₺${(unpaidTotal/1000).toFixed(1)}K`, color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
+                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: kisaTutar(unpaidTotal, { fmt: unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 }), color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
                         sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${currentLanguage==='tr'?'sipariş':'orders'}` : null },
                     ].map((k, i) => (
                       <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
@@ -615,7 +610,7 @@ export default function OrdersPage({
                             </p>
                             <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">{currentLanguage === 'tr' ? b.labelTR : b.label}</p>
                             <p className="text-[9px] text-gray-500 mt-1">
-                              ₺{b.items.reduce((s,o)=>s+(o.totalPrice||0),0).toLocaleString('tr-TR',{maximumFractionDigits:0})}
+                              {paraYaz(b.items.reduce((s,o)=>s+(o.totalPrice||0),0), { ondalik: 0 })}
                             </p>
                           </div>
                         ))}
@@ -703,7 +698,7 @@ export default function OrdersPage({
                             // Para 2 ondalik: locale verilse de ondalik verilmezse
                             // tarayici 3 haneye kadar basabiliyor.
                             body: sel.map(o => [gorunenSiparisNo(o), o.customerName, o.status,
-                              `₺${(Number(o.totalPrice) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]),
+                              paraYaz(o.totalPrice)]),
                           });
                           pdfAltBilgi(pdf);
                           pdf.save(`siparisler_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -817,7 +812,7 @@ export default function OrdersPage({
                                 <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.active ? (overdue ? 'bg-red-400' : 'bg-emerald-400') : 'bg-gray-200'}`} />
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-bold text-gray-800 truncate">{r.templateName}</p>
-                                  <p className="text-[10px] text-gray-400">{r.customerName} · {fmtKpi((r.totalPrice || 0))}</p>
+                                  <p className="text-[10px] text-gray-400">{r.customerName} · {fmtKpi(r.totalPrice)}</p>
                                 </div>
                                 <span className="text-[10px] text-gray-500 flex-shrink-0">
                                   {r.frequency === 'weekly' ? (currentLanguage === 'tr' ? 'Haftalık' : 'Weekly')
@@ -1190,7 +1185,7 @@ export default function OrdersPage({
                               {/* TL yolu birebir korundu; USD/EUR artık kur yoksa '—' (eskiden `||1` ile
                                   TL tutar '$' ile basılıyordu — ~38× şişkin). Sembol biçimleyicinin içinde. */}
                               <div>{kpiCurrency === 'TRY'
-                                ? `₺${order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                ? paraYaz(order.totalPrice)
                                 : formatInCurrency(order.totalPrice, kpiCurrency, exchangeRates ?? undefined)}</div>
                               <div className="flex flex-col items-end gap-0.5 mt-0.5">
                                 {/* SIRA KRİTİK (2026-09-03 code-review): mikro-fatura dalı ÖNCE
@@ -1348,15 +1343,15 @@ export default function OrdersPage({
                                           <td className="px-4 py-2 text-gray-400 font-mono">{li.sku}</td>
                                           <td className="px-4 py-2 text-gray-700 font-medium">{li.title ?? li.name}</td>
                                           <td className="px-4 py-2 text-right text-gray-600">{li.quantity}</td>
-                                          <td className="px-4 py-2 text-right text-gray-600">₺{(li.price ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
-                                          <td className="px-4 py-2 text-right font-bold text-gray-800">₺{((li.price ?? 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                                          <td className="px-4 py-2 text-right text-gray-600">{paraYaz(li.price)}</td>
+                                          <td className="px-4 py-2 text-right font-bold text-gray-800">{paraYaz(li.price * li.quantity)}</td>
                                         </tr>
                                       ))}
                                     </tbody>
                                     <tfoot>
                                       <tr className="bg-gray-50">
                                         <td colSpan={4} className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Genel Toplam' : 'Grand Total'}</td>
-                                        <td className="px-4 py-2 text-right font-black text-brand">₺{order.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                                        <td className="px-4 py-2 text-right font-black text-brand">{paraYaz(order.totalPrice)}</td>
                                       </tr>
                                     </tfoot>
                                   </table>
@@ -1400,7 +1395,7 @@ export default function OrdersPage({
                         {(() => { const d = siparisTarih(order); return d ? d.toLocaleDateString() : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-brand">{order.totalPrice.toLocaleString()} TL</p>
+                        <p className="font-bold text-brand">{paraYaz(order.totalPrice)}</p>
                         {/* Phase 67: invoice mini-badge on mobile */}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           {order.source === 'mikro-fatura' ? (
@@ -1480,7 +1475,7 @@ export default function OrdersPage({
                             <td className="px-3 py-2.5 font-medium text-gray-800">{r.customerName}</td>
                             <td className="px-3 py-2.5 font-mono text-gray-500">{r.orderId||'—'}</td>
                             <td className="px-3 py-2.5 text-gray-600 max-w-[200px] truncate">{r.reason}</td>
-                            <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?`₺${r.amount.toLocaleString('tr-TR')}`:'—'}</td>
+                            <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?paraYaz(r.amount):'—'}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
                               <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'salesReturns',r.id),{status:e.target.value});}catch(err){toast((tr575?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
@@ -1843,17 +1838,17 @@ export default function OrdersPage({
                             autoTable(doc505, {
                               startY: 58,
                               head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
-                              body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, `₺${(li.price || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, `₺${((li.price || 0) * li.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` ]),
+                              body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, paraYaz(li.price), paraYaz(satirTutari(li.price, li.quantity)) ]),
                               styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
                               headStyles: { fillColor: marka505, textColor: [255, 255, 255], fontStyle: 'bold' },
                               alternateRowStyles: { fillColor: [253, 248, 246] },
-                              foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, `₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`]],
+                              foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)]],
                               footStyles: { fillColor: [245, 245, 245], fontStyle: 'bold', fontSize: 10 },
                             });
                           } else {
                             const y505 = 58;
                             doc505.setFontSize(10); doc505.setTextColor(30,30,30);
-                            doc505.text(`${currentLanguage === 'tr' ? 'Toplam Tutar' : 'Total Amount'}: ₺${(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, 14, y505);
+                            doc505.text(`${currentLanguage === 'tr' ? 'Toplam Tutar' : 'Total Amount'}: ${paraYaz(o.totalPrice)}`, 14, y505);
                           }
                           const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
@@ -1935,8 +1930,7 @@ export default function OrdersPage({
                               : 'Exchange rate unavailable — summary not copied.', 'error');
                             return;
                           }
-                          const _waSym  = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                          const _waAmt  = `${_waSym}${_waCv.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+                          const _waAmt  = paraYaz(_waCv, { birim: kpiCurrency, ondalik: 0 });
                           const summary = currentLanguage === 'tr'
                             ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
                             : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
@@ -1964,8 +1958,7 @@ export default function OrdersPage({
                                 : 'Exchange rate unavailable — reminder not generated.', 'error');
                               return;
                             }
-                            const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
-                            const amt = `${sym}${cv.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            const amt = paraYaz(cv, { birim: kpiCurrency });
                             const msg = currentLanguage === 'tr'
                               ? `Sayın ${o.customerName},\n\nSipariş No: ${gorunenSiparisNo(o)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
                               : `Dear ${o.customerName},\n\nPayment of ${amt} for Order ${gorunenSiparisNo(o)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
@@ -2013,16 +2006,16 @@ export default function OrdersPage({
                                 <div className="space-y-2.5 text-sm">
                                   <div className="flex justify-between">
                                     <span className="text-gray-500">{currentLanguage === 'tr' ? 'Gelir' : 'Revenue'}</span>
-                                    <span className="font-bold text-emerald-600">₺{revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                    <span className="font-bold text-emerald-600">{paraYaz(revenue)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-gray-500">{currentLanguage === 'tr' ? 'Maliyet (COGS)' : 'Cost (COGS)'}</span>
-                                    <span className="font-bold text-red-500">−₺{cogs.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                    <span className="font-bold text-red-500">−{paraYaz(cogs)}</span>
                                   </div>
                                   <div className="h-px bg-gray-100" />
                                   <div className="flex justify-between">
                                     <span className="font-bold">{currentLanguage === 'tr' ? 'Brüt Kâr' : 'Gross Profit'}</span>
-                                    <span className={cn("font-black", gp >= 0 ? "text-emerald-600" : "text-red-600")}>₺{gp.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                                    <span className={cn("font-black", gp >= 0 ? "text-emerald-600" : "text-red-600")}>{paraYaz(gp)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-gray-500">{currentLanguage === 'tr' ? 'Kâr Marjı' : 'Margin'}</span>
@@ -2041,7 +2034,7 @@ export default function OrdersPage({
                                           <div key={i} className="flex justify-between text-[11px]">
                                             <span className="text-gray-500 truncate max-w-[160px]">{li.name} ×{li.quantity}</span>
                                             <span className={liRev >= liCost ? "text-emerald-600 font-semibold" : "text-red-500 font-semibold"}>
-                                              ₺{(liRev - liCost).toLocaleString('tr-TR', { minimumFractionDigits: 0 })}
+                                              {paraYaz(liRev - liCost)}
                                             </span>
                                           </div>
                                         );
@@ -2132,7 +2125,7 @@ export default function OrdersPage({
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.total_price}</span>
-                        <span className="font-bold text-lg">₺{selectedOrder.totalPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="font-bold text-lg">{paraYaz(selectedOrder.totalPrice)}</span>
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.tracking_number}</span>
@@ -2277,8 +2270,8 @@ export default function OrdersPage({
                                   {item.sku && <p className="text-[10px] text-gray-400">{item.sku}</p>}
                                 </td>
                                 <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
-                                <td className="px-4 py-3 text-right text-gray-500">₺{(item.price ?? 0).toFixed(2)}</td>
-                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">₺{((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2)}</td>
+                                <td className="px-4 py-3 text-right text-gray-500">{paraYaz(item.price)}</td>
+                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">{paraYaz(satirTutari(item.price, item.quantity))}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -2319,10 +2312,10 @@ export default function OrdersPage({
                           <div className="flex items-center justify-between gap-4">
                             <div>
                               <p className={`text-xl font-black ${gpColor}`}>
-                                ₺{gp.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {paraYaz(gp)}
                               </p>
                               <p className="text-[10px] text-gray-500 mt-0.5">
-                                {currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}: ₺{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}: {paraYaz(cost)}
                               </p>
                             </div>
                             <div className="flex-1 max-w-[120px]">
@@ -2882,7 +2875,7 @@ export default function OrdersPage({
                     <div className="grid grid-cols-3 gap-4">
                       <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr622?'Toplam Sevkiyat':'Total Shipments'}</p><p className="text-2xl font-black text-blue-600">{p622Shipments.length}</p></div>
                       <div className="apple-card p-4 bg-amber-50"><p className="text-xs text-gray-500">{tr622?'Yolda/Gümrük':'In Transit'}</p><p className="text-2xl font-black text-amber-600">{inTransit}</p></div>
-                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr622?'Toplam Değer':'Total Value'}</p><p className="text-lg font-black text-emerald-600">${totalValue.toLocaleString('tr-TR')}</p></div>
+                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr622?'Toplam Değer':'Total Value'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalValue, { birim: 'USD', ondalik: 0 })}</p></div>
                     </div>
                     {p622ShowForm && (
                       <div className="apple-card p-5 space-y-3">
@@ -2930,7 +2923,7 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5 font-mono text-gray-700">{sh.orderRef}</td>
                                 <td className="px-3 py-2.5 font-medium text-gray-800">{sh.destination}</td>
                                 <td className="px-3 py-2.5 text-gray-500">{sh.incoterm}</td>
-                                <td className="px-3 py-2.5 font-bold text-gray-700">{sh.currency} {sh.value.toLocaleString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 font-bold text-gray-700">{paraYaz(sh.value, { birim: sh.currency })}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
                                 <td className="px-3 py-2.5 text-gray-500">{new Date(sh.exportDate).toLocaleDateString('tr-TR')}</td>
                                 <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
@@ -3397,7 +3390,7 @@ export default function OrdersPage({
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,
                         createdAt: serverTimestamp(),
                       });
-                      createNotification(currentLanguage === 'tr' ? 'İade Oluşturuldu' : 'Return Created', `#${o.id.slice(0, 6)} — ₺${returnAmount.toLocaleString('tr-TR')}`, 'info');
+                      createNotification(currentLanguage === 'tr' ? 'İade Oluşturuldu' : 'Return Created', `#${o.id.slice(0, 6)} — ${paraYaz(returnAmount)}`, 'info');
                       toast(currentLanguage === 'tr' ? 'İade kaydı oluşturuldu.' : 'Return created.', 'success');
                       setReturnModal({ open: false, order: null });
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }

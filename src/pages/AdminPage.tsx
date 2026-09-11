@@ -19,7 +19,7 @@ import SuperAdminPanel from '../components/SuperAdminPanel';
 import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
-import { kurCevir } from '../utils/currency';
+import { tlYaz, kisaTutar } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -150,18 +150,11 @@ export default function AdminPage({
     if (adminTab === 'system') void fetchSystemHealth();
   }, [adminTab, fetchSystemHealth]);
 
-  // Kur yoksa ARTIK 2024'ten kalma sabit kur (32/35) uydurulmuyor: kurCevir
-  // null döner ve hücre '—' basar. Sembol '—' yolunda EKLENMEZ ("$—" saçma).
-  // TRY yolu kasıtlı olarak AYNEN korundu: kurCevir(_, 'TRY', _) tutarı olduğu
-  // gibi döndürür, biçimleme (locale + maximumFractionDigits) hiç değişmedi.
-  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const cv = kurCevir(v, kpiCurrency, exchangeRates);
-    if (cv === null) return '—';
-    const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
-    const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    if (fmt === 'K') return `${sym}${(cv / 1000).toFixed(decimals)}K`;
-    return `${sym}${cv.toLocaleString(locale, { maximumFractionDigits: decimals })}`;
-  };
+  // Para biçimi TEK KAYNAK: utils/currency.kisaTutar — kur yoksa '—' basar,
+  // sembol '—' yolunda eklenmez ("$—" yok), sahte sabit kur uydurulmaz.
+  // İmza korunuyor; çağrı yerleri değişmedi.
+  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string =>
+    kisaTutar(v, { fmt, ondalik: decimals, birim: kpiCurrency, rates: exchangeRates });
 
 
   const defaultAccessMatrix = DEFAULT_ACCESS_MATRIX;
@@ -219,10 +212,8 @@ export default function AdminPage({
           {/* Revenue card with currency toggle */}
           {(() => {
             const totalTRY = orders.reduce((s,o)=>s+(o.totalPrice||0),0);
-            // `|| 1` kaldırıldı: kur yokken TL tutarı olduğu gibi kalıp başına '$'
-            // konuyordu (₺40.000 → "$40.000", ~38× şişkin). Artık null → '—'.
-            const converted = kurCevir(totalTRY, kpiCurrency, exchangeRates);
-            const symbol = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
+            // Kur yokken TL tutarı yabancı sembolle BASILMAZ: tlYaz null kurda '—'
+            // döner (eski `|| 1` ₺40.000 → "$40.000", ~38× şişkin üretiyordu).
             return (
               <div className="apple-card p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('reports')}>
                 <div className="flex items-center justify-between mb-2">
@@ -236,7 +227,7 @@ export default function AdminPage({
                     ))}
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-green-600">{converted === null ? '—' : `${symbol}${converted.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0})}`}</div>
+                <div className="text-2xl font-bold text-green-600">{tlYaz(totalTRY, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 })}</div>
               </div>
             );
           })()}
@@ -300,7 +291,7 @@ export default function AdminPage({
                 {orders.slice(0,8).map((o,i) => (
                   <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 px-3 font-medium text-gray-800">{o.customerName||'—'}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-brand">{fmtKpi((o.totalPrice||0),'full',2)}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-brand">{fmtKpi(o.totalPrice,'full',2)}</td>
                     <td className="py-2.5 px-3 text-center hidden sm:table-cell">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status==='Delivered'?'bg-green-100 text-green-600':o.status==='Pending'?'bg-yellow-100 text-yellow-600':'bg-gray-100 text-gray-500'}`}>{o.status||'—'}</span>
                     </td>

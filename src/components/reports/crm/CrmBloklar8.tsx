@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { paraYaz } from '../../../utils/currency';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -146,7 +147,7 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
                             <div className="rounded h-6 flex items-center justify-center text-[8px] font-bold" style={{
                               background: v === 0 ? '#f3f4f6' : `rgba(99,102,241,${0.15 + intensity * 0.85})`,
                               color: intensity > 0.5 ? 'white' : '#4b5563'
-                            }} title={`₺${v.toLocaleString('tr-TR', {maximumFractionDigits: 0})}`}>
+                            }} title={paraYaz(v, { ondalik: 0 })}>
                               {v > 0 ? `${(v / 1000).toFixed(0)}k` : '-'}
                             </div>
                           </td>

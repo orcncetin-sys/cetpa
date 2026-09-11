@@ -18,6 +18,7 @@ import { Package, AlertCircle } from 'lucide-react';
 import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
+import { paraYaz } from '../../../utils/currency';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
 
@@ -155,7 +156,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                   <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
                     <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
                       <div className={`w-full rounded-t-lg ${colors[i]}`} style={{ height: `${Math.max(h, 3)}%` }}
-                        title={`${b.count} ${currentLanguage==='tr'?'sipariş':'orders'} · ₺${b.total.toLocaleString()}`} />
+                        title={`${b.count} ${currentLanguage==='tr'?'sipariş':'orders'} · ${paraYaz(b.total, { ondalik: 0 })}`} />
                     </div>
                     <span className="text-[8px] text-gray-400 text-center leading-tight">{b.label}</span>
                     <span className="text-[9px] font-bold text-gray-600">{b.count}</span>
@@ -311,7 +312,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                           <div
                             className={`w-full rounded-t-lg transition-all duration-500 ${d.revenue === maxRev147 ? 'bg-brand' : 'bg-brand/30 hover:bg-brand/60'}`}
                             style={{ height: `${Math.max(h, 2)}%` }}
-                            title={`₺${d.revenue.toLocaleString()} · ${d.orders} ${currentLanguage==='tr'?'sipariş':'orders'}`}
+                            title={`${paraYaz(d.revenue, { ondalik: 0 })} · ${d.orders} ${currentLanguage==='tr'?'sipariş':'orders'}`}
                           />
                         </div>
                         <span className={`text-[10px] font-semibold ${d.revenue === maxRev147 ? 'text-brand' : 'text-gray-400'}`}>{d.day}</span>

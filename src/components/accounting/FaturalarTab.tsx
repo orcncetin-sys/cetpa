@@ -8,6 +8,7 @@ import { type MikroFaturaDetayVerisi } from '../MikroFaturaDetay';
 import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { faturaTipiEtiketi } from '../../utils/durumEtiketi';
+import { paraYaz } from '../../utils/currency';
 
 type InvoiceForm = {
   faturaNo: string; faturaTipi: 'e-fatura' | 'e-arsiv' | 'ihracat';
@@ -115,9 +116,9 @@ export default function FaturalarTab({
               {invoiceSource && (
                 <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1">
                   <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Sipariş':'Order'}:</span><span className="font-semibold">#{(invoiceSource.id as string).slice(0,8)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Matrah (KDV hariç)':'Net (excl. VAT)'}:</span><span className="font-semibold">₺{((invoiceSource.totalPrice as number||0)/(1+invoiceForm.kdvOran/100)).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-                  <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">₺{((invoiceSource.totalPrice as number||0)-(invoiceSource.totalPrice as number||0)/(1+invoiceForm.kdvOran/100)).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{currentLanguage==='tr'?'Toplam':'Total'}:</span><span>₺{(invoiceSource.totalPrice as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Matrah (KDV hariç)':'Net (excl. VAT)'}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
+                  <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)-(invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
+                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{currentLanguage==='tr'?'Toplam':'Total'}:</span><span>{paraYaz(invoiceSource.totalPrice)}</span></div>
                 </div>
               )}
             </div>
@@ -292,8 +293,8 @@ export default function FaturalarTab({
                       <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColor}`}>{faturaTipiEtiketi(tp, currentLanguage)}</span></td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{inv.date as string}</td>
                       <td className="px-4 py-3 text-right text-gray-600">%{inv.kdvOran as number}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">₺{(inv.kdvHaric as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                      <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{(inv.totalPrice as number||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{paraYaz(inv.kdvHaric)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">{paraYaz(inv.totalPrice)}</td>
                       <td className="px-4 py-3"><span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{inv.status as string || 'Kesildi'}</span></td>
                       {isAuthenticated && (
                         <td className="px-4 py-3">
@@ -352,7 +353,7 @@ export default function FaturalarTab({
                       : (f.oran !== null ? `%${f.oran}` : '—')}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
-                  <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">₺{f.tutar.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">{paraYaz(f.tutar)}</td>
                   <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>
                   {isAuthenticated && <td className="px-4 py-3" />}
                 </tr>

@@ -30,7 +30,7 @@ import {
 import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, kisaTutar, paraYaz } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -459,7 +459,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💰 Fiyat Kademesi Gelir Dağılımı' : '💰 Price Tier Revenue Mix'}</h3>
                 <div className="flex rounded-xl overflow-hidden h-6 mb-4 gap-0.5">
                   {tiers.map(([tier, v]) => (
-                    <div key={tier} className="transition-all" style={{ width: `${Math.round((v.revenue / total177) * 100)}%`, backgroundColor: tierColors[tier] || '#6b7280' }} title={`${tier}: ₺${v.revenue.toLocaleString()}`} />
+                    <div key={tier} className="transition-all" style={{ width: `${Math.round((v.revenue / total177) * 100)}%`, backgroundColor: tierColors[tier] || '#6b7280' }} title={`${tier}: ${paraYaz(v.revenue)}`} />
                   ))}
                 </div>
                 <div className="space-y-1.5">
@@ -1477,7 +1477,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                     <p className="text-[10px] text-gray-400">{l.category} · {l.stock} {currentLanguage === 'tr' ? 'stok' : 'in stock'}</p>
                   </div>
                   <span className={`text-xs font-bold shrink-0 ml-2 ${l.rev > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                    {l.rev > 0 ? `₺${(l.rev/1000).toFixed(0)}K` : (currentLanguage === 'tr' ? 'Satış yok' : 'No sales')}
+                    {l.rev > 0 ? kisaTutar(l.rev, { fmt: 'K' }) : (currentLanguage === 'tr' ? 'Satış yok' : 'No sales')}
                   </span>
                 </div>
               ))}
@@ -1682,7 +1682,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? `Stok değeri: ₺${(inventoryVal259/1000).toFixed(0)}K · Taşıma maliyeti genellikle stok değerinin %20-30\'udur.` : `Inventory value: ₺${(inventoryVal259/1000).toFixed(0)}K · Carrying cost is typically 20-30% of inventory value.`}</p>
+            <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? `Stok değeri: ${kisaTutar(inventoryVal259, { fmt: 'K' })} · Taşıma maliyeti genellikle stok değerinin %20-30\'udur.` : `Inventory value: ${kisaTutar(inventoryVal259, { fmt: 'K' })} · Carrying cost is typically 20-30% of inventory value.`}</p>
           </div>
         );
       })()}
@@ -1802,7 +1802,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                       <td className="py-1.5 font-medium" style={{ color: colors[ci] }}>{cat}</td>
                       {months.map(m => (
                         <td key={m.key} className="py-1.5 text-right text-gray-600">
-                          {catRevenue[cat][m.key] ? `₺${(catRevenue[cat][m.key]/1000).toFixed(0)}k` : '-'}
+                          {catRevenue[cat][m.key] ? kisaTutar(catRevenue[cat][m.key], { fmt: 'K' }) : '-'}
                         </td>
                       ))}
                       <td className="py-1.5 text-right font-bold text-gray-800">
@@ -2083,7 +2083,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             <p className="text-xs text-gray-500 mb-3">Total at cost: {fmtAna(totalValue,'full',0)}</p>
             <div className="flex h-4 rounded-full overflow-hidden mb-4 gap-0.5">
               {cats.slice(0,8).map(([,d],i) => (
-                <div key={i} style={{ width: `${totalValue>0?(d.value/totalValue*100):0}%`, background: colors[i%colors.length], minWidth: d.value>0?'2px':'0' }} title={`${cats[i][0]}: ₺${d.value.toLocaleString()}`} />
+                <div key={i} style={{ width: `${totalValue>0?(d.value/totalValue*100):0}%`, background: colors[i%colors.length], minWidth: d.value>0?'2px':'0' }} title={`${cats[i][0]}: ${paraYaz(d.value)}`} />
               ))}
             </div>
             <div className="space-y-2">

@@ -8,6 +8,7 @@
  */
 
 import { sayiBicimleyici } from '../utils/recharts';
+import { kisaTutar, paraYaz } from '../utils/currency';
 import { useState } from 'react';
 import {
   TrendingUp, RefreshCw, AlertCircle, Package,
@@ -171,7 +172,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
         }));
 
       const monthlyArr = Object.entries(monthlyRevenue).sort()
-        .map(([m, r]) => `${m}: ₺${Math.round(r).toLocaleString('tr-TR')}`);
+        .map(([m, r]) => `${m}: ${paraYaz(r, { ondalik: 0 })}`);
 
       const inventoryCtx = inventory.slice(0, 20)
         .map(i => `${i.name} (${i.quantity ?? '?'} units)`)
@@ -300,12 +301,12 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                   <YAxis
-                    tickFormatter={v => `₺${(v / 1000).toFixed(0)}k`}
+                    tickFormatter={v => kisaTutar(v, { fmt: 'K' })}
                     tick={{ fontSize: 10, fill: '#9ca3af' }}
                     axisLine={false} tickLine={false} width={48}
                   />
                   <Tooltip
-                    formatter={sayiBicimleyici((v) => [`₺${v.toLocaleString('tr-TR')}`, tr ? 'Tahmini' : 'Projected'])}
+                    formatter={sayiBicimleyici((v) => [paraYaz(v, { ondalik: 0 }), tr ? 'Tahmini' : 'Projected'])}
                     contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 11 }}
                   />
                   <Bar dataKey="projected" radius={[6, 6, 0, 0]}>

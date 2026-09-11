@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { InventoryItem, Warehouse } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { faturaEsle } from '../utils/faturaEsle';
+import { paraYaz } from '../utils/currency';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 
 /** Hem Cetpa şeması hem normalize edilmiş Mikro hareketi buraya oturur. */
@@ -37,7 +38,7 @@ interface ProductDetailProps {
   warehouses: Warehouse[];
 }
 
-const tl = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tl = (n: number) => paraYaz(n);
 
 function toDate(ts: unknown): Date | null {
   if (!ts) return null;
@@ -130,7 +131,7 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
             {[
               { label: 'Mevcut Stok', value: String(product.stockLevel), note: '', icon: Layers, color: product.stockLevel <= product.lowStockThreshold ? 'text-red-600' : 'text-green-600', bg: product.stockLevel <= product.lowStockThreshold ? 'bg-red-50' : 'bg-green-50' },
               { label: 'Kritik Eşik', value: String(product.lowStockThreshold), note: '', icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
-              { label: 'Maliyet', value: tl(Number(product.costPrice) || 0), note: 'KDV hariç', icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Maliyet', value: tl(product.costPrice), note: 'KDV hariç', icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
               { label: 'Satış Fiyatı', value: tl(satisFiyati), note: satisFiyati > 0 ? 'KDV hariç' : 'tanımsız', icon: TrendingUp, color: 'text-brand', bg: 'bg-brand/5' },
             ].map((stat, i) => (
               <div key={i} className={cn("p-4 rounded-2xl border border-transparent transition-all", stat.bg)}>
@@ -185,7 +186,7 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                 {Object.entries(product.prices || {}).map(([tier, price]: [string, number]) => (
                   <div key={tier} className="flex justify-between items-center">
                     <span className="text-xs font-medium text-gray-600">{tier}</span>
-                    <span className="text-sm font-bold text-gray-900">₺{price.toLocaleString()}</span>
+                    <span className="text-sm font-bold text-gray-900">{paraYaz(price)}</span>
                   </div>
                 ))}
                 {(!product.prices || Object.keys(product.prices).length === 0) && (

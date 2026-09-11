@@ -24,7 +24,7 @@ import {
 } from '../types';
 import { format } from 'date-fns';
 import { confirmAction } from '../lib/confirm';
-import { kurCevir } from '../utils/currency';
+import { kurCevir, paraYaz } from '../utils/currency';
 import { cn } from '../lib/utils';
 import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
@@ -576,7 +576,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                         </td>
                         <td className="py-3 px-5 text-gray-600">{emp.position}</td>
                         <td className="py-3 px-5 text-gray-500">{emp.department}</td>
-                        <td className="py-3 px-5 text-right font-medium">₺{(emp.salary ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right font-medium">{paraYaz(emp.salary)}</td>
                         <td className="py-3 px-5 text-center text-gray-400">{emp.startDate}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${emp.status === 'Aktif' ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
@@ -662,15 +662,14 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   }
                   const totalTRY: number | null = kurEksik ? null : toplam;
                   const rate = kurAl(salaryCurrency);
-                  const sym = salaryCurrency === 'TRY' ? '₺' : salaryCurrency === 'USD' ? '$' : '€';
                   const converted = totalTRY === null ? null : kurCevir(totalTRY, salaryCurrency, exchangeRates ?? undefined);
                   return (
                     <>
-                      <p className="text-3xl font-bold text-gray-900">{converted === null ? '—' : `${sym}${converted.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}</p>
+                      <p className="text-3xl font-bold text-gray-900">{converted === null ? '—' : paraYaz(converted, { birim: salaryCurrency, ondalik: 0 })}</p>
                       {converted === null ? (
                         <p className="text-xs text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Kur verisi yok — toplam hesaplanamıyor' : 'No exchange rate data — total unavailable'}</p>
                       ) : salaryCurrency !== 'TRY' && totalTRY !== null && rate !== null ? (
-                        <p className="text-xs text-gray-400 mt-0.5">₺{totalTRY.toLocaleString('tr-TR', {maximumFractionDigits: 0})} · 1 {salaryCurrency} = ₺{rate.toFixed(2)}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{paraYaz(totalTRY, { ondalik: 0 })} · 1 {salaryCurrency} = {paraYaz(rate)}</p>
                       ) : null}
                     </>
                   );
@@ -726,10 +725,10 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                       <tr key={p.id} className="hover:bg-gray-50 transition-all group">
                         <td className="py-3 px-5 font-bold text-gray-900">{p.employeeName}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{p.month}/{p.year}</td>
-                        <td className="py-3 px-5 text-right">₺{(p.baseSalary ?? 0).toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right text-green-600">+₺{(p.bonus ?? 0).toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right text-red-500">-₺{(p.deduction ?? 0).toLocaleString()}</td>
-                        <td className="py-3 px-5 text-right font-bold text-gray-900">₺{(p.netSalary ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right">{paraYaz(p.baseSalary)}</td>
+                        <td className="py-3 px-5 text-right text-green-600">+{paraYaz(p.bonus)}</td>
+                        <td className="py-3 px-5 text-right text-red-500">{p.deduction == null ? '—' : `-${paraYaz(p.deduction)}`}</td>
+                        <td className="py-3 px-5 text-right font-bold text-gray-900">{paraYaz(p.netSalary)}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status === 'Ödendi' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'}`}>
                             {p.status}
@@ -1070,7 +1069,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                         <td className="py-3 px-5 text-gray-600">{req.destination}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{req.startDate}</td>
                         <td className="py-3 px-5 text-center text-gray-500">{req.endDate}</td>
-                        <td className="py-3 px-5 text-right font-bold">₺{(req.advanceAmount ?? 0).toLocaleString()}</td>
+                        <td className="py-3 px-5 text-right font-bold">{paraYaz(req.advanceAmount)}</td>
                         <td className="py-3 px-5 text-center">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${req.status === 'Onaylandı' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'}`}>
                             {req.status}
@@ -1337,7 +1336,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-bold text-gray-500">{t.netSalary}</span>
-                    <span className="text-xl font-bold text-[#ff4000]">₺{((payrollForm.baseSalary || 0) + (payrollForm.bonus || 0) - (payrollForm.deduction || 0)).toLocaleString()}</span>
+                    <span className="text-xl font-bold text-[#ff4000]">{paraYaz((payrollForm.baseSalary || 0) + (payrollForm.bonus || 0) - (payrollForm.deduction || 0))}</span>
                   </div>
                 </div>
               </div>

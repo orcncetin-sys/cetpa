@@ -30,6 +30,7 @@ import { etiketPayload } from '../services/mikroEvrak';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Printer, Search } from 'lucide-react';
 import { eslesir } from '../utils/arama';
+import { paraYaz } from '../utils/currency';
 
 export interface LabelItem {
   id:    string;
@@ -74,7 +75,7 @@ function Label({ item, lang }: { item: LabelItem; lang: boolean }) {
         <div>
           <div style={{ fontSize: '6pt', color: '#9ca3af', letterSpacing: '0.5px' }}>{lang ? 'FİYAT' : 'PRICE'}</div>
           <div style={{ fontSize: '11pt', fontWeight: 800, color: '#111827' }}>
-            ₺{item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            {paraYaz(item.price)}
           </div>
           <div style={{ fontSize: '5.5pt', color: '#9ca3af' }}>/{item.unit || (lang ? 'ADET' : 'PC')}</div>
         </div>

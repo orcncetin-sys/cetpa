@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { itemCostTRY, brutMarj, type ReportsCtx } from '../useReportsData';
+import { paraYaz } from '../../../utils/currency';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -308,7 +309,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
                 );
               })}
             </div>
-            <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? `Bu ay: ₺${currAOV.toLocaleString()} ortalama sipariş değeri · ${months198[months198.length-1].count} sipariş` : `This month: ₺${currAOV.toLocaleString()} AOV · ${months198[months198.length-1].count} orders`}</p>
+            <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? `Bu ay: ${paraYaz(currAOV, { ondalik: 0 })} ortalama sipariş değeri · ${months198[months198.length-1].count} sipariş` : `This month: ${paraYaz(currAOV, { ondalik: 0 })} AOV · ${months198[months198.length-1].count} orders`}</p>
           </div>
         );
       })()}

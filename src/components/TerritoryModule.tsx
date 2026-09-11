@@ -22,6 +22,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 import { useCountryList, useCitiesForCountry } from '../hooks/useWorldGeo';
 
@@ -176,7 +177,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
   const selectedTerritory = territories.find(t => t.id === selectedTerritoryId) ?? null;
   const selectedStats = selectedTerritory ? territoryStats(selectedTerritory) : null;
 
-  const fmtTRY = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+  const fmtTRY = (v: number) => paraYaz(v, { ondalik: 0 });
 
   return (
     <div className="space-y-4">
@@ -347,8 +348,8 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                       style={{ width: `${Math.min(100, p)}%`, backgroundColor: p >= 100 ? '#10b981' : p >= 70 ? '#f59e0b' : '#ef4444' }} />
                   </div>
                   <div className="flex justify-between text-xs mt-0.5 text-gray-400">
-                    <span>{Math.round(stats.actual).toLocaleString('tr-TR')} ₺</span>
-                    <span>{Math.round(t.revenueTarget).toLocaleString('tr-TR')} ₺</span>
+                    <span>{paraYaz(stats.actual, { ondalik: 0 })}</span>
+                    <span>{paraYaz(t.revenueTarget, { ondalik: 0 })}</span>
                   </div>
                 </div>
               )}
@@ -409,7 +410,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
               {selectedTerritory.revenueTarget > 0 && (
                 <div className="ml-auto text-right">
                   <p className="text-xs text-blue-400">{tr ? 'Yıllık Kota' : 'Annual Quota'}</p>
-                  <p className="font-bold text-blue-800">₺{Math.round(selectedTerritory.revenueTarget).toLocaleString('tr-TR')}</p>
+                  <p className="font-bold text-blue-800">{paraYaz(selectedTerritory.revenueTarget, { ondalik: 0 })}</p>
                 </div>
               )}
             </div>

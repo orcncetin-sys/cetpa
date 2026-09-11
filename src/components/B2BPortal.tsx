@@ -24,7 +24,7 @@ import type {
 } from '../types';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
-import { kurCevir } from '../utils/currency';
+import { paraYaz, tlYaz } from '../utils/currency';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
 import { exportOrderPDF } from '../utils/pdf';
 import { syncShopify } from '../services/shopifyService';
@@ -94,14 +94,10 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   // Bayi/kredi gostergelerinin para birimi bicimleyicisi. Tutarlar TL tutulur;
   // secili para birimine ceviri YALNIZ gercek kur varsa yapilir. Kur yoksa
   // uydurma yedek (eski `exchangeRates?.USD || 1`: TL rakamini '$' ile basip
-  // ~38x sisiriyordu) yerine '—' gosterilir. TRY seciliyken kur gerekmez,
-  // kurCevir tutari aynen dondurur — davranis degismez.
-  const dcSym = dealerCurrency === 'TRY' ? '₺' : dealerCurrency === 'USD' ? '$' : '€';
-  const dcFormat = (tutarTL: number): string => {
-    const cevrilen = kurCevir(tutarTL, dealerCurrency, exchangeRates);
-    if (cevrilen === null) return '—';
-    return `${dcSym}${cevrilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-  };
+  // ~38x sisiriyordu) yerine '—' gosterilir. TRY seciliyken kur gerekmez.
+  // Govde tek kaynakta (tlYaz, Faz 2 1/n) — imza korundu, cagri yerleri degismedi.
+  const dcFormat = (tutarTL: number): string =>
+    tlYaz(tutarTL, { birim: dealerCurrency, rates: exchangeRates, ondalik: 0 });
 
   useEffect(() => {
     if (!user || !userRole) return;
@@ -442,7 +438,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <td className="text-gray-500">{d.email as string}</td>
                       <td className="hidden md:table-cell text-gray-500">{d.phone as string}</td>
                       <td className="hidden sm:table-cell"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand">{d.priceTier as string || 'Dealer'}</span></td>
-                      <td className="hidden lg:table-cell font-semibold">{dcFormat((d.creditLimit as number) || 0)}</td>
+                      <td className="hidden lg:table-cell font-semibold">{dcFormat(d.creditLimit as number)}</td>
                       <td className="hidden lg:table-cell text-gray-500">{d.paymentTerms as string || '30'} {currentLanguage === 'tr' ? 'gün' : 'days'}</td>
                       <td><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.status === 'Active' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>{d.status as string || 'Active'}</span></td>
                       <td>
@@ -497,10 +493,10 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                   .map(pl => (
                     <tr key={pl.id}>
                       <td><p className="font-semibold">{(pl.productName as string) || (pl.itemName as string)}</p><p className="text-xs text-gray-400">{pl.sku as string}</p></td>
-                      <td className="text-right font-semibold">{(pl.prices?.['Retail'] ?? 0).toLocaleString('tr-TR')} {(pl.currency as string) || '₺'}</td>
-                      <td className="text-right text-gray-500 hidden sm:table-cell">{(pl.prices?.['B2B Standard'] ?? 0).toLocaleString('tr-TR')}</td>
-                      <td className="text-right text-gray-500 hidden sm:table-cell">{(pl.prices?.['B2B Premium'] ?? 0).toLocaleString('tr-TR')}</td>
-                      <td className="text-right text-brand font-bold">{(pl.prices?.['Dealer'] ?? 0).toLocaleString('tr-TR')}</td>
+                      <td className="text-right font-semibold">{paraYaz(pl.prices?.['Retail'], { birim: pl.currency as string | undefined })}</td>
+                      <td className="text-right text-gray-500 hidden sm:table-cell">{paraYaz(pl.prices?.['B2B Standard'], { birim: pl.currency as string | undefined })}</td>
+                      <td className="text-right text-gray-500 hidden sm:table-cell">{paraYaz(pl.prices?.['B2B Premium'], { birim: pl.currency as string | undefined })}</td>
+                      <td className="text-right text-brand font-bold">{paraYaz(pl.prices?.['Dealer'], { birim: pl.currency as string | undefined })}</td>
                       <td><div className="flex items-center justify-end gap-1">
                         {canManagePrices ? (<>
                           <button onClick={() => { setSelectedPriceList(pl); setIsEditingPriceList(true); }} className="action-btn-edit"><Edit2 className="w-3.5 h-3.5" /></button>
@@ -542,7 +538,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                       <tr key={q.id} onClick={() => setSelectedQuotation(q)} className="border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer group">
                         <td className="py-2.5 px-2"><p className="font-semibold text-[#1D1D1F] truncate max-w-[140px]">{q.customerName}</p><p className="text-[10px] text-[#86868B]">{q.items?.length || 0} {currentT.items || 'ürün'}</p></td>
                         <td className="py-2.5 px-2 font-mono text-xs text-[#86868B] hidden md:table-cell">#{q.id.slice(0, 8)}</td>
-                        <td className="py-2.5 px-2 font-bold text-[#1D1D1F] whitespace-nowrap">{(q.totalAmount ?? 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {q.currency || 'TL'}</td>
+                        <td className="py-2.5 px-2 font-bold text-[#1D1D1F] whitespace-nowrap">{paraYaz(q.totalAmount, { birim: q.currency })}</td>
                         <td className="py-2.5 px-2">
                           <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase whitespace-nowrap', q.status === 'approved' ? 'bg-green-100 text-green-600' : q.status === 'Converted to Order' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600')}>
                             {q.status === 'approved' ? currentT.approved : q.status === 'Converted to Order' ? currentT.converted : currentT.pending}

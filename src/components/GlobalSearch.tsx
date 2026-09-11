@@ -9,6 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Package, Users, ShoppingCart, X, ArrowRight, Hash } from 'lucide-react';
 import type { Order, Lead, InventoryItem } from '../types';
+import { paraYaz } from '../utils/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ function buildResults(
         type:       'order',
         id:         o.id,
         title:      o.customerName,
-        subtitle:   `#${o.shopifyOrderId ?? o.id.slice(0, 8)} · ₺${o.totalPrice.toLocaleString('tr-TR')}`,
+        subtitle:   `#${o.shopifyOrderId ?? o.id.slice(0, 8)} · ${paraYaz(o.totalPrice)}`,
         badge:      o.status,
         badgeColor: STATUS_COLORS[o.status] ?? 'bg-gray-100 text-gray-600',
         score:      s,

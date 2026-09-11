@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Download, Search, Plus, Eye, Edit2, Trash2, Upload, X, Save } from 'lucide-react';
 import { type Customer } from '../../types';
+import { paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 
@@ -128,7 +129,7 @@ export default function MusterilerTab({
                     <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{c.phone || '—'}</td>
                     <td className="py-2.5 px-3 text-right hidden sm:table-cell">
                       <span className={`text-xs font-bold ${(c.balance || 0) > 0 ? 'text-red-600' : (c.balance || 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                        ₺{(c.balance || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        {paraYaz(c.balance, { ondalik: 0 })}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-center hidden sm:table-cell">

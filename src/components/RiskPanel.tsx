@@ -6,6 +6,7 @@ import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { tlYaz } from '../utils/currency';
 
 interface CustomerRisk {
   id: string;
@@ -35,17 +36,10 @@ interface RiskPanelProps {
 type Currency = 'TRY' | 'USD' | 'EUR';
 
 // ─── Currency helpers ─────────────────────────────────────────────────────────
-function convertAmount(tryAmount: number, currency: Currency, rates?: ExchangeRates | null): number {
-  if (currency === 'TRY' || !rates) return tryAmount;
-  const rate = currency === 'USD' ? rates.USD : rates.EUR;
-  return rate ? tryAmount / rate : tryAmount;
-}
-
+// Tek kaynak (Faz 2 1/n): tlYaz kur yoksa '—' basar — eski convertAmount kur yokken
+// TL tutarını '$' sembolüyle geri veriyordu (sahte kur). İmza korundu.
 function formatAmount(tryAmount: number, currency: Currency, rates?: ExchangeRates | null): string {
-  const val = convertAmount(tryAmount, currency, rates);
-  if (currency === 'USD') return `$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  if (currency === 'EUR') return `€${val.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  return `₺${val.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return tlYaz(tryAmount, { birim: currency, rates, ondalik: 0 });
 }
 
 // ─── Currency Toggle ──────────────────────────────────────────────────────────
@@ -450,7 +444,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
                 <tr key={order.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 font-medium text-gray-900">{order.shopifyOrderId || order.id}</td>
                   <td className="px-6 py-4 text-gray-600">{order.customerName}</td>
-                  <td className="px-6 py-4 text-right font-mono">{formatAmount(order.totalPrice || 0, activeCurrency, exchangeRates)}</td>
+                  <td className="px-6 py-4 text-right font-mono">{formatAmount(order.totalPrice, activeCurrency, exchangeRates)}</td>
                   <td className="px-6 py-4 text-center">
                     <span className="px-2 py-1 rounded-full text-xs font-bold bg-red-50 text-red-600 border border-red-100">
                       {tr ? 'Gecikmiş' : 'Overdue'}

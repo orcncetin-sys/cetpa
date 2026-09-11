@@ -1,4 +1,5 @@
 // ─── Subscription Data Model ─────────────────────────────────────────────────
+import { paraYaz } from '../utils/currency';
 
 export type SubscriptionPlan = 'starter' | 'professional' | 'business' | 'enterprise';
 export type BillingCycle = 'monthly' | 'yearly';
@@ -231,7 +232,7 @@ export function daysRemaining(subscription: UserSubscription | null): number {
 
 export function formatPrice(amount: number, lang: 'tr' | 'en' = 'tr'): string {
   if (amount === 0) return lang === 'tr' ? 'Özel Fiyat' : 'Custom';
-  return `₺${amount.toLocaleString('tr-TR')}`;
+  return paraYaz(amount, { ondalik: 0 });
 }
 
 export function yearlySavingsPercent(plan: PlanConfig): number {

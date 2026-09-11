@@ -6,6 +6,7 @@ import {
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
+import { paraYaz } from '../utils/currency';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
   MapPin, Phone, Mail, User, CheckCircle, Package
@@ -362,15 +363,15 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
                   return (
                     <tr key={row.subeAdi} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-3 px-3 font-semibold text-gray-900">{row.subeAdi}</td>
-                      <td className="py-3 px-3 text-right text-gray-700">₺ {row.buAyGelir.toLocaleString()}</td>
-                      <td className="py-3 px-3 text-right text-gray-500">₺ {row.buAyMaliyet.toLocaleString()}</td>
-                      <td className="py-3 px-3 text-right font-bold text-green-600">₺ {buAyKar.toLocaleString()}</td>
+                      <td className="py-3 px-3 text-right text-gray-700">{paraYaz(row.buAyGelir, { ondalik: 0 })}</td>
+                      <td className="py-3 px-3 text-right text-gray-500">{paraYaz(row.buAyMaliyet, { ondalik: 0 })}</td>
+                      <td className="py-3 px-3 text-right font-bold text-green-600">{paraYaz(buAyKar, { ondalik: 0 })}</td>
                       <td className="py-3 px-3 text-right">
                         <span className={`text-sm font-bold ${marj >= 35 ? 'text-green-600' : marj >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{marj}%</span>
                       </td>
                       <td className="py-3 px-3 text-right text-gray-400">
                         <span className={trend ? 'text-green-500' : 'text-red-400'}>{trend ? '▲' : '▼'}</span>
-                        {' '}₺ {gecenAyKar.toLocaleString()}
+                        {' '}{paraYaz(gecenAyKar, { ondalik: 0 })}
                       </td>
                     </tr>
                   );
@@ -392,7 +393,7 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
                   <div key={row.subeAdi}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-semibold text-gray-700">{row.subeAdi}</span>
-                      <span className="text-xs text-gray-500">₺ {row.buAyGelir.toLocaleString()} <span className="text-green-600 font-semibold">({karPct}% marj)</span></span>
+                      <span className="text-xs text-gray-500">{paraYaz(row.buAyGelir, { ondalik: 0 })} <span className="text-green-600 font-semibold">({karPct}% marj)</span></span>
                     </div>
                     <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                       <div className="h-full bg-brand rounded-full transition-all" style={{ width: `${pct}%` }} />

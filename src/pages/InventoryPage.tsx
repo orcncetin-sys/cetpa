@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { doc, collection, addDoc, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
+import { paraYaz } from '../utils/currency';
 import AIInlineNudge from '../components/AIInlineNudge';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import type { LabelItem } from '../components/LabelSheetModal';
@@ -294,7 +295,7 @@ export default function InventoryPage(props: Props) {
                               ))}
                             </Pie>
                             <Tooltip
-                              formatter={sayiBicimleyici((v) => [`₺${v.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`, currentLanguage === 'tr' ? 'Değer' : 'Value'])}
+                              formatter={sayiBicimleyici((v) => [paraYaz(v, { ondalik: 0 }), currentLanguage === 'tr' ? 'Değer' : 'Value'])}
                               contentStyle={{ fontSize: 11, borderRadius: 8 }}
                             />
                           </RePieChart>
@@ -758,10 +759,10 @@ export default function InventoryPage(props: Props) {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                       {[
-                        {label:tr574?'Toplam Değer':'Total Value', val:`₺${totalValue574.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, color:'text-blue-700'},
+                        {label:tr574?'Toplam Değer':'Total Value', val:paraYaz(totalValue574, { ondalik: 0 }), color:'text-blue-700'},
                         {label:tr574?'Toplam SKU':'Total SKUs', val:String(inventory.length), color:'text-gray-700'},
                         {label:tr574?'Toplam Stok':'Total Stock', val:inventory.reduce((s,i)=>s+(i.stockLevel||0),0).toLocaleString(), color:'text-gray-700'},
-                        {label:tr574?'Düşük Stok Değeri':'Low-Stock Value', val:`₺${lowStockValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}`, color:'text-amber-600'},
+                        {label:tr574?'Düşük Stok Değeri':'Low-Stock Value', val:paraYaz(lowStockValue, { ondalik: 0 }), color:'text-amber-600'},
                       ].map(k=>(
                         <div key={k.label} className="bg-gray-50 rounded-xl p-3">
                           <p className="text-[10px] text-gray-500 uppercase font-semibold">{k.label}</p>
@@ -978,7 +979,7 @@ export default function InventoryPage(props: Props) {
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h3 className="font-bold text-gray-900 text-sm">{tr588?'🤝 Konsinye Stok':'🤝 Consignment Stock'}</h3>
-                        {p588Consign.length>0&&<p className="text-xs text-gray-500 mt-0.5">{tr588?'Depodaki değer:':'Value on hand:'} <span className="font-bold text-blue-600">₺{totalConsignValue.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span></p>}
+                        {p588Consign.length>0&&<p className="text-xs text-gray-500 mt-0.5">{tr588?'Depodaki değer:':'Value on hand:'} <span className="font-bold text-blue-600">{paraYaz(totalConsignValue, { ondalik: 0 })}</span></p>}
                       </div>
                       {hasFullAccess('inventory') && (
                         <button onClick={()=>setP588ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">

@@ -9,6 +9,7 @@ import { Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
 import { eslesir } from '../utils/arama';
+import { paraYaz } from '../utils/currency';
 
 interface Oneri {
   sku: string; urunAdi: string; oneriTipi: 'yeniden-siparis' | 'capraz-satis';
@@ -113,7 +114,7 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
               <p className="text-[10px] text-gray-400 mt-1">
                 {tr ? 'Öneri:' : 'Qty:'} <span className="font-bold text-gray-700">{o.onerilenMiktar}</span>
                 {' · '}{tr ? 'Stok:' : 'Stock:'} {o.guncelStok ?? '—'}
-                {' · '}{tr ? 'Birim:' : 'Unit:'} {o.birimFiyat != null ? `₺${o.birimFiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` : '—'}
+                {' · '}{tr ? 'Birim:' : 'Unit:'} {paraYaz(o.birimFiyat)}
               </p>
             </div>
           ))}

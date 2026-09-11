@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
 import { type JournalEntry } from '../../types';
-import { formatInCurrency } from '../../utils/currency';
+import { formatInCurrency, paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, HESAP_PLANI, type AccountingT } from './shared';
 
 /**
@@ -21,7 +21,7 @@ const kurEtiketi = (
   if (!kur || !isFinite(kur) || kur <= 0) {
     return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
   }
-  return `1 ${currency} = ₺${kur.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `1 ${currency} = ${paraYaz(kur)}`;
 };
 
 type JournalForm = {

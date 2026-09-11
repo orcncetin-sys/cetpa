@@ -15,6 +15,7 @@ import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, Alert
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { registerTurkishFont } from '../utils/pdfFont';
+import { paraYaz } from '../utils/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -139,7 +140,7 @@ async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(26, 58, 92);
   doc.text(t ? 'Güncel Cari Bakiye:' : 'Current Account Balance:', margin + 6, afterTable + 9);
-  const balStr = `₺${data.lead.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
+  const balStr = paraYaz(data.lead.bakiye);
   doc.text(balStr, pageW - margin - 6 - doc.getTextWidth(balStr), afterTable + 9);
   doc.setFontSize(8);
   doc.setFont('Roboto', 'normal');
@@ -227,8 +228,8 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
       const pdfBase64 = doc.output('datauristring');
       // Send a WhatsApp message with a link/notification (PDF inline not supported in basic API)
       const msg = t
-        ? `Merhaba ${data.lead.name}, ${data.period} dönemi cari hesap mutabakat mektubumuz hazırlanmıştır. Toplam bakiye: ₺${data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}. Lütfen kayıtlarınızla karşılaştırınız.`
-        : `Hello ${data.lead.name}, your account reconciliation letter for ${data.period} is ready. Total: ₺${data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}. Please compare with your records.`;
+        ? `Merhaba ${data.lead.name}, ${data.period} dönemi cari hesap mutabakat mektubumuz hazırlanmıştır. Toplam bakiye: ${paraYaz(data.totalAmount)}. Lütfen kayıtlarınızla karşılaştırınız.`
+        : `Hello ${data.lead.name}, your account reconciliation letter for ${data.period} is ready. Total: ${paraYaz(data.totalAmount)}. Please compare with your records.`;
       const r = await authFetch('/api/whatsapp/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: data.lead.phone, message: msg }),
@@ -318,7 +319,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
             </div>
             <div>
               <div className="text-[10px] text-gray-500 font-bold uppercase">{t ? 'Toplam Tutar' : 'Total Amount'}</div>
-              <div className="text-xs font-bold text-[#1a3a5c]">₺{data.totalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</div>
+              <div className="text-xs font-bold text-[#1a3a5c]">{paraYaz(data.totalAmount)}</div>
             </div>
           </div>
 
@@ -329,7 +330,7 @@ export default function MutabakatPanel({ leadId, currentLanguage = 'tr' }: Mutab
                 <div key={o.id} className="flex items-center justify-between px-3 py-2 text-xs">
                   <span className="font-mono text-gray-500">{o.orderNo}</span>
                   <span className="text-gray-400">{o.date}</span>
-                  <span className="font-bold text-gray-800">₺{o.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                  <span className="font-bold text-gray-800">{paraYaz(o.amount)}</span>
                 </div>
               ))}
             </div>

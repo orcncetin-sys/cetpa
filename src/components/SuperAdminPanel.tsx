@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
+import { paraYaz } from '../utils/currency';
 import OpsWatchdogCard from './OpsWatchdogCard';
 import TrafikKarti from './TrafikKarti';
 import ModuleStatusBoard from './ModuleStatusBoard';
@@ -87,8 +88,7 @@ function fmtDate(v: unknown, lang: string): string {
   return new Date(ms).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 function fmtMoney(v: number, currency = 'TRY'): string {
-  const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₺';
-  return `${sym}${Math.round(v).toLocaleString('tr-TR')}`;
+  return paraYaz(v, { birim: currency, ondalik: 0 });
 }
 
 /**

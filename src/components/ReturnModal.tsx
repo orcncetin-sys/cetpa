@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, X } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
+import { paraYaz } from '../utils/currency';
 import type { Order } from '../types';
 import type { Language } from '../translations';
 
@@ -93,7 +94,7 @@ export default function ReturnModal({
                   max={order.totalPrice}
                 />
               </div>
-              <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} ₺{(order.totalPrice || 0).toLocaleString('tr-TR')}</p>
+              <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Maks:' : 'Max:'} {paraYaz(order.totalPrice)}</p>
             </div>
           </div>
           <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
@@ -107,7 +108,7 @@ export default function ReturnModal({
                 // İade tutarı 0 ile sipariş toplamı arasında olmalı (max= sadece UI ipucuydu).
                 const maxRet = Number(order.totalPrice) || 0;
                 if (returnAmount < 0 || returnAmount > maxRet + 0.01) {
-                  onError(currentLanguage === 'tr' ? `İade tutarı 0 ile ₺${maxRet.toLocaleString('tr-TR')} arasında olmalı.` : `Refund must be between 0 and ${maxRet}.`);
+                  onError(currentLanguage === 'tr' ? `İade tutarı 0 ile ${paraYaz(maxRet)} arasında olmalı.` : `Refund must be between 0 and ${maxRet}.`);
                   return;
                 }
                 setReturnSubmitting(true);

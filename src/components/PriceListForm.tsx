@@ -5,6 +5,7 @@ import { X, Save, FileText, Search, Trash2, Tag, Plus, ChevronUp, Check, Package
 import { collection, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { type InventoryItem } from '../types';
+import { paraYaz } from '../utils/currency';
 
 interface PriceListItem {
   productId: string;
@@ -241,7 +242,7 @@ export default function PriceListForm({ isOpen, onClose, onSave, initialData, in
                       ) : (
                         filteredInventory.map(item => {
                           const added = isAdded(item.id);
-                          const price = item.prices?.['Retail'] ?? item.price ?? 0;
+                          const price = item.prices?.['Retail'] ?? item.price;
                           return (
                             <button
                               key={item.id}
@@ -262,7 +263,7 @@ export default function PriceListForm({ isOpen, onClose, onSave, initialData, in
                                 <p className="text-[10px] text-gray-400">SKU: {item.sku}</p>
                               </div>
                               <span className="text-sm font-bold text-gray-700 flex-shrink-0">
-                                ₺{price.toLocaleString('tr-TR')}
+                                {paraYaz(price)}
                               </span>
                             </button>
                           );
@@ -305,7 +306,7 @@ export default function PriceListForm({ isOpen, onClose, onSave, initialData, in
                 <div key={item.productId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl group">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-gray-900 truncate">{item.name}</p>
-                    <p className="text-[10px] text-gray-400">SKU: {item.sku} · Liste: ₺{item.basePrice.toLocaleString('tr-TR')}</p>
+                    <p className="text-[10px] text-gray-400">SKU: {item.sku} · Liste: {paraYaz(item.basePrice)}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="text-[10px] font-bold text-gray-400 hidden sm:block">Özel Fiyat</span>
@@ -343,7 +344,7 @@ export default function PriceListForm({ isOpen, onClose, onSave, initialData, in
               <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 rounded-xl text-xs text-gray-500">
                 <span>{formData.items.length} ürün seçildi</span>
                 <span className="font-bold text-gray-700">
-                  Toplam Liste Değeri: ₺{formData.items.reduce((s, i) => s + i.customPrice, 0).toLocaleString('tr-TR')}
+                  Toplam Liste Değeri: {paraYaz(formData.items.reduce((s, i) => s + i.customPrice, 0))}
                 </span>
               </div>
             )}

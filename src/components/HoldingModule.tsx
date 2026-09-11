@@ -3,6 +3,7 @@ import {
   collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp,
 } from '../lib/dbClient';
 import { db } from '../firebase';
+import { paraYaz } from '../utils/currency';
 import { Building2, Plus, BarChart3, FileText, ArrowLeftRight, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
 
 interface HoldingModuleProps {
@@ -60,9 +61,9 @@ const ACCOUNT_TYPES: { value: GLAccount['type']; label: string; sign: 1 | -1 }[]
 ];
 
 // `null` = kur verisi olmadigi icin hesaplanamadi. Uydurma sayi yerine '—'.
+// Kurus VARSA gosterilir (eski Intl currency min0/max2 davranisi): 1234 → '₺1.234', 1234.56 → '₺1.234,56'.
 function fmt(n: number | null, currency = 'TRY') {
-  if (n === null) return '—';
-  return new Intl.NumberFormat('tr-TR', { style: 'currency', currency, minimumFractionDigits: 0 }).format(n);
+  return paraYaz(n, { birim: currency, ondalik: Number.isInteger(Number(n)) ? 0 : 2 });
 }
 
 export default function HoldingModule({ currentLanguage, isAuthenticated, exchangeRates }: HoldingModuleProps) {

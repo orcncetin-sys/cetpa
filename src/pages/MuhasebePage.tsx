@@ -20,7 +20,7 @@ import AccountingModule from '../components/AccountingModule';
 import { SortHeader } from '../components/accounting/shared';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
 import { itemCostTRY } from '../utils/cost';
-import { kurCevir } from '../utils/currency';
+import { paraYaz, tlYaz } from '../utils/currency';
 import { authFetch } from '../services/authFetch';
 import { MUHASEBE_MENU } from '../lib/muhasebeMenu';
 import TahsilatModule from '../components/TahsilatModule';
@@ -407,8 +407,8 @@ export default function MuhasebePage(props: Props) {
                         </div>
                         <div className="grid grid-cols-3 gap-3 mb-5">
                           {[
-                            { label: currentLanguage==='tr'?'KDV Hariç Ciro':'Net Revenue', value: `₺${totalNet.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-blue-600' },
-                            { label: currentLanguage==='tr'?'KDV Tutarı':'VAT Amount', value: `₺${totalKDV.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-purple-600' },
+                            { label: currentLanguage==='tr'?'KDV Hariç Ciro':'Net Revenue', value: paraYaz(totalNet, { ondalik: 0 }), color: 'text-blue-600' },
+                            { label: currentLanguage==='tr'?'KDV Tutarı':'VAT Amount', value: paraYaz(totalKDV, { ondalik: 0 }), color: 'text-purple-600' },
                             { label: currentLanguage==='tr'?'Efektif KDV Oranı':'Effective VAT Rate', value: totalNet > 0 ? `%${((totalKDV/totalNet)*100).toFixed(1)}` : '—', color: 'text-gray-700' },
                           ].map(k => (
                             <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -484,7 +484,7 @@ export default function MuhasebePage(props: Props) {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Kritik':'Critical'}</p><p className="text-xl font-black text-red-600">{criticalCount}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Açık Fatura':'Unpaid'}</p><p className="text-xl font-black text-amber-600">{withDays.length}</p></div>
-                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Toplam Bakiye':'Total O/S'}</p><p className="text-lg font-black text-orange-600">₺{Math.round(totalUnpaid).toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Toplam Bakiye':'Total O/S'}</p><p className="text-lg font-black text-orange-600">{paraYaz(totalUnpaid, { ondalik: 0 })}</p></div>
                             </div>
                             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                               {withDays.slice(0,20).map(o=>{
@@ -497,7 +497,7 @@ export default function MuhasebePage(props: Props) {
                                     </div>
                                     <div className="flex items-center gap-3 shrink-0">
                                       <span className={`text-xs font-bold ${bucket.color}`}>{bucket.label}</span>
-                                      <span className="text-xs font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>
+                                      <span className="text-xs font-mono text-gray-700">{paraYaz(o.totalPrice, { ondalik: 0 })}</span>
                                     </div>
                                   </div>
                                 );
@@ -546,14 +546,9 @@ export default function MuhasebePage(props: Props) {
                         });
                         const maxAmt110 = Math.max(...apBuckets.map(b => b.orders.reduce((s, po) => s + po.totalAmount, 0)), 1);
 
-                        const apSym = apCurrency === 'TRY' ? '₺' : apCurrency === 'USD' ? '$' : '€';
                         // Kur yoksa FX_FALLBACK (2024'ten kalma sabit 38/41) ile bolunuyordu.
-                        // kurCevir kur yoksa null doner; null'da sembol bile basmiyoruz ("$—" sacma).
-                        const fmtAP = (n: number) => {
-                          if (apCurrency === 'TRY') return `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-                          const c = kurCevir(n, apCurrency, exchangeRates);
-                          return c === null ? '—' : `${apSym}${c.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                        };
+                        // tlYaz kur yoksa '—' doner; null'da sembol bile basmiyoruz ("$—" sacma). TL 0, doviz 2 ondalik.
+                        const fmtAP = (n: number) => tlYaz(n, { birim: apCurrency, rates: exchangeRates, ondalik: apCurrency === 'TRY' ? 0 : 2 });
                         return (
                           <>
                             {/* Summary KPIs */}
@@ -706,12 +701,7 @@ export default function MuhasebePage(props: Props) {
                           setDoc(doc(db, 'settings', 'budgets'), { [budgetMonth]: newBudgets }, { merge: true }).catch(() => {});
                         };
 
-                        const butceSym = butceCurrency === 'TRY' ? '₺' : butceCurrency === 'USD' ? '$' : '€';
-                        const fmtButce = (n: number) => {
-                          if (butceCurrency === 'TRY') return `₺${n.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-                          const c = kurCevir(n, butceCurrency, exchangeRates);
-                          return c === null ? '—' : `${butceSym}${c.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-                        };
+                        const fmtButce = (n: number) => tlYaz(n, { birim: butceCurrency, rates: exchangeRates, ondalik: 0 });
                         return (
                           <>
                             {/* Month picker + summary */}
@@ -967,7 +957,7 @@ export default function MuhasebePage(props: Props) {
                             {expiringSoon>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">⚠️ {expiringSoon} {tr623?'L/C 30 gün içinde sona eriyor':'L/C expiring within 30 days'}</div>}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Açık L/C':'Open L/C'}</p><p className="text-xl font-black text-emerald-600">{openLCs.length}</p></div>
-                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Toplam Değer':'Total Value'}</p><p className="text-base font-black text-blue-600">${totalValue623.toLocaleString('tr-TR')}</p></div>
+                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Toplam Değer':'Total Value'}</p><p className="text-base font-black text-blue-600">{paraYaz(totalValue623, { birim: 'USD' })}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Sona Yakın':'Expiring Soon'}</p><p className="text-xl font-black text-amber-600">{expiringSoon}</p></div>
                             </div>
                             {p623ShowForm && (
@@ -998,7 +988,7 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-3 py-2.5 font-medium text-gray-800">{lc.bank}</td>
                                       <td className="px-3 py-2.5 text-gray-600">{lc.beneficiary}</td>
                                       <td className="px-3 py-2.5 font-mono text-gray-500">{lc.ref}</td>
-                                      <td className="px-3 py-2.5 font-bold">{lc.currency} {lc.amount.toLocaleString()}</td>
+                                      <td className="px-3 py-2.5 font-bold">{paraYaz(lc.amount, { birim: lc.currency })}</td>
                                       <td className="px-3 py-2.5 text-gray-500">{lc.expiryDate?new Date(lc.expiryDate).toLocaleDateString('tr-TR'):'—'}</td>
                                       <td className="px-3 py-2.5"><select value={lc.status} onChange={async e=>{try{await updateDoc(doc(db,'letterOfCredit',lc.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statCls[lc.status]}`}>{['Açık','Kullanıldı','Sona Erdi','İptal'].map(s=><option key={s}>{s}</option>)}</select></td>
                                     </tr>
@@ -1064,8 +1054,8 @@ export default function MuhasebePage(props: Props) {
                                         <tr key={r.invoiceId} className="hover:bg-gray-50/50">
                                           <td className="px-3 py-2.5 font-mono text-gray-600">{r.invoiceNo}</td>
                                           <td className="px-3 py-2.5 font-medium text-gray-800">{r.customer}</td>
-                                          <td className="px-3 py-2.5 font-mono text-gray-700">₺{r.invoiceAmount.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
-                                          <td className="px-3 py-2.5 font-mono text-emerald-600">₺{r.matchedAmount.toLocaleString('tr-TR',{maximumFractionDigits:0})}</td>
+                                          <td className="px-3 py-2.5 font-mono text-gray-700">{paraYaz(r.invoiceAmount, { ondalik: 0 })}</td>
+                                          <td className="px-3 py-2.5 font-mono text-emerald-600">{paraYaz(r.matchedAmount, { ondalik: 0 })}</td>
                                           <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="w-12 bg-gray-100 rounded-full h-1.5 overflow-hidden"><div className={`h-full rounded-full ${r.confidence>80?'bg-emerald-400':r.confidence>60?'bg-amber-400':'bg-red-400'}`} style={{width:`${r.confidence}%`}}/></div><span className="text-gray-500">%{r.confidence}</span></div></td>
                                           <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusCls[r.status]}`}>{r.status}</span></td>
                                         </tr>
@@ -1153,13 +1143,9 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-sm text-gray-400">{currentLanguage === 'tr' ? 'Tüm siparişler tahsil edildi.' : 'All orders collected.'}</p>
                           </div>
                         );
-                        const s131 = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
                         // Sembol eskiden cagri yerinde ({s131}{f131(v)}) ekleniyordu; kur yokken
-                        // "$—" cikmasin diye artik formatleyicinin ICINDE.
-                        const f131 = (v: number) => {
-                          const c = kpiCurrency === 'TRY' ? v : kurCevir(v, kpiCurrency, exchangeRates);
-                          return c === null ? '—' : `${s131}${c.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
-                        };
+                        // "$—" cikmasin diye artik formatleyicinin ICINDE (tlYaz).
+                        const f131 = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                         return (
                           <div className="space-y-3">
                             {/* Summary cards */}
@@ -1245,7 +1231,7 @@ export default function MuhasebePage(props: Props) {
                                   <p className="text-xs font-medium text-gray-800 truncate">{o.customerName}</p>
                                   <p className="text-[10px] text-gray-400">{o.daysOld}g {currentLanguage==='tr'?'gecikmiş':'overdue'}</p>
                                 </div>
-                                <span className="text-xs font-bold text-red-600 shrink-0">{fmtKpi((o.totalPrice||0))}</span>
+                                <span className="text-xs font-bold text-red-600 shrink-0">{fmtKpi(o.totalPrice)}</span>
                               </div>
                             );
                           })}
@@ -1361,14 +1347,7 @@ export default function MuhasebePage(props: Props) {
                     // Kur ETIKETI ("₺1 = $x") icin ham kur — yoksa null ve rakam BASMIYORUZ.
                     const pnlKurHam = exchangeRates?.[p563PnlCurrency];
                     const pnlKur = typeof pnlKurHam === 'number' && isFinite(pnlKurHam) && pnlKurHam > 0 ? pnlKurHam : null;
-                    const fmtPnl  = (v: number) => {
-                      const c = p563PnlCurrency === 'TRY' ? v : kurCevir(v, p563PnlCurrency, exchangeRates);
-                      if (c === null) return '—';
-                      return `${pnlSym}${c.toLocaleString(
-                        p563PnlCurrency === 'TRY' ? 'tr-TR' : p563PnlCurrency === 'EUR' ? 'de-DE' : 'en-US',
-                        { maximumFractionDigits: 0 }
-                      )}`;
-                    };
+                    const fmtPnl  = (v: number) => tlYaz(v, { birim: p563PnlCurrency, rates: exchangeRates, ondalik: 0 });
 
                     const now143 = new Date();
                     const months143: { label: string; revenue: number; cogs: number; grossProfit: number }[] = [];
@@ -1470,7 +1449,7 @@ export default function MuhasebePage(props: Props) {
                                   {/* Show TRY reference when not in TRY mode */}
                                   {p563PnlCurrency !== 'TRY' && (
                                     <span className="text-xs text-gray-400 font-mono tabular-nums">
-                                      ₺{Math.abs(row.value).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                      {paraYaz(Math.abs(row.value), { ondalik: 0 })}
                                     </span>
                                   )}
                                   <span className={`text-sm font-bold tabular-nums ${row.positive ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -1544,8 +1523,8 @@ export default function MuhasebePage(props: Props) {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                           {[
                             { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${(grossMarginBE*100).toFixed(1)}`, color: 'text-blue-600' },
-                            { label: currentLanguage==='tr'?'Tahmini Sabit Gider':'Est. Fixed Costs', value: `₺${estFixedCosts.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-red-500' },
-                            { label: currentLanguage==='tr'?'Başabaş Cirosu':'Break-Even Revenue', value: `₺${breakEvenRev.toLocaleString(undefined,{maximumFractionDigits:0})}`, color: 'text-amber-600' },
+                            { label: currentLanguage==='tr'?'Tahmini Sabit Gider':'Est. Fixed Costs', value: paraYaz(estFixedCosts, { ondalik: 0 }), color: 'text-red-500' },
+                            { label: currentLanguage==='tr'?'Başabaş Cirosu':'Break-Even Revenue', value: paraYaz(breakEvenRev, { ondalik: 0 }), color: 'text-amber-600' },
                             { label: currentLanguage==='tr'?'Güvenlik Marjı':'Safety Margin', value: `%${safetyMargin}`, color: safetyMargin >= 20 ? 'text-emerald-600' : 'text-red-500' },
                           ].map(k => (
                             <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -1621,7 +1600,7 @@ export default function MuhasebePage(props: Props) {
                     const totalOutflow = rows.reduce((s, r) => s + r.outflow, 0);
                     const totalNet = totalInflow - totalOutflow;
                     const maxVal = Math.max(...rows.map(r => Math.max(r.inflow, r.outflow)), 1);
-                    const fCF = (v: number) => '₺' + Math.abs(v).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                    const fCF = (v: number) => paraYaz(Math.abs(v), { ondalik: 0 });
                     return (
                       <motion.div key="muhasebe-nakit" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                         <ModuleHeader
@@ -1744,7 +1723,7 @@ export default function MuhasebePage(props: Props) {
                     const toplamBorç547 = ap547 + kdvBorc547;
                     const ozkaynak547 = toplamAktif547 - toplamBorç547;
                     const toplamPasif547 = toplamBorç547 + ozkaynak547;
-                    const fB = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const fB = (v: number) => paraYaz(v, { ondalik: 0 });
                     const aktifRows = [
                       { group: tr547?'Dönen Varlıklar':'Current Assets', items: [
                         { label: tr547?'Kasa':'Cash on Hand',          v: kasa547 },
@@ -1859,7 +1838,7 @@ export default function MuhasebePage(props: Props) {
                       if (o.paid) arMap[k].paid += o.totalPrice || o.totalAmount || 0;
                     }
                     const mutRows = Object.values(arMap).map(r => ({ ...r, balance: r.ar - r.paid })).sort((a,b) => b.balance - a.balance);
-                    const fM = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const fM = (v: number) => paraYaz(v, { ondalik: 0 });
                     return (
                       <motion.div key="mutabakat" initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }} className="space-y-4">
                         <ModuleHeader title={tr550?'Cari Mutabakat':'Account Reconciliation'} subtitle={tr550?'Müşteri bazında alacak/ödeme dengesi':'AR vs. payments balance per customer'} icon={RefreshCw} />
@@ -1935,7 +1914,7 @@ export default function MuhasebePage(props: Props) {
                     const kurEksik548 = [...new Set([...bekT548.birimler, ...onaT548.birimler])].join('/');
                     const totalPending = bekT548.toplam;
                     const totalApproved = onaT548.toplam;
-                    const fE = (v:number, c:string='TRY') => c==='USD'?`$${v.toFixed(2)}`:c==='EUR'?`€${v.toFixed(2)}`:`₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const fE = (v:number, c:string='TRY') => paraYaz(v, { birim: c, ondalik: c === 'TRY' ? 0 : 2 });
                     return (
                       <motion.div key="masraf" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader
@@ -1960,8 +1939,8 @@ export default function MuhasebePage(props: Props) {
                         )}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
-                            { label: tr548?'Bekleyen Talep':'Pending', v: pending548.length, sub: `₺${Math.round(totalPending).toLocaleString('tr-TR')}`, color:'text-orange-600', bg:'bg-orange-50' },
-                            { label: tr548?'Onaylanan':'Approved',     v: approved548.length, sub: `₺${Math.round(totalApproved).toLocaleString('tr-TR')}`, color:'text-emerald-600', bg:'bg-emerald-50' },
+                            { label: tr548?'Bekleyen Talep':'Pending', v: pending548.length, sub: paraYaz(totalPending, { ondalik: 0 }), color:'text-orange-600', bg:'bg-orange-50' },
+                            { label: tr548?'Onaylanan':'Approved',     v: approved548.length, sub: paraYaz(totalApproved, { ondalik: 0 }), color:'text-emerald-600', bg:'bg-emerald-50' },
                             { label: tr548?'Reddedilen':'Rejected',    v: p548Masraflar.filter(m=>m.status==='Reddedildi').length, sub:'', color:'text-red-500', bg:'bg-red-50' },
                             { label: tr548?'Toplam Kayıt':'Total',     v: p548Masraflar.length, sub:'', color:'text-gray-600', bg:'bg-gray-50' },
                           ].map(k=>(
@@ -2078,7 +2057,7 @@ export default function MuhasebePage(props: Props) {
                       bsMap[ad] = (bsMap[ad] || 0) + f.tutar;
                     }
                     const bsRows = Object.entries(bsMap).filter(([,v])=>v>=5000).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
-                    const fBabs = (v:number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+                    const fBabs = (v:number) => paraYaz(v, { ondalik: 0 });
                     return (
                       <motion.div key="babs" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr555?'Ba/Bs Formu':'Ba/Bs Tax Form'} subtitle={tr555?'₺5.000 ve üzeri alım (Ba) ve satış (Bs) bildirimi — Logo/Mikro uyumlu':'Purchase (Ba) and sales (Bs) declarations ≥ ₺5,000 — Logo/Mikro compatible'} icon={FileText} />
@@ -2363,10 +2342,10 @@ export default function MuhasebePage(props: Props) {
                                 {monthlyData.map(d => (
                                   <tr key={d.m} className="hover:bg-gray-50/50">
                                     <td className="px-3 py-2 font-semibold text-gray-700">{monthNames[d.m-1]}</td>
-                                    <td className="px-3 py-2 text-emerald-700 font-mono">{d.collected > 0 ? `₺${d.collected.toLocaleString('tr-TR')}` : '—'}</td>
-                                    <td className="px-3 py-2 text-red-500 font-mono">{d.paidEst > 0 ? `₺${d.paidEst.toLocaleString('tr-TR')}` : '—'}</td>
+                                    <td className="px-3 py-2 text-emerald-700 font-mono">{d.collected > 0 ? paraYaz(d.collected) : '—'}</td>
+                                    <td className="px-3 py-2 text-red-500 font-mono">{d.paidEst > 0 ? paraYaz(d.paidEst) : '—'}</td>
                                     <td className={`px-3 py-2 font-bold font-mono ${d.net > 0 ? 'text-amber-700' : d.net < 0 ? 'text-blue-700' : 'text-gray-400'}`}>
-                                      {d.net !== 0 ? `₺${d.net.toLocaleString('tr-TR')}` : '—'}
+                                      {d.net !== 0 ? paraYaz(d.net) : '—'}
                                     </td>
                                   </tr>
                                 ))}
@@ -2374,9 +2353,9 @@ export default function MuhasebePage(props: Props) {
                               <tfoot>
                                 <tr className="border-t-2 border-gray-200 font-bold bg-gray-50">
                                   <td className="px-3 py-2 text-[10px] uppercase text-gray-500">{tr558?'Toplam':'Total'}</td>
-                                  <td className="px-3 py-2 text-emerald-700 font-mono">₺{totCol.toLocaleString('tr-TR')}</td>
-                                  <td className="px-3 py-2 text-red-500 font-mono">₺{totPaid.toLocaleString('tr-TR')}</td>
-                                  <td className={`px-3 py-2 font-mono ${totNet>0?'text-amber-700':'text-blue-700'}`}>₺{totNet.toLocaleString('tr-TR')}</td>
+                                  <td className="px-3 py-2 text-emerald-700 font-mono">{paraYaz(totCol)}</td>
+                                  <td className="px-3 py-2 text-red-500 font-mono">{paraYaz(totPaid)}</td>
+                                  <td className={`px-3 py-2 font-mono ${totNet>0?'text-amber-700':'text-blue-700'}`}>{paraYaz(totNet)}</td>
                                 </tr>
                               </tfoot>
                             </table>
@@ -2393,7 +2372,7 @@ export default function MuhasebePage(props: Props) {
                                 }).map(([rate, total]) => (
                                   <div key={rate} className="bg-gray-50 rounded-xl px-3 py-2">
                                     <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (tr558?'Oran yok':'No rate') : rate === 'karma' ? (tr558?'Karma oran':'Mixed rate') : `%${rate} KDV`}</p>
-                                    <p className="font-bold text-gray-800 text-sm">₺{total.toLocaleString('tr-TR')}</p>
+                                    <p className="font-bold text-gray-800 text-sm">{paraYaz(total)}</p>
                                   </div>
                                 ))}
                               </div>
@@ -2532,7 +2511,7 @@ export default function MuhasebePage(props: Props) {
                                           'bg-amber-100 text-amber-700'
                                         }`}>{row.status}</span>
                                       </td>
-                                      <td className="px-3 py-2 font-bold text-gray-800 font-mono">₺{(row.totalPrice||0).toLocaleString('tr-TR')}</td>
+                                      <td className="px-3 py-2 font-bold text-gray-800 font-mono">{paraYaz(row.totalPrice)}</td>
                                       <td className="px-3 py-2">
                                         {row.isPaid
                                           ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ {tr559?'Ödendi':'Paid'}</span>
@@ -2540,7 +2519,7 @@ export default function MuhasebePage(props: Props) {
                                         }
                                       </td>
                                       <td className={`px-3 py-2 font-bold font-mono ${row.runBalance>0?'text-amber-700':'text-emerald-700'}`}>
-                                        ₺{row.runBalance.toLocaleString('tr-TR')}
+                                        {paraYaz(row.runBalance)}
                                       </td>
                                     </tr>
                                   ))}
@@ -2581,7 +2560,7 @@ export default function MuhasebePage(props: Props) {
                             <div key={o.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100">
                               <div className="flex-1 min-w-0">
                                 <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
-                                <p className="text-xs text-gray-400">#{o.id.slice(0,8)} · ₺{(o.totalPrice||0).toLocaleString('tr-TR')}</p>
+                                <p className="text-xs text-gray-400">#{o.id.slice(0,8)} · {paraYaz(o.totalPrice)}</p>
                               </div>
                               {hasFullAccess('muhasebe') && (
                                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -2667,7 +2646,7 @@ export default function MuhasebePage(props: Props) {
                                           <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{f.tarih}</td>
                                           <td className="px-3 py-2 text-gray-700">{cariAdMap.get(f.cariKod) || f.cariKod}</td>
                                           <td className="px-3 py-2 text-gray-500">{f.faturaNo}</td>
-                                          <td className="px-3 py-2 text-right font-bold tabular-nums whitespace-nowrap">₺{Math.round(f.tutar).toLocaleString('tr-TR')}</td>
+                                          <td className="px-3 py-2 text-right font-bold tabular-nums whitespace-nowrap">{paraYaz(f.tutar, { ondalik: 0 })}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -2743,7 +2722,7 @@ export default function MuhasebePage(props: Props) {
                                       <tr key={o.id} onClick={() => setP564DetayId(o.id)} className={`hover:bg-gray-50/50 transition-colors cursor-pointer ${!hasFatura?'bg-red-50/20':''}`}>
                                         <td className="px-3 py-2.5 text-gray-400">{dateStr}</td>
                                         <td className="px-3 py-2.5 font-semibold text-gray-800 max-w-[150px] truncate">{o.customerName}</td>
-                                        <td className="px-3 py-2.5 font-mono text-gray-700">₺{(o.totalPrice||0).toLocaleString('tr-TR')}</td>
+                                        <td className="px-3 py-2.5 font-mono text-gray-700">{paraYaz(o.totalPrice)}</td>
                                         <td className="px-3 py-2.5">
                                           {o.faturaTipi ? (
                                             <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{faturaTipiEtiketi(o.faturaTipi, currentLanguage)}</span>
@@ -2806,8 +2785,8 @@ export default function MuhasebePage(props: Props) {
                                   {satir564(tr564 ? 'Müşteri' : 'Customer', d.customerName)}
                                   {d.customerEmail && satir564(tr564 ? 'E-posta' : 'Email', d.customerEmail)}
                                   {d.shippingAddress && satir564(tr564 ? 'Adres' : 'Address', <span className="font-normal text-xs">{d.shippingAddress}</span>)}
-                                  {satir564(tr564 ? 'Tutar' : 'Amount', `₺${(d.totalPrice||0).toLocaleString('tr-TR')}`)}
-                                  {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ₺${d.kdvTutari.toLocaleString('tr-TR')}` : ''}`)}
+                                  {satir564(tr564 ? 'Tutar' : 'Amount', paraYaz(d.totalPrice))}
+                                  {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ${paraYaz(d.kdvTutari)}` : ''}`)}
                                   {d.faturaTipi && satir564(tr564 ? 'Fatura Türü' : 'Invoice Type', faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
                                   {satir564(tr564 ? 'Fatura No' : 'Invoice No', dInvoiceNo)}
                                   {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
@@ -2826,7 +2805,7 @@ export default function MuhasebePage(props: Props) {
                                         {d.lineItems.map((li, i) => (
                                           <div key={li.id || i} className="flex items-center justify-between text-xs text-gray-600 py-1 border-b border-gray-50 last:border-0">
                                             <span>{li.name} {li.quantity ? `× ${li.quantity}` : ''}</span>
-                                            <span className="font-semibold tabular-nums">₺{((li.price||0)*(li.quantity||1)).toLocaleString('tr-TR')}</span>
+                                            <span className="font-semibold tabular-nums">{paraYaz((li.price||0)*(li.quantity||1))}</span>
                                           </div>
                                         ))}
                                       </div>
@@ -2887,11 +2866,11 @@ export default function MuhasebePage(props: Props) {
                             <div key={b.label} className={`rounded-xl p-3 ${b.bg}`}>
                               <p className="text-[10px] font-bold text-gray-400 uppercase">{b.label}</p>
                               <p className={`text-xl font-black ${b.color}`}>{b.orders.length}</p>
-                              <p className="text-xs text-gray-500">₺{Math.round(b.orders.reduce((s,o)=>s+(o.totalPrice||0),0)).toLocaleString('tr-TR')}</p>
+                              <p className="text-xs text-gray-500">{paraYaz(b.orders.reduce((s,o)=>s+(o.totalPrice||0),0), { ondalik: 0 })}</p>
                             </div>
                           ))}
                         </div>
-                        <div className="text-xs text-gray-500">{tr630?'Toplam Bekleyen:':'Total Outstanding:'} <span className="font-bold text-red-600">₺{Math.round(totalUnpaid).toLocaleString('tr-TR')}</span> ({unpaidInvoiced.length} {tr630?'sipariş':'orders'})</div>
+                        <div className="text-xs text-gray-500">{tr630?'Toplam Bekleyen:':'Total Outstanding:'} <span className="font-bold text-red-600">{paraYaz(totalUnpaid, { ondalik: 0 })}</span> ({unpaidInvoiced.length} {tr630?'sipariş':'orders'})</div>
                       </div>
                     );
                   })()}
@@ -3338,7 +3317,7 @@ export default function MuhasebePage(props: Props) {
                                   return (
                                     <tr key={s.id} className={`hover:bg-gray-50/50 ${isDue?'bg-amber-50/30':''}`}>
                                       <td className="px-4 py-2.5 font-medium text-gray-800">{s.customerName}</td>
-                                      <td className="px-4 py-2.5 font-bold font-mono text-gray-700">₺{s.amount.toLocaleString('tr-TR')}</td>
+                                      <td className="px-4 py-2.5 font-bold font-mono text-gray-700">{paraYaz(s.amount)}</td>
                                       <td className="px-4 py-2.5"><span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{freqLabels591[s.frequency]}</span></td>
                                       <td className="px-4 py-2.5"><span className={isDue?'text-amber-600 font-bold':'text-gray-600'}>{s.nextDate}</span></td>
                                       <td className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{s.description||'—'}</td>
@@ -3409,23 +3388,23 @@ export default function MuhasebePage(props: Props) {
                                     <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
                                   </div>
                                   <div className="grid grid-cols-3 gap-3 text-xs mb-3">
-                                    <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">₺{c.totalValue.toLocaleString()}</p></div>
-                                    <div><p className="text-gray-400">{tr597?'Tanınan':'Recognized'}</p><p className="font-bold text-emerald-600">₺{c.recognized.toLocaleString()}</p></div>
-                                    <div><p className="text-gray-400">{tr597?'Ertelenmiş':'Deferred'}</p><p className="font-bold text-amber-600">₺{deferred.toLocaleString()}</p></div>
+                                    <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">{paraYaz(c.totalValue)}</p></div>
+                                    <div><p className="text-gray-400">{tr597?'Tanınan':'Recognized'}</p><p className="font-bold text-emerald-600">{paraYaz(c.recognized)}</p></div>
+                                    <div><p className="text-gray-400">{tr597?'Ertelenmiş':'Deferred'}</p><p className="font-bold text-amber-600">{paraYaz(deferred)}</p></div>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2 mb-1.5 overflow-hidden">
                                     <div className="h-full bg-emerald-400 rounded-full" style={{width:`${recPct}%`}}/>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-gray-400">
                                     <span>{recPct.toFixed(0)}% {tr597?'tanındı':'recognized'}</span>
-                                    {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} ₺{monthlyRec.toLocaleString('tr-TR',{maximumFractionDigits:0})}</span>}
+                                    {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} {paraYaz(monthlyRec, { ondalik: 0 })}</span>}
                                     <button onClick={async ()=>{try{await updateDoc(doc(db,'revenueContracts',c.id),{recognized:Math.min(c.totalValue,c.recognized+monthlyRec)});}catch(e){console.error("[firestore]", e);}}} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
                                   </div>
                                 </div>
                               );
                             })}
                             <div className="apple-card p-4 bg-blue-50/30 text-sm">
-                              <p className="font-bold text-gray-700">{tr597?'Toplam Ertelenmiş Gelir:':'Total Deferred Revenue:'} <span className="text-amber-600">₺{p597Contracts.reduce((s,c)=>s+(c.totalValue-c.recognized),0).toLocaleString()}</span></p>
+                              <p className="font-bold text-gray-700">{tr597?'Toplam Ertelenmiş Gelir:':'Total Deferred Revenue:'} <span className="text-amber-600">{paraYaz(p597Contracts.reduce((s,c)=>s+(c.totalValue-c.recognized),0))}</span></p>
                             </div>
                           </div>
                         )}
@@ -3479,9 +3458,9 @@ export default function MuhasebePage(props: Props) {
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           {[
-                            {label:tr617?'Toplam Ciro':'Total Revenue',val:`₺${Math.round(totalRevenue).toLocaleString('tr-TR')}`,color:'text-blue-600',bg:'bg-blue-50'},
-                            {label:tr617?'Toplam Matrah':'Total Base',val:`₺${Math.round(totalMatrah).toLocaleString('tr-TR')}`,color:'text-purple-600',bg:'bg-purple-50'},
-                            {label:tr617?'Toplam KDV':'Total VAT',val:`₺${Math.round(totalKdv).toLocaleString('tr-TR')}`,color:'text-emerald-600',bg:'bg-emerald-50'},
+                            {label:tr617?'Toplam Ciro':'Total Revenue',val:paraYaz(totalRevenue, { ondalik: 0 }),color:'text-blue-600',bg:'bg-blue-50'},
+                            {label:tr617?'Toplam Matrah':'Total Base',val:paraYaz(totalMatrah, { ondalik: 0 }),color:'text-purple-600',bg:'bg-purple-50'},
+                            {label:tr617?'Toplam KDV':'Total VAT',val:paraYaz(totalKdv, { ondalik: 0 }),color:'text-emerald-600',bg:'bg-emerald-50'},
                             {label:tr617?'Fatura Sayısı':'Invoices',val:String(donemFaturalar.length),color:'text-amber-600',bg:'bg-amber-50'},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-5 ${k.bg}`}>
@@ -3496,15 +3475,15 @@ export default function MuhasebePage(props: Props) {
                             {oranRows.map(row=>(
                               <div key={row.oranKarma ? 'karma' : String(row.oran)} className="grid grid-cols-2 sm:grid-cols-4 gap-y-1 px-4 py-3 text-xs">
                                 <span className={`font-bold ${bandColor(row.oran)}`}>{row.oranKarma ? (tr617?'Karma oran':'Mixed rate') : row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
-                                <span className="tabular-nums text-gray-600">₺{Math.round(row.matrah).toLocaleString('tr-TR')}</span>
-                                <span className="tabular-nums font-bold text-gray-800">₺{Math.round(row.kdv).toLocaleString('tr-TR')}</span>
+                                <span className="tabular-nums text-gray-600">{paraYaz(row.matrah, { ondalik: 0 })}</span>
+                                <span className="tabular-nums font-bold text-gray-800">{paraYaz(row.kdv, { ondalik: 0 })}</span>
                                 <span className="text-gray-400">{row.count} {tr617?'fatura':'invoices'}</span>
                               </div>
                             ))}
                             {donemFaturasiz.length > 0 && (
                               <div key="faturasiz" className="grid grid-cols-4 px-4 py-3 text-xs bg-gray-50/60">
                                 <span className="font-bold text-gray-500">{tr617?'Faturasız / Muaf':'Non-Invoiced / Exempt'}</span>
-                                <span className="tabular-nums text-gray-600">₺{Math.round(faturasizTutar).toLocaleString('tr-TR')}</span>
+                                <span className="tabular-nums text-gray-600">{paraYaz(faturasizTutar, { ondalik: 0 })}</span>
                                 <span className="tabular-nums font-bold text-gray-800">₺0</span>
                                 <span className="text-gray-400">{donemFaturasiz.length} {tr617?'işlem':'txns'}</span>
                               </div>
@@ -3556,9 +3535,9 @@ export default function MuhasebePage(props: Props) {
                           <span className="text-xs text-gray-500">• {tr625?'Bütçe hücrelerine tıklayarak düzenleyin.':'Click cells to edit budget.'}</span>
                         </div>
                         <div className="grid grid-cols-3 gap-4">
-                          <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr625?'Bütçe Ciro':'Budget Revenue'}</p><p className="text-lg font-black text-blue-600">₺{Math.round(totalBudRev).toLocaleString('tr-TR')}</p></div>
-                          <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr625?'Gerçekleşen Ciro':'Actual Revenue'}</p><p className="text-lg font-black text-emerald-600">₺{Math.round(totalActRev).toLocaleString('tr-TR')}</p></div>
-                          <div className={`apple-card p-4 ${variance>=0?'bg-emerald-50':'bg-red-50'}`}><p className="text-xs text-gray-500">{tr625?'Sapma':'Variance'}</p><p className={`text-lg font-black ${variance>=0?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}₺{Math.round(Math.abs(variance)).toLocaleString('tr-TR')}</p></div>
+                          <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr625?'Bütçe Ciro':'Budget Revenue'}</p><p className="text-lg font-black text-blue-600">{paraYaz(totalBudRev, { ondalik: 0 })}</p></div>
+                          <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr625?'Gerçekleşen Ciro':'Actual Revenue'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalActRev, { ondalik: 0 })}</p></div>
+                          <div className={`apple-card p-4 ${variance>=0?'bg-emerald-50':'bg-red-50'}`}><p className="text-xs text-gray-500">{tr625?'Sapma':'Variance'}</p><p className={`text-lg font-black ${variance>=0?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}{paraYaz(Math.abs(variance), { ondalik: 0 })}</p></div>
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
@@ -3595,11 +3574,11 @@ export default function MuhasebePage(props: Props) {
                                           } catch(err){ toast((currentLanguage==='tr'?'Kaydedilemedi: ':'Save failed: ')+(err instanceof Error?err.message:String(err)),'error'); }
                                         }} className="apple-input px-2 py-0.5 text-xs w-28"/>
                                       ):(
-                                        <span className="tabular-nums cursor-pointer text-blue-600 hover:underline">{bud>0?`₺${Math.round(bud).toLocaleString('tr-TR')}`:'—'}</span>
+                                        <span className="tabular-nums cursor-pointer text-blue-600 hover:underline">{bud>0?paraYaz(bud, { ondalik: 0 }):'—'}</span>
                                       )}
                                     </td>
-                                    <td className="px-3 py-2.5 tabular-nums text-gray-700">{act>0?`₺${Math.round(act).toLocaleString('tr-TR')}`:'—'}</td>
-                                    <td className={`px-3 py-2.5 tabular-nums font-bold ${vari>=0?'text-emerald-600':'text-red-600'}`}>{bud>0?(vari>=0?'+':'')+'₺'+Math.round(Math.abs(vari)).toLocaleString('tr-TR'):'—'}</td>
+                                    <td className="px-3 py-2.5 tabular-nums text-gray-700">{act>0?paraYaz(act, { ondalik: 0 }):'—'}</td>
+                                    <td className={`px-3 py-2.5 tabular-nums font-bold ${vari>=0?'text-emerald-600':'text-red-600'}`}>{bud>0?(vari>=0?'+':'')+paraYaz(Math.abs(vari), { ondalik: 0 }):'—'}</td>
                                     <td className={`px-3 py-2.5 font-bold ${!pct?'text-gray-400':pct>=0?'text-emerald-600':'text-red-600'}`}>{pct!==null?`${pct>=0?'+':''}${pct.toFixed(1)}%`:'—'}</td>
                                   </tr>
                                 );
@@ -3680,9 +3659,9 @@ export default function MuhasebePage(props: Props) {
                                 return (
                                   <tr key={i} className={`hover:bg-gray-50/50 ${i===2||i===4?'font-bold bg-gray-50/30':''}`}>
                                     <td className="px-4 py-2.5 text-gray-800">{r.label}</td>
-                                    <td className="px-4 py-2.5 text-gray-600">₺{Math.round(r.budget).toLocaleString('tr-TR')}</td>
-                                    <td className="px-4 py-2.5 font-semibold text-gray-900">₺{Math.round(r.actual).toLocaleString('tr-TR')}</td>
-                                    <td className={`px-4 py-2.5 font-bold ${favorable?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}₺{Math.round(Math.abs(variance)).toLocaleString('tr-TR')}</td>
+                                    <td className="px-4 py-2.5 text-gray-600">{paraYaz(r.budget, { ondalik: 0 })}</td>
+                                    <td className="px-4 py-2.5 font-semibold text-gray-900">{paraYaz(r.actual, { ondalik: 0 })}</td>
+                                    <td className={`px-4 py-2.5 font-bold ${favorable?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}{paraYaz(Math.abs(variance), { ondalik: 0 })}</td>
                                     <td className={`px-4 py-2.5 font-bold ${favorable?'text-emerald-600':'text-red-600'}`}>{pct>=0?'+':''}{pct.toFixed(1)}%</td>
                                   </tr>
                                 );
@@ -3736,7 +3715,7 @@ export default function MuhasebePage(props: Props) {
                                 <div className="flex justify-between"><span className="text-gray-500">{tr635?'Güncel Kur':'Current Rate'}</span><span className="font-semibold">{fx.curRate === null ? '—' : `₺${fx.curRate.toFixed(4)}`}</span></div>
                                 <div className={`flex justify-between pt-2 border-t border-gray-100 font-black ${fx.gain === null ? 'text-gray-400' : fx.gain>=0?'text-emerald-600':'text-red-600'}`}>
                                   <span>{tr635?'Kur Farkı':'FX Gain/Loss'}</span>
-                                  <span>{fx.gain === null ? '—' : `${fx.gain>=0?'+':'-'}₺${Math.round(Math.abs(fx.gain)).toLocaleString('tr-TR')}`}</span>
+                                  <span>{fx.gain === null ? '—' : `${fx.gain>=0?'+':'-'}${paraYaz(Math.abs(fx.gain), { ondalik: 0 })}`}</span>
                                 </div>
                               </div>
                             </div>
@@ -3746,7 +3725,7 @@ export default function MuhasebePage(props: Props) {
                           <TrendingUp className={`w-5 h-5 ${netGain === null ? 'text-gray-400' : netGain>=0?'text-emerald-600':'text-red-600'}`}/>
                           <div>
                             <p className="text-xs text-gray-500">{tr635?'Net Kur Farkı (Değerleme Sonucu)':'Net FX Position (Revaluation Result)'}</p>
-                            <p className={`text-lg font-black ${netGain === null ? 'text-gray-400' : netGain>=0?'text-emerald-700':'text-red-700'}`}>{netGain === null ? '—' : `${netGain>=0?'+':'-'}₺${Math.round(Math.abs(netGain)).toLocaleString('tr-TR')}`}</p>
+                            <p className={`text-lg font-black ${netGain === null ? 'text-gray-400' : netGain>=0?'text-emerald-700':'text-red-700'}`}>{netGain === null ? '—' : `${netGain>=0?'+':'-'}${paraYaz(Math.abs(netGain), { ondalik: 0 })}`}</p>
                           </div>
                         </div>
                       </motion.div>
@@ -3799,7 +3778,7 @@ export default function MuhasebePage(props: Props) {
                                     <p className="text-xs text-gray-400">{s.frequency} • {tr640?'Sonraki:':'Next:'} {new Date(s.nextDate).toLocaleDateString('tr-TR')}</p>
                                   </div>
                                   <div className="text-right shrink-0">
-                                    <p className="text-sm font-black text-[#ff4000]">₺{s.amount.toLocaleString('tr-TR')}</p>
+                                    <p className="text-sm font-black text-[#ff4000]">{paraYaz(s.amount)}</p>
                                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${daysLeft<=7?'bg-amber-100 text-amber-700':s.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-500'}`}>
                                       {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
                                     </span>
@@ -3825,7 +3804,7 @@ export default function MuhasebePage(props: Props) {
                         <ModuleHeader title={tr643?'Şirketlerarası İşlemler':'Intercompany Transactions'} subtitle={tr643?'Holding bünyesindeki şirketler arası borç/alacak netleştirme':'Intercompany receivables & payables elimination for consolidation'} icon={Building2}
                           actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP643ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{tr643?'İşlem Ekle':'Add Transaction'}</button>}
                         />
-                        {pending643.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{pending643.length} {tr643?'işlem netleştirme bekliyor —':'transactions pending elimination —'} ₺{Math.round(totalPending).toLocaleString('tr-TR')}</p></div>}
+                        {pending643.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{pending643.length} {tr643?'işlem netleştirme bekliyor —':'transactions pending elimination —'} {paraYaz(totalPending, { ondalik: 0 })}</p></div>}
                         {p643ShowForm&&(
                           <div className="apple-card p-5 space-y-3 border border-brand/20">
                             <h4 className="font-bold text-sm">{tr643?'Yeni Şirketlerarası İşlem':'New Intercompany Transaction'}</h4>
@@ -3859,7 +3838,7 @@ export default function MuhasebePage(props: Props) {
                                   <p className="text-xs font-bold text-gray-800">{t.from} → {t.to}</p>
                                   <p className="text-xs text-gray-400">{t.desc} • {new Date(t.date).toLocaleDateString('tr-TR')}</p>
                                 </div>
-                                <span className="font-black text-sm text-gray-900">{t.currency==='TRY'?'₺':t.currency==='USD'?'$':'€'}{t.amount.toLocaleString('tr-TR')}</span>
+                                <span className="font-black text-sm text-gray-900">{paraYaz(t.amount, { birim: t.currency })}</span>
                                 <button onClick={async ()=>{try{await updateDoc(doc(db,'intercompanyTxns',t.id),{status:'Netleştirildi'});}catch(e){console.error("[firestore]", e);}}}
                                   className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${t.status==='Netleştirildi'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700'}`}>
                                   {t.status==='Netleştirildi'?(tr643?'Netleştirildi':'Eliminated'):(tr643?'Netleştir':'Eliminate')}
@@ -3922,16 +3901,16 @@ export default function MuhasebePage(props: Props) {
                               {rows.map(r=>(
                                 <tr key={r.name} className="hover:bg-gray-50/50">
                                   <td className="px-4 py-2.5 font-medium text-gray-800">{r.name}</td>
-                                  <td className="px-4 py-2.5 font-mono text-gray-700">₺{Math.round(r.revenue).toLocaleString('tr-TR')}</td>
-                                  <td className="px-4 py-2.5 font-mono text-gray-500">₺{Math.round(r.cost).toLocaleString('tr-TR')}</td>
+                                  <td className="px-4 py-2.5 font-mono text-gray-700">{paraYaz(r.revenue, { ondalik: 0 })}</td>
+                                  <td className="px-4 py-2.5 font-mono text-gray-500">{paraYaz(r.cost, { ondalik: 0 })}</td>
                                   <td className={`px-4 py-2.5 font-bold ${r.margin>=50?'text-emerald-600':r.margin>=20?'text-amber-600':'text-red-600'}`}>%{r.margin.toFixed(1)}</td>
                                   <td className="px-4 py-2.5 text-gray-500">{r.count}</td>
                                 </tr>
                               ))}
                               <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
                                 <td className="px-4 py-2 text-gray-700">{tr610?'Toplam':'Total'}</td>
-                                <td className="px-4 py-2 font-mono text-gray-700">₺{Math.round(totalRev).toLocaleString('tr-TR')}</td>
-                                <td className="px-4 py-2 font-mono text-gray-500">₺{Math.round(totalCost).toLocaleString('tr-TR')}</td>
+                                <td className="px-4 py-2 font-mono text-gray-700">{paraYaz(totalRev, { ondalik: 0 })}</td>
+                                <td className="px-4 py-2 font-mono text-gray-500">{paraYaz(totalCost, { ondalik: 0 })}</td>
                                 <td className={`px-4 py-2 ${totalRev>0?((totalRev-totalCost)/totalRev*100)>=30?'text-emerald-600':'text-amber-600':'text-gray-400'}`}>%{totalRev>0?(((totalRev-totalCost)/totalRev)*100).toFixed(1):'0'}</td>
                                 <td className="px-4 py-2 text-gray-500">{rows.reduce((s,r)=>s+r.count,0)}</td>
                               </tr>

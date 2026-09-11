@@ -24,6 +24,7 @@ import { cn } from '../lib/utils';
 import ModuleHeader from './ModuleHeader';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { oncelikEtiketi } from '../utils/durumEtiketi';
+import { paraYaz } from '../utils/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -317,7 +318,7 @@ export default function ApprovalQueue({
                     </span>
                     {req.amount != null && (
                       <span className="text-[10px] font-bold text-gray-600">
-                        ₺{req.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        {paraYaz(req.amount, { ondalik: 0 })}
                       </span>
                     )}
                     <span className="text-[10px] text-gray-300 ml-auto">

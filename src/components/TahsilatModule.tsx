@@ -14,6 +14,7 @@ import {
 import { format, differenceInDays, parseISO, isValid } from 'date-fns';
 import { useMikroTahsilat } from '../hooks/useMikroTahsilat';
 import { useCariAdMap } from '../hooks/useMikroFaturalar';
+import { paraYaz } from '../utils/currency';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,8 +83,7 @@ function calcFaiz(acikBakiye: number, faizOrani: number, vadeTarihi: string): nu
   return acikBakiye * (faizOrani / 100) * (gecikme / 365);
 }
 
-const formatCurrency = (val: number, currency: string = 'TRY') =>
-  new Intl.NumberFormat('tr-TR', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(val);
+const formatCurrency = (val: number, currency: string = 'TRY') => paraYaz(val, { birim: currency });
 
 const formatDate = (str: string) => {
   const d = parseDate(str);

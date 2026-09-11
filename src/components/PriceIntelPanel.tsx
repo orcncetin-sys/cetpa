@@ -3,6 +3,7 @@ import { Search, Tag, TrendingUp, Plus, X, RefreshCw, Store, Lightbulb, AlertTri
 import { authedFetch } from '../lib/dbClient';
 import { suggestPricing, maxBuyPrice } from '../lib/pricingEngine';
 import type { InventoryItem } from '../types';
+import { paraYaz } from '../utils/currency';
 
 interface Props {
   inventory: InventoryItem[];
@@ -12,7 +13,7 @@ interface Props {
 
 interface MarketResult { source: string; title: string; price: number; currency: string; url?: string }
 
-const ftl = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+const ftl = (v: number) => paraYaz(v, { ondalik: 0 });
 
 /**
  * Fiyat İstihbarat Paneli — ürün seç, pazaryeri (Trendyol/Amazon) rakip fiyatlarını

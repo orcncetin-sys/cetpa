@@ -10,6 +10,7 @@ import {
   type DocTemplate, type BelgeTipi,
   varsayilanSablon, SABLON_UYGULANIYOR, bankaBilgisiBasilir,
 } from '../utils/belgeSablonu';
+import { paraYaz } from '../utils/currency';
 
 interface DocumentDesignerProps {
   currentLanguage: 'tr' | 'en';
@@ -648,8 +649,8 @@ function DocumentPreview({ template }: { template: DocTemplate }) {
                   <p className="text-[10px] text-gray-400">{item.desc}</p>
                 </td>
                 <td className="py-3 text-center text-gray-700">{item.qty}</td>
-                {!isDelivery && <td className="py-3 text-right text-gray-700">₺{item.price.toLocaleString('tr-TR')},00</td>}
-                {!isDelivery && <td className="py-3 text-right font-bold text-gray-900">₺{(item.qty * item.price).toLocaleString('tr-TR')},00</td>}
+                {!isDelivery && <td className="py-3 text-right text-gray-700">{paraYaz(item.price)}</td>}
+                {!isDelivery && <td className="py-3 text-right font-bold text-gray-900">{paraYaz(item.qty * item.price)}</td>}
                 {isDelivery && <td className="py-3 text-gray-500 text-[10px]">LOT-2026-{String(i + 1).padStart(3, '0')}</td>}
               </tr>
             ))}
@@ -663,12 +664,12 @@ function DocumentPreview({ template }: { template: DocTemplate }) {
           <div className="w-56 space-y-1.5 text-[11px]">
             <div className="flex justify-between">
               <span className="text-gray-400">Ara Toplam:</span>
-              <span className="font-bold">₺{subtotal.toLocaleString('tr-TR')},00</span>
+              <span className="font-bold">{paraYaz(subtotal)}</span>
             </div>
             {template.vatRate > 0 && (
               <div className="flex justify-between">
                 <span className="text-gray-400">KDV (%{template.vatRate}):</span>
-                <span className="font-bold">₺{vat.toLocaleString('tr-TR', { maximumFractionDigits: 0 })},00</span>
+                <span className="font-bold">{paraYaz(vat)}</span>
               </div>
             )}
             <div
@@ -676,7 +677,7 @@ function DocumentPreview({ template }: { template: DocTemplate }) {
               style={{ backgroundColor: template.color }}
             >
               <span>TOPLAM:</span>
-              <span>₺{total.toLocaleString('tr-TR', { maximumFractionDigits: 0 })},00</span>
+              <span>{paraYaz(total)}</span>
             </div>
           </div>
         </div>

@@ -11,6 +11,7 @@ import {
   Package, Truck, CheckCircle2, Clock, AlertCircle,
   MapPin, RefreshCw, ExternalLink,
 } from 'lucide-react';
+import { paraYaz } from '../utils/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -234,7 +235,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
                         <p className="text-[11px] text-gray-400">×{item.quantity}</p>
                       </div>
                       <p className="font-bold text-gray-700">
-                        ₺{(item.price * item.quantity).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        {paraYaz(item.price * item.quantity)}
                       </p>
                     </div>
                   ))}

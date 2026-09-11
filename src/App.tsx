@@ -212,7 +212,7 @@ import PaymentMethodModal from './components/PaymentMethodModal';
 import { translations, type Language } from './translations';
 import { optimizeRoute } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
-import { kurCevir } from './utils/currency';
+import { kisaTutar, paraYaz } from './utils/currency';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -986,14 +986,8 @@ function AppContent() {
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   // TRY seciliyken kur hic sorgulanmaz — davranis eskisiyle birebir ayni.
   // USD/EUR seciliyken kur yoksa uydurma yerine '—' doner (bkz. FX_FALLBACK notu).
-  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string => {
-    const cv = kurCevir(v, kpiCurrency, exchangeRates);
-    if (cv === null) return '—';
-    const sym = kpiCurrency === 'USD' ? '$' : kpiCurrency === 'EUR' ? '€' : '₺';
-    const locale = kpiCurrency === 'USD' ? 'en-US' : kpiCurrency === 'EUR' ? 'de-DE' : 'tr-TR';
-    if (fmt === 'K') return `${sym}${(cv/1000).toFixed(decimals)}K`;
-    return `${sym}${cv.toLocaleString(locale, {maximumFractionDigits: decimals})}`;
-  };
+  const fmtKpi = (v: number, fmt: 'full' | 'K' = 'full', decimals = 0): string =>
+    kisaTutar(v, { fmt, ondalik: decimals, birim: kpiCurrency, rates: exchangeRates });
 
   // ── Commission Rules (for lead detail commission summary) ─────────────────
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
@@ -3230,7 +3224,7 @@ function AppContent() {
           if (status === 'Delivered') {
             createNotification(
               currentLanguage === 'tr' ? 'Sipariş Teslim Edildi' : 'Order Delivered',
-              `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)} ${currentLanguage === 'tr' ? 'teslim edildi' : 'delivered'} ₺${ord.totalPrice.toLocaleString('tr-TR')}`,
+              `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)} ${currentLanguage === 'tr' ? 'teslim edildi' : 'delivered'} ${paraYaz(ord.totalPrice)}`,
               'success'
             ).catch(() => {});
           } else if (status === 'Shipped') {
@@ -6116,7 +6110,7 @@ function AppContent() {
           const topLead = [...leads].sort((a,b)=>(b.score||0)-(a.score||0))[0];
           const cancelledRatio = orders.length > 0 ? Math.round(orders.filter(o=>o.status==='Cancelled').length / orders.length * 100) : 0;
           return [
-            `Bu Ay Ciro: ₺${Math.round(totalRev).toLocaleString('tr-TR')} (${thisMonth.length} sipariş)`,
+            `Bu Ay Ciro: ${paraYaz(totalRev, { ondalik: 0 })} (${thisMonth.length} sipariş)`,
             `Bekleyen Siparişler: ${pendingOrders} | İşlemde: ${processingOrders}`,
             `Düşük Stok Uyarısı: ${lowStockItems} ürün`,
             `Aktif Lead: ${activeLeads}${topLead ? ` | En Yüksek Puanlı: ${topLead.name} (${topLead.score||'?'})` : ''}`,

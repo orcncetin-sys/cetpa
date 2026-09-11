@@ -16,6 +16,7 @@ import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ProjectModule from '../components/ProjectModule';
 import { confirmDelete } from '../lib/confirm';
+import { paraYaz } from '../utils/currency';
 
 export interface P582Project { id: string; name: string; budget: number; spent: number; status: 'Aktif' | 'Tamamlandı' | 'Beklemede'; }
 export interface P582Draft { name: string; budget: string; spent: string; status: P582Project['status']; }
@@ -101,7 +102,7 @@ export default function ProjePage({
                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors582[p.status]}`}>{p.status}</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs">
-                              <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>₺{p.spent.toLocaleString()} / ₺{p.budget.toLocaleString()}</span>
+                              <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>{paraYaz(p.spent, { ondalik: 0 })} / {paraYaz(p.budget, { ondalik: 0 })}</span>
                               <button onClick={()=>{setP582Draft({name:p.name,budget:String(p.budget),spent:String(p.spent),status:p.status});setP582EditId(p.id);setP582ShowForm(true);}} title={tr582?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 ml-2"><Edit2 className="w-3.5 h-3.5"/></button>
                               <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e); toast(tr582?'Silinemedi (yetki?).':'Delete failed.','error');}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                             </div>
@@ -114,8 +115,8 @@ export default function ProjePage({
                       );
                     })}
                     <div className="border-t border-gray-100 pt-3 flex justify-between text-xs font-semibold text-gray-600">
-                      <span>{tr582?'Toplam Bütçe:':'Total Budget:'} ₺{p582Projects.reduce((s,p)=>s+p.budget,0).toLocaleString()}</span>
-                      <span>{tr582?'Toplam Harcama:':'Total Spent:'} ₺{p582Projects.reduce((s,p)=>s+p.spent,0).toLocaleString()}</span>
+                      <span>{tr582?'Toplam Bütçe:':'Total Budget:'} {paraYaz(p582Projects.reduce((s,p)=>s+p.budget,0), { ondalik: 0 })}</span>
+                      <span>{tr582?'Toplam Harcama:':'Total Spent:'} {paraYaz(p582Projects.reduce((s,p)=>s+p.spent,0), { ondalik: 0 })}</span>
                     </div>
                   </div>
                 )}

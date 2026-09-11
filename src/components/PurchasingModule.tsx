@@ -17,7 +17,7 @@ import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
 import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
-import { kurCevir } from '../utils/currency';
+import { kurCevir, paraYaz } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
@@ -333,8 +333,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
             ? `Satınalma Talebi: ${newOrder.supplier} (${newOrder.items.length} kalem)`
             : `Purchase Request: ${newOrder.supplier} (${newOrder.items.length} items)`,
           description: currentLanguage === 'tr'
-            ? `Tedarikçi: ${newOrder.supplier} · Toplam: ₺${total.toLocaleString()} · Beklenen: ${newOrder.expectedDate}${newOrder.notes ? ' · Not: ' + newOrder.notes : ''}`
-            : `Supplier: ${newOrder.supplier} · Total: ₺${total.toLocaleString()} · Due: ${newOrder.expectedDate}${newOrder.notes ? ' · Note: ' + newOrder.notes : ''}`,
+            ? `Tedarikçi: ${newOrder.supplier} · Toplam: ${paraYaz(total)} · Beklenen: ${newOrder.expectedDate}${newOrder.notes ? ' · Not: ' + newOrder.notes : ''}`
+            : `Supplier: ${newOrder.supplier} · Total: ${paraYaz(total)} · Due: ${newOrder.expectedDate}${newOrder.notes ? ' · Note: ' + newOrder.notes : ''}`,
           requestedBy: 'current_user',
           requestedByRole: userRole || 'Employee',
           targetModule: 'satin-alma',
@@ -627,7 +627,6 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
         // (₺40.000 → "$40.000", ~38× şişkin). `kurCevir` kur yoksa null döner,
         // KPI da '—' gösterir. TRY seçiliyken kur gerekmez, davranış aynıdır.
         const convertedTotal = kurCevir(totalTRY, kpiCurrency, exchangeRates);
-        const sym = kpiCurrency === 'TRY' ? '₺' : kpiCurrency === 'USD' ? '$' : '€';
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
@@ -667,7 +666,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               <p className="text-xl font-black text-green-600">
                 {convertedTotal === null
                   ? <span className="text-gray-400" title={currentLanguage === 'tr' ? 'Güncel kur alınamadı' : 'Exchange rate unavailable'}>—</span>
-                  : `${sym}${convertedTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+                  : paraYaz(convertedTotal, { birim: kpiCurrency, ondalik: 0 })}
               </p>
             </div>
           </div>
@@ -782,7 +781,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     {getEtaBadge(order) ?? <span className="text-[11px] text-gray-300">—</span>}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-bold text-gray-900">₺{order.totalAmount?.toLocaleString()}</span>
+                    <span className="text-sm font-bold text-gray-900">{paraYaz(order.totalAmount)}</span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
@@ -1103,7 +1102,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className="text-sm font-bold text-gray-900">₺{(item.purchasePrice * item.quantity).toLocaleString()}</span>
+                              <span className="text-sm font-bold text-gray-900">{paraYaz(item.purchasePrice * item.quantity)}</span>
                             </td>
                             <td className="px-4 py-3 text-right">
                               {!viewingOrder && (
@@ -1121,7 +1120,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                             {currentLanguage === 'tr' ? 'Genel Toplam' : 'Grand Total'}
                           </td>
                           <td className="px-4 py-4 text-right text-lg font-black text-brand">
-                            ₺{calculateTotal(newOrder.items).toLocaleString()}
+                            {paraYaz(calculateTotal(newOrder.items))}
                           </td>
                           <td></td>
                         </tr>

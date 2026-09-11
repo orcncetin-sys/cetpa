@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { X, FileDown } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { paraYaz } from '../utils/currency';
 import type { Lead, Order } from '../types';
 
 interface CustomerStatementModalProps {
@@ -56,7 +57,7 @@ export default function CustomerStatementModal({
           ].map(k => (
             <div key={k.label} className="bg-white px-5 py-4">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
-              <p className={cn("text-lg font-black", k.color)}>₺{k.value.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</p>
+              <p className={cn("text-lg font-black", k.color)}>{paraYaz(k.value)}</p>
             </div>
           ))}
         </div>
@@ -97,7 +98,7 @@ export default function CustomerStatementModal({
                           {currentLanguage === 'tr' ? (statusTR[o.status] || o.status) : o.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right font-bold text-gray-900">₺{(o.totalPrice || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-5 py-3 text-right font-bold text-gray-900">{paraYaz(o.totalPrice)}</td>
                       <td className="px-5 py-3 text-center">
                         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", o.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-50 text-amber-600')}>
                           {o.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}

@@ -138,3 +138,59 @@ export const formatInCurrency = (
 
   return bicimle(converted, currency);
 };
+
+// ── EKRAN para biçimi — TEK KAYNAK (Faz 2 1/n, 2026-09-05) ─────────────────────────
+// Faz 0 ölçümü: 325 satır içi `₺${n.toLocaleString('tr-TR', …)}` + 20 yerel kopya (fmtKpi ×5,
+// formatTRY ×3, fmtTRY ×3…). Kopyaların ortak arızası: bilinmeyen tutar '₺NaN'/'₺0'; kur yokken
+// 1 ya da 38 sabitiyle çeviri. Görünüm mevcut satır içi desenle AYNI tutuldu (sembol önde, yerel
+// gruplama) ki 325 yerin taşınması ekranı değiştirmesin; tek fark: bilinmeyen → '—', negatifte
+// işaret sembolün önünde. Sözleşme: currency.ekran.test.ts.
+import { bilinenSayi } from './para';
+
+const PARA_SEMBOLU: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€', GBP: '£', CHF: 'CHF ', JPY: '¥' };
+
+export interface ParaSecenek {
+  /** Para birimi kodu (varsayılan TRY). */
+  birim?: string;
+  /** Ondalık basamak (varsayılan 2). */
+  ondalik?: number;
+}
+
+const sayiYaz = (n: number, birim: string, ondalik: number): string =>
+  n.toLocaleString(CURRENCY_LOCALES[birim] ?? 'tr-TR', { minimumFractionDigits: ondalik, maximumFractionDigits: ondalik });
+
+/** Tutar ZATEN `birim` cinsinden — çeviri yapmaz. Bilinmeyen tutar '—'. Örn. '₺1.234,56', '$1,234.56', '1.234,50 XAU'. */
+export function paraYaz(v: unknown, s: ParaSecenek = {}): string {
+  if (!bilinenSayi(v)) return '—';
+  const n = Number(v);
+  const birim = String(s.birim ?? 'TRY').toUpperCase();
+  const ondalik = s.ondalik ?? 2;
+  const sembol = PARA_SEMBOLU[birim];
+  const govde = sayiYaz(Math.abs(n), birim, ondalik);
+  const isaret = n < 0 ? '-' : '';
+  return sembol ? `${isaret}${sembol}${govde}` : `${isaret}${govde} ${birim}`;
+}
+
+/** TL tutarını `birim`e kurla çevirip yazar (kurCevir); kur yoksa '—' — TL tutarı yabancı sembolle ASLA basılmaz. */
+export function tlYaz(vTRY: unknown, s: ParaSecenek & { rates?: ExchangeRates | null } = {}): string {
+  if (!bilinenSayi(vTRY)) return '—';
+  const birim = String(s.birim ?? 'TRY').toUpperCase();
+  const cv = kurCevir(Number(vTRY), birim, s.rates);
+  return cv === null ? '—' : paraYaz(cv, { birim, ondalik: s.ondalik });
+}
+
+/** KPI kartı kısa biçimi: 'K' → '₺12,5K', 'M' → '₺1,3M', 'full' → paraYaz (ondalik varsayılan 0). TL girdisi, kurla çevrilir. */
+export function kisaTutar(vTRY: unknown, s: ParaSecenek & { fmt?: 'full' | 'K' | 'M'; rates?: ExchangeRates | null } = {}): string {
+  if (!bilinenSayi(vTRY)) return '—';
+  const birim = String(s.birim ?? 'TRY').toUpperCase();
+  const ondalik = s.ondalik ?? 0;
+  const cv = kurCevir(Number(vTRY), birim, s.rates);
+  if (cv === null) return '—';
+  if (s.fmt === 'K' || s.fmt === 'M') {
+    const bolen = s.fmt === 'K' ? 1000 : 1_000_000;
+    const sembol = PARA_SEMBOLU[birim] ?? `${birim} `;
+    const isaret = cv < 0 ? '-' : '';
+    return `${isaret}${sembol}${sayiYaz(Math.abs(cv) / bolen, birim, ondalik)}${s.fmt}`;
+  }
+  return paraYaz(cv, { birim, ondalik });
+}

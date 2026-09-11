@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
+import { paraYaz } from '../utils/currency';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp
@@ -69,8 +70,8 @@ function useToast() {
   return { toast, show };
 }
 
-function fmtMoney(n: number, symbol = '₺') {
-  return `${symbol}${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function fmtMoney(n: number, doviz: KasaDoviz = 'TRY') {
+  return paraYaz(n, { birim: doviz });
 }
 
 const TODAY = new Date().toISOString().split('T')[0];
@@ -497,7 +498,6 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
             ) : (
               kasalar.map(kasa => {
                 const bakiye = kasaBakiye[kasa.id] ?? 0;
-                const sym = DOVIZ_SYMBOL[kasa.doviz];
                 return (
                   <div key={kasa.id} className="apple-card p-5 space-y-3">
                     <div className="flex items-start justify-between">
@@ -523,7 +523,7 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
                     )}>
                       <p className="text-xs text-gray-500 mb-0.5">Güncel Bakiye</p>
                       <p className={cn('text-xl font-bold', bakiye >= 0 ? 'text-green-600' : 'text-red-500')}>
-                        {fmtMoney(bakiye, sym)}
+                        {fmtMoney(bakiye, kasa.doviz)}
                       </p>
                     </div>
                     <div className="flex gap-2">

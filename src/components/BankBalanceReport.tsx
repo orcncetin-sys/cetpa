@@ -16,6 +16,7 @@ import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { paraYaz } from '../utils/currency';
 import type { BankAccount, BankTransaction, BankReportPreset } from '../types';
 
 interface CostCenter { id: string; kod: string; ad: string }
@@ -150,7 +151,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
     }
   };
 
-  const fmt = (n: number, cur = 'TRY') => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (cur !== 'TRY' ? ` ${cur}` : ' ₺');
+  const fmt = (n: number, cur = 'TRY') => paraYaz(n, { birim: cur });
 
   return (
     <div className="apple-card p-5">

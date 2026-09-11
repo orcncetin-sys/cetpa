@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
+import { paraYaz } from '../utils/currency';
 
 interface GelirTanimaModuleProps {
   currentLanguage: string;
@@ -55,7 +56,7 @@ interface RevenueSchedule {
 }
 
 function fmt(n: number, currency = 'TRY') {
-  return new Intl.NumberFormat('tr-TR', { style: 'currency', currency, minimumFractionDigits: 0 }).format(n);
+  return paraYaz(n, { birim: currency });
 }
 
 
