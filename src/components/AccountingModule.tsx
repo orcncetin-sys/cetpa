@@ -652,40 +652,34 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // GERÇEK PDF (buton "Beyanname PDF" diyor ama eskiden .txt indiriyordu).
   const downloadVatDeclaration = async () => {
-    const [{ jsPDF }, { default: autoTable }, { registerTurkishFont }] = await Promise.all([
-      import('jspdf'), import('jspdf-autotable'), import('../utils/pdfFont'),
+    const [{ jsPDF }, { default: autoTable }, { registerTurkishFont }, { pdfBaslik, pdfAltBilgi, pdfTabloStili, PDF_RENK }] = await Promise.all([
+      import('jspdf'), import('jspdf-autotable'), import('../utils/pdfFont'), import('../utils/pdfTheme'),
     ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     await registerTurkishFont(doc);
-    const W = doc.internal.pageSize.getWidth();
-    doc.setFillColor(255, 64, 0);
-    doc.rect(0, 0, W, 26, 'F');
-    doc.setFont('Roboto', 'bold'); doc.setFontSize(16); doc.setTextColor(255, 255, 255);
-    doc.text('KDV BEYANNAMESİ ÖZETİ', 14, 13);
-    doc.setFont('Roboto', 'normal'); doc.setFontSize(9);
-    doc.text(normTR(`Dönem: ${kdvMonth}/${kdvYear}`), 14, 20);
+    // Bant tek kaynak (pdfTheme): eski 26 mm elle bant → 32 mm standart; gövde dönen Y'den başlar (Faz 2 3/n).
+    const govdeY = pdfBaslik(doc, { belgeAdi: 'KDV BEYANNAMESİ ÖZETİ', meta: normTR(`Dönem: ${kdvMonth}/${kdvYear}`) });
     autoTable(doc, {
-      startY: 34,
+      ...pdfTabloStili(PDF_RENK.dark),
+      startY: govdeY,
       head: [['Kalem', 'Tutar']],
       body: [
         ['Hesaplanan KDV', normTR(formatTRY(hesaplananKDV))],
         ['İndirilecek KDV', normTR(formatTRY(indirilecekKDV))],
         ['Ödenecek/İade KDV', normTR(formatTRY(odenecekKDV))],
       ],
-      styles: { font: 'Roboto', fontSize: 10 },
-      headStyles: { fillColor: [29, 29, 31] },
     });
     const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
       oran === 'karma' ? (currentLanguage === 'tr' ? 'Karma' : 'Mixed') : `%${oran}`,
       normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
     ]);
     autoTable(doc, {
+      ...pdfTabloStili(),
       startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60) + 6,
       head: [['Oran', 'Matrah', 'KDV']],
       body: oranBody.length ? oranBody : [['—', '—', '—']],
-      styles: { font: 'Roboto', fontSize: 10 },
-      headStyles: { fillColor: [255, 64, 0] },
     });
+    pdfAltBilgi(doc);
     doc.save(`KDV_Beyanname_${kdvMonth}_${kdvYear}.pdf`);
     showToast(t.declarationPreparing);
   };

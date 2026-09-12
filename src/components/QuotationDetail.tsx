@@ -10,6 +10,7 @@ import { registerTurkishFont } from '../utils/pdfFont';
 import { formatAmount } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK } from '../utils/belgeSablonu';
+import { pdfBaslik, pdfAltBilgi, pdfBilgiKutusu, PDF_RENK } from '../utils/pdfTheme';
 import { cn } from '../lib/utils';
 import { teklifToplamlari } from '../utils/para';
 import { tarihYaz } from '../utils/zaman';
@@ -59,89 +60,55 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       await registerTurkishFont(doc);
       const W = doc.internal.pageSize.getWidth();   // 210
-      const H = doc.internal.pageSize.getHeight();  // 297
 
       // Belge Tasarimcisi sablonu (Ayarlar → Belge Tasarimcisi → Teklif).
       // Okunamazsa `null` doner ve asagidaki varsayilanlar gecerli kalir —
       // sablon yuzunden PDF uretimi ASLA cokmez (sablonGetir hatayi yutar).
       const sablon = await sablonGetir('teklif');
       const BRAND: [number, number, number] = sablonRengi(sablon);
-      const DARK: [number, number, number]  = [29, 29, 31];
-      const GREY: [number, number, number]  = [134, 134, 139];
-      const LIGHT: [number, number, number] = [245, 245, 247];
 
       // registerTurkishFont (Roboto) artık Türkçe glifleri kapsıyor — harf
       // düşürmeye gerek yok (2026-08-17). Passthrough, çağrı yerlerini bozmamak için.
       const tr = (s: string) => s;
-
-      // ── Header band ──────────────────────────────────────────────────────
-      doc.setFillColor(...BRAND);
-      doc.rect(0, 0, W, 32, 'F');
-
-      // Brand name
-      doc.setFont('Roboto', 'bold');
-      doc.setFontSize(22);
-      doc.setTextColor(255, 255, 255);
-      doc.text('CETPA', 14, 15);
-
-      doc.setFontSize(8);
-      doc.setFont('Roboto', 'normal');
-      doc.setTextColor(255, 200, 180);
-      doc.text('SATIŞ & LOJİSTİK', 14, 21);
-
-      // Document type — right aligned
-      doc.setFontSize(16);
-      doc.setFont('Roboto', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text(sablon?.title?.trim() || VARSAYILAN_BASLIK.teklif, W - 14, 15, { align: 'right' });
 
       const docNo = quotation.id.substring(0, 8).toUpperCase();
       // Tarihler tek kaynaktan (utils/zaman): çözülemezse '—' — eskisi gibi BUGÜN basılmaz.
       const dateStr = tarihYaz(quotation.createdAt);
       const validStr = tarihYaz(quotation.validUntil);
 
-      doc.setFontSize(8);
-      doc.setFont('Roboto', 'normal');
-      doc.setTextColor(255, 220, 210);
-      doc.text(`No: ${docNo}  |  Tarih: ${dateStr}  |  Geçerlilik: ${validStr}`, W - 14, 26, { align: 'right' });
+      // ── Header band ──────────────────────────────────────────────────────
+      // Tek kaynak (pdfTheme): 32 mm şablon renkli bant; gövde dönen Y'den başlar (38).
+      const govdeY = pdfBaslik(doc, {
+        belgeAdi: sablon?.title?.trim() || VARSAYILAN_BASLIK.teklif,
+        meta: `No: ${docNo}  |  Tarih: ${dateStr}  |  Geçerlilik: ${validStr}`,
+        renk: BRAND,
+      });
 
       // ── Info boxes (customer | company) ─────────────────────────────────
-      const boxY = 38;
+      const boxY = govdeY;
       const boxH = 36;
       const col1 = 14, col2 = W / 2 + 4;
       const colW = W / 2 - 18;
 
       // Customer box
-      doc.setFillColor(...LIGHT);
-      doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-      doc.setFont('Roboto', 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(...BRAND);
-      doc.text('MÜŞTERİ BİLGİLERİ', col1 + 4, boxY + 6);
-      doc.setFont('Roboto', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(...DARK);
-      doc.text(tr(quotation.customerName || '-'), col1 + 4, boxY + 13);
-      doc.setFontSize(8);
-      doc.setTextColor(...GREY);
-      doc.text(quotation.customerEmail || '', col1 + 4, boxY + 19);
-      doc.text(tr(String(quotation.customerType || '')), col1 + 4, boxY + 25);
+      pdfBilgiKutusu(doc, {
+        x: col1, y: boxY, w: colW, h: boxH, baslik: 'MÜŞTERİ BİLGİLERİ', renk: BRAND,
+        satirlar: [
+          { metin: tr(quotation.customerName || '-'), dy: 13, boyut: 9 },
+          { metin: quotation.customerEmail || '', dy: 19, boyut: 8, renk: PDF_RENK.grey },
+          { metin: tr(String(quotation.customerType || '')), dy: 25, boyut: 8, renk: PDF_RENK.grey },
+        ],
+      });
 
       // Company box
-      doc.setFillColor(...LIGHT);
-      doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-      doc.setFont('Roboto', 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(...BRAND);
-      doc.text('SATICI BİLGİLERİ', col2 + 4, boxY + 6);
-      doc.setFont('Roboto', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(...DARK);
-      doc.text('CETPA Satış & Lojistik', col2 + 4, boxY + 13);
-      doc.setFontSize(8);
-      doc.setTextColor(...GREY);
-      doc.text('info@cetpa.com', col2 + 4, boxY + 19);
-      doc.text('www.cetpa.com', col2 + 4, boxY + 25);
+      pdfBilgiKutusu(doc, {
+        x: col2, y: boxY, w: colW, h: boxH, baslik: 'SATICI BİLGİLERİ', renk: BRAND,
+        satirlar: [
+          { metin: 'CETPA Satış & Lojistik', dy: 13, boyut: 9 },
+          { metin: 'info@cetpa.com', dy: 19, boyut: 8, renk: PDF_RENK.grey },
+          { metin: 'www.cetpa.com', dy: 25, boyut: 8, renk: PDF_RENK.grey },
+        ],
+      });
 
       // Status badge
       const statusColors: Record<string, [number, number, number]> = {
@@ -149,12 +116,12 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         'Rejected': [239, 68, 68],
         'Sent':     [59, 130, 246],
       };
-      const sColor = statusColors[quotation.status] ?? GREY;
+      const sColor = statusColors[quotation.status] ?? PDF_RENK.grey;
       doc.setFillColor(...sColor);
       doc.roundedRect(col2 + colW - 28, boxY + 26, 28, 7, 1, 1, 'F');
       doc.setFontSize(7);
       doc.setFont('Roboto', 'bold');
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(...PDF_RENK.white);
       doc.text(tr(quotation.status || 'Taslak'), col2 + colW - 14, boxY + 31, { align: 'center' });
 
       // ── Items table ─────────────────────────────────────────────────────
@@ -175,7 +142,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         styles: { font: 'Roboto' },
         headStyles: {
           fillColor: BRAND,
-          textColor: [255, 255, 255],
+          textColor: PDF_RENK.white,
           fontStyle: 'bold',
           fontSize: 8,
           cellPadding: 3,
@@ -207,17 +174,17 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       const totalsX = W - 70;
       const totalsY = finalY + 8;
 
-      doc.setFillColor(...LIGHT);
+      doc.setFillColor(...PDF_RENK.light);
       doc.roundedRect(totalsX - 4, totalsY - 4, 60, 34, 2, 2, 'F');
 
       doc.setFontSize(8.5);
       doc.setFont('Roboto', 'normal');
-      doc.setTextColor(...GREY);
+      doc.setTextColor(...PDF_RENK.grey);
       doc.text('Ara Toplam:', totalsX + 2, totalsY + 4);
       doc.text('KDV Toplamı:', totalsX + 2, totalsY + 12);
       doc.setFont('Roboto', 'bold');
       doc.setFontSize(9);
-      doc.setTextColor(...DARK);
+      doc.setTextColor(...PDF_RENK.dark);
       doc.text(formatAmount(subTotal, paraBirimi), W - 16, totalsY + 4, { align: 'right' });
       doc.text(formatAmount(vatTotal, paraBirimi), W - 16, totalsY + 12, { align: 'right' });
 
@@ -226,7 +193,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
       doc.setFontSize(10);
       doc.setFont('Roboto', 'bold');
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(...PDF_RENK.white);
       doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
       doc.text(formatAmount(total, paraBirimi), W - 16, totalsY + 23, { align: 'right' });
 
@@ -237,10 +204,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
         const notesY = totalsY + 36;
         doc.setFontSize(8);
         doc.setFont('Roboto', 'bold');
-        doc.setTextColor(...GREY);
+        doc.setTextColor(...PDF_RENK.grey);
         doc.text('NOTLAR', 14, notesY);
         doc.setFont('Roboto', 'normal');
-        doc.setTextColor(...DARK);
+        doc.setTextColor(...PDF_RENK.dark);
         doc.setFontSize(8.5);
         const noteLines = doc.splitTextToSize(tr(quotation.notes), totalsX - 22) as string[];
         doc.text(noteLines, 14, notesY + 6);
@@ -262,20 +229,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
 
       // Alt bant TUM sayfalara — eskiden yalniz son sayfaya ciziliyordu, cok
       // sayfali belgede 1..N-1 sayfalarinda alt bilgi/sayfa numarasi yoktu.
-      // Footer tek satira kirpilir: sagdaki sayfa etiketiyle cakismasin diye.
-      const footerMetni = (doc.splitTextToSize(sablon?.footer?.trim() || 'Bu teklif elektronik olarak oluşturulmuştur. İmza gerektirmez.', W - 90) as string[])[0] ?? '';
-      const toplamSayfa = doc.getNumberOfPages();
-      for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
-        doc.setPage(sayfa);
-        doc.setFillColor(...BRAND);
-        doc.rect(0, H - 14, W, 14, 'F');
-        doc.setFontSize(7.5);
-        doc.setFont('Roboto', 'normal');
-        doc.setTextColor(255, 220, 210);
-        doc.text(footerMetni, 14, H - 6);
-        doc.setTextColor(255, 255, 255);
-        doc.text(`CETPA  •  cetpa.com.tr  •  Sayfa ${sayfa} / ${toplamSayfa}`, W - 14, H - 6, { align: 'right' });
-      }
+      // Tek kaynak (pdfTheme bant modu): 14 mm şablon renkli bant, footer tek satıra
+      // kırpılır (sağdaki sayfa etiketiyle çakışmasın), sayfa no gerçek sayfa sayısından.
+      const footerMetni = sablon?.footer?.trim() || 'Bu teklif elektronik olarak oluşturulmuştur. İmza gerektirmez.';
+      pdfAltBilgi(doc, { bant: BRAND, solMetin: footerMetni });
 
       doc.save(`CETPA_Teklif_${docNo}_${dateStr.replace(/\./g, '-')}.pdf`);
       setPdfError(null);

@@ -113,7 +113,8 @@ export async function sablonGetir(docType: BelgeTipi): Promise<DocTemplate | nul
   }
 }
 
-export type RGB = [number, number, number];
+import { PDF_RENK, type RGB } from './pdfTheme';
+export type { RGB };   // tek tip: pdfTheme.RGB (eskiden burada ayrı tanımlıydı)
 
 /**
  * '#rrggbb' → [r,g,b]. Ayrıştıramazsa `null` döner — çağıran taraf kendi
@@ -133,7 +134,7 @@ export function hexToRgb(hex: string | undefined | null): RGB | null {
 
 /** Şablonun rengi — geçersiz/eksikse marka kırmızısı. */
 export function sablonRengi(sablon: DocTemplate | null): RGB {
-  return hexToRgb(sablon?.color) ?? [255, 64, 0];
+  return hexToRgb(sablon?.color) ?? PDF_RENK.brand;   // marka rengi tek kaynaktan (index.css ile aynı)
 }
 
 /**
@@ -210,10 +211,10 @@ export function belgeAltBilgisiCiz(
   if (satirlar.length) {
     doc.setFontSize(7);
     doc.setFont('Roboto', 'bold');
-    doc.setTextColor(...(opts.renk ?? [134, 134, 139]));
+    doc.setTextColor(...(opts.renk ?? PDF_RENK.grey));
     doc.text(opts.etiket ?? 'BANKA BİLGİLERİ', 14, y);
     doc.setFont('Roboto', 'normal');
-    doc.setTextColor(29, 29, 31);
+    doc.setTextColor(...PDF_RENK.dark);
     doc.text(satirlar, 14, y + 4);
     y += 4 + satirlar.length * 3.6 + 3;
   }
@@ -221,7 +222,7 @@ export function belgeAltBilgisiCiz(
   if (footerVar) {
     doc.setFontSize(7.5);
     doc.setFont('Roboto', 'normal');
-    doc.setTextColor(134, 134, 139);
+    doc.setTextColor(...PDF_RENK.grey);
     doc.text(opts.footer!.trim(), 14, y);
     y += 6;
   }

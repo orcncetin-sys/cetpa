@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { pdfBaslik } from '../utils/pdfTheme';
+import { pdfBaslik, pdfAltBilgi } from '../utils/pdfTheme';
 import { tarihYaz, tarihSaatYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -175,13 +175,8 @@ async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<
   doc.line(margin + 4, boxY + 14, pageW - margin - 4, boxY + 14);
   doc.text(t ? 'Tarih: _______________   İmza: _______________' : 'Date: _______________   Signature: _______________', margin + 4, boxY + 20);
 
-  // ── Footer ───────────────────────────────────────────────────────────────
-  doc.setFillColor(240, 244, 248);
-  doc.rect(0, doc.internal.pageSize.getHeight() - 12, pageW, 12, 'F');
-  doc.setFontSize(7.5);
-  doc.setTextColor(120, 120, 120);
-  doc.text('Cetpa Yazılım A.Ş. • www.cetpa.com.tr', margin, doc.internal.pageSize.getHeight() - 4);
-  doc.text(`${t ? 'Oluşturulma' : 'Generated'}: ${tarihSaatYaz(data.generatedAt)}`, pageW - margin - 80, doc.internal.pageSize.getHeight() - 4);
+  // ── Alt bilgi — ORTAK tema, düz mod, HER sayfaya (src/utils/pdfTheme.ts) ──
+  pdfAltBilgi(doc, { ekNot: `${t ? 'Oluşturulma' : 'Generated'}: ${tarihSaatYaz(data.generatedAt)}` });
 
   return doc;
 }

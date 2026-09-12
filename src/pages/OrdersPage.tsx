@@ -6,7 +6,7 @@ import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSa
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
 import React, { useState, useEffect } from 'react';
-import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../utils/pdfTheme';
+import { pdfBaslik, pdfAltBilgi, pdfTabloStili, PDF_RENK, PDF_ALT_BANT_YUKSEKLIK } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -1804,42 +1804,39 @@ export default function OrdersPage({
                           // Okunamazsa null doner, asagidaki varsayilanlar gecerli kalir.
                           const sablon505 = await sablonGetir('siparis');
                           const marka505 = sablonRengi(sablon505);
-                          doc505.setFillColor(...marka505);
-                          doc505.rect(0, 0, W, 28, 'F');
-                          doc505.setTextColor(255, 255, 255);
-                          doc505.setFontSize(16); doc505.setFont('Roboto', 'bold');
-                          doc505.text('CETPA', 14, 13);
-                          doc505.setFontSize(10); doc505.setFont('Roboto', 'normal');
-                          // 'SİPARİŞ FIŞI' yaziyordu — noktasiz I yanlis, dogrusu 'FİŞİ'.
-                          doc505.text(
-                            sablon505?.title?.trim() || (currentLanguage === 'tr' ? 'SİPARİŞ FİŞİ' : 'ORDER RECEIPT'),
-                            14, 21);
-                          doc505.setTextColor(80, 80, 80);
-                          doc505.setFontSize(9);
                           const oDate = tarihYaz(o.createdAt ?? o.syncedAt);
-                          doc505.text(gorunenSiparisNo(o), W - 14, 13, { align: 'right' });
-                          doc505.text(oDate, W - 14, 21, { align: 'right' });
+                          // Baslik bandi TEK KAYNAK (src/utils/pdfTheme.ts) — eskiden 28 mm elle bant
+                          // cizen kopya vardi; 32 mm standardi bilincli, govde donen Y'den baslar.
+                          // 'SİPARİŞ FIŞI' yaziyordu — noktasiz I yanlis, dogrusu 'FİŞİ'.
+                          const govdeY505 = pdfBaslik(doc505, {
+                            belgeAdi: sablon505?.title?.trim() || (currentLanguage === 'tr' ? 'SİPARİŞ FİŞİ' : 'ORDER RECEIPT'),
+                            meta: `${gorunenSiparisNo(o)}  |  ${oDate}`,
+                            renk: marka505,
+                          });
                           doc505.setTextColor(30, 30, 30);
                           doc505.setFontSize(11); doc505.setFont('Roboto', 'bold');
-                          doc505.text(o.customerName, 14, 38);
+                          doc505.text(o.customerName, 14, govdeY505);
                           doc505.setFontSize(9); doc505.setFont('Roboto', 'normal');
                           doc505.setTextColor(120, 120, 120);
-                          if (o.shippingAddress) doc505.text(o.shippingAddress, 14, 44);
-                          if (o.customerEmail) doc505.text(o.customerEmail, 14, 49);
+                          if (o.shippingAddress) doc505.text(o.shippingAddress, 14, govdeY505 + 6);
+                          if (o.customerEmail) doc505.text(o.customerEmail, 14, govdeY505 + 11);
                           const lineItems505 = (o.lineItems || []);
                           if (lineItems505.length > 0) {
                             autoTable(doc505, {
-                              startY: 58,
+                              ...pdfTabloStili(marka505),
+                              startY: govdeY505 + 20,
+                              // Alt marj: tablo, alt bant (14 mm) + Durum/Business Suite satirlari (+16)
+                              // icin yer birakarak kirilsin. autoTable varsayilani 14,11 mm ile finalY
+                              // 283'e dayanabiliyor; Durum satiri (finalY+10) sonradan cizilen banda
+                              // gomuluyordu (inceleme buldu). Gorunur geometri degismez, yalniz esik.
+                              margin: { bottom: PDF_ALT_BANT_YUKSEKLIK + 20 },
                               head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
                               body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, paraYaz(li.price), paraYaz(satirTutari(li.price, li.quantity)) ]),
-                              styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
-                              headStyles: { fillColor: marka505, textColor: [255, 255, 255], fontStyle: 'bold' },
-                              alternateRowStyles: { fillColor: [253, 248, 246] },
                               foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)]],
-                              footStyles: { fillColor: [245, 245, 245], fontStyle: 'bold', fontSize: 10 },
+                              footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });
                           } else {
-                            const y505 = 58;
+                            const y505 = govdeY505 + 20;
                             doc505.setFontSize(10); doc505.setTextColor(30,30,30);
                             doc505.text(`${currentLanguage === 'tr' ? 'Toplam Tutar' : 'Total Amount'}: ${paraYaz(o.totalPrice)}`, 14, y505);
                           }
@@ -1872,6 +1869,8 @@ export default function OrdersPage({
                           });
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
                           doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, altY505 + 4, { align: 'center' });
+                          // Her sayfaya sablon renginde alt bant + gercek sayfa numarasi (pdfTheme).
+                          pdfAltBilgi(doc505, { bant: marka505 });
                           doc505.save(`receipt-${(o.orderNumber || o.shopifyOrderId || o.id.slice(-8)).replace(/[^\w-]/g, '_')}.pdf`);
                           } catch (e) {
                             // Eskiden hata SESSIZDI: font/sablon/import basarisizliginda dosya

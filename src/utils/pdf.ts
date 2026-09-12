@@ -16,6 +16,9 @@ import { Order, Lead } from '../types';
 import { registerTurkishFont } from './pdfFont';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
 import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari } from './para';
+// Başlık bandı / alt bant / bilgi kutusu / palet TEK KAYNAK (Faz 2 3/n, 2026-09-12): bu dosyadaki
+// 4 üretici eskiden her biri kendi bandını ve palet kopyasını yazıyordu (pdfTheme.degismez.test.ts kilitler).
+import { pdfBaslik, pdfAltBilgi, pdfBilgiKutusu, PDF_RENK, type RGB } from './pdfTheme';
 
 // Roboto (registerTurkishFont) Türkçe glifleri kapsıyor — artık harf
 // düşürmeye gerek yok, normTR eski çağrı yerlerini bozmamak için passthrough
@@ -39,7 +42,6 @@ export const exportOrderPDF = async (
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   await registerTurkishFont(doc);
   const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
   const sablon = await sablonGetir(belgeTipi);
   const teklifMi = belgeTipi === 'teklif';
   // Para birimi ARTIK okunuyor. Eskiden 5 yerde sabit ' TL' yazıyordu; EUR bir
@@ -47,29 +49,8 @@ export const exportOrderPDF = async (
   // aynı teklifin QuotationDetail nüshası '€' basarken. Müşteriye giden iki
   // belgede iki farklı para birimi.
   const paraBirimi = String((order as Record<string, unknown>).currency || 'TL');
-  const BRAND: [number, number, number] = sablonRengi(sablon);
-  const DARK:  [number, number, number] = [29, 29, 31];
-  const GREY:  [number, number, number] = [134, 134, 139];
-  const LIGHT: [number, number, number] = [245, 245, 247];
-
-  // ── Header band ────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, 0, W, 32, 'F');
-
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(255, 255, 255);
-  doc.text('CETPA', 14, 15);
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 200, 180);
-  doc.text('SATIŞ & LOJİSTİK', 14, 21);
-
-  doc.setFontSize(16);
-  doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(sablon?.title?.trim() || VARSAYILAN_BASLIK[belgeTipi], W - 14, 15, { align: 'right' });
+  // Şablon rengi (Belge Tasarımcısı) — palet geri kalanı PDF_RENK'ten.
+  const BRAND: RGB = sablonRengi(sablon);
 
   // TARIHI BILMIYORSAK BUGUNU BASMA (2026-09-04 denetimi). Eskiden `?? new Date()`
   // yedegi vardi: Mikro faturasindan turetilen siparisin PDF'inde BUGUNUN tarihi
@@ -85,51 +66,38 @@ export const exportOrderPDF = async (
     ? String((order as Record<string, unknown>).id ?? '').substring(0, 8).toUpperCase() || '—'
     : gorunenSiparisNo(order).substring(0, 14);
 
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 220, 210);
-  doc.text(`No: ${orderNo}  |  Tarih: ${dateStr}`, W - 14, 26, { align: 'right' });
+  // ── Header band (tek kaynak: pdfBaslik — gövde döndürdüğü Y'den başlar) ──
+  const boxY = pdfBaslik(doc, {
+    belgeAdi: sablon?.title?.trim() || VARSAYILAN_BASLIK[belgeTipi],
+    meta: `No: ${orderNo}  |  Tarih: ${dateStr}`,
+    renk: BRAND,
+  });
 
   // ── Info boxes ─────────────────────────────────────────────────────────
-  const boxY = 38;
   const boxH = 32;
   const col1 = 14, col2 = W / 2 + 4;
   const colW = W / 2 - 18;
 
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...BRAND);
-  doc.text('MÜŞTERİ BİLGİLERİ', col1 + 4, boxY + 6);
-  doc.setFont('Roboto', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(...DARK);
-  doc.text(normTR(String(order.customerName || '-')), col1 + 4, boxY + 13);
-  doc.setFontSize(8);
-  doc.setTextColor(...GREY);
-  doc.text(normTR(String(order.shippingAddress || '')), col1 + 4, boxY + 20, { maxWidth: colW - 8 });
+  pdfBilgiKutusu(doc, {
+    x: col1, y: boxY, w: colW, h: boxH, baslik: 'MÜŞTERİ BİLGİLERİ', renk: BRAND,
+    satirlar: [
+      { metin: normTR(String(order.customerName || '-')), dy: 13, boyut: 9 },
+      { metin: normTR(String(order.shippingAddress || '')), dy: 20, boyut: 8, renk: PDF_RENK.grey, maxWidth: colW - 8 },
+    ],
+  });
 
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...BRAND);
-  doc.text(teklifMi ? 'TEKLİF DETAYI' : 'SİPARİŞ DETAYI', col2 + 4, boxY + 6);
-  doc.setFont('Roboto', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...DARK);
-  if (teklifMi) {
-    // Teklifte `status` ham İngilizce ('approved') ve `trackingNumber` HİÇ YOK —
-    // eskiden ikisi de basılıyordu ve müşteri "Takip No: -" görüyordu.
-    const gecerli = (order as Record<string, unknown>).validUntil;
-    doc.text(
-      `Geçerlilik: ${tarihYaz(gecerli)}`,
-      col2 + 4, boxY + 13);
-  } else {
-    doc.text(`Durum: ${normTR(String(order.status || '-'))}`, col2 + 4, boxY + 13);
-    doc.text(`Takip No: ${normTR(String(order.trackingNumber || '-'))}`, col2 + 4, boxY + 20);
-  }
+  // Teklifte `status` ham İngilizce ('approved') ve `trackingNumber` HİÇ YOK —
+  // eskiden ikisi de basılıyordu ve müşteri "Takip No: -" görüyordu.
+  const detaySatirlari = teklifMi
+    ? [{ metin: `Geçerlilik: ${tarihYaz((order as Record<string, unknown>).validUntil)}`, dy: 13, boyut: 8.5 }]
+    : [
+        { metin: `Durum: ${normTR(String(order.status || '-'))}`, dy: 13, boyut: 8.5 },
+        { metin: `Takip No: ${normTR(String(order.trackingNumber || '-'))}`, dy: 20, boyut: 8.5 },
+      ];
+  pdfBilgiKutusu(doc, {
+    x: col2, y: boxY, w: colW, h: boxH, baslik: teklifMi ? 'TEKLİF DETAYI' : 'SİPARİŞ DETAYI', renk: BRAND,
+    satirlar: detaySatirlari,
+  });
 
   // ── Items table ────────────────────────────────────────────────────────
   const lineItems = ((order as Record<string, unknown>).lineItems || (order as Record<string, unknown>).items || []) as any[];
@@ -152,7 +120,7 @@ export const exportOrderPDF = async (
     head: [['#', 'Ürün', 'SKU', 'Miktar', 'Birim Fiyat', 'Tutar']],
     body: tableData.length ? tableData : [['', 'Kalem eklenmedi', '', '', '', '']],
     styles: { font: 'Roboto' },
-    headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: BRAND, textColor: PDF_RENK.white, fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [252, 252, 252] },
     columnStyles: {
@@ -199,17 +167,17 @@ export const exportOrderPDF = async (
   const totalsX = W - 70;
   const totalsY = finalY + 8;
 
-  doc.setFillColor(...LIGHT);
+  doc.setFillColor(...PDF_RENK.light);
   doc.roundedRect(totalsX - 4, totalsY - 4, 60, 34, 2, 2, 'F');
 
   doc.setFontSize(8.5);
   doc.setFont('Roboto', 'normal');
-  doc.setTextColor(...GREY);
+  doc.setTextColor(...PDF_RENK.grey);
   doc.text('Ara Toplam:', totalsX + 2, totalsY + 4);
   doc.text(kdvEtiketi, totalsX + 2, totalsY + 12);
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(...DARK);
+  doc.setTextColor(...PDF_RENK.dark);
   doc.text(tutarYaz(subTotal, paraBirimi), W - 16, totalsY + 4, { align: 'right' });
   doc.text(tutarYaz(vatTotal, paraBirimi), W - 16, totalsY + 12, { align: 'right' });
 
@@ -217,7 +185,7 @@ export const exportOrderPDF = async (
   doc.roundedRect(totalsX - 4, totalsY + 16, 60, 10, 1.5, 1.5, 'F');
   doc.setFontSize(10);
   doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(...PDF_RENK.white);
   doc.text('GENEL TOPLAM', totalsX + 2, totalsY + 23);
   doc.text(tutarYaz(totalPrice, paraBirimi), W - 16, totalsY + 23, { align: 'right' });
 
@@ -231,22 +199,11 @@ export const exportOrderPDF = async (
     genislik: W - 100,   // toplam kutusunun soluna sigsin
   });
 
-  // Alt bant TUM sayfalara — eskiden yalniz son sayfaya ciziliyordu, cok
-  // sayfali belgede 1..N-1 sayfalarinda alt bilgi/sayfa numarasi yoktu.
-  // Footer tek satira kirpilir: sagdaki sayfa etiketiyle cakismasin diye.
-  const footerMetni = (doc.splitTextToSize(sablon?.footer?.trim() || 'Bu belge elektronik olarak oluşturulmuştur.', W - 90) as string[])[0] ?? '';
-  const toplamSayfa = doc.getNumberOfPages();
-  for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
-    doc.setPage(sayfa);
-    doc.setFillColor(...BRAND);
-    doc.rect(0, H - 14, W, 14, 'F');
-    doc.setFontSize(7.5);
-    doc.setFont('Roboto', 'normal');
-    doc.setTextColor(255, 220, 210);
-    doc.text(footerMetni, 14, H - 6);
-    doc.setTextColor(255, 255, 255);
-    doc.text(`CETPA  •  cetpa.com.tr  •  Sayfa ${sayfa} / ${toplamSayfa}`, W - 14, H - 6, { align: 'right' });
-  }
+  // Alt bant TUM sayfalara — tek kaynak pdfAltBilgi (bant modu): sablon footer'i tek
+  // satira kirpilir (sagdaki sayfa etiketiyle cakismasin), sag tarafta GERCEK sayfa
+  // numarasi. Eskiden burada elle `for sayfa…` dongusu vardi; daha da eskiden yalniz son
+  // sayfaya ciziliyordu ve 1..N-1 sayfalarinda alt bilgi/sayfa numarasi yoktu.
+  pdfAltBilgi(doc, { bant: BRAND, solMetin: sablon?.footer?.trim() || 'Bu belge elektronik olarak oluşturulmuştur.' });
 
   doc.save(`CETPA_${teklifMi ? 'Teklif' : 'Siparis'}_${orderNo}_${dateStr.replace(/\./g, '-')}.pdf`);
 };
@@ -261,48 +218,28 @@ export const exportCustomerStatement = async (
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
-  const H    = doc.internal.pageSize.getHeight();
-  const BRAND: [number, number, number] = [26, 58, 92];   // #1a3a5c navy
-  const LIGHT: [number, number, number] = [245, 245, 247];
-  const DARK:  [number, number, number] = [29,  29,  31];
-  const GREY:  [number, number, number] = [134, 134, 139];
+  // Hesap ekstresi BELGE TÜRÜ rengi: lacivert #1a3a5c — marka değil, bilinçli (Faz 2 3/n'de korundu).
+  // Palet geri kalanı (açık zemin, koyu/gri metin, beyaz) PDF_RENK'ten.
+  const BRAND: RGB = [26, 58, 92];
 
   const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
-  // ── Header band ──────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, 0, W, 32, 'F');
-
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(255, 255, 255);
-  doc.text('CETPA', 14, 15);
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(200, 220, 255);
-  doc.text('SATIŞ & LOJİSTİK', 14, 22);
-
-  doc.setFontSize(14);
-  doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(
-    lang === 'tr' ? 'HESAP EKSTRESİ' : 'ACCOUNT STATEMENT',
-    W - 14, 15, { align: 'right' },
-  );
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(200, 220, 255);
-  doc.text(`${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, W - 14, 22, { align: 'right' });
+  // ── Header band (tek kaynak: pdfBaslik) ──────────────────────────────────
+  const boxY = pdfBaslik(doc, {
+    belgeAdi: lang === 'tr' ? 'HESAP EKSTRESİ' : 'ACCOUNT STATEMENT',
+    meta: `${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`,
+    renk: BRAND,
+  });
 
   // ── Customer info box ────────────────────────────────────────────────────
-  const boxY = 38;
-  doc.setFillColor(...LIGHT);
+  // pdfBilgiKutusu'na ÇEVRİLMEDİ: bu kutu standart yerleşimde değil (başlık koyu 9pt x+6/y+7,
+  // müşteri adı KALIN 11pt, kredi limiti sağa dayalı). Geometri korunuyor, yalnız palet tek kaynaktan.
+  doc.setFillColor(...PDF_RENK.light);
   doc.roundedRect(14, boxY, W - 28, 28, 2, 2, 'F');
 
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(...DARK);
+  doc.setTextColor(...PDF_RENK.dark);
   doc.text(lang === 'tr' ? 'MÜŞTERİ' : 'CUSTOMER', 20, boxY + 7);
 
   doc.setFont('Roboto', 'bold');
@@ -311,7 +248,7 @@ export const exportCustomerStatement = async (
 
   doc.setFont('Roboto', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(...GREY);
+  doc.setTextColor(...PDF_RENK.grey);
   const infoLine = [lead.company, lead.email, lead.phone].filter(Boolean).join('  •  ');
   doc.text(normTR(infoLine), 20, boxY + 20);
 
@@ -363,7 +300,7 @@ export const exportCustomerStatement = async (
     head,
     body,
     styles:       { font: 'Roboto', fontSize: 8, cellPadding: 3, overflow: 'ellipsize' },
-    headStyles:   { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+    headStyles:   { fillColor: BRAND, textColor: PDF_RENK.white, fontStyle: 'bold', fontSize: 8 },
     alternateRowStyles: { fillColor: [250, 250, 252] },
     columnStyles: {
       0: { cellWidth: 28, fontStyle: 'bold' },
@@ -385,7 +322,7 @@ export const exportCustomerStatement = async (
   const grandTotal       = sorted.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + o.totalPrice, 0);
 
   const sumY = finalY + 6;
-  doc.setFillColor(...LIGHT);
+  doc.setFillColor(...PDF_RENK.light);
   doc.roundedRect(W - 80, sumY, 66, 36, 2, 2, 'F');
 
   const rows = [
@@ -397,25 +334,20 @@ export const exportCustomerStatement = async (
     const y = sumY + 8 + i * 9;
     doc.setFont('Roboto', i === 2 ? 'bold' : 'normal');
     doc.setFontSize(i === 2 ? 9 : 8);
-    const color = i === 2 ? BRAND : GREY;
+    const color = i === 2 ? BRAND : PDF_RENK.grey;
     doc.setTextColor(...color);
     doc.text(label, W - 76, y);
     doc.text(value, W - 18, y, { align: 'right' });
   });
 
-  // ── Footer ────────────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, H - 14, W, 14, 'F');
-  doc.setFont('Roboto', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(255, 255, 255);
-  doc.text(
-    lang === 'tr'
+  // ── Footer (tek kaynak: pdfAltBilgi bant modu — HER sayfaya, gerçek sayfa no) ──
+  // Eskiden yalnız son sayfaya çiziliyordu ve sağda `cetpa.com • tarih` yazıyordu.
+  pdfAltBilgi(doc, {
+    bant: BRAND,
+    solMetin: lang === 'tr'
       ? `Bu ekstre ${today} tarihinde CETPA tarafindan uretilmistir.`
       : `This statement was generated by CETPA on ${today}.`,
-    14, H - 6,
-  );
-  doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
+  });
 
   doc.save(`CETPA_Ekstre_${normTR(lead.name).replace(/\s+/g, '_')}_${today.replace(/\./g, '-')}.pdf`);
 };
@@ -446,74 +378,41 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
-  const H    = doc.internal.pageSize.getHeight();
-  const BRAND: [number, number, number] = [255, 64, 0];
-  const DARK:  [number, number, number] = [29, 29, 31];
-  const GREY:  [number, number, number] = [134, 134, 139];
-  const LIGHT: [number, number, number] = [245, 245, 247];
 
   const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
-  // ── Header band ───────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, 0, W, 32, 'F');
-
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(255, 255, 255);
-  doc.text('CETPA', 14, 15);
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 200, 180);
-  doc.text('SATIŞ & LOJİSTİK', 14, 21);
-
-  doc.setFontSize(14);
-  doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(lang === 'tr' ? 'SATIN ALMA EMRİ' : 'PURCHASE ORDER', W - 14, 15, { align: 'right' });
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 220, 210);
-  doc.text(`No: ${po.orderNumber}  |  ${today}`, W - 14, 26, { align: 'right' });
+  // ── Header band (tek kaynak: pdfBaslik, marka rengi) ─────────────────────
+  const boxY = pdfBaslik(doc, {
+    belgeAdi: lang === 'tr' ? 'SATIN ALMA EMRİ' : 'PURCHASE ORDER',
+    meta: `No: ${po.orderNumber}  |  ${today}`,
+  });
 
   // ── Info boxes ─────────────────────────────────────────────────────────────
-  const boxY = 38;
   const boxH = 34;
   const col1 = 14, col2 = W / 2 + 4;
   const colW = W / 2 - 18;
 
-  // Supplier box
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...BRAND);
-  doc.text(lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', col1 + 4, boxY + 6);
+  // Supplier box — kutu + başlık tek kaynaktan; tedarikçi adı KALIN 11pt (standart satır
+  // normal fonttur), o yüzden aynı konuma elle basılır.
+  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', satirlar: [] });
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(11);
-  doc.setTextColor(...DARK);
+  doc.setTextColor(...PDF_RENK.dark);
   doc.text(normTR(po.supplier || '-'), col1 + 4, boxY + 16);
 
   // Order details box
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...BRAND);
-  doc.text(lang === 'tr' ? 'SİPARİŞ DETAYI' : 'ORDER DETAILS', col2 + 4, boxY + 6);
-  doc.setFont('Roboto', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...DARK);
-  doc.text(`${lang === 'tr' ? 'Durum' : 'Status'}: ${normTR(po.status || '-')}`, col2 + 4, boxY + 14);
-
   const expDateStr = tarihYaz(po.expectedDate);   // string/Timestamp fark etmez; bilinmiyorsa '—'
-  doc.setTextColor(...GREY);
-  doc.text(`${lang === 'tr' ? 'Beklenen' : 'Expected'}: ${expDateStr}`, col2 + 4, boxY + 22);
+  pdfBilgiKutusu(doc, {
+    x: col2, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'SİPARİŞ DETAYI' : 'ORDER DETAILS',
+    satirlar: [
+      { metin: `${lang === 'tr' ? 'Durum' : 'Status'}: ${normTR(po.status || '-')}`, dy: 14, boyut: 8.5 },
+      { metin: `${lang === 'tr' ? 'Beklenen' : 'Expected'}: ${expDateStr}`, dy: 22, boyut: 8.5, renk: PDF_RENK.grey },
+    ],
+  });
+  // Toplam satırı KALIN + marka renkli — standart satır normal fonttur; aynı konuma elle.
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(8);
-  doc.setTextColor(...BRAND);
+  doc.setTextColor(...PDF_RENK.brand);
   doc.text(`${lang === 'tr' ? 'Toplam' : 'Total'}: ${tutarYaz(po.totalAmount, 'TL')}`, col2 + 4, boxY + 30);
 
   // ── Items table ───────────────────────────────────────────────────────────
@@ -535,7 +434,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
     head,
     body: tableData.length ? tableData : [['', lang === 'tr' ? 'Kalem eklenmedi' : 'No items', '', '', '', '']],
     styles: { font: 'Roboto' },
-    headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: PDF_RENK.brand, textColor: PDF_RENK.white, fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [252, 252, 252] },
     columnStyles: {
@@ -555,11 +454,11 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   const totalsX = W - 70;
   const totalsY = finalY + 8;
 
-  doc.setFillColor(...BRAND);
+  doc.setFillColor(...PDF_RENK.brand);
   doc.roundedRect(totalsX - 4, totalsY, 60, 11, 1.5, 1.5, 'F');
   doc.setFontSize(10);
   doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(...PDF_RENK.white);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', totalsX + 2, totalsY + 7.5);
   doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, totalsY + 7.5, { align: 'right' });
 
@@ -568,24 +467,17 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
     const notesY = totalsY + 20;
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(7);
-    doc.setTextColor(...BRAND);
+    doc.setTextColor(...PDF_RENK.brand);
     doc.text(lang === 'tr' ? 'NOTLAR' : 'NOTES', 14, notesY);
     doc.setFont('Roboto', 'normal');
     doc.setFontSize(8);
-    doc.setTextColor(...DARK);
+    doc.setTextColor(...PDF_RENK.dark);
     const noteLines = doc.splitTextToSize(normTR(po.notes), W - 28);
     doc.text(noteLines, 14, notesY + 6);
   }
 
-  // ── Footer band ───────────────────────────────────────────────────────────
-  doc.setFillColor(...BRAND);
-  doc.rect(0, H - 14, W, 14, 'F');
-  doc.setFontSize(7.5);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(255, 220, 210);
-  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
-  doc.setTextColor(255, 255, 255);
-  doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
+  // ── Footer band (tek kaynak: pdfAltBilgi bant modu — HER sayfaya) ─────────
+  pdfAltBilgi(doc, { bant: PDF_RENK.brand, solMetin: 'Bu belge elektronik olarak oluşturulmuştur.' });
 
   const dateSlug = today.replace(/\./g, '-');
   doc.save(`CETPA_SAS_${normTR(po.orderNumber)}_${dateSlug}.pdf`);
@@ -597,67 +489,37 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   await registerTurkishFont(doc);
   const W    = doc.internal.pageSize.getWidth();
-  const H    = doc.internal.pageSize.getHeight();
-  const GREEN: [number, number, number] = [22, 163, 74];   // green-600
-  const DARK:  [number, number, number] = [29, 29, 31];
-  const GREY:  [number, number, number] = [134, 134, 139];
-  const LIGHT: [number, number, number] = [245, 245, 247];
+  // Mal kabul BELGE TÜRÜ rengi: yeşil — tek kaynaktan (eskiden yerel [22,163,74] kopyasıydı).
+  const GREEN = PDF_RENK.green;
 
   const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
-  // ── Header band ───────────────────────────────────────────────────────────
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 0, W, 32, 'F');
-
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(255, 255, 255);
-  doc.text('CETPA', 14, 15);
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(180, 240, 200);
-  doc.text('SATIŞ & LOJİSTİK', 14, 21);
-
-  doc.setFontSize(14);
-  doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(lang === 'tr' ? 'TESLİM MAKBUZU' : 'GOODS RECEIPT NOTE', W - 14, 15, { align: 'right' });
-
-  doc.setFontSize(8);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(180, 240, 200);
-  doc.text(`SAS: ${po.orderNumber}  |  ${today}`, W - 14, 26, { align: 'right' });
+  // ── Header band (tek kaynak: pdfBaslik) ───────────────────────────────────
+  const boxY = pdfBaslik(doc, {
+    belgeAdi: lang === 'tr' ? 'TESLİM MAKBUZU' : 'GOODS RECEIPT NOTE',
+    meta: `SAS: ${po.orderNumber}  |  ${today}`,
+    renk: GREEN,
+  });
 
   // ── Info boxes ─────────────────────────────────────────────────────────────
-  const boxY = 38;
   const boxH = 28;
   const col1 = 14, col2 = W / 2 + 4;
   const colW = W / 2 - 18;
 
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col1, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...GREEN);
-  doc.text(lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', col1 + 4, boxY + 6);
+  // Tedarikçi adı KALIN 10pt (standart satır normal fonttur) → kutu + başlık tek kaynaktan, ad aynı konuma elle.
+  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', renk: GREEN, satirlar: [] });
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(10);
-  doc.setTextColor(...DARK);
+  doc.setTextColor(...PDF_RENK.dark);
   doc.text(normTR(po.supplier || '-'), col1 + 4, boxY + 14);
 
-  doc.setFillColor(...LIGHT);
-  doc.roundedRect(col2, boxY, colW, boxH, 2, 2, 'F');
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...GREEN);
-  doc.text(lang === 'tr' ? 'TESLİM BİLGİLERİ' : 'RECEIPT INFO', col2 + 4, boxY + 6);
-  doc.setFont('Roboto', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...DARK);
-  doc.text(`${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, col2 + 4, boxY + 14);
-  doc.setTextColor(...GREY);
-  doc.text(`SAS No: ${po.orderNumber}`, col2 + 4, boxY + 21);
+  pdfBilgiKutusu(doc, {
+    x: col2, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TESLİM BİLGİLERİ' : 'RECEIPT INFO', renk: GREEN,
+    satirlar: [
+      { metin: `${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, dy: 14, boyut: 8.5 },
+      { metin: `SAS No: ${po.orderNumber}`, dy: 21, boyut: 8.5, renk: PDF_RENK.grey },
+    ],
+  });
 
   // ── Items table ───────────────────────────────────────────────────────────
   const tableData = (po.items || []).map((item, idx) => [
@@ -679,7 +541,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
     head,
     body: tableData.length ? tableData : [['', lang === 'tr' ? 'Kalem yok' : 'No items', '', '', '', '', '']],
     styles: { font: 'Roboto' },
-    headStyles: { fillColor: GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: GREEN, textColor: PDF_RENK.white, fontStyle: 'bold', fontSize: 8, cellPadding: 3 },
     bodyStyles: { fontSize: 8, cellPadding: 3 },
     alternateRowStyles: { fillColor: [250, 255, 252] },
     columnStyles: {
@@ -704,7 +566,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   doc.roundedRect(W - 74, sigY, 60, 11, 1.5, 1.5, 'F');
   doc.setFontSize(10);
   doc.setFont('Roboto', 'bold');
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(...PDF_RENK.white);
   doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', W - 70, sigY + 7.5);
   doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, sigY + 7.5, { align: 'right' });
 
@@ -717,7 +579,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
     lang === 'tr' ? 'ONAYLAYAN'     : 'APPROVED BY',
   ].forEach((lbl, i) => {
     const x = 14 + i * (sigBoxW + 4);
-    doc.setFillColor(...LIGHT);
+    doc.setFillColor(...PDF_RENK.light);
     doc.roundedRect(x, sigBoxY, sigBoxW, 22, 1.5, 1.5, 'F');
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(7);
@@ -728,15 +590,8 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
     doc.line(x + 4, sigBoxY + 17, x + sigBoxW - 4, sigBoxY + 17);
   });
 
-  // ── Footer ────────────────────────────────────────────────────────────────
-  doc.setFillColor(...GREEN);
-  doc.rect(0, H - 14, W, 14, 'F');
-  doc.setFontSize(7.5);
-  doc.setFont('Roboto', 'normal');
-  doc.setTextColor(180, 240, 200);
-  doc.text('Bu belge elektronik olarak oluşturulmuştur.', 14, H - 6);
-  doc.setTextColor(255, 255, 255);
-  doc.text(`CETPA  •  cetpa.com  •  ${today}`, W - 14, H - 6, { align: 'right' });
+  // ── Footer (tek kaynak: pdfAltBilgi bant modu — HER sayfaya) ──────────────
+  pdfAltBilgi(doc, { bant: GREEN, solMetin: 'Bu belge elektronik olarak oluşturulmuştur.' });
 
   const dateSlug2 = today.replace(/\./g, '-');
   doc.save(`CETPA_TMK_${normTR(po.orderNumber)}_${dateSlug2}.pdf`);
